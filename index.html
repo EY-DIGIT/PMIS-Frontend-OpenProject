@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenProject</title>
+  <style>
+    :root {
+      --primary: #1A67A3;
+      --primary-dark: #145a8a;
+      --primary-light: #e8f4fc;
+      --success: #2e7d32;
+      --warning: #ed6c02;
+      --danger: #d32f2f;
+      --gray-100: #f5f5f5;
+      --gray-200: #eeeeee;
+      --gray-300: #e0e0e0;
+      --gray-500: #9e9e9e;
+      --gray-600: #757575;
+      --gray-700: #616161;
+      --gray-800: #424242;
+      --sidebar-width: 240px;
+      --header-height: 56px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; background: var(--gray-100); color: var(--gray-800); }
+    a { color: var(--primary); text-decoration: none; }
+
+    /* Login */
+    .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1A67A3, #0d4a7a); }
+    .login-box { background: white; border-radius: 12px; padding: 48px; width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+    .login-box h1 { text-align: center; color: var(--primary); margin-bottom: 8px; }
+    .login-box p { text-align: center; color: var(--gray-600); margin-bottom: 32px; }
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; margin-bottom: 6px; font-weight: 500; }
+    .form-control { width: 100%; padding: 12px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 14px; }
+    .form-control:focus { outline: none; border-color: var(--primary); }
+    .btn { padding: 12px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }
+    .btn-primary { background: var(--primary); color: white; width: 100%; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-secondary { background: var(--gray-200); color: var(--gray-700); }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-sm { padding: 8px 16px; font-size: 13px; }
+    .error-msg { background: #ffebee; color: var(--danger); padding: 12px; border-radius: 6px; margin-bottom: 16px; display: none; }
+
+    /* App Layout */
+    .app { display: none; }
+    .header { position: fixed; top: 0; left: 0; right: 0; height: var(--header-height); background: var(--primary); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 100; }
+    .header-left { display: flex; align-items: center; gap: 20px; }
+    .logo { color: white; font-size: 18px; font-weight: 600; cursor: pointer; }
+    .project-selector { background: rgba(255,255,255,0.15); border: none; color: white; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .project-selector:hover { background: rgba(255,255,255,0.25); }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .user-btn { background: rgba(255,255,255,0.1); border: none; color: white; padding: 8px 16px; border-radius: 20px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+    .user-avatar { width: 28px; height: 28px; background: #35c53f; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; }
+
+    /* Main */
+    .main { margin-top: var(--header-height); min-height: calc(100vh - var(--header-height)); display: flex; }
+
+    /* Sidebar */
+    .sidebar { width: var(--sidebar-width); background: white; border-right: 1px solid var(--gray-200); position: fixed; top: var(--header-height); bottom: 0; overflow-y: auto; }
+    .sidebar-section { padding: 16px 0; border-bottom: 1px solid var(--gray-200); }
+    .sidebar-title { padding: 0 16px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--gray-500); }
+    .sidebar-menu { list-style: none; }
+    .sidebar-menu a { display: flex; align-items: center; gap: 12px; padding: 10px 16px; color: var(--gray-700); }
+    .sidebar-menu a:hover { background: var(--gray-100); }
+    .sidebar-menu a.active { background: var(--primary-light); color: var(--primary); font-weight: 500; }
+    .sidebar-menu .icon { width: 20px; text-align: center; }
+    .sidebar-menu .badge { margin-left: auto; background: var(--gray-200); padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+
+    /* Content */
+    .content { flex: 1; margin-left: var(--sidebar-width); padding: 24px; }
+    .content.no-sidebar { margin-left: 0; }
+
+    /* Page Header */
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .page-header h1 { font-size: 24px; }
+    .page-actions { display: flex; gap: 12px; }
+
+    /* Cards */
+    .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-header { padding: 16px 20px; border-bottom: 1px solid var(--gray-200); display: flex; align-items: center; justify-content: space-between; }
+    .card-header h3 { font-size: 16px; }
+    .card-body { padding: 20px; }
+
+    /* Project Grid */
+    .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+    .project-card { background: white; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; border: 2px solid transparent; transition: all 0.2s; }
+    .project-card:hover { border-color: var(--primary); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .project-card h3 { color: var(--primary); margin-bottom: 8px; }
+    .project-card p { color: var(--gray-600); font-size: 13px; margin-bottom: 16px; }
+    .project-card-meta { display: flex; gap: 16px; font-size: 12px; color: var(--gray-500); }
+    .project-card-actions { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--gray-200); display: flex; gap: 8px; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--gray-200); }
+    th { background: var(--gray-100); font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--gray-600); }
+    tr:hover td { background: #fafafa; }
+
+    /* Status & Priority */
+    .status { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+    .status-new { background: #e3f2fd; color: #1976d2; }
+    .status-in_progress { background: #fff3e0; color: #f57c00; }
+    .status-closed { background: #e8f5e9; color: #388e3c; }
+    .status-on_hold { background: #fff8e1; color: #ffa000; }
+    .status-resolved { background: #e8f5e9; color: #40c057; }
+    .status-rejected { background: #ffebee; color: #d32f2f; }
+    .priority-low { color: var(--gray-600); }
+    .priority-normal { color: var(--primary); }
+    .priority-high { color: var(--warning); }
+    .priority-urgent { color: var(--danger); font-weight: 600; }
+
+    /* Progress */
+    .progress { height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden; width: 80px; }
+    .progress-bar { height: 100%; background: var(--success); }
+
+    /* Kanban */
+    .kanban { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 16px; }
+    .kanban-col { min-width: 280px; background: var(--gray-100); border-radius: 8px; }
+    .kanban-col-header { padding: 12px 16px; font-weight: 600; display: flex; justify-content: space-between; border-radius: 8px 8px 0 0; }
+    .kanban-col-body { padding: 8px; min-height: 300px; }
+    .kanban-card { background: white; border-radius: 6px; padding: 12px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; }
+    .kanban-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .kanban-card.dragging { opacity: 0.5; transform: rotate(3deg); }
+    .kanban-card-id { font-size: 12px; color: var(--primary); font-weight: 600; }
+    .kanban-card-subject { margin: 6px 0; font-weight: 500; }
+    .kanban-card-meta { font-size: 12px; color: var(--gray-500); display: flex; align-items: center; }
+    .kanban-col-body.drag-over { background: var(--primary-light); border: 2px dashed var(--primary); }
+    .kanban-empty { padding: 20px; text-align: center; color: var(--gray-500); font-size: 13px; }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 200; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: white; border-radius: 12px; width: 100%; max-width: 500px; max-height: 90vh; overflow: hidden; }
+    .modal-header { padding: 20px; border-bottom: 1px solid var(--gray-200); display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h2 { font-size: 18px; }
+    .modal-close { background: none; border: none; font-size: 24px; cursor: pointer; color: var(--gray-500); }
+    .modal-body { padding: 20px; max-height: 60vh; overflow-y: auto; }
+    .modal-footer { padding: 16px 20px; border-top: 1px solid var(--gray-200); display: flex; justify-content: flex-end; gap: 12px; }
+
+    /* Toast */
+    .toast-container { position: fixed; top: 70px; right: 20px; z-index: 300; }
+    .toast { background: white; padding: 16px 20px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
+    .toast.success { border-left: 4px solid var(--success); }
+    .toast.error { border-left: 4px solid var(--danger); }
+
+    /* Empty State */
+    .empty { text-align: center; padding: 60px 20px; color: var(--gray-500); }
+    .empty h3 { color: var(--gray-700); margin-bottom: 8px; }
+
+    /* Filters */
+    .filters { display: flex; gap: 12px; margin-bottom: 20px; }
+    .filters input, .filters select { padding: 8px 12px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 14px; }
+    .filters input { width: 250px; }
+
+    /* User dropdown */
+    .user-dropdown { position: absolute; top: 100%; right: 0; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); min-width: 200px; display: none; margin-top: 8px; overflow: hidden; }
+    .user-dropdown.show { display: block; }
+    .user-dropdown a { display: block; padding: 12px 16px; color: var(--gray-700); }
+    .user-dropdown a:hover { background: var(--gray-100); }
+    .user-dropdown .logout { color: var(--danger); border-top: 1px solid var(--gray-200); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- Login Page -->
+<div id="login-page" class="login-page">
+  <div class="login-box">
+    <h1>OpenProject</h1>
+    <p>Cloud Edition</p>
+    <div id="login-error" class="error-msg"></div>
+    <form id="login-form">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" class="form-control" id="username" value="admin" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" class="form-control" id="password" value="admin123" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Sign In</button>
+    </form>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo" onclick="goHome()">OpenProject</div>
+      <button class="project-selector hidden" id="project-selector" onclick="goHome()">
+        <span id="current-project-name">Select Project</span>
+        <span>▼</span>
+      </button>
+    </div>
+    <div class="header-right">
+      <div style="position:relative;">
+        <button class="user-btn" onclick="toggleUserMenu()">
+          <div class="user-avatar" id="user-initials">A</div>
+          <span id="user-display-name">Admin</span>
+        </button>
+        <div class="user-dropdown" id="user-dropdown">
+          <a href="#" onclick="showAdminUsers()">👥 Users</a>
+          <a href="#" onclick="showAdminRoles()">🔐 Roles</a>
+          <a href="#" onclick="showAdminTypes()">📝 Work Package Types</a>
+          <a href="#" onclick="showAdminStatuses()">🏷️ Statuses</a>
+          <a href="#" onclick="showAdminPriorities()">⚡ Priorities</a>
+          <a href="#" onclick="logout()" class="logout">Sign Out</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="main">
+    <!-- Sidebar (hidden on home) -->
+    <aside class="sidebar hidden" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">Project Menu</div>
+        <ul class="sidebar-menu">
+          <li><a href="#" onclick="showProjectOverview()" data-view="overview"><span class="icon">📋</span> Overview</a></li>
+          <li><a href="#" onclick="showActivity()" data-view="activity"><span class="icon">📰</span> Activity</a></li>
+          <li><a href="#" onclick="showWorkPackages()" data-view="work-packages"><span class="icon">📝</span> Work Packages <span class="badge" id="wp-count">0</span></a></li>
+          <li><a href="#" onclick="showBoards()" data-view="boards"><span class="icon">📊</span> Boards</a></li>
+          <li><a href="#" onclick="showGantt()" data-view="gantt"><span class="icon">📈</span> Gantt Chart</a></li>
+          <li><a href="#" onclick="showCalendar()" data-view="calendar"><span class="icon">📅</span> Calendar</a></li>
+          <li><a href="#" onclick="showTeamPlanner()" data-view="team-planner"><span class="icon">👤</span> Team Planner</a></li>
+          <li><a href="#" onclick="showMeetings()" data-view="meetings"><span class="icon">🗓️</span> Meetings</a></li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Time & Costs</div>
+        <ul class="sidebar-menu">
+          <li><a href="#" onclick="showTimeEntries()" data-view="time"><span class="icon">⏱️</span> Time Entries</a></li>
+          <li><a href="#" onclick="showCosts()" data-view="costs"><span class="icon">💰</span> Costs</a></li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-title">Project Settings</div>
+        <ul class="sidebar-menu">
+          <li><a href="#" onclick="showMembers()" data-view="members"><span class="icon">👥</span> Members</a></li>
+          <li><a href="#" onclick="showProjectSettings()" data-view="settings"><span class="icon">⚙️</span> Settings</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="content no-sidebar" id="content"></main>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Modal</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ========== STATE ==========
+const STATE = {
+  user: null,
+  projects: [],
+  currentProject: null,
+  workPackages: [],
+  users: [],
+  roles: [],
+  types: [],
+  statuses: [],
+  priorities: [],
+  currentView: 'home'
+};
+
+// ========== API ==========
+const API = {
+  base: '/api/v3',
+
+  async call(method, endpoint, data = null) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (data) opts.body = JSON.stringify(data);
+    const res = await fetch(this.base + endpoint, opts);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error?.message || json.detail || 'Error');
+    return json.data || json;
+  },
+
+  get: (e) => API.call('GET', e),
+  post: (e, d) => API.call('POST', e, d),
+  patch: (e, d) => API.call('PATCH', e, d),
+  delete: (e) => API.call('DELETE', e)
+};
+
+// ========== HELPERS ==========
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const esc = t => { const d = document.createElement('div'); d.textContent = t || ''; return d.innerHTML; };
+
+function toast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<span>${esc(msg)}</span>`;
+  $('#toasts').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function openModal(title, body, footer = '') {
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = body;
+  $('#modal-footer').innerHTML = footer;
+  $('#modal').classList.add('show');
+}
+
+function closeModal() {
+  $('#modal').classList.remove('show');
+}
+
+// ========== AUTH ==========
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const users = await API.get('/users');
+    const list = users._embedded?.elements || [];
+    STATE.user = list.find(u => u.login === $('#username').value) || list[0];
+    if (STATE.user) {
+      localStorage.setItem('user', JSON.stringify(STATE.user));
+      initApp();
+    }
+  } catch (err) {
+    $('#login-error').textContent = err.message;
+    $('#login-error').style.display = 'block';
+  }
+});
+
+function logout() {
+  STATE.user = null;
+  STATE.currentProject = null;
+  localStorage.removeItem('user');
+  $('#app').style.display = 'none';
+  $('#login-page').style.display = 'flex';
+  $('#user-dropdown').classList.remove('show');
+}
+
+function toggleUserMenu() {
+  $('#user-dropdown').classList.toggle('show');
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.user-btn') && !e.target.closest('.user-dropdown')) {
+    $('#user-dropdown').classList.remove('show');
+  }
+});
+
+// ========== INIT ==========
+async function initApp() {
+  $('#login-page').style.display = 'none';
+  $('#app').style.display = 'block';
+
+  // Update user display
+  const initials = (STATE.user.firstName?.[0] || '') + (STATE.user.lastName?.[0] || 'U');
+  $('#user-initials').textContent = initials;
+  $('#user-display-name').textContent = STATE.user.firstName || STATE.user.login;
+
+  // Load data
+  await loadProjects();
+  await loadMasterData();
+
+  goHome();
+}
+
+async function loadProjects() {
+  try {
+    const res = await API.get('/projects');
+    STATE.projects = res._embedded?.elements || [];
+  } catch (e) {
+    STATE.projects = [];
+  }
+}
+
+async function loadMasterData() {
+  try {
+    const [users, roles, types, statuses, priorities] = await Promise.all([
+      API.get('/users').catch(() => ({ _embedded: { elements: [] } })),
+      API.get('/roles').catch(() => ({ _embedded: { elements: [] } })),
+      API.get('/work_package_types').catch(() => ({ _embedded: { elements: [] } })),
+      API.get('/statuses').catch(() => ({ _embedded: { elements: [] } })),
+      API.get('/priorities').catch(() => ({ _embedded: { elements: [] } }))
+    ]);
+    STATE.users = users._embedded?.elements || [];
+    STATE.roles = roles._embedded?.elements || [];
+    STATE.types = types._embedded?.elements || [];
+    STATE.statuses = statuses._embedded?.elements || [];
+    STATE.priorities = priorities._embedded?.elements || [];
+  } catch (e) {}
+}
+
+async function loadProjectWorkPackages() {
+  if (!STATE.currentProject) return;
+  try {
+    const res = await API.get(`/projects/${STATE.currentProject.id}/work_packages`);
+    STATE.workPackages = res._embedded?.elements || [];
+    $('#wp-count').textContent = STATE.workPackages.length;
+  } catch (e) {
+    STATE.workPackages = [];
+  }
+}
+
+// ========== NAVIGATION ==========
+function goHome() {
+  STATE.currentProject = null;
+  STATE.currentView = 'home';
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+  renderProjectList();
+}
+
+async function selectProject(id) {
+  STATE.currentProject = STATE.projects.find(p => p.id === id);
+  if (!STATE.currentProject) return;
+
+  $('#sidebar').classList.remove('hidden');
+  $('#content').classList.remove('no-sidebar');
+  $('#project-selector').classList.remove('hidden');
+  $('#current-project-name').textContent = STATE.currentProject.name;
+
+  await loadProjectWorkPackages();
+  showProjectOverview();
+}
+
+function setActiveView(view) {
+  STATE.currentView = view;
+  $$('.sidebar-menu a').forEach(a => {
+    a.classList.toggle('active', a.dataset.view === view);
+  });
+}
+
+// ========== HOME: PROJECT LIST ==========
+function renderProjectList() {
+  const content = $('#content');
+  content.innerHTML = `
+    <div class="page-header">
+      <h1>Projects</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openCreateProjectModal()">+ New Project</button>
+      </div>
+    </div>
+
+    ${STATE.projects.length ? `
+      <div class="project-grid">
+        ${STATE.projects.map(p => `
+          <div class="project-card" onclick="selectProject(${p.id})">
+            <h3>${esc(p.name)}</h3>
+            <p>${esc(p.description) || 'No description'}</p>
+            <div class="project-card-meta">
+              <span>${p.identifier}</span>
+              <span>${p.active ? '🟢 Active' : '⚪ Inactive'}</span>
+            </div>
+            <div class="project-card-actions" onclick="event.stopPropagation()">
+              <button class="btn btn-sm btn-secondary" onclick="openEditProjectModal(${p.id})">Edit</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteProject(${p.id})">Delete</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : `
+      <div class="empty">
+        <h3>No projects yet</h3>
+        <p>Create your first project to get started</p>
+      </div>
+    `}
+  `;
+}
+
+// ========== PROJECT: OVERVIEW ==========
+function showProjectOverview() {
+  setActiveView('overview');
+  const p = STATE.currentProject;
+  const openWPs = STATE.workPackages.filter(w => w.status !== 'closed').length;
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Overview</h1>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:24px;">
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:32px;font-weight:700;color:var(--primary);">${STATE.workPackages.length}</div>
+        <div style="color:var(--gray-600);">Total Work Packages</div>
+      </div></div>
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:32px;font-weight:700;color:var(--warning);">${openWPs}</div>
+        <div style="color:var(--gray-600);">Open</div>
+      </div></div>
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:32px;font-weight:700;color:var(--success);">${STATE.workPackages.length - openWPs}</div>
+        <div style="color:var(--gray-600);">Closed</div>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Project Details</h3></div>
+      <div class="card-body">
+        <p><strong>Name:</strong> ${esc(p.name)}</p>
+        <p><strong>Identifier:</strong> ${p.identifier}</p>
+        <p><strong>Description:</strong> ${esc(p.description) || 'No description'}</p>
+        <p><strong>Status:</strong> ${p.active ? '🟢 Active' : '⚪ Inactive'}</p>
+        <p><strong>Visibility:</strong> ${p.public ? '🌐 Public' : '🔒 Private'}</p>
+      </div>
+    </div>
+  `;
+}
+
+// ========== PROJECT: WORK PACKAGES ==========
+function showWorkPackages() {
+  setActiveView('work-packages');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Work Packages</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openCreateWPModal()">+ New Work Package</button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="text" placeholder="Search..." id="wp-search" oninput="filterWPs()">
+      <select id="wp-status-filter" onchange="filterWPs()">
+        <option value="">All Status</option>
+        ${STATE.statuses.map(s => `<option value="${s.name}">${s.displayName || s.name}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-body" style="padding:0;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Subject</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Priority</th>
+              <th>Assignee</th>
+              <th>Progress</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="wp-table">
+            ${renderWPRows(STATE.workPackages)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderWPRows(wps) {
+  if (!wps.length) return '<tr><td colspan="8" class="empty"><p>No work packages</p></td></tr>';
+
+  return wps.map(wp => {
+    const type = STATE.types.find(t => t.id === wp.typeId);
+    const assignee = STATE.users.find(u => u.id === wp.assigneeId);
+    const status = STATE.statuses.find(s => s.name === wp.status);
+    const statusDisplay = status?.displayName || wp.status;
+    return `
+      <tr>
+        <td style="color:var(--primary);font-weight:600;">#${wp.id}</td>
+        <td>${esc(wp.subject)}</td>
+        <td>${esc(type?.name || 'Task')}</td>
+        <td><span class="status status-${wp.status}">${statusDisplay}</span></td>
+        <td class="priority-${wp.priority}">${wp.priority}</td>
+        <td>${assignee ? esc(`${assignee.firstName} ${assignee.lastName}`) : '-'}</td>
+        <td>
+          <div class="progress"><div class="progress-bar" style="width:${wp.doneRatio || 0}%"></div></div>
+          <small>${wp.doneRatio || 0}%</small>
+        </td>
+        <td>
+          <button class="btn btn-sm btn-secondary" onclick="openEditWPModal(${wp.id})">Edit</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteWP(${wp.id})">Delete</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterWPs() {
+  const search = $('#wp-search').value.toLowerCase();
+  const status = $('#wp-status-filter').value;
+
+  const filtered = STATE.workPackages.filter(wp => {
+    if (search && !wp.subject.toLowerCase().includes(search)) return false;
+    if (status && wp.status !== status) return false;
+    return true;
+  });
+
+  $('#wp-table').innerHTML = renderWPRows(filtered);
+}
+
+// ========== PROJECT: BOARDS ==========
+function showBoards() {
+  setActiveView('boards');
+
+  const columns = {};
+  STATE.statuses.forEach(s => columns[s.name] = []);
+  STATE.workPackages.forEach(wp => {
+    if (columns[wp.status]) columns[wp.status].push(wp);
+  });
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Boards</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openCreateWPModal()">+ New Work Package</button>
+      </div>
+    </div>
+
+    <div class="kanban" id="kanban-board">
+      ${STATE.statuses.map(s => `
+        <div class="kanban-col" data-status="${s.name}">
+          <div class="kanban-col-header" style="background:${s.color}20;color:${s.color};">
+            <span>${s.displayName || s.name}</span>
+            <span class="kanban-count">${(columns[s.name] || []).length}</span>
+          </div>
+          <div class="kanban-col-body"
+               data-status="${s.name}"
+               ondragover="handleDragOver(event)"
+               ondrop="handleDrop(event, '${s.name}')">
+            ${(columns[s.name] || []).map(wp => `
+              <div class="kanban-card"
+                   draggable="true"
+                   data-wp-id="${wp.id}"
+                   ondragstart="handleDragStart(event, ${wp.id})"
+                   ondragend="handleDragEnd(event)"
+                   onclick="openEditWPModal(${wp.id})">
+                <div class="kanban-card-id">#${wp.id}</div>
+                <div class="kanban-card-subject">${esc(wp.subject)}</div>
+                <div class="kanban-card-meta">
+                  <span class="priority-${wp.priority}">${wp.priority}</span>
+                  ${wp.assigneeId ? `<span style="margin-left:8px;">👤</span>` : ''}
+                </div>
+              </div>
+            `).join('') || '<div class="kanban-empty">Drop items here</div>'}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// Drag and Drop handlers
+let draggedWpId = null;
+
+function handleDragStart(event, wpId) {
+  draggedWpId = wpId;
+  event.target.classList.add('dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', wpId);
+}
+
+function handleDragEnd(event) {
+  event.target.classList.remove('dragging');
+  $$('.kanban-col-body').forEach(col => col.classList.remove('drag-over'));
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  event.currentTarget.classList.add('drag-over');
+}
+
+async function handleDrop(event, newStatus) {
+  event.preventDefault();
+  event.currentTarget.classList.remove('drag-over');
+
+  if (!draggedWpId) return;
+
+  const wp = STATE.workPackages.find(w => w.id === draggedWpId);
+  if (!wp || wp.status === newStatus) {
+    draggedWpId = null;
+    return;
+  }
+
+  try {
+    await API.patch(`/work_packages/${draggedWpId}`, { status: newStatus });
+    toast(`Moved to ${newStatus}`);
+    await loadProjectWorkPackages();
+    showBoards();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+
+  draggedWpId = null;
+}
+
+// ========== PROJECT: ACTIVITY ==========
+function showActivity() {
+  setActiveView('activity');
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Activity</h1></div>
+    <div class="card"><div class="card-body">
+      <div style="border-left:3px solid var(--primary);padding-left:16px;margin-bottom:16px;">
+        <div style="font-weight:600;">Project Created</div>
+        <div style="color:var(--gray-500);font-size:13px;">${STATE.currentProject.createdAt ? new Date(STATE.currentProject.createdAt).toLocaleString() : 'Unknown'}</div>
+      </div>
+      ${STATE.workPackages.slice(0, 10).map(wp => `
+        <div style="border-left:3px solid var(--gray-300);padding-left:16px;margin-bottom:16px;">
+          <div style="font-weight:600;">Work Package #${wp.id} - ${esc(wp.subject)}</div>
+          <div style="color:var(--gray-500);font-size:13px;">Status: ${wp.status} | Priority: ${wp.priority}</div>
+        </div>
+      `).join('') || '<div class="empty"><p>No recent activity</p></div>'}
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: GANTT ==========
+function showGantt() {
+  setActiveView('gantt');
+  const wpsWithDates = STATE.workPackages.filter(wp => wp.startDate || wp.dueDate);
+
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Gantt Chart</h1></div>
+    <div class="card"><div class="card-body">
+      ${wpsWithDates.length > 0 ? `
+        <div style="overflow-x:auto;">
+          <table style="min-width:800px;">
+            <thead>
+              <tr>
+                <th style="width:200px;">Work Package</th>
+                <th>Start</th>
+                <th>Due</th>
+                <th>Timeline</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${wpsWithDates.map(wp => `
+                <tr>
+                  <td>#${wp.id} ${esc(wp.subject)}</td>
+                  <td>${wp.startDate || '-'}</td>
+                  <td>${wp.dueDate || '-'}</td>
+                  <td><div style="background:var(--primary);height:20px;border-radius:4px;width:${50 + Math.random()*100}px;"></div></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `
+        <div class="empty">
+          <h3>Gantt Chart</h3>
+          <p>Add start/due dates to work packages to see timeline</p>
+          <p style="color:var(--gray-500);">${STATE.workPackages.length} work packages (no dates set)</p>
+        </div>
+      `}
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: CALENDAR ==========
+function showCalendar() {
+  setActiveView('calendar');
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  let calendarHTML = '';
+  for (let i = 0; i < firstDay; i++) calendarHTML += '<div style="padding:8px;"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const isToday = day === today.getDate();
+    calendarHTML += `<div style="padding:8px;border:1px solid var(--gray-200);min-height:80px;background:${isToday ? 'var(--primary-light)' : 'white'};"><strong>${day}</strong></div>`;
+  }
+
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Calendar - ${monthNames[month]} ${year}</h1></div>
+    <div class="card"><div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--gray-200);">
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Sun</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Mon</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Tue</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Wed</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Thu</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Fri</div>
+        <div style="padding:8px;text-align:center;font-weight:600;background:var(--gray-100);">Sat</div>
+        ${calendarHTML}
+      </div>
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: TEAM PLANNER ==========
+function showTeamPlanner() {
+  setActiveView('team-planner');
+
+  const userAssignments = STATE.users.map(u => ({
+    user: u,
+    wps: STATE.workPackages.filter(wp => wp.assigneeId === u.id)
+  }));
+
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Team Planner</h1></div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:200px;">Team Member</th>
+            <th>Assigned Work Packages</th>
+            <th>Workload</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${userAssignments.map(ua => `
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:32px;height:32px;background:var(--primary);color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">
+                    ${(ua.user.firstName?.[0] || '') + (ua.user.lastName?.[0] || '')}
+                  </div>
+                  ${esc(ua.user.firstName)} ${esc(ua.user.lastName)}
+                </div>
+              </td>
+              <td>${ua.wps.length} tasks</td>
+              <td>
+                <div class="progress" style="width:150px;">
+                  <div class="progress-bar" style="width:${Math.min(ua.wps.length * 20, 100)}%;"></div>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: TIME ENTRIES ==========
+function showTimeEntries() {
+  setActiveView('time');
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Time Entries</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openLogTimeModal()">+ Log Time</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <h3>No Time Entries</h3>
+        <p>Start logging time on work packages</p>
+        <p style="color:var(--gray-500);">Time tracking API not available in Cloud API</p>
+      </div>
+    </div></div>
+  `;
+}
+
+function openLogTimeModal() {
+  openModal('Log Time', `
+    <form id="log-time-form">
+      <div class="form-group">
+        <label>Work Package</label>
+        <select class="form-control" name="wpId">
+          ${STATE.workPackages.map(wp => `<option value="${wp.id}">#${wp.id} - ${esc(wp.subject)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Hours</label>
+        <input type="number" class="form-control" name="hours" min="0.5" step="0.5" value="1" required>
+      </div>
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" class="form-control" name="date" value="${new Date().toISOString().split('T')[0]}" required>
+      </div>
+      <div class="form-group">
+        <label>Comment</label>
+        <textarea class="form-control" name="comment" rows="2"></textarea>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="closeModal(); toast('Time tracking requires API support', 'error');">Log Time</button>
+  `);
+}
+
+// ========== PROJECT: COSTS ==========
+function showCosts() {
+  setActiveView('costs');
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Costs</h1></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:24px;">
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:24px;font-weight:700;color:var(--primary);">$0</div>
+        <div style="color:var(--gray-600);">Labor Costs</div>
+      </div></div>
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:24px;font-weight:700;color:var(--warning);">$0</div>
+        <div style="color:var(--gray-600);">Unit Costs</div>
+      </div></div>
+      <div class="card"><div class="card-body" style="text-align:center;">
+        <div style="font-size:24px;font-weight:700;color:var(--success);">$0</div>
+        <div style="color:var(--gray-600);">Total Budget</div>
+      </div></div>
+    </div>
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <p>Cost tracking requires time entries and cost rates</p>
+      </div>
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: MEETINGS ==========
+function showMeetings() {
+  setActiveView('meetings');
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Meetings</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openCreateMeetingModal()">+ New Meeting</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body">
+      <div class="empty">
+        <h3>No Meetings Scheduled</h3>
+        <p>Create a meeting to collaborate with your team</p>
+        <p style="color:var(--gray-500);margin-top:12px;">Note: Meetings API not available in Cloud API</p>
+      </div>
+    </div></div>
+  `;
+}
+
+function openCreateMeetingModal() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  openModal('Create Meeting', `
+    <form id="create-meeting-form">
+      <div class="form-group">
+        <label>Title *</label>
+        <input type="text" class="form-control" name="title" required placeholder="Weekly Standup">
+      </div>
+      <div class="form-group">
+        <label>Date *</label>
+        <input type="date" class="form-control" name="date" value="${tomorrowStr}" required>
+      </div>
+      <div class="form-group">
+        <label>Start Time *</label>
+        <input type="time" class="form-control" name="startTime" value="10:00" required>
+      </div>
+      <div class="form-group">
+        <label>Duration (minutes)</label>
+        <select class="form-control" name="duration">
+          <option value="30">30 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Location</label>
+        <input type="text" class="form-control" name="location" placeholder="Conference Room A / Zoom">
+      </div>
+      <div class="form-group">
+        <label>Attendees</label>
+        <select class="form-control" name="attendees" multiple style="height:100px;">
+          ${STATE.users.map(u => `<option value="${u.id}">${esc(`${u.firstName} ${u.lastName}`)}</option>`).join('')}
+        </select>
+        <small style="color:var(--gray-500);">Hold Ctrl/Cmd to select multiple</small>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="closeModal(); toast('Meetings API not available in Cloud API', 'error');">Create Meeting</button>
+  `);
+}
+
+// ========== PROJECT: MEMBERS ==========
+function showMembers() {
+  setActiveView('members');
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Members</h1></div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+        <tbody>
+          ${STATE.users.map(u => `
+            <tr>
+              <td>${esc(`${u.firstName} ${u.lastName}`)}</td>
+              <td>${esc(u.email)}</td>
+              <td>${u.admin ? 'Admin' : 'Member'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+  `;
+}
+
+// ========== PROJECT: SETTINGS ==========
+function showProjectSettings() {
+  setActiveView('settings');
+  const p = STATE.currentProject;
+
+  $('#content').innerHTML = `
+    <div class="page-header"><h1>Project Settings</h1></div>
+    <div class="card"><div class="card-body">
+      <form id="project-settings-form">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" class="form-control" name="name" value="${esc(p.name)}" required>
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea class="form-control" name="description" rows="3">${esc(p.description || '')}</textarea>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" name="public" ${p.public ? 'checked' : ''}> Public</label>
+        </div>
+        <div class="form-group">
+          <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Active</label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </form>
+    </div></div>
+  `;
+
+  $('#project-settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    try {
+      await API.patch(`/projects/${p.id}`, {
+        name: form.name.value,
+        description: form.description.value,
+        public: form.public.checked,
+        active: form.active.checked
+      });
+      toast('Project updated');
+      await loadProjects();
+      STATE.currentProject = STATE.projects.find(pr => pr.id === p.id);
+      $('#current-project-name').textContent = STATE.currentProject.name;
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
+
+// ========== MODALS: PROJECT ==========
+function openCreateProjectModal() {
+  openModal('Create Project', `
+    <form id="create-project-form">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" class="form-control" name="name" required>
+      </div>
+      <div class="form-group">
+        <label>Identifier *</label>
+        <input type="text" class="form-control" name="identifier" required placeholder="my-project">
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea class="form-control" name="description" rows="3"></textarea>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="createProject()">Create</button>
+  `);
+}
+
+async function createProject() {
+  const form = $('#create-project-form');
+  try {
+    await API.post('/projects', {
+      name: form.name.value,
+      identifier: form.identifier.value,
+      description: form.description.value
+    });
+    toast('Project created');
+    closeModal();
+    await loadProjects();
+    renderProjectList();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openEditProjectModal(id) {
+  const p = STATE.projects.find(pr => pr.id === id);
+  openModal('Edit Project', `
+    <form id="edit-project-form">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" class="form-control" name="name" value="${esc(p.name)}" required>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea class="form-control" name="description" rows="3">${esc(p.description || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" name="public" ${p.public ? 'checked' : ''}> Public</label>
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Active</label>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="updateProject(${id})">Save</button>
+  `);
+}
+
+async function updateProject(id) {
+  const form = $('#edit-project-form');
+  try {
+    await API.patch(`/projects/${id}`, {
+      name: form.name.value,
+      description: form.description.value,
+      public: form.public.checked,
+      active: form.active.checked
+    });
+    toast('Project updated');
+    closeModal();
+    await loadProjects();
+    renderProjectList();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteProject(id) {
+  if (!confirm('Delete this project? This cannot be undone.')) return;
+  try {
+    await API.delete(`/projects/${id}`);
+    toast('Project deleted');
+    await loadProjects();
+    renderProjectList();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ========== MODALS: WORK PACKAGE ==========
+function openCreateWPModal() {
+  openModal('Create Work Package', `
+    <form id="create-wp-form">
+      <div class="form-group">
+        <label>Subject *</label>
+        <input type="text" class="form-control" name="subject" required>
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select class="form-control" name="typeId">
+          ${STATE.types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select class="form-control" name="status">
+          ${STATE.statuses.map(s => `<option value="${s.name}">${s.displayName || s.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <select class="form-control" name="priority">
+          ${STATE.priorities.map(p => `<option value="${p.name.toLowerCase()}">${p.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Assignee</label>
+        <select class="form-control" name="assigneeId">
+          <option value="">Unassigned</option>
+          ${STATE.users.map(u => `<option value="${u.id}">${esc(`${u.firstName} ${u.lastName}`)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea class="form-control" name="description" rows="3"></textarea>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="createWP()">Create</button>
+  `);
+}
+
+async function createWP() {
+  const form = $('#create-wp-form');
+  try {
+    await API.post(`/projects/${STATE.currentProject.id}/work_packages`, {
+      subject: form.subject.value,
+      typeId: parseInt(form.typeId.value),
+      status: form.status.value,
+      priority: form.priority.value,
+      assigneeId: form.assigneeId.value ? parseInt(form.assigneeId.value) : null,
+      description: form.description.value
+    });
+    toast('Work package created');
+    closeModal();
+    await loadProjectWorkPackages();
+    showWorkPackages();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openEditWPModal(id) {
+  const wp = STATE.workPackages.find(w => w.id === id);
+  openModal('Edit Work Package', `
+    <form id="edit-wp-form">
+      <div class="form-group">
+        <label>Subject *</label>
+        <input type="text" class="form-control" name="subject" value="${esc(wp.subject)}" required>
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select class="form-control" name="typeId">
+          ${STATE.types.map(t => `<option value="${t.id}" ${wp.typeId === t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select class="form-control" name="status">
+          ${STATE.statuses.map(s => `<option value="${s.name}" ${wp.status === s.name ? 'selected' : ''}>${s.displayName || s.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <select class="form-control" name="priority">
+          ${STATE.priorities.map(p => `<option value="${p.name.toLowerCase()}" ${wp.priority === p.name.toLowerCase() ? 'selected' : ''}>${p.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Assignee</label>
+        <select class="form-control" name="assigneeId">
+          <option value="">Unassigned</option>
+          ${STATE.users.map(u => `<option value="${u.id}" ${wp.assigneeId === u.id ? 'selected' : ''}>${esc(`${u.firstName} ${u.lastName}`)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Progress (${wp.doneRatio || 0}%)</label>
+        <input type="range" class="form-control" name="doneRatio" min="0" max="100" value="${wp.doneRatio || 0}" style="padding:0;">
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea class="form-control" name="description" rows="3">${esc(wp.description || '')}</textarea>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="updateWP(${id})">Save</button>
+  `);
+}
+
+async function updateWP(id) {
+  const form = $('#edit-wp-form');
+  try {
+    await API.patch(`/work_packages/${id}`, {
+      subject: form.subject.value,
+      typeId: parseInt(form.typeId.value),
+      status: form.status.value,
+      priority: form.priority.value,
+      assigneeId: form.assigneeId.value ? parseInt(form.assigneeId.value) : null,
+      doneRatio: parseInt(form.doneRatio.value),
+      description: form.description.value
+    });
+    toast('Work package updated');
+    closeModal();
+    await loadProjectWorkPackages();
+    if (STATE.currentView === 'boards') showBoards();
+    else showWorkPackages();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteWP(id) {
+  if (!confirm('Delete this work package?')) return;
+  try {
+    await API.delete(`/work_packages/${id}`);
+    toast('Work package deleted');
+    await loadProjectWorkPackages();
+    showWorkPackages();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ========== ADMIN: USERS ==========
+function showAdminUsers() {
+  $('#user-dropdown').classList.remove('show');
+  STATE.currentProject = null;
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Users</h1>
+      <div class="page-actions">
+        <button class="btn btn-secondary" onclick="goHome()">← Back</button>
+        <button class="btn btn-primary" onclick="openCreateUserModal()">+ Add User</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Login</th><th>Email</th><th>Admin</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${STATE.users.map(u => `
+            <tr>
+              <td>${u.id}</td>
+              <td>${esc(`${u.firstName} ${u.lastName}`)}</td>
+              <td>${esc(u.login)}</td>
+              <td>${esc(u.email)}</td>
+              <td>${u.admin ? 'Yes' : 'No'}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" onclick="openEditUserModal(${u.id})">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+  `;
+}
+
+function openCreateUserModal() {
+  openModal('Add User', `
+    <form id="create-user-form">
+      <div class="form-group"><label>First Name *</label><input type="text" class="form-control" name="firstName" required></div>
+      <div class="form-group"><label>Last Name *</label><input type="text" class="form-control" name="lastName" required></div>
+      <div class="form-group"><label>Login *</label><input type="text" class="form-control" name="login" required></div>
+      <div class="form-group"><label>Email *</label><input type="email" class="form-control" name="email" required></div>
+      <div class="form-group"><label>Password *</label><input type="password" class="form-control" name="password" required></div>
+      <div class="form-group"><label><input type="checkbox" name="admin"> Administrator</label></div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="createUser()">Create</button>
+  `);
+}
+
+async function createUser() {
+  const form = $('#create-user-form');
+  try {
+    await API.post('/users', {
+      firstName: form.firstName.value,
+      lastName: form.lastName.value,
+      login: form.login.value,
+      email: form.email.value,
+      password: form.password.value,
+      admin: form.admin.checked
+    });
+    toast('User created');
+    closeModal();
+    await loadMasterData();
+    showAdminUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openEditUserModal(id) {
+  const u = STATE.users.find(us => us.id === id);
+  openModal('Edit User', `
+    <form id="edit-user-form">
+      <div class="form-group"><label>First Name *</label><input type="text" class="form-control" name="firstName" value="${esc(u.firstName)}" required></div>
+      <div class="form-group"><label>Last Name *</label><input type="text" class="form-control" name="lastName" value="${esc(u.lastName)}" required></div>
+      <div class="form-group"><label>Email *</label><input type="email" class="form-control" name="email" value="${esc(u.email)}" required></div>
+      <div class="form-group"><label><input type="checkbox" name="admin" ${u.admin ? 'checked' : ''}> Administrator</label></div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="updateUser(${id})">Save</button>
+  `);
+}
+
+async function updateUser(id) {
+  const form = $('#edit-user-form');
+  try {
+    await API.patch(`/users/${id}`, {
+      firstName: form.firstName.value,
+      lastName: form.lastName.value,
+      email: form.email.value,
+      admin: form.admin.checked
+    });
+    toast('User updated');
+    closeModal();
+    await loadMasterData();
+    showAdminUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteUser(id) {
+  if (!confirm('Delete this user?')) return;
+  try {
+    await API.delete(`/users/${id}`);
+    toast('User deleted');
+    await loadMasterData();
+    showAdminUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ========== ADMIN: ROLES ==========
+function showAdminRoles() {
+  $('#user-dropdown').classList.remove('show');
+  STATE.currentProject = null;
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Roles</h1>
+      <div class="page-actions">
+        <button class="btn btn-secondary" onclick="goHome()">← Back</button>
+        <button class="btn btn-primary" onclick="openCreateRoleModal()">+ Add Role</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Permissions</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${STATE.roles.map(r => `
+            <tr>
+              <td>${r.id}</td>
+              <td>${esc(r.name)}</td>
+              <td>${(r.permissions || []).join(', ') || '-'}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" onclick="openEditRoleModal(${r.id})">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRole(${r.id})">Delete</button>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="4" class="empty">No roles</td></tr>'}
+        </tbody>
+      </table>
+    </div></div>
+  `;
+}
+
+function openCreateRoleModal() {
+  const perms = ['projects:view', 'projects:edit', 'work_packages:view', 'work_packages:edit', 'users:view'];
+  openModal('Add Role', `
+    <form id="create-role-form">
+      <div class="form-group"><label>Name *</label><input type="text" class="form-control" name="name" required></div>
+      <div class="form-group"><label>Permissions</label>
+        <div style="border:1px solid var(--gray-300);border-radius:6px;padding:12px;max-height:150px;overflow-y:auto;">
+          ${perms.map(p => `<label style="display:block;margin-bottom:8px;"><input type="checkbox" name="perms" value="${p}"> ${p}</label>`).join('')}
+        </div>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="createRole()">Create</button>
+  `);
+}
+
+async function createRole() {
+  const form = $('#create-role-form');
+  const perms = Array.from(form.querySelectorAll('input[name="perms"]:checked')).map(c => c.value);
+  try {
+    await API.post('/roles', { name: form.name.value, permissions: perms });
+    toast('Role created');
+    closeModal();
+    await loadMasterData();
+    showAdminRoles();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openEditRoleModal(id) {
+  const r = STATE.roles.find(ro => ro.id === id);
+  const perms = ['projects:view', 'projects:edit', 'work_packages:view', 'work_packages:edit', 'users:view'];
+  openModal('Edit Role', `
+    <form id="edit-role-form">
+      <div class="form-group"><label>Name *</label><input type="text" class="form-control" name="name" value="${esc(r.name)}" required></div>
+      <div class="form-group"><label>Permissions</label>
+        <div style="border:1px solid var(--gray-300);border-radius:6px;padding:12px;max-height:150px;overflow-y:auto;">
+          ${perms.map(p => `<label style="display:block;margin-bottom:8px;"><input type="checkbox" name="perms" value="${p}" ${(r.permissions || []).includes(p) ? 'checked' : ''}> ${p}</label>`).join('')}
+        </div>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="updateRole(${id})">Save</button>
+  `);
+}
+
+async function updateRole(id) {
+  const form = $('#edit-role-form');
+  const perms = Array.from(form.querySelectorAll('input[name="perms"]:checked')).map(c => c.value);
+  try {
+    await API.patch(`/roles/${id}`, { name: form.name.value, permissions: perms });
+    toast('Role updated');
+    closeModal();
+    await loadMasterData();
+    showAdminRoles();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteRole(id) {
+  if (!confirm('Delete this role?')) return;
+  try {
+    await API.delete(`/roles/${id}`);
+    toast('Role deleted');
+    await loadMasterData();
+    showAdminRoles();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ========== ADMIN: WORK PACKAGE TYPES ==========
+function showAdminTypes() {
+  $('#user-dropdown').classList.remove('show');
+  STATE.currentProject = null;
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Work Package Types</h1>
+      <div class="page-actions">
+        <button class="btn btn-secondary" onclick="goHome()">← Back</button>
+        <button class="btn btn-primary" onclick="openCreateTypeModal()">+ Add Type</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Color</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${STATE.types.map(t => `
+            <tr>
+              <td>${t.id}</td>
+              <td>${esc(t.name)}</td>
+              <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${t.color || '#1A67A3'};"></span> ${t.color || '#1A67A3'}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" onclick="openEditTypeModal(${t.id})">Edit</button>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="4" class="empty">No types</td></tr>'}
+        </tbody>
+      </table>
+    </div></div>
+  `;
+}
+
+function openCreateTypeModal() {
+  openModal('Add Work Package Type', `
+    <form id="create-type-form">
+      <div class="form-group"><label>Name *</label><input type="text" class="form-control" name="name" required></div>
+      <div class="form-group"><label>Color</label><input type="color" class="form-control" name="color" value="#1A67A3" style="width:100px;height:40px;padding:4px;"></div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="createType()">Create</button>
+  `);
+}
+
+async function createType() {
+  const form = $('#create-type-form');
+  try {
+    await API.post('/work_package_types', { name: form.name.value, color: form.color.value });
+    toast('Type created');
+    closeModal();
+    await loadMasterData();
+    showAdminTypes();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function openEditTypeModal(id) {
+  const t = STATE.types.find(ty => ty.id === id);
+  openModal('Edit Work Package Type', `
+    <form id="edit-type-form">
+      <div class="form-group"><label>Name *</label><input type="text" class="form-control" name="name" value="${esc(t.name)}" required></div>
+      <div class="form-group"><label>Color</label><input type="color" class="form-control" name="color" value="${t.color || '#1A67A3'}" style="width:100px;height:40px;padding:4px;"></div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="toast('Update requires API support', 'error'); closeModal();">Save</button>
+  `);
+}
+
+// ========== ADMIN: STATUSES ==========
+function showAdminStatuses() {
+  $('#user-dropdown').classList.remove('show');
+  STATE.currentProject = null;
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Work Package Statuses</h1>
+      <div class="page-actions">
+        <button class="btn btn-secondary" onclick="goHome()">← Back</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Color</th><th>Default</th><th>Closed</th></tr></thead>
+        <tbody>
+          ${STATE.statuses.map(s => `
+            <tr>
+              <td>${s.id}</td>
+              <td>${esc(s.name)}</td>
+              <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${s.color || '#1A67A3'};"></span> ${s.color || '-'}</td>
+              <td>${s.isDefault ? 'Yes' : 'No'}</td>
+              <td>${s.isClosed ? 'Yes' : 'No'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+    <div style="margin-top:16px;padding:16px;background:#fff3e0;border-radius:8px;color:#e65100;">
+      <strong>Note:</strong> Statuses are read-only (mock data). To manage statuses, update the Cloud API.
+    </div>
+  `;
+}
+
+// ========== ADMIN: PRIORITIES ==========
+function showAdminPriorities() {
+  $('#user-dropdown').classList.remove('show');
+  STATE.currentProject = null;
+  $('#sidebar').classList.add('hidden');
+  $('#content').classList.add('no-sidebar');
+  $('#project-selector').classList.add('hidden');
+
+  $('#content').innerHTML = `
+    <div class="page-header">
+      <h1>Work Package Priorities</h1>
+      <div class="page-actions">
+        <button class="btn btn-secondary" onclick="goHome()">← Back</button>
+      </div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0;">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Color</th><th>Default</th></tr></thead>
+        <tbody>
+          ${STATE.priorities.map(p => `
+            <tr>
+              <td>${p.id}</td>
+              <td class="priority-${p.name.toLowerCase()}">${esc(p.name)}</td>
+              <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:${p.color || '#1A67A3'};"></span> ${p.color || '-'}</td>
+              <td>${p.isDefault ? 'Yes' : 'No'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div></div>
+    <div style="margin-top:16px;padding:16px;background:#fff3e0;border-radius:8px;color:#e65100;">
+      <strong>Note:</strong> Priorities are read-only (mock data). To manage priorities, update the Cloud API.
+    </div>
+  `;
+}
+
+// ========== STARTUP ==========
+const savedUser = localStorage.getItem('user');
+if (savedUser) {
+  STATE.user = JSON.parse(savedUser);
+  initApp();
+}
+</script>
+</body>
+</html>
