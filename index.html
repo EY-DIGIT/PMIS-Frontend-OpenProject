@@ -276,6 +276,7 @@ const STATE = {
   projects: [],
   currentProject: null,
   workPackages: [],
+  memberships: [],
   users: [],
   roles: [],
   types: [],
@@ -989,25 +990,136 @@ function openCreateMeetingModal() {
 }
 
 // ========== PROJECT: MEMBERS ==========
-function showMembers() {
+async function showMembers() {
   setActiveView('members');
+
+  // Load project memberships
+  await loadProjectMemberships();
+
   $('#content').innerHTML = `
-    <div class="page-header"><h1>Members</h1></div>
-    <div class="card"><div class="card-body" style="padding:0;">
-      <table>
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
-        <tbody>
-          ${STATE.users.map(u => `
-            <tr>
-              <td>${esc(`${u.firstName} ${u.lastName}`)}</td>
-              <td>${esc(u.email)}</td>
-              <td>${u.admin ? 'Admin' : 'Member'}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div></div>
+    <div class="page-header">
+      <h1>Members</h1>
+      <div class="page-actions">
+        <button class="btn btn-primary" onclick="openAddMemberModal()">+ Add Member</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Project Members (${STATE.memberships.length})</h3></div>
+      <div class="card-body" style="padding:0;">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+          <tbody id="members-table">
+            ${renderMembersRows()}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
+}
+
+function renderMembersRows() {
+  if (!STATE.memberships.length) {
+    return '<tr><td colspan="4" class="empty"><p>No members yet. Add members to collaborate.</p></td></tr>';
+  }
+
+  return STATE.memberships.map(m => {
+    const user = STATE.users.find(u => u.id === m.userId);
+    const roles = m._embedded?.roles || m.roles || [];
+    return `
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="width:32px;height:32px;background:var(--primary);color:white;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">
+              ${user ? (user.firstName?.[0] || '') + (user.lastName?.[0] || '') : '?'}
+            </div>
+            ${user ? esc(user.firstName + ' ' + user.lastName) : 'User #' + m.userId}
+          </div>
+        </td>
+        <td>${user ? esc(user.email) : '-'}</td>
+        <td>${roles.map(r => '<span class="status status-new">' + esc(r.name) + '</span>').join(' ') || 'Member'}</td>
+        <td>
+          <button class="btn btn-sm btn-danger" onclick="removeMember(${m.id})">Remove</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadProjectMemberships() {
+  if (!STATE.currentProject) return;
+  try {
+    const res = await API.get('/projects/' + STATE.currentProject.id + '/memberships');
+    STATE.memberships = res._embedded?.elements || [];
+  } catch (e) {
+    STATE.memberships = [];
+  }
+}
+
+function openAddMemberModal() {
+  const memberUserIds = STATE.memberships.map(m => m.userId);
+  const nonMembers = STATE.users.filter(u => !memberUserIds.includes(u.id));
+
+  if (nonMembers.length === 0) {
+    toast('All users are already members of this project', 'error');
+    return;
+  }
+
+  openModal('Add Member', `
+    <form id="add-member-form">
+      <div class="form-group">
+        <label>Select User *</label>
+        <select class="form-control" name="userId" required>
+          <option value="">-- Select User --</option>
+          ${nonMembers.map(u => '<option value="' + u.id + '">' + esc(u.firstName + ' ' + u.lastName) + ' (' + esc(u.email) + ')</option>').join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Role</label>
+        <select class="form-control" name="roleId">
+          <option value="">-- No Role --</option>
+          ${STATE.roles.map(r => '<option value="' + r.id + '">' + esc(r.name) + '</option>').join('')}
+        </select>
+      </div>
+    </form>
+  `, `
+    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" onclick="addMember()">Add Member</button>
+  `);
+}
+
+async function addMember() {
+  const form = $('#add-member-form');
+  const userId = parseInt(form.userId.value);
+  const roleId = form.roleId.value ? parseInt(form.roleId.value) : null;
+
+  if (!userId) {
+    toast('Please select a user', 'error');
+    return;
+  }
+
+  try {
+    const payload = { user: { id: userId } };
+    if (roleId) payload.roles = [{ id: roleId }];
+
+    await API.post('/projects/' + STATE.currentProject.id + '/memberships', payload);
+    toast('Member added successfully');
+    closeModal();
+    showMembers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function removeMember(membershipId) {
+  if (!confirm('Remove this member from the project?')) return;
+  try {
+    await API.delete('/memberships/' + membershipId);
+    toast('Member removed');
+    showMembers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 // ========== PROJECT: SETTINGS ==========
