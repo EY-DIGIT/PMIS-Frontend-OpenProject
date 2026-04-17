@@ -42,7 +42,7 @@ export default function Layout({ children }) {
           👤
           <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
             <div>Profile</div>
-            <div>Sign Out</div>
+            <div onClick={() => navigate("/login")}>Sign Out</div>
           </div>
         </div>
       </div>

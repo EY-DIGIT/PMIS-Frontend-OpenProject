@@ -1,0 +1,260 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+:root {
+  --uidai-navy: #0b3c88;
+  --uidai-cyan: #0aa1c0;
+  --uidai-border: #dbe5f1;
+  --uidai-success: #16a34a;
+  --uidai-error: #dc2626;
+}
+
+/* Scoped reset — only affects elements inside UIDAI login */
+.uidai-header,
+.uidai-header *,
+.uidai-main,
+.uidai-main * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: Inter, sans-serif;
+}
+
+/* ===== HEADER ===== */
+.uidai-header {
+  background: #fff;
+  border-bottom: 3px solid var(--uidai-navy);
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.uidai-header img {
+  height: 40px;
+}
+
+.uidai-header-title {
+  font-size: 20px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--uidai-navy), var(--uidai-cyan));
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* ===== MAIN ===== */
+.uidai-main {
+  position: relative;
+  height: calc(100vh - 70px);
+  background: url("background.jpg") no-repeat center center/cover;
+}
+
+.uidai-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 30, 80, 0.75);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 40px;
+}
+
+/* ===== CARD ===== */
+.uidai-card {
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 26px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+/* Tabs hidden, structure kept */
+.uidai-tabs {
+  display: none;
+}
+
+/* ===== CARD HEAD ===== */
+.uidai-card-head {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.uidai-card-head img {
+  width: 50px;
+  margin-bottom: 8px;
+}
+
+.uidai-card-head h1 {
+  font-size: 18px;
+  color: var(--uidai-navy);
+}
+
+.uidai-sub {
+  font-size: 13px;
+  color: #555;
+}
+
+/* ===== FORM FIELDS ===== */
+.uidai-field {
+  margin-bottom: 14px;
+  position: relative;
+}
+
+.uidai-label {
+  font-size: 13px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.uidai-input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--uidai-border);
+  border-radius: 6px;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.uidai-input:focus {
+  outline: none;
+  border-color: var(--uidai-cyan);
+}
+
+/* Error state for invalid input */
+.uidai-input-error {
+  border-color: var(--uidai-error);
+  background: #fef2f2;
+}
+
+.uidai-input-error:focus {
+  border-color: var(--uidai-error);
+}
+
+.uidai-required::after {
+  content: " *";
+  color: var(--uidai-error);
+}
+
+/* Error message below field */
+.uidai-error-msg {
+  font-size: 12px;
+  color: var(--uidai-error);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* ===== PASSWORD EYE ===== */
+.uidai-password-wrapper {
+  position: relative;
+}
+
+.uidai-password-wrapper .uidai-input {
+  padding-right: 40px;
+}
+
+.uidai-eye-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-top: 12px; /* offset to align with input (label takes top space) */
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  display: none;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.uidai-eye-btn:hover {
+  color: var(--uidai-navy);
+  background: #f1f5f9;
+}
+
+.uidai-eye-btn:focus {
+  outline: 2px solid var(--uidai-cyan);
+  outline-offset: 2px;
+}
+
+/* ===== OTP BUTTON (kept for structure) ===== */
+.uidai-btn-otp {
+  width: 100%;
+  padding: 11px;
+  border: 2px solid var(--uidai-cyan);
+  background: #fff;
+  color: var(--uidai-cyan);
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.uidai-btn-otp:hover {
+  background: linear-gradient(90deg, var(--uidai-navy), var(--uidai-cyan));
+  color: #fff;
+  border-color: transparent;
+}
+
+/* ===== SUCCESS MESSAGE ===== */
+.uidai-otp-msg {
+  font-size: 12px;
+  color: var(--uidai-success);
+  margin-top: 6px;
+  display: none;
+}
+
+/* ===== PRIMARY BUTTON ===== */
+.uidai-btn-primary {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--uidai-navy), var(--uidai-cyan));
+  color: #fff;
+  font-weight: 600;
+  margin-top: 10px;
+  cursor: pointer;
+  font-family: Inter, sans-serif;
+  font-size: 14px;
+}
+
+.uidai-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== LINKS ===== */
+.uidai-links {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-top: 12px;
+}
+
+.uidai-links a {
+  color: var(--uidai-cyan);
+  text-decoration: none;
+}
+
+.uidai-links a:hover {
+  text-decoration: underline;
+}
+
+/* ===== FOOTER ===== */
+.uidai-footer {
+  text-align: center;
+  font-size: 11px;
+  margin-top: 14px;
+  color: #888;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+  .uidai-overlay {
+    justify-content: center;
+    padding: 20px;
+  }
+}
