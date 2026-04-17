@@ -1,32 +1,78 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import Btn from "./Btn";
+// ============================================================
+// pages/ProjectTable.jsx  –  Route: /projects
+// ============================================================
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useProjects, fmtDate } from "../store/Projectstore";
 import Field from "./Field";
-const fmtDate = (d) => { if (!d || d === "-") return "-"; const p = String(d).split("-"); return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : d; };
-const fmtDT = (iso) => { if (!iso) return "-"; const d = new Date(iso); return isNaN(d.getTime()) ? iso : d.toLocaleString("en-GB"); };
-export default function ProjectTable({ projects, onOpen, onOpenConfig, query, setQuery }) {
-  const q = query.trim().toLowerCase();
-  const rows = projects.filter(p => {
+import Btn   from "./Btn";
+
+export default function ProjectTable() {
+  const { projects }  = useProjects();
+  const navigate      = useNavigate();
+  const [query, setQuery] = useState("");
+
+  const q    = query.trim().toLowerCase();
+  const rows = projects.filter((p) => {
     if (!q) return true;
-    return [p.projectId, p.projectName, p.description, p.baselineId, p.status, p.category, p.actualEndDate].some(v => String(v ?? "").toLowerCase().includes(q));
+    return [p.projectId, p.projectName, p.description, p.baselineId, p.status, p.category, p.actualEndDate]
+      .some((v) => String(v ?? "").toLowerCase().includes(q));
   });
+
   return (
     <div>
       <div className="pm-title">Project Management</div>
       <div className="card">
-        <div className="grid" style={{ gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "end" }}>
+
+        {/* Search bar */}
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "end" }}
+        >
           <Field label="Search project">
-            <input placeholder="Search project…" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === "Enter" && setQuery(query)} />
+            <input
+              placeholder="Search project…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            />
           </Field>
           <div><Btn onClick={() => setQuery(query)}>Search</Btn></div>
         </div>
+
+        {/* Table */}
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Project ID</th><th>Name</th><th>Category</th><th>Baseline ID</th><th>Status</th><th>Start Date</th><th>End Date</th><th>Actual End Date</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Project ID</th>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Baseline ID</th>
+                <th>Status</th>
+                <th>Start Date</th>
+                <th>End Date</th>
+                <th>Actual End Date</th>
+              </tr>
+            </thead>
             <tbody>
-              {rows.length === 0 ? <tr><td colSpan={8} style={{ textAlign: "center", padding: 16 }}>No matching projects found.</td></tr> :
-                rows.map(p => (
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: "center", padding: 16 }}>
+                    No matching projects found.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((p) => (
                   <tr key={p.projectId}>
-                    <td className="link" onClick={() => onOpen(p.projectId)}>{p.projectId}</td>
+                    {/* Clicking Project ID navigates to details page */}
+                    <td
+                      className="link"
+                      onClick={() => navigate(`/projects/${p.projectId}`)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      {p.projectId}
+                    </td>
                     <td>{p.projectName}</td>
                     <td>{p.category}</td>
                     <td>{p.baselineId || "-"}</td>
@@ -36,7 +82,7 @@ export default function ProjectTable({ projects, onOpen, onOpenConfig, query, se
                     <td>{p.isVersion ? fmtDate(p.actualEndDate || "-") : "-"}</td>
                   </tr>
                 ))
-              }
+              )}
             </tbody>
           </table>
         </div>

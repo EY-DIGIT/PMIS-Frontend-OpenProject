@@ -1,74 +1,68 @@
 // ============================================================
-// pages/MilestoneConfig.jsx  –  Route: /projects/:projectId/config
+// pages/OnboardingConfig.jsx  –  Route: /onboard/:category/config
+//   Step 2 of 2: add milestones then save project
 // ============================================================
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
-import {
-  useProjects, deepClone, safeArr, uid,
-  renumber, addAudit, findByUid,
-} from "../store/Projectstore";
+import { useOnboard }                     from "../store/Onboardstore";
+import { useProjects, deepClone, safeArr, uid, renumber, normalizeProject } from "../store/Projectstore";
 
-import ActivityPage  from "./ActivityPage";
-import NodePopup     from "./NodePopup";
-import MessageModal  from "./MessageModal";
-import Btn           from "./Btn";
+import NodePopup    from "./NodePopup";
+import MessageModal from "./MessageModal";
+import Btn          from "./Btn";
 
-export default function MilestoneConfig() {
-  const { projectId } = useParams();
+function findByUid(list, id) {
+  for (const item of safeArr(list)) {
+    if (item.uid === id) return item;
+    const f = findByUid(item.activities || [], id) || findByUid(item.tasks || [], id) || findByUid(item.subtasks || [], id);
+    if (f) return f;
+  }
+  return null;
+}
+
+export default function OnboardingConfig() {
+  const { category }  = useParams();
   const navigate       = useNavigate();
-  const { getById, mutate, withLoader, showMsg } = useProjects();
+  const { draft, setDraft, clearDraft } = useOnboard();
+  const { getNextId, addProject, withLoader, showMsg } = useProjects();
 
-  const project = getById(projectId);
-
-  // ── Local UI state ────────────────────────────────────────
-  const [editingConfig, setEditingConfig] = useState(false);
   const [expandedMilestones, setExpandedMilestones] = useState(
-    () => new Set(safeArr(project?.milestones).map((m) => m.uid))
+    () => new Set(safeArr(draft?.milestones).map((m) => m.uid))
   );
-  const [nodePopup,    setNodePopup   ] = useState(null);
-  const [activityPage, setActivityPage] = useState(null);
-  const [msg,          setMsg         ] = useState(null);
+  const [nodePopup, setNodePopup] = useState(null);
+  const [msg,       setMsg       ] = useState(null);
 
-  // ── Guard ─────────────────────────────────────────────────
-  if (!project) {
+  // ── Guard: if someone lands here without a draft, send them back ──
+  if (!draft) {
     return (
       <div className="card" style={{ padding: 24 }}>
-        <p>Project <strong>{projectId}</strong> not found.</p>
-        <Btn onClick={() => navigate("/projects")}>Back to list</Btn>
+        <p>No project draft found. Please start from the form.</p>
+        <Btn onClick={() => navigate(`/onboard/${encodeURIComponent(category)}`)}>Back to Form</Btn>
       </div>
     );
   }
 
-  const readOnly = project.status === "PUBLISHED" && !project.isVersion;
-  const editable = editingConfig && !readOnly;
-
-  // ── Expand / collapse helpers ─────────────────────────────
-  const allExp   = safeArr(project.milestones).every((m) => expandedMilestones.has(m.uid));
+  // ── Helpers ───────────────────────────────────────────────
+  const allExp = safeArr(draft.milestones).every((m) => expandedMilestones.has(m.uid));
   const toggleAll = () =>
-    setExpandedMilestones(allExp ? new Set() : new Set(safeArr(project.milestones).map((m) => m.uid)));
+    setExpandedMilestones(allExp ? new Set() : new Set(safeArr(draft.milestones).map((m) => m.uid)));
   const toggleM = (mUid) => {
     const n = new Set(expandedMilestones);
     n.has(mUid) ? n.delete(mUid) : n.add(mUid);
     setExpandedMilestones(n);
   };
 
-  // ── Save / Edit toggle ────────────────────────────────────
-  const handleToggleEdit = () => {
-    if (!editingConfig) { setEditingConfig(true); return; }
-    withLoader("Saving milestone configuration…", () => {
-      const p = deepClone(project);
-      renumber(p);
-      addAudit(p, "Save Milestone Configuration", "-", deepClone(p.milestones));
-      mutate(p);
-      setEditingConfig(false);
-    }, "Milestone configuration saved");
+  // ── Save to draft helper ──────────────────────────────────
+  const applyDraft = (mutatedDraft) => {
+    renumber(mutatedDraft);
+    setDraft(deepClone(mutatedDraft));
   };
 
-  // ── Node save (milestone / activity add-edit) ─────────────
+  // ── Node saved (add / edit milestone or activity) ─────────
   const handleNodeSaved = (data) => {
     const { type, mode, nodeUid, parentUid } = nodePopup;
-    const p = deepClone(project);
+    const d = deepClone(draft);
 
     if (type === "milestone") {
       if (mode === "add") {
@@ -77,120 +71,104 @@ export default function MilestoneConfig() {
           startDate: data.start, endDate: data.end,
           expanded: true, comments: [], activities: [],
         };
-        p.milestones.push(m);
+        d.milestones.push(m);
         setExpandedMilestones((prev) => new Set([...prev, m.uid]));
-        addAudit(p, "Add Milestone", "-", deepClone(m));
       } else {
-        const m    = findByUid(p.milestones, nodeUid);
-        const bef  = deepClone(m);
+        const m = findByUid(d.milestones, nodeUid);
         m.name = data.name; m.description = data.desc; m.startDate = data.start; m.endDate = data.end;
-        addAudit(p, "Update Milestone", bef, deepClone(m));
       }
     } else if (type === "activity") {
-      const milestone = findByUid(p.milestones, parentUid);
+      const milestone = findByUid(d.milestones, parentUid);
       if (!milestone) return;
       if (mode === "add") {
-        const a = {
+        milestone.activities.push({
           uid: uid("a"), name: data.name, description: data.desc,
           startDate: data.start, endDate: data.end, type: data.nType,
           expanded: true, comments: [], tasks: [],
           actualStartDate: "", actualEndDate: "", resourceDetails: data.res,
-        };
-        milestone.activities.push(a);
-        addAudit(p, "Add Activity", "-", deepClone(a));
+        });
       } else {
-        const a   = findByUid(p.milestones, nodeUid);
-        const bef = deepClone(a);
+        const a = findByUid(d.milestones, nodeUid);
         a.name = data.name; a.description = data.desc; a.startDate = data.start;
         a.endDate = data.end; a.type = data.nType; a.resourceDetails = data.res;
-        addAudit(p, "Update Activity", bef, deepClone(a));
       }
     }
 
-    renumber(p);
-    mutate(p);
+    applyDraft(d);
     setNodePopup(null);
-
-    const successMsg =
-      type === "milestone" && mode === "add" ? "Milestone added" :
-      type === "milestone"                   ? "Milestone updated" :
-      mode === "add"                         ? "Activity added"    : "Activity updated";
-    setMsg({ text: successMsg, onOk: () => setMsg(null) });
   };
 
-  // ── Delete helpers ────────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────
   const deleteMilestone = (mUid) => {
-    const p    = deepClone(project);
-    const idx  = p.milestones.findIndex((m) => m.uid === mUid);
+    const d   = deepClone(draft);
+    const idx = d.milestones.findIndex((m) => m.uid === mUid);
     if (idx < 0) return;
-    const removed = p.milestones.splice(idx, 1)[0];
-    addAudit(p, "Delete Milestone", deepClone(removed), "-");
-    renumber(p);
-    mutate(p);
+    d.milestones.splice(idx, 1);
+    applyDraft(d);
   };
 
   const deleteActivity = (aUid, mUid) => {
-    const p         = deepClone(project);
-    const milestone = findByUid(p.milestones, mUid);
+    const d         = deepClone(draft);
+    const milestone = findByUid(d.milestones, mUid);
     if (!milestone) return;
     const idx = milestone.activities.findIndex((a) => a.uid === aUid);
     if (idx < 0) return;
-    const removed = milestone.activities.splice(idx, 1)[0];
-    addAudit(p, "Delete Activity", deepClone(removed), "-");
-    renumber(p);
-    mutate(p);
+    milestone.activities.splice(idx, 1);
+    applyDraft(d);
   };
 
-  // ── Activity page updates ─────────────────────────────────
-  const onActivityUpdated = (_activity, message) => {
-    if (message) setMsg({ text: message, onOk: () => setMsg(null) });
-  };
-
-  // ── Activity sub-page ─────────────────────────────────────
-  if (activityPage) {
-    return (
-      <>
-        <ActivityPage
-          {...activityPage}
-          project={project}
-          onBack={() => setActivityPage(null)}
-          onUpdated={onActivityUpdated}
-        />
-        {msg && <MessageModal msg={msg.text} onOk={msg.onOk} />}
-      </>
+  // ── Finalize: save project ────────────────────────────────
+  const handleFinalize = () => {
+    if (!safeArr(draft.milestones).length) {
+      showMsg("Add at least one milestone before saving.");
+      return;
+    }
+    withLoader(
+      "Saving project…",
+      () => {
+        const p       = deepClone(draft);
+        p.projectId   = getNextId();
+        p.status      = "NEW";
+        p.baselineId  = "-";
+        p.auditLogs   = [];
+        normalizeProject(p);
+        addProject(p);
+        clearDraft();
+      },
+      "Project onboarded successfully",
+      () => navigate("/projects")
     );
-  }
+  };
 
-  // ── Main render ───────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────
   return (
     <div>
       <div className="pm-title">Milestone Configuration</div>
       <div className="card">
-        <h3>{project.projectName}</h3>
+        <h3>{draft.projectName || ""}</h3>
         <div className="hint">
-          Disclaimer: Every add, edit, delete, and version change is audited separately.
+          Add milestones first. Then open each milestone to add activities.
+          Tasks are not used in Onboard New Project.
         </div>
 
         {/* Action bar */}
         <div className="card-actions" style={{ marginTop: 10 }}>
           <Btn onClick={toggleAll}>{allExp ? "Collapse All" : "Expand All"}</Btn>
-          {!readOnly && (
-            <Btn onClick={handleToggleEdit}>{editingConfig ? "Save" : "Edit"}</Btn>
-          )}
-          {!readOnly && editable && (
-            <Btn onClick={() => setNodePopup({ type: "milestone", mode: "add", nodeUid: null, parentUid: null })}>
-              + Add Milestone
-            </Btn>
-          )}
-          <Btn variant="cancel" onClick={() => navigate(`/projects/${projectId}`)}>Back</Btn>
+          <Btn onClick={() => setNodePopup({ type: "milestone", mode: "add", nodeUid: null, parentUid: null })}>
+            + Add Milestone
+          </Btn>
+          <Btn onClick={handleFinalize}>Save Project</Btn>
+          <Btn variant="cancel" onClick={() => navigate(`/onboard/${encodeURIComponent(category)}`)}>
+            Back
+          </Btn>
         </div>
 
         {/* Tree */}
         <div className="tree-wrap" style={{ marginTop: 18 }}>
-          {safeArr(project.milestones).length === 0 ? (
+          {safeArr(draft.milestones).length === 0 ? (
             <div className="hint">No milestones added yet</div>
           ) : (
-            safeArr(project.milestones).map((milestone) => {
+            safeArr(draft.milestones).map((milestone) => {
               const acts      = safeArr(milestone.activities);
               const taskCount = acts.reduce((s, a) => s + safeArr(a.tasks).length, 0);
               const subCount  = acts.reduce((s, a) =>
@@ -222,7 +200,6 @@ export default function MilestoneConfig() {
                       <Btn
                         variant="delete small-btn"
                         onClick={() => deleteMilestone(milestone.uid)}
-                        disabled={readOnly || !editable}
                       >
                         Remove
                       </Btn>
@@ -249,20 +226,13 @@ export default function MilestoneConfig() {
                               <div className="node-actions">
                                 <Btn
                                   variant="small"
-                                  onClick={() =>
-                                    setActivityPage({
-                                      projectId   : project.projectId,
-                                      milestoneUid: milestone.uid,
-                                      activityUid : activity.uid,
-                                    })
-                                  }
+                                  onClick={() => setNodePopup({ type: "activity", mode: "edit", nodeUid: activity.uid, parentUid: milestone.uid })}
                                 >
                                   View/Update
                                 </Btn>
                                 <Btn
                                   variant="delete small-btn"
                                   onClick={() => deleteActivity(activity.uid, milestone.uid)}
-                                  disabled={readOnly || !editable}
                                 >
                                   Remove
                                 </Btn>
@@ -271,14 +241,12 @@ export default function MilestoneConfig() {
                           </div>
                         ))}
                       </div>
-                      {editable && (
-                        <Btn
-                          style={{ marginTop: 12 }}
-                          onClick={() => setNodePopup({ type: "activity", mode: "add", nodeUid: null, parentUid: milestone.uid })}
-                        >
-                          + Add Activity
-                        </Btn>
-                      )}
+                      <Btn
+                        style={{ marginTop: 12 }}
+                        onClick={() => setNodePopup({ type: "activity", mode: "add", nodeUid: null, parentUid: milestone.uid })}
+                      >
+                        + Add Activity
+                      </Btn>
                     </div>
                   )}
                 </div>
@@ -291,10 +259,10 @@ export default function MilestoneConfig() {
       {nodePopup && (
         <NodePopup
           ctx={nodePopup}
-          project={project}
-          onboardDraft={null}
-          editingConfig={editable}
-          currentView="config"
+          project={{ projectId: "draft" }}
+          onboardDraft={draft}
+          editingConfig={true}
+          currentView="onboarding"
           onClose={() => setNodePopup(null)}
           onSaved={handleNodeSaved}
         />
