@@ -18,6 +18,8 @@ import OnboardingConfig from "./components/Onboardingconfig";
 import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/Resetpassword";
+import ActivityPage from "./components/ActivityPage";
+import TaskPage from "./components/TaskPage";
 
 export default function MainApp() {
   return (
@@ -40,6 +42,16 @@ export default function MainApp() {
                     <Route path="/projects/:projectId/config" element={<MilestoneConfig />} />
                     <Route path="/onboard/:category" element={<OnboardingForm />} />
                     <Route path="/onboard/:category/config" element={<OnboardingConfig />} />
+                    <Route
+                      path="/projects/:projectId/config/milestone/:milestoneUid/activity/:activityUid"
+                      element={<ActivityPage />}
+                    />
+
+                    {/* NEW — Task page route */}
+                    <Route
+                      path="/projects/:projectId/config/milestone/:milestoneUid/activity/:activityUid/task/:taskUid"
+                      element={<TaskPage />}
+                    />
                   </Routes>
                 </Layout>
               }

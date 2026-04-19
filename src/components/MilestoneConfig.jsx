@@ -9,15 +9,14 @@ import {
   renumber, addAudit, findByUid,
 } from "../store/Projectstore";
 
-import ActivityPage  from "./ActivityPage";
 import NodePopup     from "./NodePopup";
 import MessageModal  from "./MessageModal";
 import Btn           from "./Btn";
 
 export default function MilestoneConfig() {
   const { projectId } = useParams();
-  const navigate       = useNavigate();
-  const { getById, mutate, withLoader, showMsg } = useProjects();
+  const navigate      = useNavigate();
+  const { getById, mutate, withLoader } = useProjects();
 
   const project = getById(projectId);
 
@@ -26,9 +25,8 @@ export default function MilestoneConfig() {
   const [expandedMilestones, setExpandedMilestones] = useState(
     () => new Set(safeArr(project?.milestones).map((m) => m.uid))
   );
-  const [nodePopup,    setNodePopup   ] = useState(null);
-  const [activityPage, setActivityPage] = useState(null);
-  const [msg,          setMsg         ] = useState(null);
+  const [nodePopup, setNodePopup] = useState(null);
+  const [msg,       setMsg]       = useState(null);
 
   // ── Guard ─────────────────────────────────────────────────
   if (!project) {
@@ -44,7 +42,7 @@ export default function MilestoneConfig() {
   const editable = editingConfig && !readOnly;
 
   // ── Expand / collapse helpers ─────────────────────────────
-  const allExp   = safeArr(project.milestones).every((m) => expandedMilestones.has(m.uid));
+  const allExp = safeArr(project.milestones).every((m) => expandedMilestones.has(m.uid));
   const toggleAll = () =>
     setExpandedMilestones(allExp ? new Set() : new Set(safeArr(project.milestones).map((m) => m.uid)));
   const toggleM = (mUid) => {
@@ -81,9 +79,10 @@ export default function MilestoneConfig() {
         setExpandedMilestones((prev) => new Set([...prev, m.uid]));
         addAudit(p, "Add Milestone", "-", deepClone(m));
       } else {
-        const m    = findByUid(p.milestones, nodeUid);
-        const bef  = deepClone(m);
-        m.name = data.name; m.description = data.desc; m.startDate = data.start; m.endDate = data.end;
+        const m   = findByUid(p.milestones, nodeUid);
+        const bef = deepClone(m);
+        m.name = data.name; m.description = data.desc;
+        m.startDate = data.start; m.endDate = data.end;
         addAudit(p, "Update Milestone", bef, deepClone(m));
       }
     } else if (type === "activity") {
@@ -101,8 +100,9 @@ export default function MilestoneConfig() {
       } else {
         const a   = findByUid(p.milestones, nodeUid);
         const bef = deepClone(a);
-        a.name = data.name; a.description = data.desc; a.startDate = data.start;
-        a.endDate = data.end; a.type = data.nType; a.resourceDetails = data.res;
+        a.name = data.name; a.description = data.desc;
+        a.startDate = data.start; a.endDate = data.end;
+        a.type = data.nType; a.resourceDetails = data.res;
         addAudit(p, "Update Activity", bef, deepClone(a));
       }
     }
@@ -120,8 +120,8 @@ export default function MilestoneConfig() {
 
   // ── Delete helpers ────────────────────────────────────────
   const deleteMilestone = (mUid) => {
-    const p    = deepClone(project);
-    const idx  = p.milestones.findIndex((m) => m.uid === mUid);
+    const p   = deepClone(project);
+    const idx = p.milestones.findIndex((m) => m.uid === mUid);
     if (idx < 0) return;
     const removed = p.milestones.splice(idx, 1)[0];
     addAudit(p, "Delete Milestone", deepClone(removed), "-");
@@ -140,26 +140,6 @@ export default function MilestoneConfig() {
     renumber(p);
     mutate(p);
   };
-
-  // ── Activity page updates ─────────────────────────────────
-  const onActivityUpdated = (_activity, message) => {
-    if (message) setMsg({ text: message, onOk: () => setMsg(null) });
-  };
-
-  // ── Activity sub-page ─────────────────────────────────────
-  if (activityPage) {
-    return (
-      <>
-        <ActivityPage
-          {...activityPage}
-          project={project}
-          onBack={() => setActivityPage(null)}
-          onUpdated={onActivityUpdated}
-        />
-        {msg && <MessageModal msg={msg.text} onOk={msg.onOk} />}
-      </>
-    );
-  }
 
   // ── Main render ───────────────────────────────────────────
   return (
@@ -250,11 +230,9 @@ export default function MilestoneConfig() {
                                 <Btn
                                   variant="small"
                                   onClick={() =>
-                                    setActivityPage({
-                                      projectId   : project.projectId,
-                                      milestoneUid: milestone.uid,
-                                      activityUid : activity.uid,
-                                    })
+                                    navigate(
+                                      `/projects/${project.projectId}/config/milestone/${milestone.uid}/activity/${activity.uid}`
+                                    )
                                   }
                                 >
                                   View/Update
