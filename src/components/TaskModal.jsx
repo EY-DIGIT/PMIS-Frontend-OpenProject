@@ -6,6 +6,8 @@ import SubtaskCard from "./SubtaskCard";
 import CommentsPanel from "./CommentsPanel";
 const TYPES = ["Standard Type", "Resource Type", "Transactional Type"];
 const safeArr = (v) => Array.isArray(v) ? v : [];
+const deepClone = (o) => JSON.parse(JSON.stringify(o));
+const uid = (p) => `${p}-${Math.random().toString(36).slice(2, 11)}-${Date.now().toString(36)}`;
 function findByUid(list, id) {
   for (const item of safeArr(list)) {
     if (item.uid === id) return item;
