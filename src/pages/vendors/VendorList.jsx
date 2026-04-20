@@ -1,0 +1,182 @@
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useData } from '../../data/DataContext';
+import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
+import FilterShell from '../../components/FilterShell';
+
+export default function VendorList() {
+  const { vendors } = useData();
+  const navigate = useNavigate();
+
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({
+    vendorName: '',
+    vendorType: '',
+    status: '',
+    contact: '',
+    email: '',
+    phone: '',
+    mapping: ''
+  });
+
+  function updateFilter(key, value) {
+    setFilters((f) => ({ ...f, [key]: value }));
+  }
+
+  const typeOptions = useMemo(() => uniqueSorted(vendors.map((v) => v.vendorType)), [vendors]);
+  const statusOptions = useMemo(() => uniqueSorted(vendors.map((v) => v.status)), [vendors]);
+
+  const filtered = vendors.filter((v) => {
+    const q = normalizeText(search);
+    const combined = [
+      v.vendorName, v.vendorType, v.status, v.contact, v.email, v.phone, renderMappingText(v.projectMapping)
+    ].join(' ').toLowerCase();
+    const contains = (field, value) => !value || normalizeText(field).includes(normalizeText(value));
+    const exact = (field, value) => !value || normalizeText(field) === normalizeText(value);
+    return (
+      (!q || combined.includes(q)) &&
+      contains(v.vendorName, filters.vendorName) &&
+      exact(v.vendorType, filters.vendorType) &&
+      exact(v.status, filters.status) &&
+      contains(v.contact, filters.contact) &&
+      contains(v.email, filters.email) &&
+      contains(v.phone, filters.phone) &&
+      contains(renderMappingText(v.projectMapping), filters.mapping)
+    );
+  });
+
+  return (
+    <>
+      <div className="uidai-pmis-title">Vendor Management</div>
+      <div className="uidai-pmis-card">
+        <div className="uidai-pmis-search-row">
+          <input
+            className="uidai-pmis-search-input"
+            placeholder="Search vendors..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button className="uidai-pmis-btn uidai-pmis-btn-small">Search</button>
+        </div>
+
+        <FilterShell>
+          <div className="uidai-pmis-field">
+            <label>Vendor Name</label>
+            <input
+              className="uidai-pmis-filter-input"
+              type="text"
+              placeholder="Search vendor name"
+              value={filters.vendorName}
+              onChange={(e) => updateFilter('vendorName', e.target.value)}
+            />
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Type</label>
+            <select
+              className="uidai-pmis-filter-select"
+              value={filters.vendorType}
+              onChange={(e) => updateFilter('vendorType', e.target.value)}
+            >
+              <option value="">All</option>
+              {typeOptions.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Status</label>
+            <select
+              className="uidai-pmis-filter-select"
+              value={filters.status}
+              onChange={(e) => updateFilter('status', e.target.value)}
+            >
+              <option value="">All</option>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Contact Person</label>
+            <input
+              className="uidai-pmis-filter-input"
+              type="text"
+              placeholder="Search contact person"
+              value={filters.contact}
+              onChange={(e) => updateFilter('contact', e.target.value)}
+            />
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Email</label>
+            <input
+              className="uidai-pmis-filter-input"
+              type="text"
+              placeholder="Search email"
+              value={filters.email}
+              onChange={(e) => updateFilter('email', e.target.value)}
+            />
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Phone</label>
+            <input
+              className="uidai-pmis-filter-input"
+              type="text"
+              placeholder="Search phone"
+              value={filters.phone}
+              onChange={(e) => updateFilter('phone', e.target.value)}
+            />
+          </div>
+          <div className="uidai-pmis-field uidai-pmis-full">
+            <label>Project Mapping</label>
+            <input
+              className="uidai-pmis-filter-input"
+              type="text"
+              placeholder="Search project mapping"
+              value={filters.mapping}
+              onChange={(e) => updateFilter('mapping', e.target.value)}
+            />
+          </div>
+        </FilterShell>
+
+        <div className="uidai-pmis-table-wrap">
+          <table className="uidai-pmis-table uidai-pmis-table-compact">
+            <thead>
+              <tr>
+                <th>Vendor ID</th><th>Vendor Name</th><th>Type</th><th>Status</th>
+                <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((v) => (
+                <tr key={v.vendorId}>
+                  <td className="uidai-pmis-link" onClick={() => navigate(`/vendors/${v.vendorId}`)}>
+                    {v.vendorId}
+                  </td>
+                  <td>{v.vendorName}</td>
+                  <td>{v.vendorType}</td>
+                  <td>
+                    <span className={`uidai-pmis-badge ${v.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>
+                      {v.status}
+                    </span>
+                  </td>
+                  <td>{v.contact}</td>
+                  <td>{v.email}</td>
+                  <td>{v.phone}</td>
+                  <td>{renderMappingText(v.projectMapping)}</td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={8}>No matching vendors found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>
+          Cancel
+        </button>
+      </div>
+    </>
+  );
+}
