@@ -7,8 +7,8 @@ import { useNavigate } from "react-router-dom";
 
 import { useProjects } from "../store/Projectstore";
 import Sidebar from "../components/Sidebar";
-import LoaderModal from "../components/LoaderModal";
-import MessageModal from "../components/MessageModal";
+// import LoaderModal from "../components/LoaderModal";
+// import MessageModal from "../components/MessageModal";
 
 import Aadhar from "../assets/Aadhaar.png";
 import Logo from "../assets/logo.avif";
@@ -65,8 +65,8 @@ export default function Layout({ children }) {
       </div>
 
       {/* ── Global modals ── */}
-      {loader && <LoaderModal text={loader} />}
-      {msg && <MessageModal msg={msg.text} onOk={clearMsg} />}
+      {/* {loader && <LoaderModal text={loader} />}
+      {msg && <MessageModal msg={msg.text} onOk={clearMsg} />} */}
 
     </div>
   );

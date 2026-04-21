@@ -10,16 +10,11 @@ import Layout from "./layout/Layout";
 
 // ── Page components ────────────────────────────────────────
 import HomePage from "./pages/Homepage";
-import ProjectTablePage from "./components/ProjectTable";
-import ProjectDetails from "./components/ProjectDetails";
-import MilestoneConfig from "./components/MilestoneConfig";
-import OnboardingForm from "./components/OnboardingForm";
-import OnboardingConfig from "./components/Onboardingconfig";
+
 import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/Resetpassword";
-import ActivityPage from "./components/ActivityPage";
-import TaskPage from "./components/TaskPage";
+
 
 import VendorList from './pages/vendors/VendorList';
 import VendorForm from './pages/vendors/VendorForm';
@@ -32,9 +27,14 @@ import MasterVendors from './pages/master/MasterVendors';
 import MasterUsers from './pages/master/MasterUsers';
 import { DataProvider } from './data/DataContext';
 import "./styles/global.css";
+
 import Dashboard from "./pages/Dashboard";
+import SearchProject from './pages/projects/SearchProject';
+import AddProject from './pages/projects/AddProject';
+import "./styles/Project.css"
 export default function MainApp() {
   return (
+
     <ProjectProvider>
       <OnboardProvider>
         <DataProvider>
@@ -50,21 +50,9 @@ export default function MainApp() {
                   <Layout>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
-                      <Route path="/projects" element={<ProjectTablePage />} />
-                      <Route path="/projects/:projectId" element={<ProjectDetails />} />
-                      <Route path="/projects/:projectId/config" element={<MilestoneConfig />} />
-                      <Route path="/onboard/:category" element={<OnboardingForm />} />
-                      <Route path="/onboard/:category/config" element={<OnboardingConfig />} />
-                      <Route
-                        path="/projects/:projectId/config/milestone/:milestoneUid/activity/:activityUid"
-                        element={<ActivityPage />}
-                      />
-
-                      {/* NEW — Task page route */}
-                      <Route
-                        path="/projects/:projectId/config/milestone/:milestoneUid/activity/:activityUid/task/:taskUid"
-                        element={<TaskPage />}
-                      />
+                      <Route path="/search-project" element={<SearchProject />} />
+                      <Route path="/project/:id" element={<AddProject />} />
+                  
 
                       {/* Vendors */}
                       <Route path="vendors" element={<VendorList />} />
@@ -89,5 +77,6 @@ export default function MainApp() {
         </DataProvider>
       </OnboardProvider>
     </ProjectProvider>
+
   );
 }
