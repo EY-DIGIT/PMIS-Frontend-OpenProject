@@ -1,7 +1,7 @@
 // ============================================================
 // MainApp.jsx  –  Providers + Router + Routes only
 // ============================================================
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
 
 import { ProjectProvider } from "./store/Projectstore";
 import { OnboardProvider } from "./store/Onboardstore";
@@ -44,6 +44,65 @@ import "./styles/project/pages.css"
 import MessageModal from "./components/projects/modals/MessageModal";
 import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
+
+/* ─────────────────────────────────────────────────────────────
+   Breadcrumbs — auto-built from the current URL.
+   Works for every route because it reads useLocation().
+   ───────────────────────────────────────────────────────────── */
+function Breadcrumbs() {
+    const { pathname } = useLocation();
+    const segments = pathname.split("/").filter(Boolean);
+    if (segments.length === 0) return null; // hide on Dashboard
+
+    /* Static segment → pretty label. Dynamic params (IDs, UIDs) fall
+       through to their raw decoded value. */
+    const LABELS = {
+        projects: "Projects",
+        add: "Add Project",
+        config: "Milestone Configuration",
+        track: "Track Progress",
+        vendors: "Vendors",
+        users: "Users",
+        master: "Master Data",
+        new: "New",
+        dashboard: "Dashboard"
+    };
+
+    return (
+        <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+            paddingBottom: "10px",
+            background: "#f5f7fa",
+            // borderBottom: "1px solid #e0e5ec",
+            fontSize: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap"
+        }}>
+            <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                 Home
+            </Link>
+            {segments.map((seg, i) => {
+                const to = "/" + segments.slice(0, i + 1).join("/");
+                const isLast = i === segments.length - 1;
+                const label = LABELS[seg] || decodeURIComponent(seg);
+                return (
+                    <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: "#999" }}>›</span>
+                        {isLast ? (
+                            <span style={{ color: "#333", fontWeight: 600 }}>{label}</span>
+                        ) : (
+                            <Link to={to} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                                {label}
+                            </Link>
+                        )}
+                    </span>
+                );
+            })}
+        </nav>
+    );
+}
+
 export default function MainApp() {
     return (
 
@@ -60,6 +119,7 @@ export default function MainApp() {
                                 path="/*"
                                 element={
                                     <Layout>
+                                        <Breadcrumbs />
                                         <Routes>
                                             <Route path="/" element={<Dashboard />} />
 

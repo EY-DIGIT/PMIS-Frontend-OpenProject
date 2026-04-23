@@ -93,7 +93,7 @@ const UIDAILogin = () => {
       sessionStorage.setItem('uidai_loggedIn', 'true');
 
       // Navigate to home page
-      navigate('/home');
+      navigate('/');
     }
   };
 
