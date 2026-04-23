@@ -80,7 +80,6 @@ export default function AddProjectPage() {
     <div>
       <div className="uidai-page-title">Project Management</div>
       <div className="uidai-card-project">
-        <h3 style={{ marginTop: 0, marginBottom: 12 }}>New Project</h3>
         <div className="uidai-grid">
           <div className="uidai-field">
             <label className="uidai-field__label">
