@@ -1,10 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
 import { CATEGORY_OPTIONS, VENDOR_MASTER } from "../../utils/project/constants";
 import { safeArray } from "../../utils/project/helpers";
 import ChipControl from "../../components/projects/ChipControl";
+import { getToken, logout } from "../../api/auth";
+import { ENDPOINTS } from "../../api/endpoint";
+// Move this to an env / config file later
+const API_BASE = "http://10.1.131.199:8000";
 
 function makeEmpty() {
   return {
@@ -26,10 +30,45 @@ function makeEmpty() {
   };
 }
 
+function toIso(d) {
+  if (!d) return null;
+  return new Date(`${d}T23:59:59Z`).toISOString();
+}
+
+function tomorrowStr() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function extractVendors(raw) {
+  const elements =
+    raw?.data?._embedded?.elements ??
+    raw?._embedded?.elements ??
+    raw?.data ??
+    raw ??
+    [];
+  const list = Array.isArray(elements) ? elements : [];
+  return list
+    .filter((v) => v?.active !== false && v?.id && v?.name)
+    .map((v) => ({ id: v.id, name: v.name }));
+}
+
 export default function AddProjectPage() {
   const navigate = useNavigate();
   const existingDraft = useDraft();
   const [form, setForm] = useState(() => existingDraft || makeEmpty());
+  const [submitting, setSubmitting] = useState(false);
+
+  const [vendorOptions, setVendorOptions] = useState(() => safeArray(VENDOR_MASTER));
+  const [vendorNameToId, setVendorNameToId] = useState({});
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [vendorsError, setVendorsError] = useState("");
+
+  const minDate = tomorrowStr();
 
   const categoryInList = CATEGORY_OPTIONS.includes(form.category);
   const selCat = categoryInList ? form.category : form.category ? "Others" : "MSAP";
@@ -38,11 +77,87 @@ export default function AddProjectPage() {
   const [otherCategory, setOtherCategory] = useState(otherCat);
   const [selectedCategory, setSelectedCategory] = useState(selCat);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVendors() {
+      const token = getToken();
+      if (!token) return;
+
+      setVendorsLoading(true);
+      setVendorsError("");
+      try {
+        const res = await fetch(`${API_BASE}/api/v3/vendors`, {
+          method: "GET",
+          headers: { accept: "application/json", Authorization: `Bearer ${token}` }
+        });
+
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          logout();
+          uiStore.showMessage("Session expired. Please sign in again.");
+          navigate("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          throw new Error(errBody || `Failed to load vendors (${res.status})`);
+        }
+
+        const raw = await res.json().catch(() => ({}));
+        const vendors = extractVendors(raw);
+
+        if (!cancelled) {
+          if (vendors.length) {
+            setVendorOptions(vendors.map((v) => v.name));
+            setVendorNameToId(Object.fromEntries(vendors.map((v) => [v.name, v.id])));
+          } else {
+            setVendorOptions(safeArray(VENDOR_MASTER));
+            setVendorNameToId({});
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setVendorsError(err?.message || "Failed to load vendors");
+      } finally {
+        if (!cancelled) setVendorsLoading(false);
+      }
+    }
+
+    loadVendors();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function update(patch) {
     setForm((f) => ({ ...f, ...patch }));
   }
 
-  function goNext() {
+  function buildPayload() {
+    const isOther = selectedCategory === "Others";
+    const selectedNames = safeArray(form.vendors);
+    const vendorIds = selectedNames.map((n) => vendorNameToId[n]).filter(Boolean);
+
+    return {
+      name: form.projectName.trim(),
+      description: form.description.trim(),
+      active: true,
+      isPublic: form.isPublic === "Yes",
+      status_explanation: "",
+      status: "new",
+      owner: form.owner.trim(),
+      category: isOther ? "Others" : selectedCategory,
+      category_other: isOther ? otherCategory.trim() : "",
+      vendor_ids: vendorIds,
+      startDate: toIso(form.startDate),
+      endDate: toIso(form.endDate)
+    };
+  }
+
+  async function goNext() {
+    if (submitting) return;
+
     const finalCat =
       selectedCategory === "Others" ? otherCategory.trim() : selectedCategory;
     if (selectedCategory === "Others" && !otherCategory.trim()) {
@@ -53,22 +168,77 @@ export default function AddProjectPage() {
       uiStore.showMessage("Fill required fields");
       return;
     }
+    if (form.startDate < minDate) {
+      uiStore.showMessage("Expected Start Date must be a future date.");
+      return;
+    }
+    if (form.endDate < minDate) {
+      uiStore.showMessage("Expected End Date must be a future date.");
+      return;
+    }
     if (form.endDate < form.startDate) {
       uiStore.showMessage("Expected End Date cannot be earlier than Expected Start Date.");
       return;
     }
-    const next = {
-      ...form,
-      projectName: form.projectName.trim(),
-      description: form.description.trim(),
-      owner: form.owner.trim(),
-      category: finalCat,
-      baselineId: "-",
-      status: "DRAFT",
-      milestones: safeArray(form.milestones)
-    };
-    draftStore.set(next);
-    navigate("/projects/add/config");
+
+    const token = getToken();
+    if (!token) {
+      uiStore.showMessage("Your session has expired. Please sign in again.");
+      navigate("/login");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}${ENDPOINTS.create}`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(buildPayload())
+      });
+
+      if (res.status === 401) {
+        logout();
+        uiStore.showMessage("Session expired. Please sign in again.");
+        navigate("/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(errBody || `Request failed (${res.status})`);
+      }
+
+      const raw = await res.json().catch(() => ({}));
+      // ← response is nested under `data`
+      const created = raw?.data ?? raw ?? {};
+
+      const next = {
+        ...form,
+        projectId: created.id ?? created._id ?? created.projectId ?? null,
+        projectName: form.projectName.trim(),
+        description: form.description.trim(),
+        owner: form.owner.trim(),
+        category: finalCat,
+        baselineId: "-",
+        status: "DRAFT",
+        milestones: safeArray(form.milestones),
+        // Replace vendor-name array with the server's {id, name} objects
+        // so downstream (milestone create) can resolve names → UUIDs.
+        vendors: Array.isArray(created.vendors) && created.vendors.length
+          ? created.vendors
+          : safeArray(form.vendors)
+      };
+      draftStore.set(next);
+      navigate("/projects/add/config");
+    } catch (err) {
+      uiStore.showMessage(err?.message || "Failed to create project");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function cancel() {
@@ -128,6 +298,7 @@ export default function AddProjectPage() {
             <input
               className="uidai-input"
               type="date"
+              min={minDate}
               value={form.startDate}
               onChange={(e) => update({ startDate: e.target.value })}
             />
@@ -140,6 +311,7 @@ export default function AddProjectPage() {
             <input
               className="uidai-input"
               type="date"
+              min={form.startDate || minDate}
               value={form.endDate}
               onChange={(e) => update({ endDate: e.target.value })}
             />
@@ -190,11 +362,15 @@ export default function AddProjectPage() {
           <div className="uidai-field uidai-grid__full">
             <label className="uidai-field__label">Associated Vendors</label>
             <div className="uidai-hint" style={{ marginBottom: 8 }}>
-              Select vendors for this project
+              {vendorsLoading
+                ? "Loading vendors..."
+                : vendorsError
+                ? `Could not load vendors (${vendorsError}). Showing fallback list.`
+                : "Select vendors for this project"}
             </div>
             <ChipControl
               value={safeArray(form.vendors)}
-              options={VENDOR_MASTER}
+              options={vendorOptions}
               onChange={(next) => update({ vendors: next })}
               label="vendor"
             />
@@ -202,10 +378,14 @@ export default function AddProjectPage() {
         </div>
 
         <div style={{ marginTop: 18, display: "flex", flexWrap: "wrap", gap: 10 }}>
-          <button className="uidai-btn" onClick={goNext}>
-            Save &amp; Next
+          <button className="uidai-btn" onClick={goNext} disabled={submitting}>
+            {submitting ? "Saving..." : "Save & Next"}
           </button>
-          <button className="uidai-btn uidai-btn--cancel" onClick={cancel}>
+          <button
+            className="uidai-btn uidai-btn--cancel"
+            onClick={cancel}
+            disabled={submitting}
+          >
             Cancel
           </button>
         </div>

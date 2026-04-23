@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_BASE_URL || 'http://10.1.131.199:8000/';
 
 const TOKEN_KEY = 'pmis_token';
 const REFRESH_KEY = 'pmis_refresh_token';

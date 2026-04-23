@@ -1,23 +1,133 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjects } from "../../store/project/projectsStore";
+import { uiStore } from "../../store/project/uiStore";
 import { formatDateDisplay } from "../../utils/project/helpers";
 import { hydrateProjects } from "../../store/project/apiSync";
+import { getToken, logout } from "../../api/auth";
+
+const API_BASE = "http://10.1.131.199:8000";
+
+/* "2026-04-24T23:59:59" → "2026-04-24" */
+function stripTime(iso) {
+  if (!iso) return "";
+  const s = String(iso);
+  const idx = s.indexOf("T");
+  return idx > 0 ? s.slice(0, idx) : s;
+}
+
+/* "new" → "NEW", "draft" → "DRAFT", etc. */
+function formatStatus(s) {
+  if (!s) return "";
+  return String(s).replace(/_/g, " ").toUpperCase();
+}
+
+function mapApiProjectToRow(p) {
+  return {
+    // UUID used for navigation and downstream API calls
+    projectId: p.id || "",
+    // Human-readable project code ("UIDAI-PR...") — what the user thinks of as the ID
+    projectCode: p.projectCode || "",
+    projectName: p.name || "",
+    description: p.description || "",
+    baselineId: p.baselineId || "-",
+    status: formatStatus(p.status),
+    startDate: stripTime(p.startDate),
+    endDate: stripTime(p.endDate),
+    actualEndDate: stripTime(p.actualEndDate),
+    isPublic: p.isPublic ? "Yes" : "No",
+    owner: p.owner || "",
+    category: p.category || "",
+    isVersion: !!p.isVersion,
+    vendors: Array.isArray(p.vendors) ? p.vendors : []
+  };
+}
+
+function extractProjectsFromResponse(raw) {
+  const elements =
+    raw?.data?._embedded?.elements ??
+    raw?._embedded?.elements ??
+    raw?.data ??
+    [];
+  return Array.isArray(elements) ? elements : [];
+}
 
 export default function ProjectsListPage() {
   const navigate = useNavigate();
-  const projects = useProjects();
+  // Kept so the local store stays hydrated for other pages that still read from it
+  useProjects();
+
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
+  const [apiProjects, setApiProjects] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  useEffect(() => { hydrateProjects(); }, []);
+  useEffect(() => {
+    // legacy store refresh (harmless if other screens still rely on it)
+    try { hydrateProjects(); } catch (e) {}
+
+    let cancelled = false;
+
+    async function loadProjects() {
+      const token = getToken();
+      if (!token) {
+        uiStore.showMessage("Please sign in to continue.");
+        navigate("/login");
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/v3/projects?offset=1&pageSize=20`,
+          {
+            method: "GET",
+            headers: {
+              accept: "application/json",
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          logout();
+          uiStore.showMessage("Session expired. Please sign in again.");
+          navigate("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(body || `Failed to load projects (${res.status})`);
+        }
+
+        const raw = await res.json().catch(() => ({}));
+        const mapped = extractProjectsFromResponse(raw).map(mapApiProjectToRow);
+
+        if (!cancelled) setApiProjects(mapped);
+      } catch (err) {
+        if (!cancelled) setError(err?.message || "Failed to load projects");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadProjects();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const q = submitted.trim().toLowerCase();
-    if (!q) return projects;
-    return projects.filter((p) =>
+    if (!q) return apiProjects;
+    return apiProjects.filter((p) =>
       [
         p.projectId,
+        p.projectCode,
         p.projectName,
         p.description,
         p.baselineId,
@@ -25,10 +135,9 @@ export default function ProjectsListPage() {
         p.owner,
         p.category,
         p.actualEndDate
-      ]
-        .some((v) => String(v ?? "").toLowerCase().includes(q))
+      ].some((v) => String(v ?? "").toLowerCase().includes(q))
     );
-  }, [projects, submitted]);
+  }, [apiProjects, submitted]);
 
   function doSearch() {
     setSubmitted(query);
@@ -61,6 +170,12 @@ export default function ProjectsListPage() {
           </div>
         </div>
 
+        {error && !loading && (
+          <div className="uidai-hint" style={{ marginTop: 8, color: "#b91c1c" }}>
+            Could not load projects: {error}
+          </div>
+        )}
+
         <div className="uidai-table-wrap">
           <table className="uidai-table">
             <thead>
@@ -79,10 +194,18 @@ export default function ProjectsListPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {loading ? (
                 <tr>
                   <td colSpan={11} style={{ textAlign: "center", padding: 16 }}>
-                    No matching projects found.
+                    Loading projects...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={11} style={{ textAlign: "center", padding: 16 }}>
+                    {apiProjects.length === 0
+                      ? "No projects found."
+                      : "No matching projects found."}
                   </td>
                 </tr>
               ) : (
@@ -91,9 +214,12 @@ export default function ProjectsListPage() {
                     <td>
                       <button
                         className="uidai-link"
-                        onClick={() => navigate(`/projects/${encodeURIComponent(p.projectId)}`)}
+                        onClick={() =>
+                          navigate(`/projects/${encodeURIComponent(p.projectId)}`)
+                        }
+                        title={p.projectId}
                       >
-                        {p.projectId}
+                        {p.projectCode || p.projectId}
                       </button>
                     </td>
                     <td>{p.projectName}</td>
@@ -102,7 +228,9 @@ export default function ProjectsListPage() {
                     <td>{p.status}</td>
                     <td>{formatDateDisplay(p.startDate)}</td>
                     <td>{formatDateDisplay(p.endDate)}</td>
-                    <td>{p.isVersion ? formatDateDisplay(p.actualEndDate || "-") : "-"}</td>
+                    <td>
+                      {p.isVersion ? formatDateDisplay(p.actualEndDate || "-") : "-"}
+                    </td>
                     <td>{p.isPublic}</td>
                     <td>{p.owner}</td>
                     <td>{p.category || ""}</td>

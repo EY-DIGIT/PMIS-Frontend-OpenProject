@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
@@ -27,38 +27,181 @@ import { formatDateDisplay } from "../../utils/project/helpers";
 import * as projectsApi from "../../api/projects";
 import * as nodesApi from "../../api/nodes";
 import { tokenStore } from "../../api/client";
+import { getToken, logout } from "../../api/auth";
 import { hydrateProjects } from "../../store/project/apiSync";
 
+const API_BASE = "http://10.1.131.199:8000";
+
+/* ─── Onboarding draft persistence ─── */
+const DRAFT_STORAGE_KEY = "uidai_onboarding_draft";
+
+function persistOnboardingDraft(p) {
+  if (!p || !p.projectId) return;
+  try {
+    const snapshot = {
+      projectId: p.projectId,
+      projectName: p.projectName,
+      description: p.description,
+      owner: p.owner,
+      isPublic: p.isPublic,
+      category: p.category,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      vendors: safeArray(p.vendors),
+      baselineId: p.baselineId || "-",
+      status: p.status || "DRAFT",
+      isVersion: !!p.isVersion
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (e) {}
+}
+function readPersistedOnboardingDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.projectId ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+function clearPersistedOnboardingDraft() {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (e) {}
+}
+
+/* ─── Helpers ─── */
+function toMilestoneIsoStart(d) {
+  if (!d) return null;
+  return new Date(`${d}T00:00:00Z`).toISOString();
+}
+function toMilestoneIsoEnd(d) {
+  if (!d) return null;
+  return new Date(`${d}T23:59:59Z`).toISOString();
+}
+function mapStatusForApi(s) {
+  return s === "Completed" ? "completed" : "not_completed";
+}
+function resolveVendorIds(project, vendorName) {
+  if (!vendorName) return [];
+  const vendors = safeArray(project && project.vendors);
+  const match = vendors.find((v) => {
+    if (v && typeof v === "object") return v.name === vendorName;
+    return v === vendorName;
+  });
+  if (match && typeof match === "object" && match.id) return [match.id];
+  return [];
+}
+function toDateInputValue(iso) {
+  if (!iso) return "";
+  const s = String(iso);
+  const tIdx = s.indexOf("T");
+  return tIdx > 0 ? s.slice(0, tIdx) : s;
+}
+function mapStatusFromApi(s) {
+  return s === "completed" ? "Completed" : "Not Completed";
+}
+function stripTime(iso) {
+  if (!iso) return "";
+  const s = String(iso);
+  const idx = s.indexOf("T");
+  return idx > 0 ? s.slice(0, idx) : s;
+}
+
+function mapApiProject(p) {
+  if (!p) return null;
+  return {
+    projectId: p.id || "",
+    projectCode: p.projectCode || "",
+    projectName: p.name || "",
+    description: p.description || "",
+    owner: p.owner || "",
+    isPublic: p.isPublic ? "Yes" : "No",
+    status: p.status ? String(p.status).toUpperCase() : "",
+    startDate: stripTime(p.startDate),
+    endDate: stripTime(p.endDate),
+    actualEndDate: stripTime(p.actualEndDate),
+    category: p.category || "",
+    categoryOther: p.categoryOther || "",
+    vendors: Array.isArray(p.vendors) ? p.vendors : [],
+    isVersion: !!p.isVersion,
+    versionOf: p.versionOf || null,
+    versionNo: p.versionNo || null,
+    parentId: p.parentId || null,
+    baselineId: p.baselineId || "-",
+    milestones: [],
+    auditLogs: [],
+    resources: []
+  };
+}
+
+function mapApiMilestoneToNode(m) {
+  const vendors = Array.isArray(m.vendors) ? m.vendors : [];
+  return {
+    uid: generateNodeUid("m"),
+    apiId: m.id || "",
+    id: m.id || "",
+    name: m.name || "",
+    description: m.description || "",
+    startDate: toDateInputValue(m.startDate),
+    endDate: toDateInputValue(m.endDate),
+    status: mapStatusFromApi(m.status),
+    vendor: vendors.length ? vendors[0].name || "" : "",
+    dependsOn: [],
+    activities: [],
+    comments: [],
+    attachments: [],
+    position: typeof m.position === "number" ? m.position : undefined
+  };
+}
+function extractMilestonesFromResponse(raw) {
+  const elements =
+    raw?.data?._embedded?.elements ??
+    raw?._embedded?.elements ??
+    raw?.data ??
+    [];
+  return Array.isArray(elements) ? elements : [];
+}
+
 export default function MilestoneConfigPage({ mode }) {
-  /* mode = 'onboarding' | 'update' */
   const { projectId } = useParams();
   const navigate = useNavigate();
 
-  /* ─────────────────────────────────────────────────────────────
-     ALL HOOKS FIRST — nothing conditional before this block.
-     Keeping hook order stable across renders is mandatory
-     (React's Rules of Hooks; CRA's eslint blocks compile otherwise,
-     which is what was preventing /projects/add/config from opening).
-     ───────────────────────────────────────────────────────────── */
   useProjects();
   const draft = useDraft();
   const isOnboarding = mode === "onboarding";
   const realProject = useProject(projectId);
-  const project = isOnboarding ? draft : realProject;
 
   const [editingConfig, setEditingConfig] = useState(isOnboarding);
   const [expandedRows, setExpandedRows] = useState(() => new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [modalCtx, setModalCtx] = useState(null);
+  const [milestonesLoading, setMilestonesLoading] = useState(false);
+  const [milestonesError, setMilestonesError] = useState("");
 
-  /* Pagination math (no hooks — safe whether project exists or not) */
+  // Local "view-ref" copy of the project. In update mode we force a new
+  // reference here after every mutation — the store mutates in place and its
+  // refresh() doesn't change the object identity, so useMemo below never saw
+  // the milestone update. apiProjectLocal solves that.
+  const [apiProjectLocal, setApiProjectLocal] = useState(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState("");
+
+  const [restoring, setRestoring] = useState(() => {
+    if (!isOnboarding) return false;
+    if (draft) return false;
+    return !!readPersistedOnboardingDraft();
+  });
+
+  // Prefer apiProjectLocal (fresh ref after every mutation) over realProject
+  // (may be the same ref after store mutation). Draft wins during onboarding.
+  const project = isOnboarding ? draft : (apiProjectLocal || realProject);
+
   const totalMilestones = project ? safeArray(project.milestones).length : 0;
   const effectivePageSize = pageSize > 0 ? pageSize : Math.max(totalMilestones, 1);
   const totalPages = totalMilestones === 0 ? 1 : Math.ceil(totalMilestones / effectivePageSize);
   const page = Math.max(1, Math.min(currentPage, totalPages));
 
-  /* Memoized rows — tolerates null project so the hook is always called */
   const rows = useMemo(() => {
     if (!project) return [];
     const out = [];
@@ -92,13 +235,220 @@ export default function MilestoneConfigPage({ mode }) {
     return out;
   }, [project, expandedRows, page, effectivePageSize]);
 
-  /* Memoized dep-display map — also null-tolerant */
   const depMap = useMemo(() => (project ? buildDepDisplayMap(project) : {}), [project]);
 
-  /* ─────────────────────────────────────────────────────────────
-     From here on, conditional returns are safe — no more hooks.
-     ───────────────────────────────────────────────────────────── */
+  const pid = project && project.projectId ? project.projectId : null;
+
+  /* Helper: push the latest target shape into React as a fresh reference,
+     and also notify the store so other pages stay in sync. */
+  function commitUpdate(target) {
+    if (!target) return;
+    if (isOnboarding) {
+      draftStore.refresh();
+    } else {
+      try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
+      setApiProjectLocal({ ...target });
+    }
+  }
+
+  /* ─── Restore onboarding draft from localStorage if needed ─── */
+  useEffect(() => {
+    if (!isOnboarding) {
+      setRestoring(false);
+      return;
+    }
+    if (draft && draft.projectId) {
+      setRestoring(false);
+      return;
+    }
+    const persisted = readPersistedOnboardingDraft();
+    if (persisted) {
+      draftStore.set({
+        projectName: "",
+        description: "",
+        owner: "",
+        startDate: "",
+        endDate: "",
+        actualEndDate: "",
+        isPublic: "Yes",
+        category: "",
+        vendors: [],
+        milestones: [],
+        auditLogs: [],
+        resources: [],
+        ...persisted,
+        milestones: []
+      });
+    }
+    setRestoring(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ─── Persist onboarding draft when it has a projectId ─── */
+  useEffect(() => {
+    if (isOnboarding && project && project.projectId) {
+      persistOnboardingDraft(project);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnboarding, pid, project && project.projectName]);
+
+  /* ─── Fetch project from API when not onboarding and the store is empty ─── */
+  useEffect(() => {
+    if (isOnboarding) return;
+    if (!projectId) return;
+
+    let cancelled = false;
+
+    async function loadProject() {
+      // If the store already has it, seed apiProjectLocal from the store so we
+      // have a fresh-ref starting point, then skip the network call.
+      const fromStore = projectsStore.find ? projectsStore.find(projectId) : null;
+      if (fromStore) {
+        setApiProjectLocal({ ...fromStore });
+        return;
+      }
+
+      const token = getToken();
+      if (!token) {
+        uiStore.showMessage("Please sign in to continue.");
+        navigate("/login");
+        return;
+      }
+      setProjectLoading(true);
+      setProjectError("");
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/v3/projects/${encodeURIComponent(projectId)}`,
+          {
+            method: "GET",
+            headers: {
+              accept: "application/json",
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          logout();
+          uiStore.showMessage("Session expired. Please sign in again.");
+          navigate("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(body || `Failed to load project (${res.status})`);
+        }
+
+        const raw = await res.json().catch(() => ({}));
+        const mapped = mapApiProject(raw?.data ?? raw);
+
+        if (cancelled) return;
+
+        if (mapped) {
+          setApiProjectLocal(mapped);
+          try {
+            if (projectsStore.addProject) {
+              projectsStore.addProject(mapped);
+              if (projectsStore.refresh) projectsStore.refresh();
+            }
+          } catch (e) { /* store shape mismatch — local copy still works */ }
+        }
+      } catch (err) {
+        if (!cancelled) setProjectError(err?.message || "Failed to load project");
+      } finally {
+        if (!cancelled) setProjectLoading(false);
+      }
+    }
+
+    loadProject();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, isOnboarding]);
+
+  /* ─── Load milestones once we have a projectId ─── */
+  async function loadMilestonesFromApi() {
+    if (!pid) return;
+    const token = getToken();
+    if (!token) return;
+
+    setMilestonesLoading(true);
+    setMilestonesError("");
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/v3/projects/${encodeURIComponent(pid)}/milestones`,
+        {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      if (res.status === 401) {
+        logout();
+        uiStore.showMessage("Session expired. Please sign in again.");
+        navigate("/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(body || `Failed to load milestones (${res.status})`);
+      }
+
+      const raw = await res.json().catch(() => ({}));
+      const apiList = extractMilestonesFromResponse(raw)
+        .slice()
+        .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0));
+      const mapped = apiList.map(mapApiMilestoneToNode);
+
+      // Resolve target we're going to mutate:
+      //   onboarding → the draft
+      //   update     → store copy (so audit/version logic still works),
+      //                else the apiProjectLocal we already have.
+      let target = null;
+      if (isOnboarding) {
+        target = draft;
+      } else {
+        target = projectsStore.find ? projectsStore.find(pid) : null;
+        if (!target) target = apiProjectLocal;
+      }
+
+      if (target) {
+        target.milestones = mapped;
+        try { normalizeProject(target); } catch (e) {}
+        try { recomputeActualDates(target); } catch (e) {}
+        commitUpdate(target);
+      }
+    } catch (err) {
+      setMilestonesError(err?.message || "Failed to load milestones");
+    } finally {
+      setMilestonesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (pid) loadMilestonesFromApi();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
+
   if (!project) {
+    if (restoring || projectLoading) {
+      return (
+        <div>
+          <div className="uidai-page-title">Milestone Configuration</div>
+          <div className="uidai-card-project">
+            <div className="uidai-hint">
+              {restoring ? "Restoring your session…" : "Loading project…"}
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div>
         <div className="uidai-page-title">Milestone Configuration</div>
@@ -106,6 +456,8 @@ export default function MilestoneConfigPage({ mode }) {
           <div className="uidai-hint">
             {isOnboarding
               ? "No draft found. Please start from Add Project."
+              : projectError
+              ? `Could not load project: ${projectError}`
               : "Project not found."}
           </div>
           <div className="uidai-card-project-actions" style={{ justifyContent: "flex-start" }}>
@@ -126,15 +478,11 @@ export default function MilestoneConfigPage({ mode }) {
   const canMod = isOnboarding || editable;
   const isVersion = !isOnboarding && isVersionProject(project);
 
-  /* Ensure project is normalized & actuals refreshed */
   normalizeProject(project);
-  try {
-    recomputeActualDates(project);
-  } catch (e) {}
+  try { recomputeActualDates(project); } catch (e) {}
 
   const showStatusCol = !isOnboarding;
 
-  /* ─── Expand/collapse ─── */
   function allRowsExpanded() {
     let total = 0;
     let exp = 0;
@@ -216,6 +564,149 @@ export default function MilestoneConfigPage({ mode }) {
   }
   function closeNodeModal() {
     setModalCtx(null);
+  }
+
+  /* ─── POST /milestones/create ─── */
+  async function createMilestoneApi(formData) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const payload = {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      status: mapStatusForApi(formData.status || "Not Completed"),
+      vendorIds: resolveVendorIds(project, formData.vendor)
+    };
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/projects/${encodeURIComponent(project.projectId)}/milestones/create`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body || `Request failed (${res.status})`);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
+  }
+
+  /* ─── PATCH /milestones/{id} ─── */
+  async function updateMilestoneApi(milestoneServerId, formData) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const payload = {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      status: mapStatusForApi(formData.status || "Not Completed"),
+      vendorIds: resolveVendorIds(project, formData.vendor)
+    };
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body || `Request failed (${res.status})`);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
+  }
+
+  /* ─── DELETE /milestones/{id} ─── */
+  async function deleteMilestoneApi(milestoneServerId) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          accept: "application/json",
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok && res.status !== 204) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body || `Request failed (${res.status})`);
+    }
+    return true;
+  }
+
+  /* ─── POST /projects/{id}/save — finalize the project ─── */
+  async function saveProjectApi(projectServerId) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/save`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({})
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok && res.status !== 204) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body || `Request failed (${res.status})`);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
   }
 
   function saveNodeFromModal(formData) {
@@ -324,17 +815,30 @@ export default function MilestoneConfigPage({ mode }) {
       resourceCount: formData.resourceCount,
     };
 
-    const apiCall = (() => {
-      if (isOnboarding || !tokenStore.get()) return null;
-      if (modeAction === "add") {
-        const parentId = kind === "milestone" ? project.projectId : parentUid;
-        return nodesApi.createByKind[kind] ? nodesApi.createByKind[kind](parentId, uiPayload) : null;
-      }
-      return nodesApi.updateByKind[kind] ? nodesApi.updateByKind[kind](nodeUid, uiPayload) : null;
-    })();
+    const shouldCreateMilestoneRemotely =
+      modeAction === "add" &&
+      kind === "milestone" &&
+      !!project.projectId &&
+      !!getToken();
 
-    const doLocal = () => {
-      const target = isOnboarding ? project : projectsStore.find(project.projectId);
+    let milestoneServerId = null;
+    if (modeAction === "edit" && kind === "milestone" && nodeUid) {
+      const loc = locateNode(project, nodeUid);
+      milestoneServerId = loc && loc.node ? loc.node.apiId || null : null;
+    }
+    const shouldUpdateMilestoneRemotely =
+      modeAction === "edit" &&
+      kind === "milestone" &&
+      !!milestoneServerId &&
+      !!getToken();
+
+    const doLocal = (apiData) => {
+      let target;
+      if (isOnboarding) target = project;
+      else {
+        target = projectsStore.find ? projectsStore.find(project.projectId) : null;
+        if (!target) target = apiProjectLocal;
+      }
       if (!target) {
         uiStore.hideLoader();
         return;
@@ -352,6 +856,8 @@ export default function MilestoneConfigPage({ mode }) {
           comments: safeArray(formData.comments),
           attachments: []
         };
+        if (apiData && apiData.id) newNode.apiId = apiData.id;
+
         if (kind !== "milestone") {
           newNode.actualStartDate = "";
           newNode.actualEndDate = "";
@@ -417,7 +923,7 @@ export default function MilestoneConfigPage({ mode }) {
             deepClone(newNode)
           );
           if (isBaselineProject(target)) {
-            propagateNodeAddToVersions(projectsStore.getAll(), target, parentUid, kind, newNode);
+            propagateNodeAddToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, parentUid, kind, newNode);
           }
         }
       } else {
@@ -460,7 +966,7 @@ export default function MilestoneConfigPage({ mode }) {
             deepClone(node)
           );
           if (isBaselineProject(target)) {
-            propagateNodeUpdateToVersions(projectsStore.getAll(), target, nodeUid, {
+            propagateNodeUpdateToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, nodeUid, {
               name: node.name,
               description: node.description,
               startDate: node.startDate,
@@ -481,15 +987,56 @@ export default function MilestoneConfigPage({ mode }) {
       recomputeActualDates(target);
       normalizeProject(target);
 
-      if (isOnboarding) {
-        draftStore.refresh();
-      } else {
-        projectsStore.refresh();
-      }
+      commitUpdate(target);
       uiStore.hideLoader();
       closeNodeModal();
       uiStore.showMessage(modeAction === "add" ? "Item added" : "Item updated");
     };
+
+    if (shouldCreateMilestoneRemotely) {
+      createMilestoneApi(formData)
+        .then((created) => {
+          doLocal(created);
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to create milestone");
+        });
+      return;
+    }
+
+    if (shouldUpdateMilestoneRemotely) {
+      updateMilestoneApi(milestoneServerId, formData)
+        .then((updated) => {
+          doLocal(updated);
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to update milestone");
+        });
+      return;
+    }
+
+    const apiCall = (() => {
+      if (isOnboarding || !tokenStore.get()) return null;
+      if (modeAction === "add") {
+        const parentId = kind === "milestone" ? project.projectId : parentUid;
+        return nodesApi.createByKind[kind] ? nodesApi.createByKind[kind](parentId, uiPayload) : null;
+      }
+      return nodesApi.updateByKind[kind] ? nodesApi.updateByKind[kind](nodeUid, uiPayload) : null;
+    })();
 
     if (apiCall) {
       apiCall
@@ -501,7 +1048,12 @@ export default function MilestoneConfigPage({ mode }) {
   }
 
   function removeNode(kind, uid) {
-    const target = isOnboarding ? project : projectsStore.find(project.projectId);
+    let target;
+    if (isOnboarding) target = project;
+    else {
+      target = projectsStore.find ? projectsStore.find(project.projectId) : null;
+      if (!target) target = apiProjectLocal;
+    }
     if (!target) return;
     const loc = locateNode(target, uid);
     if (!loc) return;
@@ -527,7 +1079,7 @@ export default function MilestoneConfigPage({ mode }) {
       if (!isOnboarding) {
         addAudit(target, `Delete ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, removed, "-");
         if (isBaselineProject(target)) {
-          propagateNodeDeleteToVersions(projectsStore.getAll(), target, uid);
+          propagateNodeDeleteToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, uid);
         }
       }
 
@@ -538,11 +1090,33 @@ export default function MilestoneConfigPage({ mode }) {
       });
       normalizeProject(target);
       recomputeActualDates(target);
-      if (isOnboarding) draftStore.refresh();
-      else projectsStore.refresh();
+      commitUpdate(target);
       uiStore.hideLoader();
       uiStore.showMessage("Removed");
     };
+
+    const milestoneServerId =
+      kind === "milestone" && loc.node ? loc.node.apiId || null : null;
+    const shouldDeleteMilestoneRemotely =
+      kind === "milestone" && !!milestoneServerId && !!getToken();
+
+    if (shouldDeleteMilestoneRemotely) {
+      deleteMilestoneApi(milestoneServerId)
+        .then(() => {
+          doLocal();
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to delete milestone");
+        });
+      return;
+    }
 
     if (!isOnboarding && tokenStore.get() && nodesApi.removeByKind[kind]) {
       nodesApi.removeByKind[kind](uid)
@@ -562,18 +1136,43 @@ export default function MilestoneConfigPage({ mode }) {
 
     const doLocal = (idOverride) => {
       const p = deepClone(project);
-      p.projectId = idOverride || projectsStore.getNextProjectId();
+      p.projectId = idOverride || p.projectId || projectsStore.getNextProjectId();
       p.status = "DRAFT";
       p.baselineId = "-";
       p.auditLogs = [];
       normalizeProject(p);
       projectsStore.addProject(p);
       draftStore.clear();
+      clearPersistedOnboardingDraft();
       uiStore.hideLoader();
       uiStore.showMessage(`Project ${p.projectId} added successfully!`, () =>
         navigate("/projects")
       );
     };
+
+    if (project.projectId && getToken()) {
+      saveProjectApi(project.projectId)
+        .then(() => {
+          try { hydrateProjects({ force: true }); } catch (e) {}
+          doLocal(project.projectId);
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to save project");
+        });
+      return;
+    }
+
+    if (project.projectId) {
+      try { hydrateProjects({ force: true }); } catch (e) {}
+      setTimeout(() => doLocal(project.projectId), 400);
+      return;
+    }
 
     if (!tokenStore.get()) {
       setTimeout(() => doLocal(), 900);
@@ -610,7 +1209,7 @@ export default function MilestoneConfigPage({ mode }) {
             }
           }
         }
-        try { await projectsApi.save(projectUuid); } catch { /* save endpoint optional */ }
+        try { await saveProjectApi(projectUuid); } catch {}
         hydrateProjects({ force: true });
         doLocal(projectUuid);
       } catch (err) {
@@ -689,6 +1288,17 @@ export default function MilestoneConfigPage({ mode }) {
         </div>
         {versionBanner}
 
+        {milestonesLoading && (
+          <div className="uidai-hint" style={{ marginTop: 8 }}>
+            Loading milestones...
+          </div>
+        )}
+        {milestonesError && !milestonesLoading && (
+          <div className="uidai-hint" style={{ marginTop: 8, color: "#b91c1c" }}>
+            Could not load milestones: {milestonesError}
+          </div>
+        )}
+
         <div className="uidai-msgrid__toolbar">
           <div className="uidai-msgrid__toolbar-right">
             <button
@@ -721,7 +1331,9 @@ export default function MilestoneConfigPage({ mode }) {
               {rows.length === 0 ? (
                 <tr className="uidai-msgrid__empty">
                   <td colSpan={colSpan}>
-                    {totalMilestones === 0
+                    {milestonesLoading
+                      ? "Loading milestones..."
+                      : totalMilestones === 0
                       ? `No milestones added yet${
                           canMod ? " — click + Add Milestone above to start." : "."
                         }`

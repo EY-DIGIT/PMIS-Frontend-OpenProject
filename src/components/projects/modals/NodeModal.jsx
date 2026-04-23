@@ -30,6 +30,20 @@ function hintFor(kind) {
   return "Sub-Tasks can be nested under tasks or under other sub-tasks.";
 }
 
+// Accept either "Capgemini" or {id, name}. Always return a name string.
+function vendorName(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") return v.name || "";
+  return "";
+}
+function vendorKey(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") return v.id || v.name || "";
+  return "";
+}
+
 function makeDefaultForm(kind, node) {
   const n = node || {};
   return {
@@ -93,7 +107,6 @@ export default function NodeModal({
   const [commentFiles, setCommentFiles] = useState([]);
   const [attachError, setAttachError] = useState("");
 
-  /* Reset form when the modal opens or context changes */
   useEffect(() => {
     if (open) {
       setForm(makeDefaultForm(kind, node));
@@ -121,7 +134,6 @@ export default function NodeModal({
     ? getParentDateBoundsForNew(project, parentUid)
     : getParentDateBounds(project, nodeUid);
 
-  /* Whether dependency section is shown */
   const isOnboarding = !project.projectId;
   const projectIsVersion = !!project.isVersion;
   let showDepsSection = false;
@@ -364,9 +376,16 @@ export default function NodeModal({
                 disabled={dis}
               >
                 <option value="">— None —</option>
-                {projectVendors.map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
+                {projectVendors.map((v) => {
+                  const name = vendorName(v);
+                  const key = vendorKey(v);
+                  if (!name) return null;
+                  return (
+                    <option key={key} value={name}>
+                      {name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
