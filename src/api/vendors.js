@@ -1,0 +1,41 @@
+import { api } from './client';
+
+function unwrap(res) {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
+}
+
+function fromApi(v) {
+  return {
+    vendorId: v.uuid || v.id,
+    vendorName: v.name || '',
+    description: v.description || '',
+    status: v.active === false ? 'Inactive' : 'Active',
+    vendorType: v.type || v.vendorType || 'Standard Vendor',
+    contact: v.contact || '',
+    email: v.email || '',
+    phone: v.phone || '',
+    projectMapping: v.projectMapping || [],
+    startDate: (v.startDate || '').slice(0, 10),
+    endDate: (v.endDate || '').slice(0, 10),
+    address: v.address || '',
+    services: v.services || '',
+  };
+}
+
+export async function list() {
+  const res = await api.get('/api/v3/vendors');
+  return unwrap(res).map(fromApi);
+}
+
+export async function create({ name, description, active = true }) {
+  const res = await api.post('/api/v3/vendors/create', { name, description, active });
+  return fromApi(res);
+}
+
+export async function update(id, patch) {
+  const res = await api.patch(`/api/v3/vendors/${id}`, patch);
+  return fromApi(res);
+}

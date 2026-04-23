@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import '../assets/css/UIDAILogin.css'; // Assuming you have a CSS file for styling
 import logo from '../assets/logo.avif';
 import aadhaarLogo from '../assets/Aadhaar.png';
+import * as auth from '../api/auth';
 const UIDAILogin = () => {
   const navigate = useNavigate();
 
@@ -10,6 +11,8 @@ const UIDAILogin = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoginDisabled, setIsLoginDisabled] = useState(true);
+  const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   // Validation error states
   const [usernameError, setUsernameError] = useState('');
@@ -23,40 +26,12 @@ const UIDAILogin = () => {
 
   /* ===== VALIDATION RULES ===== */
   const validateUsername = (value) => {
-    if (!value.trim()) {
-      return 'Username is required';
-    }
-    if (value.length < 4) {
-      return 'Username must be at least 4 characters';
-    }
-    if (value.length > 20) {
-      return 'Username must not exceed 20 characters';
-    }
-    if (!/^[a-zA-Z0-9_.]+$/.test(value)) {
-      return 'Only letters, numbers, underscore and dot allowed';
-    }
+    if (!value.trim()) return 'Username is required';
     return '';
   };
 
   const validatePassword = (value) => {
-    if (!value) {
-      return 'Password is required';
-    }
-    if (value.length < 8) {
-      return 'Password must be at least 8 characters';
-    }
-    if (!/[A-Z]/.test(value)) {
-      return 'Must contain at least one uppercase letter';
-    }
-    if (!/[a-z]/.test(value)) {
-      return 'Must contain at least one lowercase letter';
-    }
-    if (!/[0-9]/.test(value)) {
-      return 'Must contain at least one number';
-    }
-    if (!/[!@#$%^&*(),.?":{}|<>_\-+=]/.test(value)) {
-      return 'Must contain at least one special character';
-    }
+    if (!value) return 'Password is required';
     return '';
   };
 
@@ -77,9 +52,10 @@ const UIDAILogin = () => {
   };
 
   /* ===== FORM SUBMIT ===== */
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setUsernameTouched(true);
     setPasswordTouched(true);
+    setSubmitError('');
 
     const uErr = validateUsername(username);
     const pErr = validatePassword(password);
@@ -87,13 +63,18 @@ const UIDAILogin = () => {
     setUsernameError(uErr);
     setPasswordError(pErr);
 
-    if (!uErr && !pErr) {
-      // Save login info (simple session)
+    if (uErr || pErr) return;
+
+    setSubmitting(true);
+    try {
+      await auth.login({ login: username.trim(), password });
       sessionStorage.setItem('uidai_user', username);
       sessionStorage.setItem('uidai_loggedIn', 'true');
-
-      // Navigate to home page
       navigate('/');
+    } catch (err) {
+      setSubmitError(err?.message || 'Login failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -208,13 +189,17 @@ const UIDAILogin = () => {
               )}
             </div>
 
+            {submitError && (
+              <div className="uidai-error-msg" style={{ marginBottom: 8 }}>{submitError}</div>
+            )}
+
             <button
               className="uidai-btn-primary"
               id="loginBtn"
-              disabled={isLoginDisabled}
+              disabled={isLoginDisabled || submitting}
               onClick={handleSubmit}
             >
-              Sign In
+              {submitting ? 'Signing In…' : 'Sign In'}
             </button>
 
             <div className="uidai-links">

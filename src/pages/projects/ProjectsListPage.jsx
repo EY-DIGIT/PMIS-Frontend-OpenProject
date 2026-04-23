@@ -1,13 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjects } from "../../store/project/projectsStore";
 import { formatDateDisplay } from "../../utils/project/helpers";
+import { hydrateProjects } from "../../store/project/apiSync";
 
 export default function ProjectsListPage() {
   const navigate = useNavigate();
   const projects = useProjects();
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
+
+  useEffect(() => { hydrateProjects(); }, []);
 
   const filtered = useMemo(() => {
     const q = submitted.trim().toLowerCase();

@@ -24,6 +24,10 @@ import {
 } from "../../utils/project/nodeUtils";
 import NodeModal from "../../components/projects/modals/NodeModal";
 import { formatDateDisplay } from "../../utils/project/helpers";
+import * as projectsApi from "../../api/projects";
+import * as nodesApi from "../../api/nodes";
+import { tokenStore } from "../../api/client";
+import { hydrateProjects } from "../../store/project/apiSync";
 
 export default function MilestoneConfigPage({ mode }) {
   /* mode = 'onboarding' | 'update' */
@@ -305,7 +309,31 @@ export default function MilestoneConfigPage({ mode }) {
     }
 
     uiStore.showLoader(modeAction === "add" ? "Saving new item..." : "Updating item...");
-    setTimeout(() => {
+
+    const uiPayload = {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: formData.startDate,
+      endDate: formData.endDate,
+      status: formData.status,
+      dependsOn: formData.dependsOn,
+      type: formData.type,
+      vendor: formData.vendor,
+      resourceEntryType: formData.resourceEntryType,
+      resourceDetails: formData.resourceDetails,
+      resourceCount: formData.resourceCount,
+    };
+
+    const apiCall = (() => {
+      if (isOnboarding || !tokenStore.get()) return null;
+      if (modeAction === "add") {
+        const parentId = kind === "milestone" ? project.projectId : parentUid;
+        return nodesApi.createByKind[kind] ? nodesApi.createByKind[kind](parentId, uiPayload) : null;
+      }
+      return nodesApi.updateByKind[kind] ? nodesApi.updateByKind[kind](nodeUid, uiPayload) : null;
+    })();
+
+    const doLocal = () => {
       const target = isOnboarding ? project : projectsStore.find(project.projectId);
       if (!target) {
         uiStore.hideLoader();
@@ -461,7 +489,15 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.hideLoader();
       closeNodeModal();
       uiStore.showMessage(modeAction === "add" ? "Item added" : "Item updated");
-    }, 500);
+    };
+
+    if (apiCall) {
+      apiCall
+        .then(() => { hydrateProjects({ force: true }); doLocal(); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to save item"); });
+    } else {
+      setTimeout(doLocal, 500);
+    }
   }
 
   function removeNode(kind, uid) {
@@ -476,7 +512,8 @@ export default function MilestoneConfigPage({ mode }) {
     if (!window.confirm(`Remove ${kind} "${loc.node.name || uid}" and all of its children?`)) return;
 
     uiStore.showLoader("Removing...");
-    setTimeout(() => {
+
+    const doLocal = () => {
       const { parent, parentKind, node } = loc;
       const removed = deepClone(node);
       let list;
@@ -505,7 +542,15 @@ export default function MilestoneConfigPage({ mode }) {
       else projectsStore.refresh();
       uiStore.hideLoader();
       uiStore.showMessage("Removed");
-    }, 500);
+    };
+
+    if (!isOnboarding && tokenStore.get() && nodesApi.removeByKind[kind]) {
+      nodesApi.removeByKind[kind](uid)
+        .then(() => { hydrateProjects({ force: true }); doLocal(); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to remove item"); });
+    } else {
+      setTimeout(doLocal, 500);
+    }
   }
 
   function finalizeOnboarding() {
@@ -514,9 +559,10 @@ export default function MilestoneConfigPage({ mode }) {
       return;
     }
     uiStore.showLoader("Saving project...");
-    setTimeout(() => {
+
+    const doLocal = (idOverride) => {
       const p = deepClone(project);
-      p.projectId = projectsStore.getNextProjectId();
+      p.projectId = idOverride || projectsStore.getNextProjectId();
       p.status = "DRAFT";
       p.baselineId = "-";
       p.auditLogs = [];
@@ -527,7 +573,51 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.showMessage(`Project ${p.projectId} added successfully!`, () =>
         navigate("/projects")
       );
-    }, 900);
+    };
+
+    if (!tokenStore.get()) {
+      setTimeout(() => doLocal(), 900);
+      return;
+    }
+
+    (async () => {
+      try {
+        const created = await projectsApi.create({
+          projectName: project.projectName,
+          description: project.description,
+          owner: project.owner,
+          isPublic: project.isPublic,
+          category: project.category,
+          startDate: project.startDate,
+          endDate: project.endDate,
+        });
+        const projectUuid = created.projectId;
+        for (const m of safeArray(project.milestones)) {
+          const mRes = await nodesApi.createMilestone(projectUuid, m);
+          const mId = mRes?.uuid || mRes?.id;
+          if (!mId) continue;
+          for (const a of safeArray(m.activities)) {
+            const aRes = await nodesApi.createActivity(mId, a);
+            const aId = aRes?.uuid || aRes?.id;
+            if (!aId) continue;
+            for (const t of safeArray(a.tasks)) {
+              const tRes = await nodesApi.createTask(aId, t);
+              const tId = tRes?.uuid || tRes?.id;
+              if (!tId) continue;
+              for (const s of safeArray(t.subtasks)) {
+                await nodesApi.createSubtask(tId, s);
+              }
+            }
+          }
+        }
+        try { await projectsApi.save(projectUuid); } catch { /* save endpoint optional */ }
+        hydrateProjects({ force: true });
+        doLocal(projectUuid);
+      } catch (err) {
+        uiStore.hideLoader();
+        uiStore.showMessage(err?.message || "Failed to create project");
+      }
+    })();
   }
 
   const title = project.projectName || "New Project";

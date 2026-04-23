@@ -17,6 +17,9 @@ import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
 import CreateVersionModal from "../../components/projects/modals/CreateVersionModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
+import * as projectsApi from "../../api/projects";
+import { tokenStore } from "../../api/client";
+import { hydrateProjects } from "../../store/project/apiSync";
 
 export default function ProjectDetailsPage() {
   const { projectId } = useParams();
@@ -93,14 +96,10 @@ export default function ProjectDetailsPage() {
       return;
     }
 
-    uiStore.showLoader("Saving project details...");
-    setTimeout(() => {
+    const doLocal = () => {
       const all = projectsStore.getAll();
       const target = all.find((p) => p.projectId === project.projectId);
-      if (!target) {
-        uiStore.hideLoader();
-        return;
-      }
+      if (!target) { uiStore.hideLoader(); return; }
       const before = deepClone(target);
       if (isVersion) {
         target.owner = form.owner.trim();
@@ -123,18 +122,35 @@ export default function ProjectDetailsPage() {
       uiStore.hideLoader();
       setEditing(false);
       uiStore.showMessage("Project details saved");
-    }, 600);
+    };
+
+    uiStore.showLoader("Saving project details...");
+    if (tokenStore.get()) {
+      const payload = isVersion
+        ? { projectName: project.projectName, owner: form.owner.trim(), isPublic: form.isPublic, actualEndDate: form.actualEndDate || "" }
+        : {
+            projectName: form.projectName.trim(),
+            description: form.description.trim(),
+            owner: form.owner.trim(),
+            startDate: form.startDate,
+            endDate: form.endDate,
+            isPublic: form.isPublic,
+            category: finalCat,
+          };
+      projectsApi.update(project.projectId, payload)
+        .then(() => { hydrateProjects({ force: true }); doLocal(); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to save project details"); });
+    } else {
+      setTimeout(doLocal, 600);
+    }
   }
 
   function confirmPublish() {
     setPublishOpen(false);
     uiStore.showLoader("Publishing project...");
-    setTimeout(() => {
+    const doLocal = () => {
       const target = projectsStore.find(project.projectId);
-      if (!target) {
-        uiStore.hideLoader();
-        return;
-      }
+      if (!target) { uiStore.hideLoader(); return; }
       const before = deepClone(target);
       target.status = "PUBLISHED";
       target.baselineId = "-";
@@ -142,21 +158,25 @@ export default function ProjectDetailsPage() {
       projectsStore.refresh();
       uiStore.hideLoader();
       uiStore.showMessage("Project published successfully");
-    }, 900);
+    };
+    if (tokenStore.get()) {
+      projectsApi.publish(project.projectId)
+        .then(() => { hydrateProjects({ force: true }); doLocal(); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to publish project"); });
+    } else {
+      setTimeout(doLocal, 900);
+    }
   }
 
   function confirmCreateVersion() {
     setVersionOpen(false);
     uiStore.showLoader("Creating version...");
-    setTimeout(() => {
+    const doLocal = (overrideId) => {
       const base = getRootProjectId(project);
       const src = projectsStore.find(project.projectId);
-      if (!src) {
-        uiStore.hideLoader();
-        return;
-      }
+      if (!src) { uiStore.hideLoader(); return; }
       const np = deepClone(src);
-      np.projectId = projectsStore.getNextVersionId(base);
+      np.projectId = overrideId || projectsStore.getNextVersionId(base);
       np.versionOf = base;
       np.isVersion = true;
       np.versionNo = (src.versionNo || 0) + 1;
@@ -173,13 +193,30 @@ export default function ProjectDetailsPage() {
       uiStore.showMessage("Version created successfully", () =>
         navigate(`/projects/${encodeURIComponent(np.projectId)}`)
       );
-    }, 900);
+    };
+    if (tokenStore.get()) {
+      projectsApi.createVersion(project.projectId)
+        .then((newProject) => { hydrateProjects({ force: true }); doLocal(newProject?.projectId); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to create version"); });
+    } else {
+      setTimeout(() => doLocal(), 900);
+    }
   }
 
   function confirmDelete() {
     setDeleteOpen(false);
-    projectsStore.removeProject(project.projectId);
-    navigate("/projects");
+    const finish = () => {
+      projectsStore.removeProject(project.projectId);
+      navigate("/projects");
+    };
+    if (tokenStore.get()) {
+      uiStore.showLoader("Removing project...");
+      projectsApi.remove(project.projectId)
+        .then(() => { uiStore.hideLoader(); hydrateProjects({ force: true }); finish(); })
+        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to delete project"); });
+    } else {
+      finish();
+    }
   }
 
   const disclaimer = isPubBase

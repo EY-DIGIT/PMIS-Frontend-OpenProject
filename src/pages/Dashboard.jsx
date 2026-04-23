@@ -1,7 +1,11 @@
+import { useEffect } from 'react';
 import { useData } from '../data/DataContext';
+import { hydrateProjects } from '../store/project/apiSync';
 
 export default function Dashboard() {
   const { vendors, users } = useData();
+
+  useEffect(() => { hydrateProjects(); }, []);
 
   return (
     <>
