@@ -17,14 +17,12 @@ import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
 import CreateVersionModal from "../../components/projects/modals/CreateVersionModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
-import * as projectsApi from "../../api/projects";
 import { tokenStore } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { hydrateProjects } from "../../store/project/apiSync";
 
 const API_BASE = "http://10.1.131.199:8000";
 
-/* "2026-04-24T23:59:59" → "2026-04-24" */
 function stripTime(iso) {
   if (!iso) return "";
   const s = String(iso);
@@ -32,7 +30,6 @@ function stripTime(iso) {
   return idx > 0 ? s.slice(0, idx) : s;
 }
 
-/* "2026-04-24" → "2026-04-24T23:59:59.000Z" (end-of-day UTC). */
 function toIsoDate(d) {
   if (!d) return null;
   try {
@@ -49,6 +46,24 @@ function vendorName(v) {
 }
 function vendorsToNames(list) {
   return safeArray(list).map(vendorName).filter(Boolean);
+}
+
+/* Pull a friendly message out of a server error body. The backend wraps
+   errors as { error: { message, errorIdentifier, _embedded: { details } } }. */
+async function readErrorMessage(res) {
+  const body = await res.text().catch(() => "");
+  if (!body) return `Request failed (${res.status})`;
+  try {
+    const parsed = JSON.parse(body);
+    return (
+      parsed?.error?.message ||
+      parsed?.message ||
+      parsed?.detail ||
+      body
+    );
+  } catch (e) {
+    return body;
+  }
 }
 
 function mapApiProject(p) {
@@ -135,12 +150,10 @@ export default function ProjectDetailsPage() {
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
 
-  // Full vendor master from GET /api/v3/vendors — [{id, name}]
   const [vendorMaster, setVendorMaster] = useState([]);
 
   const project = realProject || apiProject;
 
-  /* Name → {id, name} lookup for vendors currently on this project. */
   const projectVendorIndex = useMemo(() => {
     const map = {};
     safeArray(project && project.vendors).forEach((v) => {
@@ -150,21 +163,18 @@ export default function ProjectDetailsPage() {
     return map;
   }, [project]);
 
-  /* Name → {id, name} lookup for the full fetched vendor master. */
   const vendorMasterIndex = useMemo(() => {
     const map = {};
     vendorMaster.forEach((v) => { if (v && v.name) map[v.name] = v; });
     return map;
   }, [vendorMaster]);
 
-  /* Options for ChipControl. Prefer the live master, fall back to the
-     hardcoded VENDOR_MASTER constant if the fetch hasn't returned yet. */
   const vendorOptions = useMemo(() => {
     const names = vendorMaster.map((v) => v && v.name).filter(Boolean);
     return names.length ? names : VENDOR_MASTER;
   }, [vendorMaster]);
 
-  /* ─── GET /api/v3/vendors — for ChipControl options & ID resolution ─── */
+  /* ─── GET /api/v3/vendors ─── */
   useEffect(() => {
     let cancelled = false;
 
@@ -181,8 +191,12 @@ export default function ProjectDetailsPage() {
         });
 
         if (cancelled) return;
-        if (res.status === 401) return; // handled by project fetch
-        if (!res.ok) return;
+        if (res.status === 401) return;
+        if (!res.ok) {
+          const msg = await readErrorMessage(res);
+          uiStore.showError(msg);
+          return;
+        }
 
         const raw = await res.json().catch(() => ({}));
         const elements =
@@ -197,14 +211,16 @@ export default function ProjectDetailsPage() {
           : [];
 
         if (!cancelled) setVendorMaster(mapped);
-      } catch (e) { /* keep fallback to VENDOR_MASTER */ }
+      } catch (err) {
+        if (!cancelled) uiStore.showError(err?.message || "Failed to load vendors");
+      }
     }
 
     loadVendors();
     return () => { cancelled = true; };
   }, []);
 
-  /* ─── Fetch project on mount / projectId change ─── */
+  /* ─── GET /api/v3/projects/{id} ─── */
   useEffect(() => {
     if (!projectId) return;
 
@@ -213,7 +229,7 @@ export default function ProjectDetailsPage() {
     async function loadProject() {
       const token = getToken();
       if (!token) {
-        uiStore.showMessage("Please sign in to continue.");
+        uiStore.showError("Please sign in to continue");
         navigate("/login");
         return;
       }
@@ -236,14 +252,14 @@ export default function ProjectDetailsPage() {
 
         if (res.status === 401) {
           logout();
-          uiStore.showMessage("Session expired. Please sign in again.");
+          uiStore.showError("Session expired. Please sign in again.");
           navigate("/login");
           return;
         }
 
         if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          throw new Error(body || `Failed to load project (${res.status})`);
+          const msg = await readErrorMessage(res);
+          throw new Error(msg);
         }
 
         const raw = await res.json().catch(() => ({}));
@@ -256,7 +272,11 @@ export default function ProjectDetailsPage() {
           mergeIntoStore(mapped);
         }
       } catch (err) {
-        if (!cancelled) setProjectError(err?.message || "Failed to load project");
+        if (!cancelled) {
+          const msg = err?.message || "Failed to load project";
+          setProjectError(msg);
+          uiStore.showError(msg);
+        }
       } finally {
         if (!cancelled) setProjectLoading(false);
       }
@@ -267,7 +287,6 @@ export default function ProjectDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  /* ─── Populate the form whenever the project becomes available ─── */
   useEffect(() => {
     if (!project) return;
     const catInList = CATEGORY_OPTIONS.includes(project.category || "");
@@ -286,9 +305,6 @@ export default function ProjectDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project && project.projectId, editing]);
 
-  /* ─── Resolve form vendor names → UUIDs.
-     Check the project's own vendors first (captures freshly-unchanged),
-     then the fetched master (captures newly-added from dropdown). */
   function resolveVendorIds(names) {
     return safeArray(names)
       .map((n) => {
@@ -303,7 +319,6 @@ export default function ProjectDetailsPage() {
       .filter(Boolean);
   }
 
-  /* ─── Rebuild [{id, name}] vendor objects for the store copy. */
   function rebuildVendorObjects(names) {
     return safeArray(names)
       .map((n) => {
@@ -314,27 +329,45 @@ export default function ProjectDetailsPage() {
       .filter(Boolean);
   }
 
-  /* ─── PATCH /api/v3/projects/{id} ─── */
+  /* ─── PATCH /api/v3/projects/{id}
+     Server enforces a different editable-field set for version vs baseline
+     projects. Sending a forbidden field returns 422 with errorIdentifier
+     "invalid_field". So branch the payload by mode. */
   async function updateProjectApi(projectServerId, finalCat, isVersionMode) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
-    const payload = {
-      name: isVersionMode ? (project.projectName || "") : (form.projectName || "").trim(),
-      description: (form.description || "").trim(),
-      active: true,
-      isPublic: form.isPublic === "Yes",
-      status_explanation: project.statusExplanation || "",
-      status: (project.status || "new").toLowerCase(),
-      owner: (form.owner || "").trim(),
-      category: finalCat || "",
-      category_other: finalCat === "Others" ? (otherCat || "").trim() : "",
-      vendor_ids: resolveVendorIds(form.vendors),
-      startDate: toIsoDate(form.startDate),
-      endDate: toIsoDate(form.endDate),
-      actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
-    };
-    if (project.parentId) payload.parent_id = project.parentId;
+    let payload;
+    if (isVersionMode) {
+      // Version projects: only owner, isPublic, actualEndDate,
+      // status_explanation are editable per the server.
+      payload = {
+        owner: (form.owner || "").trim(),
+        isPublic: form.isPublic === "Yes",
+        actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
+        status_explanation: project.statusExplanation || ""
+      };
+    } else {
+      // Baseline / new projects: full edit allowed.
+      payload = {
+        name: (form.projectName || "").trim(),
+        description: (form.description || "").trim(),
+        active: true,
+        isPublic: form.isPublic === "Yes",
+        status_explanation: project.statusExplanation || "",
+        status: (project.status || "new").toLowerCase(),
+        owner: (form.owner || "").trim(),
+        category: finalCat || "",
+        category_other: finalCat === "Others" ? (otherCat || "").trim() : "",
+        vendor_ids: resolveVendorIds(form.vendors),
+        startDate: toIsoDate(form.startDate),
+        endDate: toIsoDate(form.endDate),
+        actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
+      };
+      // parent_id only meaningful when present — sending empty string causes
+      // some endpoints to choke.
+      if (project.parentId) payload.parent_id = project.parentId;
+    }
 
     const res = await fetch(
       `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}`,
@@ -356,8 +389,8 @@ export default function ProjectDetailsPage() {
       throw err;
     }
     if (!res.ok && res.status !== 204) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
@@ -388,8 +421,40 @@ export default function ProjectDetailsPage() {
       throw err;
     }
     if (!res.ok && res.status !== 204) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
+  }
+
+  /* ─── POST /api/v3/projects/{id}/versions/create ─── */
+  async function createVersionApi(projectServerId) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/versions/create`,
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({})
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok && res.status !== 204) {
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
@@ -418,8 +483,8 @@ export default function ProjectDetailsPage() {
       throw err;
     }
     if (!res.ok && res.status !== 204) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
     }
     return true;
   }
@@ -471,15 +536,15 @@ export default function ProjectDetailsPage() {
     const finalCat =
       selCat === "Others" ? (otherCat || "").trim() : selCat;
     if (canEditCat && selCat === "Others" && !finalCat) {
-      uiStore.showMessage("Please specify the category.");
+      uiStore.showError("Please specify the category.");
       return;
     }
     if (!form.owner.trim() || (!isVersion && (!form.projectName.trim() || !form.startDate || !form.endDate))) {
-      uiStore.showMessage("Fill required fields.");
+      uiStore.showError("Fill required fields.");
       return;
     }
     if (!isVersion && form.endDate && form.startDate && form.endDate < form.startDate) {
-      uiStore.showMessage("Expected End Date cannot be earlier than Expected Start Date.");
+      uiStore.showError("Expected End Date cannot be earlier than Expected Start Date.");
       return;
     }
 
@@ -492,10 +557,11 @@ export default function ProjectDetailsPage() {
       if (!target) { uiStore.hideLoader(); return; }
       const before = deepClone(target);
       if (isVersion) {
+        // Match the API contract: only owner, isPublic, actualEndDate,
+        // status_explanation are tracked locally for version projects.
         target.owner = form.owner.trim();
         target.isPublic = form.isPublic;
         target.actualEndDate = form.actualEndDate || "";
-        target.vendors = rebuiltVendors;
       } else {
         target.projectName = form.projectName.trim();
         target.description = form.description.trim();
@@ -510,8 +576,6 @@ export default function ProjectDetailsPage() {
       if (!isVersion) propagateBaselineDetailsToVersions(all, target);
       try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
 
-      // Refresh local apiProject from API response, if present — guarantees
-      // a fresh reference so React re-renders with authoritative server data.
       if (apiData && apiData.id) {
         const mapped = mapApiProject(apiData);
         if (mapped) setApiProject(mapped);
@@ -532,11 +596,11 @@ export default function ProjectDetailsPage() {
         .catch((err) => {
           uiStore.hideLoader();
           if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
+            uiStore.showError(err.message);
             navigate("/login");
             return;
           }
-          uiStore.showMessage(err?.message || "Failed to save project details");
+          uiStore.showError(err?.message || "Failed to save project details");
         });
     } else {
       setTimeout(() => doLocal(null), 600);
@@ -574,11 +638,11 @@ export default function ProjectDetailsPage() {
         .catch((err) => {
           uiStore.hideLoader();
           if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
+            uiStore.showError(err.message);
             navigate("/login");
             return;
           }
-          uiStore.showMessage(err?.message || "Failed to publish project");
+          uiStore.showError(err?.message || "Failed to publish project");
         });
     } else {
       setTimeout(() => doLocal(null), 900);
@@ -588,35 +652,71 @@ export default function ProjectDetailsPage() {
   function confirmCreateVersion() {
     setVersionOpen(false);
     uiStore.showLoader("Creating version...");
-    const doLocal = (overrideId) => {
-      const base = getRootProjectId(project);
-      const src = projectsStore.find(project.projectId);
-      if (!src) { uiStore.hideLoader(); return; }
-      const np = deepClone(src);
-      np.projectId = overrideId || projectsStore.getNextVersionId(base);
-      np.versionOf = base;
-      np.isVersion = true;
-      np.versionNo = (src.versionNo || 0) + 1;
-      np.baselineId = base;
-      np.status = "NEW";
-      np.actualEndDate = "";
-      np.auditLogs = [];
-      safeArray(np.milestones).forEach(markSubtreeFromBaseline);
-      normalizeProject(np);
-      projectsStore.addProject(np);
-      addAudit(np, "Create Version", deepClone(src), deepClone(np));
-      projectsStore.refresh();
+
+    const doLocal = (apiData) => {
+      let newProjectUuid = apiData && apiData.id ? apiData.id : null;
+
+      if (apiData && apiData.id) {
+        const mapped = mapApiProject(apiData);
+        if (mapped) {
+          try {
+            if (projectsStore.addProject) projectsStore.addProject(mapped);
+            if (projectsStore.refresh) projectsStore.refresh();
+          } catch (e) {}
+        }
+      } else {
+        const base = getRootProjectId(project);
+        const src = projectsStore.find ? projectsStore.find(project.projectId) : null;
+        if (src) {
+          const np = deepClone(src);
+          np.projectId = newProjectUuid || (projectsStore.getNextVersionId
+            ? projectsStore.getNextVersionId(base)
+            : `${base}-v${(src.versionNo || 0) + 1}`);
+          np.versionOf = base;
+          np.isVersion = true;
+          np.versionNo = (src.versionNo || 0) + 1;
+          np.baselineId = base;
+          np.status = "NEW";
+          np.actualEndDate = "";
+          np.auditLogs = [];
+          safeArray(np.milestones).forEach(markSubtreeFromBaseline);
+          normalizeProject(np);
+          try {
+            projectsStore.addProject(np);
+            addAudit(np, "Create Version", deepClone(src), deepClone(np));
+            projectsStore.refresh();
+          } catch (e) {}
+          newProjectUuid = np.projectId;
+        }
+      }
+
       uiStore.hideLoader();
-      uiStore.showMessage("Version created successfully", () =>
-        navigate(`/projects/${encodeURIComponent(np.projectId)}`)
-      );
+      uiStore.showMessage("Version created successfully", () => {
+        if (newProjectUuid) {
+          navigate(`/projects/${encodeURIComponent(newProjectUuid)}`);
+        } else {
+          navigate("/projects");
+        }
+      });
     };
-    if (tokenStore.get()) {
-      projectsApi.createVersion(project.projectId)
-        .then((newProject) => { hydrateProjects({ force: true }); doLocal(newProject?.projectId); })
-        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to create version"); });
+
+    if (getToken()) {
+      createVersionApi(project.projectId)
+        .then((created) => {
+          try { hydrateProjects({ force: true }); } catch (e) {}
+          doLocal(created);
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showError(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showError(err?.message || "Failed to create version");
+        });
     } else {
-      setTimeout(() => doLocal(), 900);
+      setTimeout(() => doLocal(null), 900);
     }
   }
 
@@ -638,11 +738,11 @@ export default function ProjectDetailsPage() {
         .catch((err) => {
           uiStore.hideLoader();
           if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
+            uiStore.showError(err.message);
             navigate("/login");
             return;
           }
-          uiStore.showMessage(err?.message || "Failed to delete project");
+          uiStore.showError(err?.message || "Failed to delete project");
         });
     } else {
       setTimeout(finish, 600);
@@ -850,7 +950,7 @@ export default function ProjectDetailsPage() {
             options={vendorOptions}
             onChange={(next) => setForm((f) => ({ ...f, vendors: next }))}
             label="vendor"
-            disabled={!editing}
+            disabled={!editing || isVersion}
           />
         </div>
       </div>
