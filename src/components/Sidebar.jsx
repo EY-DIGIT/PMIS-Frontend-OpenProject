@@ -38,14 +38,14 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         <div className={`pmis-submenu${pmOpen ? " open" : ""}`}>
           {/* Add Project — direct click, no dropdown */}
           <div
-            onClick={() => navigate("/project/new")}
+            onClick={() => navigate("/projects/add")}
           >
             ➕ <span className="pmis-text">Add Project</span>
           </div>
 
           {/* Search Project — direct click */}
           <div
-            onClick={() =>  navigate("/search-project")}
+            onClick={() =>  navigate("/projects")}
           >
             🔍 <span className="pmis-text">Search Project</span>
           </div>

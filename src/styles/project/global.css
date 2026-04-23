@@ -1,0 +1,250 @@
+/* ═══════════════════════════════════════════════════════════════
+   global.css — CSS variables, reset, base typography
+   Unique prefix: uidai-
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --uidai-navy: #0b3c88;
+  --uidai-cyan: #0aa1c0;
+  --uidai-light: #f4f7fb;
+  --uidai-border: #dbe5f1;
+  --uidai-red: #d32f2f;
+  --uidai-text: #1e2a3a;
+  --uidai-ms-milestone-bg: #eef4fc;
+  --uidai-ms-activity-bg: #f7fafe;
+  --uidai-ms-task-bg: #ffffff;
+  --uidai-ms-sub-bg: #fcfdff;
+  --uidai-row-hover: #e7f1ff;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: Inter, sans-serif;
+  background: var(--uidai-light);
+  color: var(--uidai-text);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.uidai-hidden {
+  display: none !important;
+}
+
+.uidai-required-project {
+  color: var(--uidai-red);
+}
+
+.uidai-link {
+  color: var(--uidai-navy);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+}
+
+.uidai-hint {
+  font-size: 12px;
+  color: #66788f;
+  margin-top: 8px;
+}
+
+.uidai-char-count {
+  font-size: 12px;
+  text-align: right;
+  color: #666;
+  margin-top: 4px;
+}
+
+/* Form controls */
+.uidai-input,
+.uidai-select,
+.uidai-textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--uidai-border);
+  background: #fff;
+  color: var(--uidai-text);
+  font: inherit;
+}
+
+.uidai-textarea {
+  height: 96px;
+  resize: vertical;
+}
+
+.uidai-input:disabled,
+.uidai-select:disabled,
+.uidai-textarea:disabled {
+  background: #f3f6fb;
+  color: #3e4a5b;
+  cursor: not-allowed;
+}
+
+.uidai-input:focus,
+.uidai-select:focus,
+.uidai-textarea:focus {
+  outline: none;
+  border-color: var(--uidai-cyan);
+  box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.12);
+}
+
+/* Buttons */
+.uidai-btn {
+  background: linear-gradient(90deg, var(--uidai-navy), var(--uidai-cyan));
+  color: #fff;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  font-size: 14px;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+}
+
+.uidai-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.uidai-btn--cancel {
+  background: #fff;
+  color: #000;
+  border: 1px solid var(--uidai-border);
+}
+
+.uidai-btn--cancel:hover:not(:disabled) {
+  background: #f8fbff;
+}
+
+.uidai-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.uidai-btn--delete {
+  background: #fff;
+  color: var(--uidai-red);
+  border: 1px solid var(--uidai-red);
+  padding: 8px 14px;
+}
+
+.uidai-btn--delete:hover:not(:disabled) {
+  background: var(--uidai-red);
+  color: #fff;
+}
+
+.uidai-btn--small {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+/* Field / grid */
+.uidai-field {
+  display: block;
+}
+
+.uidai-field__label {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.uidai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.uidai-grid__full {
+  grid-column: 1 / -1;
+}
+
+.uidai-card-project {
+  background: #fff;
+  padding: 18px 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 14px;
+  position: relative;
+}
+
+.uidai-card-project > h3:first-child,
+.uidai-card-project > h4:first-child {
+  margin-top: 0;
+}
+
+.uidai-card-project-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+/* Tables */
+.uidai-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 15px;
+  border-radius: 10px;
+  border: 1px solid var(--uidai-border);
+}
+
+.uidai-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.uidai-table th {
+  background: #f1f6fd;
+  padding: 10px;
+  border-bottom: 1px solid var(--uidai-border);
+  text-align: left;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.uidai-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--uidai-border);
+  vertical-align: top;
+  font-size: 13px;
+}
+
+.uidai-table tr:hover {
+  background: #f9fcff;
+}
+
+@media (max-width: 720px) {
+  .uidai-grid {
+    grid-template-columns: 1fr;
+  }
+  .uidai-grid__full {
+    grid-column: auto;
+  }
+  .uidai-card-project {
+    padding: 14px;
+  }
+}

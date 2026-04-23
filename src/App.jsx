@@ -29,54 +29,87 @@ import { DataProvider } from './data/DataContext';
 import "./styles/global.css";
 
 import Dashboard from "./pages/Dashboard";
-import SearchProject from './pages/projects/SearchProject';
-import AddProject from './pages/projects/AddProject';
+
+
+import ProjectsListPage from "./pages/projects/ProjectsListPage";
+import AddProjectPage from "./pages/projects/AddProjectPage";
+import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
+import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
+import TrackProgressPage from "./pages/projects/TrackProgressPage";
+
 import "./styles/Project.css"
+import "./styles/project/global.css"
+import "./styles/project/modals.css"
+import "./styles/project/pages.css"
+import MessageModal from "./components/projects/modals/MessageModal";
+import LoaderModal from "./components/projects/modals/LoaderModal";
+import "./styles/project/layout.css"
 export default function MainApp() {
-  return (
+    return (
 
-    <ProjectProvider>
-      <OnboardProvider>
-        <DataProvider>
-          <BrowserRouter>
-            <Routes>
-              {/* Login route — OUTSIDE Layout */}
-              <Route path="/login" element={<UIDAILogin />} />
-              <Route path="/reset-password" element={<ResetPassword />} />
-              {/* All other routes — INSIDE Layout */}
-              <Route
-                path="/*"
-                element={
-                  <Layout>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/search-project" element={<SearchProject />} />
-                      <Route path="/project/:id" element={<AddProject />} />
-                  
+        <ProjectProvider>
+            <OnboardProvider>
+                <DataProvider>
+                    <BrowserRouter>
+                        <Routes>
+                            {/* Login route — OUTSIDE Layout */}
+                            <Route path="/login" element={<UIDAILogin />} />
+                            <Route path="/reset-password" element={<ResetPassword />} />
+                            {/* All other routes — INSIDE Layout */}
+                            <Route
+                                path="/*"
+                                element={
+                                    <Layout>
+                                        <Routes>
+                                            <Route path="/" element={<Dashboard />} />
 
-                      {/* Vendors */}
-                      <Route path="vendors" element={<VendorList />} />
-                      <Route path="vendors/new" element={<VendorForm />} />
-                      <Route path="vendors/:id" element={<VendorDetails />} />
+                                            <Route path="/projects" element={<ProjectsListPage />} />
 
-                      {/* Users */}
-                      <Route path="users" element={<UserList />} />
-                      <Route path="users/new" element={<UserForm />} />
-                      <Route path="users/:id" element={<UserDetails />} />
+                                            {/* Onboarding — step 1 = details, step 2 = milestone config (draft) */}
+                                            <Route path="/projects/add" element={<AddProjectPage />} />
+                                            <Route
+                                                path="/projects/add/config"
+                                                element={<MilestoneConfigPage mode="onboarding" />}
+                                            />
 
-                      {/* Master Data */}
-                      <Route path="master" element={<MasterOverview />} />
-                      <Route path="master/vendors" element={<MasterVendors />} />
-                      <Route path="master/users" element={<MasterUsers />} />
-                    </Routes>
-                  </Layout>
-                }
-              />
-            </Routes>
-          </BrowserRouter>
-        </DataProvider>
-      </OnboardProvider>
-    </ProjectProvider>
+                                            {/* Existing project — details / config / track */}
+                                            <Route path="/projects/:projectId" element={<ProjectDetailsPage />} />
+                                            <Route
+                                                path="/projects/:projectId/config"
+                                                element={<MilestoneConfigPage mode="update" />}
+                                            />
+                                            <Route path="/projects/:projectId/track" element={<TrackProgressPage />} />
+                                            <Route
+                                                path="/projects/:projectId/track/:nodeUid"
+                                                element={<TrackProgressPage />}
+                                            />
 
-  );
+
+                                            {/* Vendors */}
+                                            <Route path="vendors" element={<VendorList />} />
+                                            <Route path="vendors/new" element={<VendorForm />} />
+                                            <Route path="vendors/:id" element={<VendorDetails />} />
+
+                                            {/* Users */}
+                                            <Route path="users" element={<UserList />} />
+                                            <Route path="users/new" element={<UserForm />} />
+                                            <Route path="users/:id" element={<UserDetails />} />
+
+                                            {/* Master Data */}
+                                            <Route path="master" element={<MasterOverview />} />
+                                            <Route path="master/vendors" element={<MasterVendors />} />
+                                            <Route path="master/users" element={<MasterUsers />} />
+                                        </Routes>
+                                    </Layout>
+                                }
+                            />
+                        </Routes>
+                        <MessageModal />
+                        <LoaderModal />
+                    </BrowserRouter>
+                </DataProvider>
+            </OnboardProvider>
+        </ProjectProvider>
+
+    );
 }

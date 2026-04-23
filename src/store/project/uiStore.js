@@ -1,0 +1,96 @@
+/* ═══════════════════════════════════════════════════════════════
+   uiStore.js — singleton store for global UI state (message modal,
+   loader modal). Works identically to projectsStore: subscribe-based,
+   no React Context Provider needed.
+   ═══════════════════════════════════════════════════════════════ */
+
+import { useSyncExternalStore } from "react";
+
+let state = {
+  messageOpen: false,
+  messageText: "",
+  messageIsError: false,
+  messageOnOk: null,
+
+  loaderOpen: false,
+  loaderText: "",
+  loaderShownAt: 0,
+  loaderHideTimer: null
+};
+
+const listeners = new Set();
+
+function emit() {
+  listeners.forEach((fn) => fn());
+}
+
+function subscribe(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+function getSnapshot() {
+  return state;
+}
+
+function setState(patch) {
+  state = { ...state, ...patch };
+  emit();
+}
+
+export const uiStore = {
+  showMessage(msg, onOk) {
+    const clean = String(msg ?? "")
+      .trim()
+      .replace(/[.]+$/g, "");
+    const errorPattern =
+      /(not found|fill required fields|type the phrase above|invalid|warning|cannot|please specify|add at least one|please wait)/i;
+    const isError = errorPattern.test(clean);
+    setState({
+      messageOpen: true,
+      messageText: clean,
+      messageIsError: isError,
+      messageOnOk: onOk || null
+    });
+  },
+
+  closeMessage() {
+    const onOk = state.messageOnOk;
+    setState({ messageOpen: false, messageText: "", messageOnOk: null });
+    if (typeof onOk === "function") setTimeout(onOk, 0);
+  },
+
+  showLoader(text) {
+    if (state.loaderHideTimer) {
+      clearTimeout(state.loaderHideTimer);
+      state.loaderHideTimer = null;
+    }
+    setState({
+      loaderOpen: true,
+      loaderText: text || "Loading",
+      loaderShownAt: Date.now(),
+      loaderHideTimer: null
+    });
+  },
+
+  hideLoader() {
+    const elapsed = Date.now() - state.loaderShownAt;
+    const minVisible = 600;
+    const finish = () => {
+      setState({ loaderOpen: false });
+    };
+    if (elapsed < minVisible) {
+      if (state.loaderHideTimer) clearTimeout(state.loaderHideTimer);
+      const timer = setTimeout(finish, minVisible - elapsed);
+      setState({ loaderHideTimer: timer });
+      return;
+    }
+    finish();
+  },
+
+  subscribe
+};
+
+export function useUiState() {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
