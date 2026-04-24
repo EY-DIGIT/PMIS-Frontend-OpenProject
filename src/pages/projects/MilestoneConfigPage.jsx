@@ -25,19 +25,28 @@ import {
 import {
   persistOnboardingDraft,
   readPersistedOnboardingDraft,
-  clearPersistedOnboardingDraft
+  clearPersistedOnboardingDraft,
+  findEnclosingTaskApiId
 } from "../../utils/project/milestoneConfigHelpers";
 import {
   loadProjectById,
   loadMilestonesForProject,
   loadActivitiesForMilestone,
+  loadTasksForActivity,
+  loadSubtasksForTask,
   createMilestoneApi,
   updateMilestoneApi,
   deleteMilestoneApi,
   saveProjectApi,
   createActivityApi,
   updateActivityApi,
-  deleteActivityApi
+  deleteActivityApi,
+  createTaskApi,
+  updateTaskApi,
+  deleteTaskApi,
+  createSubtaskApi,
+  updateSubtaskApi,
+  deleteSubtaskApi
 } from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
 import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
@@ -82,7 +91,6 @@ export default function MilestoneConfigPage({ mode }) {
   const totalPages = totalMilestones === 0 ? 1 : Math.ceil(totalMilestones / effectivePageSize);
   const page = Math.max(1, Math.min(currentPage, totalPages));
 
-  /* Flatten the expanded tree into ordered rows for rendering. */
   const rows = useMemo(() => {
     if (!project) return [];
     const out = [];
@@ -115,7 +123,6 @@ export default function MilestoneConfigPage({ mode }) {
 
   const pid = project && project.projectId ? project.projectId : null;
 
-  /* Push a fresh reference so React re-renders after in-place mutations. */
   function commitUpdate(target) {
     if (!target) return;
     if (isOnboarding) {
@@ -126,7 +133,6 @@ export default function MilestoneConfigPage({ mode }) {
     }
   }
 
-  /* Common handler for an err.isAuth thrown by the API layer. */
   function handleAuthError(err) {
     uiStore.showMessage(err?.message || "Session expired. Please sign in again.");
     navigate("/login");
@@ -206,36 +212,66 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isOnboarding]);
 
-  /* ─── Two-phase load: milestones first, then activities per milestone ─── */
+  /* ─── 4-phase load: milestones → activities → tasks → subtasks.
+     Each phase commits a fresh target reference so the UI fills in
+     progressively rather than waiting for the whole tree. ─── */
   async function loadMilestonesFromApi() {
     if (!pid || !getToken()) return;
 
     setMilestonesLoading(true);
     setMilestonesError("");
     try {
-      const mapped = await loadMilestonesForProject(pid);
+      const milestones = await loadMilestonesForProject(pid);
 
       let target = isOnboarding
         ? draft
         : (projectsStore.find ? projectsStore.find(pid) : null) || apiProjectLocal;
+      if (!target) return;
 
-      if (target) {
-        target.milestones = mapped;
+      target.milestones = milestones;
+      try { normalizeProject(target); } catch (e) {}
+      try { recomputeActualDates(target); } catch (e) {}
+      commitUpdate(target);
+
+      if (milestones.length === 0) return;
+
+      // Phase 2: activities for every milestone in parallel
+      const activityLists = await Promise.all(
+        milestones.map((m) =>
+          m.apiId ? loadActivitiesForMilestone(m.apiId) : Promise.resolve([])
+        )
+      );
+      milestones.forEach((m, i) => { m.activities = activityLists[i] || []; });
+      try { normalizeProject(target); } catch (e) {}
+      try { recomputeActualDates(target); } catch (e) {}
+      commitUpdate(target);
+
+      // Phase 3: tasks for every activity in parallel
+      const allActivities = milestones.flatMap((m) => safeArray(m.activities));
+      if (allActivities.length > 0) {
+        const taskLists = await Promise.all(
+          allActivities.map((a) =>
+            a.apiId ? loadTasksForActivity(a.apiId) : Promise.resolve([])
+          )
+        );
+        allActivities.forEach((a, i) => { a.tasks = taskLists[i] || []; });
         try { normalizeProject(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
         commitUpdate(target);
+      }
 
-        if (mapped.length > 0) {
-          const activityLists = await Promise.all(
-            mapped.map((m) =>
-              m.apiId ? loadActivitiesForMilestone(m.apiId) : Promise.resolve([])
-            )
-          );
-          mapped.forEach((m, i) => { m.activities = activityLists[i] || []; });
-          try { normalizeProject(target); } catch (e) {}
-          try { recomputeActualDates(target); } catch (e) {}
-          commitUpdate(target);
-        }
+      // Phase 4: subtasks for every task in parallel
+      const allTasks = allActivities.flatMap((a) => safeArray(a.tasks));
+      if (allTasks.length > 0) {
+        const subtaskLists = await Promise.all(
+          allTasks.map((t) =>
+            t.apiId ? loadSubtasksForTask(t.apiId) : Promise.resolve([])
+          )
+        );
+        allTasks.forEach((t, i) => { t.subtasks = subtaskLists[i] || []; });
+        try { normalizeProject(target); } catch (e) {}
+        try { recomputeActualDates(target); } catch (e) {}
+        commitUpdate(target);
       }
     } catch (err) {
       if (err?.isAuth) return handleAuthError(err);
@@ -381,7 +417,7 @@ export default function MilestoneConfigPage({ mode }) {
     const { kind, mode: modeAction, parentUid, nodeUid } = modalCtx;
     const bounds = formData.bounds;
 
-    /* ─── Permission checks by project type and action ─── */
+    /* ─── Permission checks ─── */
     if (isVersionProject(project)) {
       if (modeAction === "add" && (kind === "milestone" || kind === "activity")) {
         uiStore.showMessage(
@@ -515,6 +551,45 @@ export default function MilestoneConfigPage({ mode }) {
     const shouldUpdateActivityRemotely =
       modeAction === "edit" && kind === "activity" &&
       !!activityServerId && !!getToken();
+
+    // ── Task remote branches ──
+    let taskParentActivityApiId = null;
+    if (modeAction === "add" && kind === "task" && parentUid) {
+      const aLoc = locateNode(project, parentUid);
+      taskParentActivityApiId = aLoc?.node?.apiId || null;
+    }
+    const shouldCreateTaskRemotely =
+      modeAction === "add" && kind === "task" &&
+      !!taskParentActivityApiId && !!getToken();
+
+    let taskServerId = null;
+    if (modeAction === "edit" && kind === "task" && nodeUid) {
+      const loc = locateNode(project, nodeUid);
+      taskServerId = loc?.node?.apiId || null;
+    }
+    const shouldUpdateTaskRemotely =
+      modeAction === "edit" && kind === "task" &&
+      !!taskServerId && !!getToken();
+
+    // ── Subtask remote branches ──
+    // Subtask create accepts ONLY a task id as parent. If the parent is a
+    // subtask in the UI (nested), we walk up to the enclosing task.
+    let subtaskParentTaskApiId = null;
+    if (modeAction === "add" && kind === "subtask" && parentUid) {
+      subtaskParentTaskApiId = findEnclosingTaskApiId(project, parentUid);
+    }
+    const shouldCreateSubtaskRemotely =
+      modeAction === "add" && kind === "subtask" &&
+      !!subtaskParentTaskApiId && !!getToken();
+
+    let subtaskServerId = null;
+    if (modeAction === "edit" && kind === "subtask" && nodeUid) {
+      const loc = locateNode(project, nodeUid);
+      subtaskServerId = loc?.node?.apiId || null;
+    }
+    const shouldUpdateSubtaskRemotely =
+      modeAction === "edit" && kind === "subtask" &&
+      !!subtaskServerId && !!getToken();
 
     /* ─── Local mutation — common to all branches ─── */
     const doLocal = (apiData) => {
@@ -673,8 +748,21 @@ export default function MilestoneConfigPage({ mode }) {
     if (shouldUpdateActivityRemotely) {
       return handleRemote(updateActivityApi(activityServerId, formData), "Failed to update activity");
     }
+    if (shouldCreateTaskRemotely) {
+      return handleRemote(createTaskApi(taskParentActivityApiId, formData), "Failed to create task");
+    }
+    if (shouldUpdateTaskRemotely) {
+      return handleRemote(updateTaskApi(taskServerId, formData), "Failed to update task");
+    }
+    if (shouldCreateSubtaskRemotely) {
+      return handleRemote(createSubtaskApi(subtaskParentTaskApiId, formData), "Failed to create subtask");
+    }
+    if (shouldUpdateSubtaskRemotely) {
+      return handleRemote(updateSubtaskApi(subtaskServerId, formData), "Failed to update subtask");
+    }
 
-    /* Legacy fallback for Task/Subtask (nodesApi stubs) — no remote activity path. */
+    /* Legacy fallback for anything not covered above (e.g. onboarding or
+       unauthenticated sessions using the stubbed nodesApi). */
     const apiCall = (() => {
       if (isOnboarding || !tokenStore.get()) return null;
       if (modeAction === "add") {
@@ -744,8 +832,7 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.showMessage("Removed");
     };
 
-    const milestoneServerId = kind === "milestone" ? loc.node?.apiId || null : null;
-    const activityServerId = kind === "activity" ? loc.node?.apiId || null : null;
+    const serverId = loc.node?.apiId || null;
 
     const handleRemote = (promise, failMessage) => {
       promise
@@ -757,14 +844,20 @@ export default function MilestoneConfigPage({ mode }) {
         });
     };
 
-    if (kind === "milestone" && milestoneServerId && getToken()) {
-      return handleRemote(deleteMilestoneApi(milestoneServerId), "Failed to delete milestone");
+    if (kind === "milestone" && serverId && getToken()) {
+      return handleRemote(deleteMilestoneApi(serverId), "Failed to delete milestone");
     }
-    if (kind === "activity" && activityServerId && getToken()) {
-      return handleRemote(deleteActivityApi(activityServerId), "Failed to delete activity");
+    if (kind === "activity" && serverId && getToken()) {
+      return handleRemote(deleteActivityApi(serverId), "Failed to delete activity");
+    }
+    if (kind === "task" && serverId && getToken()) {
+      return handleRemote(deleteTaskApi(serverId), "Failed to delete task");
+    }
+    if (kind === "subtask" && serverId && getToken()) {
+      return handleRemote(deleteSubtaskApi(serverId), "Failed to delete subtask");
     }
 
-    /* Fallback for tasks/subtasks using legacy nodesApi stubs. */
+    /* Fallback for legacy or unauthenticated sessions. */
     if (!isOnboarding && tokenStore.get() && nodesApi.removeByKind[kind]) {
       nodesApi.removeByKind[kind](uid)
         .then(() => { hydrateProjects({ force: true }); doLocal(); })

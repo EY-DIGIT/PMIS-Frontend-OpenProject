@@ -18,9 +18,12 @@ import {
   mapStatusForApi,
   activityEndpointFor,
   activityServerTypePair,
+  buildResourcePayload,
   mapApiProject,
   mapApiMilestoneToNode,
   mapApiActivityToNode,
+  mapApiTaskToNode,
+  mapApiSubtaskToNode,
   extractListElements
 } from "../utils/project/milestoneConfigHelpers";
 
@@ -41,7 +44,6 @@ function getHeaders(token) {
   };
 }
 
-/* Throws an auth-tagged error that callers can catch to redirect to /login. */
 function throwAuth() {
   logout();
   const err = new Error("Session expired. Please sign in again.");
@@ -65,9 +67,23 @@ async function throwHttp(res) {
   throw new Error(msg);
 }
 
+/* Common base fields for activity/task create & update. Tasks and
+   activities share the same contract for dates, dependsOn, position. */
+function buildActivityLikeBase(formData) {
+  return {
+    name: formData.name.trim(),
+    description: (formData.description || "").trim(),
+    startDate: toMilestoneIsoStart(formData.startDate),
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
+    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
+    position: 0,
+    dependsOn: []
+  };
+}
+
 /* ════════════════ Project APIs ════════════════ */
 
-/* GET /api/v3/projects/{id} — returns a mapped local project object. */
 export async function loadProjectById(projectId) {
   const token = requireToken();
   const res = await fetch(
@@ -80,7 +96,6 @@ export async function loadProjectById(projectId) {
   return mapApiProject(raw?.data ?? raw);
 }
 
-/* POST /api/v3/projects/{id}/save */
 export async function saveProjectApi(projectServerId) {
   const token = requireToken();
   const res = await fetch(
@@ -94,7 +109,6 @@ export async function saveProjectApi(projectServerId) {
 
 /* ════════════════ Milestone APIs ════════════════ */
 
-/* GET /api/v3/projects/{id}/milestones — returns mapped local nodes, sorted by position. */
 export async function loadMilestonesForProject(projectId) {
   const token = requireToken();
   const res = await fetch(
@@ -110,7 +124,6 @@ export async function loadMilestonesForProject(projectId) {
     .map(mapApiMilestoneToNode);
 }
 
-/* POST /api/v3/projects/{id}/milestones/create */
 export async function createMilestoneApi(project, formData) {
   const token = requireToken();
 
@@ -132,7 +145,6 @@ export async function createMilestoneApi(project, formData) {
   return parseData(res);
 }
 
-/* PATCH /api/v3/milestones/{id} */
 export async function updateMilestoneApi(milestoneServerId, formData, project) {
   const token = requireToken();
 
@@ -154,7 +166,6 @@ export async function updateMilestoneApi(milestoneServerId, formData, project) {
   return parseData(res);
 }
 
-/* DELETE /api/v3/milestones/{id} */
 export async function deleteMilestoneApi(milestoneServerId) {
   const token = requireToken();
   const res = await fetch(
@@ -168,8 +179,6 @@ export async function deleteMilestoneApi(milestoneServerId) {
 
 /* ════════════════ Activity APIs ════════════════ */
 
-/* GET /api/v3/milestones/{id}/activities — returns mapped nodes, sorted by position.
-   Silent failure: loading activities is non-critical; return [] on any error. */
 export async function loadActivitiesForMilestone(milestoneApiId) {
   if (!milestoneApiId) return [];
   const token = getToken();
@@ -191,52 +200,20 @@ export async function loadActivitiesForMilestone(milestoneApiId) {
   }
 }
 
-/* POST /api/v3/milestones/{id}/activities/{endpoint}/create
-   Endpoint path is one of: standard, transactional, resource/count, resource/details */
 export async function createActivityApi(milestoneApiId, formData) {
   const token = requireToken();
 
   const endpoint = activityEndpointFor(formData);
-
-  const base = {
-    name: formData.name.trim(),
-    description: (formData.description || "").trim(),
-    startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate),
-    actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-    position: 0,
-    dependsOn: []
-  };
+  const base = buildActivityLikeBase(formData);
 
   let payload;
   if (endpoint === "standard") {
     payload = { ...base, status: mapStatusForApi(formData.status || "Not Completed") };
   } else if (endpoint === "transactional") {
     payload = { ...base };
-  } else if (endpoint === "resource/count") {
-    const rc = formData.resourceCount || {};
-    payload = { ...base, resourceCount: parseInt(rc.count, 10) || 1 };
   } else {
-    const rd = formData.resourceDetails || {};
-    payload = {
-      ...base,
-      resource: {
-        resourceName: rd.resourceName || "",
-        onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
-        actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
-        offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
-        actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
-        position: rd.position || "",
-        designation: rd.designation || "",
-        jobRole: rd.jobRole || "",
-        qualification: rd.qualification || "",
-        experienceYears: parseFloat(rd.experience) || 0,
-        typeOfResourceId: rd.resType || "",
-        division: rd.division || "",
-        divisionOther: ""
-      }
-    };
+    // resource/count or resource/details
+    payload = { ...base, ...buildResourcePayload(formData) };
   }
 
   const url = `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities/${endpoint}/create`;
@@ -250,49 +227,20 @@ export async function createActivityApi(milestoneApiId, formData) {
   return parseData(res);
 }
 
-/* PATCH /api/v3/activities/{id}
-   Single endpoint, takes type + resourceMode + full payload. */
 export async function updateActivityApi(activityServerId, formData) {
   const token = requireToken();
 
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
-    name: formData.name.trim(),
-    description: (formData.description || "").trim(),
+    ...buildActivityLikeBase(formData),
     type,
-    startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate),
-    actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-    position: 0,
-    status: mapStatusForApi(formData.status || "Not Completed"),
-    dependsOn: []
+    status: mapStatusForApi(formData.status || "Not Completed")
   };
 
   if (type === "resource") {
     payload.resourceMode = resourceMode;
-    if (resourceMode === "count") {
-      const rc = formData.resourceCount || {};
-      payload.resourceCount = parseInt(rc.count, 10) || 1;
-    } else {
-      const rd = formData.resourceDetails || {};
-      payload.resource = {
-        resourceName: rd.resourceName || "",
-        onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
-        actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
-        offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
-        actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
-        position: rd.position || "",
-        designation: rd.designation || "",
-        jobRole: rd.jobRole || "",
-        qualification: rd.qualification || "",
-        experienceYears: parseFloat(rd.experience) || 0,
-        typeOfResourceId: rd.resType || "",
-        division: rd.division || "",
-        divisionOther: ""
-      };
-    }
+    Object.assign(payload, buildResourcePayload(formData));
   }
 
   const res = await fetch(
@@ -304,11 +252,179 @@ export async function updateActivityApi(activityServerId, formData) {
   return parseData(res);
 }
 
-/* DELETE /api/v3/activities/{id} */
 export async function deleteActivityApi(activityServerId) {
   const token = requireToken();
   const res = await fetch(
     `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
+    { method: "DELETE", headers: getHeaders(token) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok && res.status !== 204) await throwHttp(res);
+  return true;
+}
+
+/* ════════════════ Task APIs ════════════════ */
+
+/* GET /api/v3/activities/{id}/tasks — returns mapped task nodes. */
+export async function loadTasksForActivity(activityApiId) {
+  if (!activityApiId) return [];
+  const token = getToken();
+  if (!token) return [];
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityApiId)}/tasks?offset=1&pageSize=20&includeDeleted=false`,
+      { method: "GET", headers: getHeaders(token) }
+    );
+    if (!res.ok) return [];
+    const raw = await res.json().catch(() => ({}));
+    return extractListElements(raw)
+      .slice()
+      .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
+      .map(mapApiTaskToNode);
+  } catch (e) {
+    return [];
+  }
+}
+
+/* POST /api/v3/activities/{id}/tasks/create
+   Single endpoint — type is auto-derived server-side from resourceMode.
+   We send resourceMode + resourceCount/resource for Resource Type, else base. */
+export async function createTaskApi(activityApiId, formData) {
+  const token = requireToken();
+
+  const { type, resourceMode } = activityServerTypePair(formData);
+  const payload = buildActivityLikeBase(formData);
+
+  if (type === "resource") {
+    payload.resourceMode = resourceMode;
+    Object.assign(payload, buildResourcePayload(formData));
+  }
+
+  const res = await fetch(
+    `${API_BASE}/api/v3/activities/${encodeURIComponent(activityApiId)}/tasks/create`,
+    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* PATCH /api/v3/tasks/{id} — full payload, same shape as activity PATCH. */
+export async function updateTaskApi(taskServerId, formData) {
+  const token = requireToken();
+
+  const { type, resourceMode } = activityServerTypePair(formData);
+
+  const payload = {
+    ...buildActivityLikeBase(formData),
+    type
+  };
+
+  if (type === "resource") {
+    payload.resourceMode = resourceMode;
+    Object.assign(payload, buildResourcePayload(formData));
+  }
+
+  const res = await fetch(
+    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskServerId)}`,
+    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* DELETE /api/v3/tasks/{id} */
+export async function deleteTaskApi(taskServerId) {
+  const token = requireToken();
+  const res = await fetch(
+    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskServerId)}`,
+    { method: "DELETE", headers: getHeaders(token) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok && res.status !== 204) await throwHttp(res);
+  return true;
+}
+
+/* ════════════════ Subtask APIs ════════════════ */
+
+/* GET /api/v3/tasks/{id}/subtasks — returns mapped subtask nodes. */
+export async function loadSubtasksForTask(taskApiId) {
+  if (!taskApiId) return [];
+  const token = getToken();
+  if (!token) return [];
+
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskApiId)}/subtasks?offset=1&pageSize=20&includeDeleted=false`,
+      { method: "GET", headers: getHeaders(token) }
+    );
+    if (!res.ok) return [];
+    const raw = await res.json().catch(() => ({}));
+    return extractListElements(raw)
+      .slice()
+      .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
+      .map(mapApiSubtaskToNode);
+  } catch (e) {
+    return [];
+  }
+}
+
+/* POST /api/v3/tasks/{id}/subtasks/create
+   Create payload is deliberately minimal — only name, description, and dates.
+   Type/resource fields are NOT accepted by the create endpoint (only by PATCH). */
+export async function createSubtaskApi(taskApiId, formData) {
+  const token = requireToken();
+
+  const payload = {
+    name: formData.name.trim(),
+    description: (formData.description || "").trim(),
+    startDate: toMilestoneIsoStart(formData.startDate),
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
+    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null
+  };
+
+  const res = await fetch(
+    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskApiId)}/subtasks/create`,
+    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* PATCH /api/v3/subtasks/{id} — full payload same as task/activity PATCH. */
+export async function updateSubtaskApi(subtaskServerId, formData) {
+  const token = requireToken();
+
+  const { type, resourceMode } = activityServerTypePair(formData);
+
+  const payload = {
+    ...buildActivityLikeBase(formData),
+    type
+  };
+
+  if (type === "resource") {
+    payload.resourceMode = resourceMode;
+    Object.assign(payload, buildResourcePayload(formData));
+  }
+
+  const res = await fetch(
+    `${API_BASE}/api/v3/subtasks/${encodeURIComponent(subtaskServerId)}`,
+    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  );
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* DELETE /api/v3/subtasks/{id} */
+export async function deleteSubtaskApi(subtaskServerId) {
+  const token = requireToken();
+  const res = await fetch(
+    `${API_BASE}/api/v3/subtasks/${encodeURIComponent(subtaskServerId)}`,
     { method: "DELETE", headers: getHeaders(token) }
   );
   if (res.status === 401) throwAuth();

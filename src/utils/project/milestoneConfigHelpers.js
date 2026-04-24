@@ -7,8 +7,9 @@
    - Vendor ID resolution against a project
    - Error body extraction
    - API-response → local node/project shape mappers
-   - Activity endpoint / server-type resolvers
+   - Activity/task/subtask endpoint resolvers
    - LocalStorage draft persistence for onboarding
+   - Tree helpers (findEnclosingTaskApiId)
    ══════════════════════════════════════════════════════════════════ */
 
 import { generateNodeUid, safeArray } from "./helpers";
@@ -160,9 +161,10 @@ export function mapApiMilestoneToNode(m) {
   };
 }
 
-/* ─── API → local activity node. Stashes raw server type/resourceMode so
-   PATCH can round-trip them even when the UI hasn't changed the type. */
-export function mapApiActivityToNode(a) {
+/* Shared builder for activity/task/subtask node shape (they share the same
+   API schema). kindLetter is the one-char prefix for generated uids, and
+   childrenKey decides whether the node holds `tasks` or `subtasks`. */
+function buildActivityLikeNode(a, kindLetter, childrenKey) {
   const apiType = String(a?.type || "").toLowerCase();
   let uiType = "Standard Type";
   let resourceEntryType = "details";
@@ -175,7 +177,7 @@ export function mapApiActivityToNode(a) {
   }
 
   const node = {
-    uid: generateNodeUid("a"),
+    uid: generateNodeUid(kindLetter),
     apiId: a.id || "",
     id: a.id || "",
     apiType: apiType || "standard",
@@ -190,11 +192,11 @@ export function mapApiActivityToNode(a) {
     type: uiType,
     resourceEntryType,
     dependsOn: [],
-    tasks: [],
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0
   };
+  node[childrenKey] = [];
 
   if (apiType === "resource" && a.resourceMode === "count") {
     node.resourceCount = {
@@ -224,6 +226,20 @@ export function mapApiActivityToNode(a) {
   }
 
   return node;
+}
+
+export function mapApiActivityToNode(a) {
+  return buildActivityLikeNode(a, "a", "tasks");
+}
+
+export function mapApiTaskToNode(t) {
+  return buildActivityLikeNode(t, "t", "subtasks");
+}
+
+export function mapApiSubtaskToNode(s) {
+  // Subtasks can technically contain other subtasks in the local UI; keep an
+  // empty `subtasks` array on each so the tree walkers don't crash.
+  return buildActivityLikeNode(s, "s", "subtasks");
 }
 
 /* ─── Extract { data: { _embedded: { elements: [...] } } } safely. */
@@ -257,4 +273,66 @@ export function activityServerTypePair(formData) {
   }
   if (t.includes("transactional")) return { type: "transactional", resourceMode: null };
   return { type: "standard", resourceMode: null };
+}
+
+/* ─── Resource sub-payload builder ──────────────────────────────
+   Returns the portion of the payload that describes resource data for
+   the current form state. Used by both task and activity create/update,
+   since they share the same server contract. */
+export function buildResourcePayload(formData) {
+  const t = String(formData?.type || "").toLowerCase();
+  if (!t.includes("resource")) return {};
+
+  if (formData.resourceEntryType === "count") {
+    const rc = formData.resourceCount || {};
+    return { resourceCount: parseInt(rc.count, 10) || 1 };
+  }
+
+  const rd = formData.resourceDetails || {};
+  return {
+    resource: {
+      resourceName: rd.resourceName || "",
+      onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
+      actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
+      offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
+      actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
+      position: rd.position || "",
+      designation: rd.designation || "",
+      jobRole: rd.jobRole || "",
+      qualification: rd.qualification || "",
+      experienceYears: parseFloat(rd.experience) || 0,
+      typeOfResourceId: rd.resType || "",
+      division: rd.division || "",
+      divisionOther: ""
+    }
+  };
+}
+
+/* ─── Walk the project tree to find the task that directly or transitively
+   contains the node with the given uid. Returns the task's apiId or null.
+   Used when creating a subtask under another subtask: the API only
+   accepts subtask creation under a task, so we must walk up. */
+export function findEnclosingTaskApiId(project, targetUid) {
+  if (!project || !targetUid) return null;
+
+  function containsUid(node, uid) {
+    if (!node) return false;
+    if (node.uid === uid) return true;
+    const kids = Array.isArray(node.subtasks) ? node.subtasks : [];
+    for (const k of kids) if (containsUid(k, uid)) return true;
+    return false;
+  }
+
+  const milestones = Array.isArray(project.milestones) ? project.milestones : [];
+  for (const m of milestones) {
+    const acts = Array.isArray(m.activities) ? m.activities : [];
+    for (const a of acts) {
+      const tasks = Array.isArray(a.tasks) ? a.tasks : [];
+      for (const t of tasks) {
+        if (t.uid === targetUid) return t.apiId || null;
+        if (containsUid(t, targetUid)) return t.apiId || null;
+      }
+    }
+  }
+  return null;
 }
