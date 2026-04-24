@@ -36,6 +36,7 @@ import AddProjectPage from "./pages/projects/AddProjectPage";
 import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
 import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
+import { useProjects as useProjectsList } from "./store/project/projectsStore";
 
 import "./styles/Project.css"
 import "./styles/project/global.css"
@@ -82,6 +83,7 @@ function PageTitle() {
    ───────────────────────────────────────────────────────────── */
 function Breadcrumbs() {
     const { pathname } = useLocation();
+    const projects = useProjectsList();
     const segments = pathname.split("/").filter(Boolean);
     if (segments.length === 0) return null; // hide on Dashboard
 
@@ -98,6 +100,16 @@ function Breadcrumbs() {
         new: "New",
         dashboard: "Dashboard"
     };
+
+    /* Under /projects/:projectId/... segments[1] is the project's id — swap
+       to projectCode if we have it in the store. */
+    const projectIdSeg =
+        segments[0] === "projects" && segments[1] && segments[1] !== "add"
+            ? decodeURIComponent(segments[1])
+            : null;
+    const projectCode = projectIdSeg
+        ? (projects.find((p) => p.projectId === projectIdSeg)?.projectCode || "")
+        : "";
 
     return (
         <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
@@ -116,7 +128,10 @@ function Breadcrumbs() {
             {segments.map((seg, i) => {
                 const to = "/" + segments.slice(0, i + 1).join("/");
                 const isLast = i === segments.length - 1;
-                const label = LABELS[seg] || decodeURIComponent(seg);
+                const isProjectIdSeg = projectIdSeg && i === 1 && segments[0] === "projects";
+                const label = isProjectIdSeg && projectCode
+                    ? projectCode
+                    : (LABELS[seg] || decodeURIComponent(seg));
                 return (
                     <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#999" }}>›</span>
