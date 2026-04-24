@@ -20,6 +20,7 @@ function makeEmpty() {
     actualEndDate: "",
     isPublic: "Yes",
     category: "",
+    categoryOtherReason: "",
     isVersion: false,
     versionOf: "",
     versionNo: 0,
@@ -27,6 +28,32 @@ function makeEmpty() {
     milestones: [],
     vendors: [],
     resources: []
+  };
+}
+
+/* Merge an arbitrary draft on top of makeEmpty() so that every field the
+   component reads is guaranteed to be defined. Prevents `.length` / etc.
+   crashes when a persisted or partial draft comes in without, say, a
+   `description` field. */
+function normalizeFormShape(maybeDraft) {
+  const base = makeEmpty();
+  if (!maybeDraft || typeof maybeDraft !== "object") return base;
+  return {
+    ...base,
+    ...maybeDraft,
+    projectName: maybeDraft.projectName || "",
+    description: maybeDraft.description || "",
+    owner: maybeDraft.owner || "",
+    startDate: maybeDraft.startDate || "",
+    endDate: maybeDraft.endDate || "",
+    actualEndDate: maybeDraft.actualEndDate || "",
+    isPublic: maybeDraft.isPublic || "Yes",
+    category: maybeDraft.category || "",
+    categoryOtherReason: maybeDraft.categoryOtherReason || "",
+    vendors: safeArray(maybeDraft.vendors),
+    milestones: safeArray(maybeDraft.milestones),
+    auditLogs: safeArray(maybeDraft.auditLogs),
+    resources: safeArray(maybeDraft.resources)
   };
 }
 
@@ -60,14 +87,18 @@ function extractVendors(raw) {
 export default function AddProjectPage() {
   const navigate = useNavigate();
   const existingDraft = useDraft();
-  const [form, setForm] = useState(() => existingDraft || makeEmpty());
+
+  // Always initialize with a fully-shaped object — prevents blank-page crashes
+  // when a partial/stale draft arrives (e.g. restored from localStorage with
+  // description undefined).
+  const [form, setForm] = useState(() => normalizeFormShape(existingDraft));
   const [submitting, setSubmitting] = useState(false);
 
   const [vendorOptions, setVendorOptions] = useState(() => safeArray(VENDOR_MASTER));
   const [vendorNameToId, setVendorNameToId] = useState({});
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState("");
-
+  const [errorCreated, setErrorCreated] = useState("");
   const minDate = tomorrowStr();
 
   const categoryInList = CATEGORY_OPTIONS.includes(form.category);
@@ -97,7 +128,7 @@ export default function AddProjectPage() {
 
         if (res.status === 401) {
           logout();
-          uiStore.showMessage("Session expired. Please sign in again.");
+          setErrorCreated("Session expired. Please sign in again.");
           navigate("/login");
           return;
         }
@@ -141,13 +172,13 @@ export default function AddProjectPage() {
     const vendorIds = selectedNames.map((n) => vendorNameToId[n]).filter(Boolean);
 
     return {
-      name: form.projectName.trim(),
-      description: form.description.trim(),
+      name: (form.projectName || "").trim(),
+      description: (form.description || "").trim(),
       active: true,
       isPublic: form.isPublic === "Yes",
       status_explanation: "",
       status: "new",
-      owner: form.owner.trim(),
+      owner: (form.owner || "").trim(),
       category: isOther ? "Others" : selectedCategory,
       category_other: isOther ? otherCategory.trim() : "",
       category_other_reason: isOther ? otherCategoryReason.trim() : "",
@@ -163,33 +194,33 @@ export default function AddProjectPage() {
     const finalCat =
       selectedCategory === "Others" ? otherCategory.trim() : selectedCategory;
     if (selectedCategory === "Others" && !otherCategory.trim()) {
-      uiStore.showMessage("Please specify the category.");
+      setErrorCreated("Please specify the category.");
       return;
     }
     if (selectedCategory === "Others" && !otherCategoryReason.trim()) {
-      uiStore.showMessage("Please provide a reason for the 'Others' category.");
+      setErrorCreated("Please provide a reason for the 'Others' category.");
       return;
     }
-    if (!form.projectName.trim() || !form.owner.trim() || !form.startDate || !form.endDate) {
-      uiStore.showMessage("Fill required fields");
+    if (!(form.projectName || "").trim() || !(form.owner || "").trim() || !form.startDate || !form.endDate) {
+      setErrorCreated("Fill required fields");
       return;
     }
     if (form.startDate < minDate) {
-      uiStore.showMessage("Expected Start Date must be a future date.");
+      setErrorCreated("Expected Start Date must be a future date.");
       return;
     }
     if (form.endDate < minDate) {
-      uiStore.showMessage("Expected End Date must be a future date.");
+      setErrorCreated("Expected End Date must be a future date.");
       return;
     }
     if (form.endDate < form.startDate) {
-      uiStore.showMessage("Expected End Date cannot be earlier than Expected Start Date.");
+      setErrorCreated("Expected End Date cannot be earlier than Expected Start Date.");
       return;
     }
 
     const token = getToken();
     if (!token) {
-      uiStore.showMessage("Your session has expired. Please sign in again.");
+      setErrorCreated("Your session has expired. Please sign in again.");
       navigate("/login");
       return;
     }
@@ -208,7 +239,7 @@ export default function AddProjectPage() {
 
       if (res.status === 401) {
         logout();
-        uiStore.showMessage("Session expired. Please sign in again.");
+        setErrorCreated("Session expired. Please sign in again.");
         navigate("/login");
         return;
       }
@@ -219,22 +250,19 @@ export default function AddProjectPage() {
       }
 
       const raw = await res.json().catch(() => ({}));
-      // ← response is nested under `data`
       const created = raw?.data ?? raw ?? {};
 
       const next = {
         ...form,
         projectId: created.id ?? created._id ?? created.projectId ?? null,
-        projectName: form.projectName.trim(),
-        description: form.description.trim(),
-        owner: form.owner.trim(),
+        projectName: (form.projectName || "").trim(),
+        description: (form.description || "").trim(),
+        owner: (form.owner || "").trim(),
         category: finalCat,
         categoryOtherReason: selectedCategory === "Others" ? otherCategoryReason.trim() : "",
         baselineId: "-",
         status: "DRAFT",
         milestones: safeArray(form.milestones),
-        // Replace vendor-name array with the server's {id, name} objects
-        // so downstream (milestone create) can resolve names → UUIDs.
         vendors: Array.isArray(created.vendors) && created.vendors.length
           ? created.vendors
           : safeArray(form.vendors)
@@ -242,7 +270,7 @@ export default function AddProjectPage() {
       draftStore.set(next);
       navigate("/projects/add/config");
     } catch (err) {
-      uiStore.showMessage(err?.message || "Failed to create project");
+      setErrorCreated(err?.message || "Failed to create project");
     } finally {
       setSubmitting(false);
     }
@@ -264,7 +292,7 @@ export default function AddProjectPage() {
             </label>
             <input
               className="uidai-input"
-              value={form.projectName}
+              value={form.projectName || ""}
               onChange={(e) => update({ projectName: e.target.value })}
             />
           </div>
@@ -274,11 +302,11 @@ export default function AddProjectPage() {
             <textarea
               className="uidai-textarea"
               maxLength={5000}
-              value={form.description}
+              value={form.description || ""}
               onChange={(e) => update({ description: e.target.value })}
             />
             <div className="uidai-char-count">
-              {5000 - form.description.length} characters remaining
+              {5000 - (form.description || "").length} characters remaining
             </div>
           </div>
 
@@ -293,7 +321,7 @@ export default function AddProjectPage() {
             </label>
             <input
               className="uidai-input"
-              value={form.owner}
+              value={form.owner || ""}
               onChange={(e) => update({ owner: e.target.value })}
             />
           </div>
@@ -306,7 +334,7 @@ export default function AddProjectPage() {
               className="uidai-input"
               type="date"
               min={minDate}
-              value={form.startDate}
+              value={form.startDate || ""}
               onChange={(e) => update({ startDate: e.target.value })}
             />
           </div>
@@ -319,7 +347,7 @@ export default function AddProjectPage() {
               className="uidai-input"
               type="date"
               min={form.startDate || minDate}
-              value={form.endDate}
+              value={form.endDate || ""}
               onChange={(e) => update({ endDate: e.target.value })}
             />
           </div>
@@ -330,7 +358,7 @@ export default function AddProjectPage() {
             </label>
             <select
               className="uidai-select"
-              value={form.isPublic}
+              value={form.isPublic || "Yes"}
               onChange={(e) => update({ isPublic: e.target.value })}
             >
               <option>Yes</option>
@@ -388,8 +416,8 @@ export default function AddProjectPage() {
               {vendorsLoading
                 ? "Loading vendors..."
                 : vendorsError
-                ? `Could not load vendors (${vendorsError}). Showing fallback list.`
-                : "Select vendors for this project"}
+                  ? `Could not load vendors (${vendorsError}). Showing fallback list.`
+                  : "Select vendors for this project"}
             </div>
             <ChipControl
               value={safeArray(form.vendors)}
@@ -399,7 +427,7 @@ export default function AddProjectPage() {
             />
           </div>
         </div>
-
+        <p style={{ color: "red" }}>{errorCreated}</p>
         <div style={{ marginTop: 18, display: "flex", flexWrap: "wrap", gap: 10 }}>
           <button className="uidai-btn" onClick={goNext} disabled={submitting}>
             {submitting ? "Saving..." : "Save & Next"}

@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
-import { safeArray, deepClone, generateNodeUid } from "../../utils/project/helpers";
+import { safeArray, deepClone, generateNodeUid, formatDateDisplay } from "../../utils/project/helpers";
 import {
   normalizeProject,
   recomputeActualDates,
@@ -22,247 +22,31 @@ import {
   propagateNodeUpdateToVersions,
   propagateNodeDeleteToVersions
 } from "../../utils/project/nodeUtils";
+import {
+  persistOnboardingDraft,
+  readPersistedOnboardingDraft,
+  clearPersistedOnboardingDraft
+} from "../../utils/project/milestoneConfigHelpers";
+import {
+  loadProjectById,
+  loadMilestonesForProject,
+  loadActivitiesForMilestone,
+  createMilestoneApi,
+  updateMilestoneApi,
+  deleteMilestoneApi,
+  saveProjectApi,
+  createActivityApi,
+  updateActivityApi,
+  deleteActivityApi
+} from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
-import { formatDateDisplay } from "../../utils/project/helpers";
+import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
+import MilestonePagination from "../../components/projects/MilestonePagination";
 import * as projectsApi from "../../api/projects";
 import * as nodesApi from "../../api/nodes";
 import { tokenStore } from "../../api/client";
-import { getToken, logout } from "../../api/auth";
+import { getToken } from "../../api/auth";
 import { hydrateProjects } from "../../store/project/apiSync";
-
-const API_BASE = "http://10.1.131.199:8000";
-
-/* ─── Onboarding draft persistence ─── */
-const DRAFT_STORAGE_KEY = "uidai_onboarding_draft";
-
-function persistOnboardingDraft(p) {
-  if (!p || !p.projectId) return;
-  try {
-    const snapshot = {
-      projectId: p.projectId,
-      projectName: p.projectName,
-      description: p.description,
-      owner: p.owner,
-      isPublic: p.isPublic,
-      category: p.category,
-      startDate: p.startDate,
-      endDate: p.endDate,
-      vendors: safeArray(p.vendors),
-      baselineId: p.baselineId || "-",
-      status: p.status || "DRAFT",
-      isVersion: !!p.isVersion
-    };
-    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
-  } catch (e) {}
-}
-function readPersistedOnboardingDraft() {
-  try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && parsed.projectId ? parsed : null;
-  } catch (e) {
-    return null;
-  }
-}
-function clearPersistedOnboardingDraft() {
-  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (e) {}
-}
-
-/* ─── Helpers ─── */
-function toMilestoneIsoStart(d) {
-  if (!d) return null;
-  return new Date(`${d}T00:00:00Z`).toISOString();
-}
-function toMilestoneIsoEnd(d) {
-  if (!d) return null;
-  return new Date(`${d}T23:59:59Z`).toISOString();
-}
-function mapStatusForApi(s) {
-  return s === "Completed" ? "completed" : "not_completed";
-}
-function resolveVendorIds(project, vendorName) {
-  if (!vendorName) return [];
-  const vendors = safeArray(project && project.vendors);
-  const match = vendors.find((v) => {
-    if (v && typeof v === "object") return v.name === vendorName;
-    return v === vendorName;
-  });
-  if (match && typeof match === "object" && match.id) return [match.id];
-  return [];
-}
-function toDateInputValue(iso) {
-  if (!iso) return "";
-  const s = String(iso);
-  const tIdx = s.indexOf("T");
-  return tIdx > 0 ? s.slice(0, tIdx) : s;
-}
-function mapStatusFromApi(s) {
-  return s === "completed" ? "Completed" : "Not Completed";
-}
-function stripTime(iso) {
-  if (!iso) return "";
-  const s = String(iso);
-  const idx = s.indexOf("T");
-  return idx > 0 ? s.slice(0, idx) : s;
-}
-
-async function readErrorBody(res) {
-  const body = await res.text().catch(() => "");
-  if (!body) return `Request failed (${res.status})`;
-  try {
-    const parsed = JSON.parse(body);
-    return parsed?.error?.message || parsed?.message || parsed?.detail || body;
-  } catch (e) {
-    return body;
-  }
-}
-
-function mapApiProject(p) {
-  if (!p) return null;
-  return {
-    projectId: p.id || "",
-    projectCode: p.projectCode || "",
-    projectName: p.name || "",
-    description: p.description || "",
-    owner: p.owner || "",
-    isPublic: p.isPublic ? "Yes" : "No",
-    status: p.status ? String(p.status).toUpperCase() : "",
-    startDate: stripTime(p.startDate),
-    endDate: stripTime(p.endDate),
-    actualEndDate: stripTime(p.actualEndDate),
-    category: p.category || "",
-    categoryOther: p.categoryOther || "",
-    categoryOtherReason: p.categoryOtherReason || "",
-    vendors: Array.isArray(p.vendors) ? p.vendors : [],
-    isVersion: !!p.isVersion,
-    versionOf: p.versionOf || null,
-    versionNo: p.versionNo || null,
-    parentId: p.parentId || null,
-    baselineId: p.baselineId || "-",
-    milestones: [],
-    auditLogs: [],
-    resources: []
-  };
-}
-
-function mapApiMilestoneToNode(m) {
-  const vendors = Array.isArray(m.vendors) ? m.vendors : [];
-  return {
-    uid: generateNodeUid("m"),
-    apiId: m.id || "",
-    id: m.id || "",
-    name: m.name || "",
-    description: m.description || "",
-    startDate: toDateInputValue(m.startDate),
-    endDate: toDateInputValue(m.endDate),
-    status: mapStatusFromApi(m.status),
-    vendor: vendors.length ? vendors[0].name || "" : "",
-    dependsOn: [],
-    activities: [],
-    comments: [],
-    attachments: [],
-    position: typeof m.position === "number" ? m.position : undefined
-  };
-}
-
-/* ─── API activity → local node shape. Stashes raw server type/resourceMode
-   so PATCH can round-trip them even when the UI hasn't changed the type. */
-function mapApiActivityToNode(a) {
-  const apiType = String(a?.type || "").toLowerCase();
-  let uiType = "Standard Type";
-  let resourceEntryType = "details";
-
-  if (apiType === "resource") {
-    uiType = "Resource Type";
-    resourceEntryType = a.resourceMode === "count" ? "count" : "details";
-  } else if (apiType === "transactional") {
-    uiType = "Transactional";
-  }
-
-  const node = {
-    uid: generateNodeUid("a"),
-    apiId: a.id || "",
-    id: a.id || "",
-    apiType: apiType || "standard",
-    apiResourceMode: a.resourceMode || null,
-    name: a.name || "",
-    description: a.description || "",
-    startDate: toDateInputValue(a.startDate),
-    endDate: toDateInputValue(a.endDate),
-    actualStartDate: toDateInputValue(a.actualStartDate),
-    actualEndDate: toDateInputValue(a.actualEndDate),
-    status: mapStatusFromApi(a.status),
-    type: uiType,
-    resourceEntryType,
-    dependsOn: [],
-    tasks: [],
-    comments: [],
-    attachments: [],
-    position: typeof a.position === "number" ? a.position : 0
-  };
-
-  if (apiType === "resource" && a.resourceMode === "count") {
-    node.resourceCount = {
-      resType: "RFP",
-      count: a.resourceCount || 1,
-      onboardingDate: "",
-      division: ""
-    };
-  }
-
-  if (apiType === "resource" && a.resourceMode === "details" && a.resource) {
-    const r = a.resource || {};
-    node.resourceDetails = {
-      resourceName: r.resourceName || "",
-      resType: r.typeOfResourceId || "RFP",
-      division: r.division || "",
-      onboardingDate: toDateInputValue(r.onboardDate),
-      offboardingDate: toDateInputValue(r.offboardDate),
-      actualOnboardingDate: toDateInputValue(r.actualOnboardDate),
-      actualOffboardingDate: toDateInputValue(r.actualOffboardDate),
-      position: r.position || "",
-      designation: r.designation || "",
-      jobRole: r.jobRole || "",
-      qualification: r.qualification || "",
-      experience: r.experienceYears != null ? String(r.experienceYears) : ""
-    };
-  }
-
-  return node;
-}
-
-function extractListElements(raw) {
-  const elements =
-    raw?.data?._embedded?.elements ??
-    raw?._embedded?.elements ??
-    raw?.data ??
-    [];
-  return Array.isArray(elements) ? elements : [];
-}
-
-function activityEndpointFor(formData) {
-  const t = String(formData?.type || "").toLowerCase();
-  if (t.includes("resource")) {
-    return (formData.resourceEntryType === "count") ? "resource/count" : "resource/details";
-  }
-  if (t.includes("transactional")) return "transactional";
-  return "standard";
-}
-
-/* UI type + resourceEntryType → server's (type, resourceMode) pair.
-   Used by PATCH activity since the single endpoint takes both. */
-function activityServerTypePair(formData) {
-  const t = String(formData?.type || "").toLowerCase();
-  if (t.includes("resource")) {
-    return {
-      type: "resource",
-      resourceMode: formData.resourceEntryType === "count" ? "count" : "details"
-    };
-  }
-  if (t.includes("transactional")) return { type: "transactional", resourceMode: null };
-  return { type: "standard", resourceMode: null };
-}
 
 export default function MilestoneConfigPage({ mode }) {
   const { projectId } = useParams();
@@ -298,6 +82,7 @@ export default function MilestoneConfigPage({ mode }) {
   const totalPages = totalMilestones === 0 ? 1 : Math.ceil(totalMilestones / effectivePageSize);
   const page = Math.max(1, Math.min(currentPage, totalPages));
 
+  /* Flatten the expanded tree into ordered rows for rendering. */
   const rows = useMemo(() => {
     if (!project) return [];
     const out = [];
@@ -306,14 +91,8 @@ export default function MilestoneConfigPage({ mode }) {
       const hasKids = kids.length > 0;
       const isExp = expandedRows.has(node.uid);
       out.push({
-        node,
-        kind,
-        depth,
-        hasKids,
-        isExpanded: isExp,
-        milestoneUid,
-        activityUid,
-        parentTaskUid
+        node, kind, depth, hasKids, isExpanded: isExp,
+        milestoneUid, activityUid, parentTaskUid
       });
       if (!isExp) return;
       if (kind === "milestone")
@@ -322,7 +101,8 @@ export default function MilestoneConfigPage({ mode }) {
         kids.forEach((k) => walk(k, "task", depth + 1, milestoneUid, node.uid, null));
       else if (kind === "task")
         kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid));
-      else kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid));
+      else
+        kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid));
     }
     const allMs = safeArray(project.milestones);
     const startIdx = (page - 1) * effectivePageSize;
@@ -335,6 +115,7 @@ export default function MilestoneConfigPage({ mode }) {
 
   const pid = project && project.projectId ? project.projectId : null;
 
+  /* Push a fresh reference so React re-renders after in-place mutations. */
   function commitUpdate(target) {
     if (!target) return;
     if (isOnboarding) {
@@ -345,30 +126,23 @@ export default function MilestoneConfigPage({ mode }) {
     }
   }
 
+  /* Common handler for an err.isAuth thrown by the API layer. */
+  function handleAuthError(err) {
+    uiStore.showMessage(err?.message || "Session expired. Please sign in again.");
+    navigate("/login");
+  }
+
+  /* ─── Restore onboarding draft from localStorage if needed ─── */
   useEffect(() => {
-    if (!isOnboarding) {
-      setRestoring(false);
-      return;
-    }
-    if (draft && draft.projectId) {
-      setRestoring(false);
-      return;
-    }
+    if (!isOnboarding) { setRestoring(false); return; }
+    if (draft && draft.projectId) { setRestoring(false); return; }
     const persisted = readPersistedOnboardingDraft();
     if (persisted) {
       draftStore.set({
-        projectName: "",
-        description: "",
-        owner: "",
-        startDate: "",
-        endDate: "",
-        actualEndDate: "",
-        isPublic: "Yes",
-        category: "",
-        vendors: [],
-        milestones: [],
-        auditLogs: [],
-        resources: [],
+        projectName: "", description: "", owner: "",
+        startDate: "", endDate: "", actualEndDate: "",
+        isPublic: "Yes", category: "",
+        vendors: [], milestones: [], auditLogs: [], resources: [],
         ...persisted,
         milestones: []
       });
@@ -384,56 +158,29 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnboarding, pid, project && project.projectName]);
 
+  /* ─── Fetch project when not onboarding and the store doesn't have it ─── */
   useEffect(() => {
-    if (isOnboarding) return;
-    if (!projectId) return;
+    if (isOnboarding || !projectId) return;
 
     let cancelled = false;
 
-    async function loadProject() {
+    async function load() {
       const fromStore = projectsStore.find ? projectsStore.find(projectId) : null;
       if (fromStore) {
         setApiProjectLocal({ ...fromStore });
         return;
       }
 
-      const token = getToken();
-      if (!token) {
+      if (!getToken()) {
         uiStore.showMessage("Please sign in to continue.");
         navigate("/login");
         return;
       }
+
       setProjectLoading(true);
       setProjectError("");
       try {
-        const res = await fetch(
-          `${API_BASE}/api/v3/projects/${encodeURIComponent(projectId)}`,
-          {
-            method: "GET",
-            headers: {
-              accept: "application/json",
-              Authorization: `Bearer ${token}`
-            }
-          }
-        );
-
-        if (cancelled) return;
-
-        if (res.status === 401) {
-          logout();
-          uiStore.showMessage("Session expired. Please sign in again.");
-          navigate("/login");
-          return;
-        }
-
-        if (!res.ok) {
-          const msg = await readErrorBody(res);
-          throw new Error(msg);
-        }
-
-        const raw = await res.json().catch(() => ({}));
-        const mapped = mapApiProject(raw?.data ?? raw);
-
+        const mapped = await loadProjectById(projectId);
         if (cancelled) return;
 
         if (mapped) {
@@ -446,88 +193,31 @@ export default function MilestoneConfigPage({ mode }) {
           } catch (e) {}
         }
       } catch (err) {
-        if (!cancelled) setProjectError(err?.message || "Failed to load project");
+        if (cancelled) return;
+        if (err?.isAuth) return handleAuthError(err);
+        setProjectError(err?.message || "Failed to load project");
       } finally {
         if (!cancelled) setProjectLoading(false);
       }
     }
 
-    loadProject();
+    load();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isOnboarding]);
 
-  async function loadActivitiesForMilestone(milestoneApiId) {
-    if (!milestoneApiId) return [];
-    const token = getToken();
-    if (!token) return [];
-
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities?offset=1&pageSize=20&includeDeleted=false`,
-        {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-      if (!res.ok) return [];
-      const raw = await res.json().catch(() => ({}));
-      return extractListElements(raw)
-        .slice()
-        .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-        .map(mapApiActivityToNode);
-    } catch (e) {
-      return [];
-    }
-  }
-
+  /* ─── Two-phase load: milestones first, then activities per milestone ─── */
   async function loadMilestonesFromApi() {
-    if (!pid) return;
-    const token = getToken();
-    if (!token) return;
+    if (!pid || !getToken()) return;
 
     setMilestonesLoading(true);
     setMilestonesError("");
     try {
-      const res = await fetch(
-        `${API_BASE}/api/v3/projects/${encodeURIComponent(pid)}/milestones`,
-        {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
+      const mapped = await loadMilestonesForProject(pid);
 
-      if (res.status === 401) {
-        logout();
-        uiStore.showMessage("Session expired. Please sign in again.");
-        navigate("/login");
-        return;
-      }
-
-      if (!res.ok) {
-        const msg = await readErrorBody(res);
-        throw new Error(msg);
-      }
-
-      const raw = await res.json().catch(() => ({}));
-      const apiList = extractListElements(raw)
-        .slice()
-        .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0));
-      const mapped = apiList.map(mapApiMilestoneToNode);
-
-      let target = null;
-      if (isOnboarding) {
-        target = draft;
-      } else {
-        target = projectsStore.find ? projectsStore.find(pid) : null;
-        if (!target) target = apiProjectLocal;
-      }
+      let target = isOnboarding
+        ? draft
+        : (projectsStore.find ? projectsStore.find(pid) : null) || apiProjectLocal;
 
       if (target) {
         target.milestones = mapped;
@@ -548,6 +238,7 @@ export default function MilestoneConfigPage({ mode }) {
         }
       }
     } catch (err) {
+      if (err?.isAuth) return handleAuthError(err);
       setMilestonesError(err?.message || "Failed to load milestones");
     } finally {
       setMilestonesLoading(false);
@@ -675,11 +366,7 @@ export default function MilestoneConfigPage({ mode }) {
   }
 
   function toggleEdit() {
-    if (!editingConfig) {
-      setEditingConfig(true);
-      return;
-    }
-    setEditingConfig(false);
+    setEditingConfig((prev) => !prev);
   }
 
   function openNodeModal(kind, modeAction, parentUid, nodeUid) {
@@ -689,327 +376,12 @@ export default function MilestoneConfigPage({ mode }) {
     setModalCtx(null);
   }
 
-  /* ─── Milestone APIs ─── */
-  async function createMilestoneApi(formData) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const payload = {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      status: mapStatusForApi(formData.status || "Not Completed"),
-      vendorIds: resolveVendorIds(project, formData.vendor)
-    };
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(project.projectId)}/milestones/create`,
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  async function updateMilestoneApi(milestoneServerId, formData) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const payload = {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      status: mapStatusForApi(formData.status || "Not Completed"),
-      vendorIds: resolveVendorIds(project, formData.vendor)
-    };
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
-      {
-        method: "PATCH",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  async function deleteMilestoneApi(milestoneServerId) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
-      {
-        method: "DELETE",
-        headers: {
-          accept: "application/json",
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok && res.status !== 204) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    return true;
-  }
-
-  async function saveProjectApi(projectServerId) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/save`,
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({})
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok && res.status !== 204) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  /* ─── Activity APIs ─── */
-
-  async function createActivityApi(milestoneApiId, formData) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const endpoint = activityEndpointFor(formData);
-
-    const base = {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-      actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-      position: 0,
-      dependsOn: []
-    };
-
-    let payload;
-    if (endpoint === "standard") {
-      payload = { ...base, status: mapStatusForApi(formData.status || "Not Completed") };
-    } else if (endpoint === "transactional") {
-      payload = { ...base };
-    } else if (endpoint === "resource/count") {
-      const rc = formData.resourceCount || {};
-      payload = { ...base, resourceCount: parseInt(rc.count, 10) || 1 };
-    } else {
-      const rd = formData.resourceDetails || {};
-      payload = {
-        ...base,
-        resource: {
-          resourceName: rd.resourceName || "",
-          onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
-          actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
-          offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
-          actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
-          position: rd.position || "",
-          designation: rd.designation || "",
-          jobRole: rd.jobRole || "",
-          qualification: rd.qualification || "",
-          experienceYears: parseFloat(rd.experience) || 0,
-          typeOfResourceId: rd.resType || "",
-          division: rd.division || "",
-          divisionOther: ""
-        }
-      };
-    }
-
-    const url = `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities/${endpoint}/create`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  /* PATCH /api/v3/activities/{id} — single endpoint, takes type + resourceMode
-     + full payload. Build based on UI state. */
-  async function updateActivityApi(activityServerId, formData) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const { type, resourceMode } = activityServerTypePair(formData);
-
-    const payload = {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      type,
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-      actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-      position: 0,
-      status: mapStatusForApi(formData.status || "Not Completed"),
-      dependsOn: []
-    };
-
-    if (type === "resource") {
-      payload.resourceMode = resourceMode;
-      if (resourceMode === "count") {
-        const rc = formData.resourceCount || {};
-        payload.resourceCount = parseInt(rc.count, 10) || 1;
-      } else {
-        const rd = formData.resourceDetails || {};
-        payload.resource = {
-          resourceName: rd.resourceName || "",
-          onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
-          actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
-          offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
-          actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
-          position: rd.position || "",
-          designation: rd.designation || "",
-          jobRole: rd.jobRole || "",
-          qualification: rd.qualification || "",
-          experienceYears: parseFloat(rd.experience) || 0,
-          typeOfResourceId: rd.resType || "",
-          division: rd.division || "",
-          divisionOther: ""
-        };
-      }
-    }
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
-      {
-        method: "PATCH",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify(payload)
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  /* DELETE /api/v3/activities/{id} */
-  async function deleteActivityApi(activityServerId) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const res = await fetch(
-      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
-      {
-        method: "DELETE",
-        headers: {
-          accept: "application/json",
-          Authorization: `Bearer ${token}`
-        }
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok && res.status !== 204) {
-      const msg = await readErrorBody(res);
-      throw new Error(msg);
-    }
-    return true;
-  }
-
   function saveNodeFromModal(formData) {
     if (!modalCtx) return;
     const { kind, mode: modeAction, parentUid, nodeUid } = modalCtx;
     const bounds = formData.bounds;
 
+    /* ─── Permission checks by project type and action ─── */
     if (isVersionProject(project)) {
       if (modeAction === "add" && (kind === "milestone" || kind === "activity")) {
         uiStore.showMessage(
@@ -1040,6 +412,7 @@ export default function MilestoneConfigPage({ mode }) {
       }
     }
 
+    /* ─── Field validations ─── */
     if (!formData.name.trim() || !formData.startDate || !formData.endDate) {
       uiStore.showMessage("Fill required fields.");
       return;
@@ -1108,61 +481,47 @@ export default function MilestoneConfigPage({ mode }) {
       vendor: formData.vendor,
       resourceEntryType: formData.resourceEntryType,
       resourceDetails: formData.resourceDetails,
-      resourceCount: formData.resourceCount,
+      resourceCount: formData.resourceCount
     };
 
-    /* ── Milestone remote branches ── */
+    /* ─── Resolve which remote branch to take ─── */
     const shouldCreateMilestoneRemotely =
-      modeAction === "add" &&
-      kind === "milestone" &&
-      !!project.projectId &&
-      !!getToken();
+      modeAction === "add" && kind === "milestone" &&
+      !!project.projectId && !!getToken();
 
     let milestoneServerId = null;
     if (modeAction === "edit" && kind === "milestone" && nodeUid) {
       const loc = locateNode(project, nodeUid);
-      milestoneServerId = loc && loc.node ? loc.node.apiId || null : null;
+      milestoneServerId = loc?.node?.apiId || null;
     }
     const shouldUpdateMilestoneRemotely =
-      modeAction === "edit" &&
-      kind === "milestone" &&
-      !!milestoneServerId &&
-      !!getToken();
+      modeAction === "edit" && kind === "milestone" &&
+      !!milestoneServerId && !!getToken();
 
-    /* ── Activity remote branches ── */
     let activityParentMilestoneApiId = null;
     if (modeAction === "add" && kind === "activity" && parentUid) {
       const mLoc = locateNode(project, parentUid);
-      if (mLoc && mLoc.node) activityParentMilestoneApiId = mLoc.node.apiId || null;
+      activityParentMilestoneApiId = mLoc?.node?.apiId || null;
     }
     const shouldCreateActivityRemotely =
-      modeAction === "add" &&
-      kind === "activity" &&
-      !!activityParentMilestoneApiId &&
-      !!getToken();
+      modeAction === "add" && kind === "activity" &&
+      !!activityParentMilestoneApiId && !!getToken();
 
     let activityServerId = null;
     if (modeAction === "edit" && kind === "activity" && nodeUid) {
       const loc = locateNode(project, nodeUid);
-      activityServerId = loc && loc.node ? loc.node.apiId || null : null;
+      activityServerId = loc?.node?.apiId || null;
     }
     const shouldUpdateActivityRemotely =
-      modeAction === "edit" &&
-      kind === "activity" &&
-      !!activityServerId &&
-      !!getToken();
+      modeAction === "edit" && kind === "activity" &&
+      !!activityServerId && !!getToken();
 
+    /* ─── Local mutation — common to all branches ─── */
     const doLocal = (apiData) => {
-      let target;
-      if (isOnboarding) target = project;
-      else {
-        target = projectsStore.find ? projectsStore.find(project.projectId) : null;
-        if (!target) target = apiProjectLocal;
-      }
-      if (!target) {
-        uiStore.hideLoader();
-        return;
-      }
+      const target = isOnboarding
+        ? project
+        : (projectsStore.find ? projectsStore.find(project.projectId) : null) || apiProjectLocal;
+      if (!target) { uiStore.hideLoader(); return; }
 
       if (modeAction === "add") {
         const newNode = {
@@ -1191,37 +550,26 @@ export default function MilestoneConfigPage({ mode }) {
         } else {
           newNode.vendor = formData.vendor;
         }
+
         if (kind === "milestone") {
           newNode.activities = [];
           target.milestones.push(newNode);
         } else if (kind === "activity") {
           newNode.tasks = [];
           const parent = locateNode(target, parentUid)?.node;
-          if (!parent) {
-            uiStore.hideLoader();
-            uiStore.showMessage("Parent milestone not found.");
-            return;
-          }
+          if (!parent) { uiStore.hideLoader(); uiStore.showMessage("Parent milestone not found."); return; }
           parent.activities = safeArray(parent.activities);
           parent.activities.push(newNode);
         } else if (kind === "task") {
           newNode.subtasks = [];
           const parent = locateNode(target, parentUid)?.node;
-          if (!parent) {
-            uiStore.hideLoader();
-            uiStore.showMessage("Parent activity not found.");
-            return;
-          }
+          if (!parent) { uiStore.hideLoader(); uiStore.showMessage("Parent activity not found."); return; }
           parent.tasks = safeArray(parent.tasks);
           parent.tasks.push(newNode);
         } else {
           newNode.subtasks = [];
           const parent = locateNode(target, parentUid)?.node;
-          if (!parent) {
-            uiStore.hideLoader();
-            uiStore.showMessage("Parent not found.");
-            return;
-          }
+          if (!parent) { uiStore.hideLoader(); uiStore.showMessage("Parent not found."); return; }
           parent.subtasks = safeArray(parent.subtasks);
           parent.subtasks.push(newNode);
         }
@@ -1236,23 +584,17 @@ export default function MilestoneConfigPage({ mode }) {
         }
 
         if (!isOnboarding) {
-          addAudit(
-            target,
-            `Add ${kind.charAt(0).toUpperCase() + kind.slice(1)}`,
-            "-",
-            deepClone(newNode)
-          );
+          addAudit(target, `Add ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, "-", deepClone(newNode));
           if (isBaselineProject(target)) {
-            propagateNodeAddToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, parentUid, kind, newNode);
+            propagateNodeAddToVersions(
+              projectsStore.getAll ? projectsStore.getAll() : [],
+              target, parentUid, kind, newNode
+            );
           }
         }
       } else {
         const loc = locateNode(target, nodeUid);
-        if (!loc) {
-          uiStore.hideLoader();
-          uiStore.showMessage("Item not found.");
-          return;
-        }
+        if (!loc) { uiStore.hideLoader(); uiStore.showMessage("Item not found."); return; }
         const { node } = loc;
         const before = deepClone(node);
         node.name = formData.name.trim();
@@ -1279,26 +621,21 @@ export default function MilestoneConfigPage({ mode }) {
         node.comments = safeArray(formData.comments);
 
         if (!isOnboarding) {
-          addAudit(
-            target,
-            `Update ${kind.charAt(0).toUpperCase() + kind.slice(1)}`,
-            before,
-            deepClone(node)
-          );
+          addAudit(target, `Update ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, before, deepClone(node));
           if (isBaselineProject(target)) {
-            propagateNodeUpdateToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, nodeUid, {
-              name: node.name,
-              description: node.description,
-              startDate: node.startDate,
-              endDate: node.endDate,
-              status: node.status,
-              dependsOn: node.dependsOn,
-              type: node.type,
-              vendor: node.vendor,
-              resourceEntryType: node.resourceEntryType,
-              resourceDetails: node.resourceDetails,
-              resourceCount: node.resourceCount
-            });
+            propagateNodeUpdateToVersions(
+              projectsStore.getAll ? projectsStore.getAll() : [],
+              target, nodeUid,
+              {
+                name: node.name, description: node.description,
+                startDate: node.startDate, endDate: node.endDate,
+                status: node.status, dependsOn: node.dependsOn,
+                type: node.type, vendor: node.vendor,
+                resourceEntryType: node.resourceEntryType,
+                resourceDetails: node.resourceDetails,
+                resourceCount: node.resourceCount
+              }
+            );
           }
         }
       }
@@ -1313,78 +650,31 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.showMessage(modeAction === "add" ? "Item added" : "Item updated");
     };
 
+    /* ─── Dispatch to the correct remote branch, then run doLocal ─── */
+    const handleRemote = (promise, failMessage) => {
+      promise
+        .then((updated) => { doLocal(updated); loadMilestonesFromApi(); })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err?.isAuth) return handleAuthError(err);
+          uiStore.showMessage(err?.message || failMessage);
+        });
+    };
+
     if (shouldCreateMilestoneRemotely) {
-      createMilestoneApi(formData)
-        .then((created) => {
-          doLocal(created);
-          loadMilestonesFromApi();
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to create milestone");
-        });
-      return;
+      return handleRemote(createMilestoneApi(project, formData), "Failed to create milestone");
     }
-
     if (shouldUpdateMilestoneRemotely) {
-      updateMilestoneApi(milestoneServerId, formData)
-        .then((updated) => {
-          doLocal(updated);
-          loadMilestonesFromApi();
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to update milestone");
-        });
-      return;
+      return handleRemote(updateMilestoneApi(milestoneServerId, formData, project), "Failed to update milestone");
     }
-
     if (shouldCreateActivityRemotely) {
-      createActivityApi(activityParentMilestoneApiId, formData)
-        .then((created) => {
-          doLocal(created);
-          loadMilestonesFromApi();
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to create activity");
-        });
-      return;
+      return handleRemote(createActivityApi(activityParentMilestoneApiId, formData), "Failed to create activity");
     }
-
     if (shouldUpdateActivityRemotely) {
-      updateActivityApi(activityServerId, formData)
-        .then((updated) => {
-          doLocal(updated);
-          loadMilestonesFromApi();
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to update activity");
-        });
-      return;
+      return handleRemote(updateActivityApi(activityServerId, formData), "Failed to update activity");
     }
 
+    /* Legacy fallback for Task/Subtask (nodesApi stubs) — no remote activity path. */
     const apiCall = (() => {
       if (isOnboarding || !tokenStore.get()) return null;
       if (modeAction === "add") {
@@ -1397,19 +687,19 @@ export default function MilestoneConfigPage({ mode }) {
     if (apiCall) {
       apiCall
         .then(() => { hydrateProjects({ force: true }); doLocal(); })
-        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to save item"); });
+        .catch((err) => {
+          uiStore.hideLoader();
+          uiStore.showMessage(err?.message || "Failed to save item");
+        });
     } else {
       setTimeout(doLocal, 500);
     }
   }
 
   function removeNode(kind, uid) {
-    let target;
-    if (isOnboarding) target = project;
-    else {
-      target = projectsStore.find ? projectsStore.find(project.projectId) : null;
-      if (!target) target = apiProjectLocal;
-    }
+    const target = isOnboarding
+      ? project
+      : (projectsStore.find ? projectsStore.find(project.projectId) : null) || apiProjectLocal;
     if (!target) return;
     const loc = locateNode(target, uid);
     if (!loc) return;
@@ -1435,7 +725,10 @@ export default function MilestoneConfigPage({ mode }) {
       if (!isOnboarding) {
         addAudit(target, `Delete ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, removed, "-");
         if (isBaselineProject(target)) {
-          propagateNodeDeleteToVersions(projectsStore.getAll ? projectsStore.getAll() : [], target, uid);
+          propagateNodeDeleteToVersions(
+            projectsStore.getAll ? projectsStore.getAll() : [],
+            target, uid
+          );
         }
       }
 
@@ -1451,57 +744,34 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.showMessage("Removed");
     };
 
-    /* ── Resolve remote delete by kind ── */
-    const milestoneServerId =
-      kind === "milestone" && loc.node ? loc.node.apiId || null : null;
-    const activityServerIdForDelete =
-      kind === "activity" && loc.node ? loc.node.apiId || null : null;
+    const milestoneServerId = kind === "milestone" ? loc.node?.apiId || null : null;
+    const activityServerId = kind === "activity" ? loc.node?.apiId || null : null;
 
-    const shouldDeleteMilestoneRemotely =
-      kind === "milestone" && !!milestoneServerId && !!getToken();
-    const shouldDeleteActivityRemotely =
-      kind === "activity" && !!activityServerIdForDelete && !!getToken();
-
-    if (shouldDeleteMilestoneRemotely) {
-      deleteMilestoneApi(milestoneServerId)
-        .then(() => {
-          doLocal();
-          loadMilestonesFromApi();
-        })
+    const handleRemote = (promise, failMessage) => {
+      promise
+        .then(() => { doLocal(); loadMilestonesFromApi(); })
         .catch((err) => {
           uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to delete milestone");
+          if (err?.isAuth) return handleAuthError(err);
+          uiStore.showMessage(err?.message || failMessage);
         });
-      return;
+    };
+
+    if (kind === "milestone" && milestoneServerId && getToken()) {
+      return handleRemote(deleteMilestoneApi(milestoneServerId), "Failed to delete milestone");
+    }
+    if (kind === "activity" && activityServerId && getToken()) {
+      return handleRemote(deleteActivityApi(activityServerId), "Failed to delete activity");
     }
 
-    if (shouldDeleteActivityRemotely) {
-      deleteActivityApi(activityServerIdForDelete)
-        .then(() => {
-          doLocal();
-          loadMilestonesFromApi();
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showMessage(err?.message || "Failed to delete activity");
-        });
-      return;
-    }
-
+    /* Fallback for tasks/subtasks using legacy nodesApi stubs. */
     if (!isOnboarding && tokenStore.get() && nodesApi.removeByKind[kind]) {
       nodesApi.removeByKind[kind](uid)
         .then(() => { hydrateProjects({ force: true }); doLocal(); })
-        .catch((err) => { uiStore.hideLoader(); uiStore.showMessage(err?.message || "Failed to remove item"); });
+        .catch((err) => {
+          uiStore.hideLoader();
+          uiStore.showMessage(err?.message || "Failed to remove item");
+        });
     } else {
       setTimeout(doLocal, 500);
     }
@@ -1538,11 +808,7 @@ export default function MilestoneConfigPage({ mode }) {
         })
         .catch((err) => {
           uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showMessage(err.message);
-            navigate("/login");
-            return;
-          }
+          if (err?.isAuth) return handleAuthError(err);
           uiStore.showMessage(err?.message || "Failed to save project");
         });
       return;
@@ -1568,7 +834,7 @@ export default function MilestoneConfigPage({ mode }) {
           isPublic: project.isPublic,
           category: project.category,
           startDate: project.startDate,
-          endDate: project.endDate,
+          endDate: project.endDate
         });
         const projectUuid = created.projectId;
         for (const m of safeArray(project.milestones)) {
@@ -1681,11 +947,7 @@ export default function MilestoneConfigPage({ mode }) {
 
         <div className="uidai-msgrid__toolbar">
           <div className="uidai-msgrid__toolbar-right">
-            <button
-              type="button"
-              className="uidai-btn uidai-btn--small"
-              onClick={toggleExpandAll}
-            >
+            <button type="button" className="uidai-btn uidai-btn--small" onClick={toggleExpandAll}>
               {expandAllLabel}
             </button>
             {addMilestoneBtn}
@@ -1714,15 +976,13 @@ export default function MilestoneConfigPage({ mode }) {
                     {milestonesLoading
                       ? "Loading milestones..."
                       : totalMilestones === 0
-                      ? `No milestones added yet${
-                          canMod ? " — click + Add Milestone above to start." : "."
-                        }`
+                      ? `No milestones added yet${canMod ? " — click + Add Milestone above to start." : "."}`
                       : "No milestones to display on this page."}
                   </td>
                 </tr>
               ) : (
                 rows.map((r) => (
-                  <GridRow
+                  <MilestoneGridRow
                     key={r.node.uid}
                     r={r}
                     project={project}
@@ -1737,9 +997,7 @@ export default function MilestoneConfigPage({ mode }) {
                     onDelete={removeNode}
                     onTrack={(uid) =>
                       navigate(
-                        `/projects/${encodeURIComponent(project.projectId)}/track/${encodeURIComponent(
-                          uid
-                        )}`
+                        `/projects/${encodeURIComponent(project.projectId)}/track/${encodeURIComponent(uid)}`
                       )
                     }
                   />
@@ -1750,7 +1008,7 @@ export default function MilestoneConfigPage({ mode }) {
         </div>
 
         {totalMilestones > 0 && (
-          <Pagination
+          <MilestonePagination
             total={totalMilestones}
             page={page}
             totalPages={totalPages}
@@ -1781,271 +1039,6 @@ export default function MilestoneConfigPage({ mode }) {
           onError={(m) => uiStore.showMessage(m)}
         />
       )}
-    </div>
-  );
-}
-
-function GridRow({
-  r,
-  project,
-  depMap,
-  canMod,
-  showStatusCol,
-  isOnboarding,
-  isVersion,
-  onToggle,
-  onAddChild,
-  onEdit,
-  onDelete,
-  onTrack
-}) {
-  const { node, kind, depth, hasKids, isExpanded } = r;
-  const indent = 10 + depth * 28;
-
-  const eff = effectiveStatus(node);
-  const rolled = eff === "Completed" && node.status !== "Completed";
-  const pillClass =
-    eff === "Completed"
-      ? rolled
-        ? "uidai-status-pill--rolledup"
-        : "uidai-status-pill--done"
-      : "uidai-status-pill--todo";
-  const pillLabel =
-    eff === "Completed" ? (rolled ? "All children completed" : "Completed") : "Not Completed";
-
-  const deps = safeArray(node.dependsOn)
-    .map((uid) => depMap[uid])
-    .filter(Boolean);
-
-  const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
-  const locked = isNodeBaselineLocked(project, node);
-
-  let addChildBtn = null;
-  if (canMod) {
-    if (kind === "milestone" && !isVersion) {
-      addChildBtn = (
-        <button
-          type="button"
-          className="uidai-msgrid__add-inline"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddChild("activity", "add", node.uid, null);
-          }}
-        >
-          + Activity
-        </button>
-      );
-    } else if (kind === "activity" && !isOnboarding && isVersion) {
-      addChildBtn = (
-        <button
-          type="button"
-          className="uidai-msgrid__add-inline"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddChild("task", "add", node.uid, null);
-          }}
-        >
-          + Task
-        </button>
-      );
-    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && isVersion) {
-      addChildBtn = (
-        <button
-          type="button"
-          className="uidai-msgrid__add-inline"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddChild("subtask", "add", node.uid, null);
-          }}
-        >
-          + Sub Task
-        </button>
-      );
-    }
-  }
-
-  const rowClass = `uidai-msgrid__row--${kind}` + (locked ? " uidai-msgrid__row--locked" : "");
-
-  const parentUidForEdit = r.milestoneUid || r.activityUid || r.parentTaskUid || "";
-
-  return (
-    <tr className={rowClass}>
-      <td className="uidai-msgrid__cell uidai-msgrid__cell--wbs">{node.id || ""}</td>
-      <td className="uidai-msgrid__cell uidai-msgrid__cell--name">
-        <div className="uidai-msgrid__name-inner" style={{ paddingLeft: indent }}>
-          {hasKids ? (
-            <button
-              type="button"
-              className="uidai-msgrid__expand-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggle(node.uid);
-              }}
-              aria-label="Toggle"
-            >
-              {isExpanded ? "−" : "+"}
-            </button>
-          ) : (
-            <span className="uidai-msgrid__expand-spacer" />
-          )}
-          <span className="uidai-msgrid__row-label" title={node.name}>
-            {node.name}
-          </span>
-          {locked && (
-            <span
-              className="uidai-baseline-lock-icon"
-              title="Baseline item — locked in this version"
-            >
-              🔒
-            </span>
-          )}
-          {addChildBtn}
-        </div>
-      </td>
-      <td className="uidai-msgrid__cell">
-        {typeLabel ? <span className="uidai-type-tag">{typeLabel}</span> : null}
-      </td>
-      {showStatusCol && (
-        <td className="uidai-msgrid__cell">
-          <span className={`uidai-status-pill ${pillClass}`}>{pillLabel}</span>
-        </td>
-      )}
-      <td className="uidai-msgrid__cell uidai-msgrid__cell--date">
-        {formatDateDisplay(node.startDate)}
-      </td>
-      <td className="uidai-msgrid__cell uidai-msgrid__cell--date">
-        {formatDateDisplay(node.endDate)}
-      </td>
-      <td className="uidai-msgrid__cell">
-        {kind === "milestone" && node.vendor ? (
-          <span className="uidai-vendor-tag">{node.vendor}</span>
-        ) : (
-          <span className="uidai-dep-empty">—</span>
-        )}
-      </td>
-      <td className="uidai-msgrid__cell">
-        {deps.length === 0 ? (
-          <span className="uidai-dep-empty">—</span>
-        ) : (
-          deps.map((d, i) => (
-            <span key={i} className="uidai-dep-tag">
-              {d.id || d.name}
-            </span>
-          ))
-        )}
-      </td>
-      <td className="uidai-msgrid__cell uidai-msgrid__cell--actions">
-        {!isOnboarding && (
-          <button
-            type="button"
-            className="uidai-msgrid__btn-text"
-            onClick={() => onTrack(node.uid)}
-          >
-            Track
-          </button>
-        )}
-        <button
-          type="button"
-          className="uidai-msgrid__btn-text"
-          onClick={() => onEdit(kind, "edit", parentUidForEdit, node.uid)}
-        >
-          {locked ? "View" : "Edit"}
-        </button>
-        <button
-          type="button"
-          className="uidai-msgrid__btn-text uidai-msgrid__btn-text--danger"
-          disabled={!canMod || locked}
-          title={locked ? "Baseline items cannot be deleted from a version" : ""}
-          onClick={() => onDelete(kind, node.uid)}
-        >
-          Delete
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-function Pagination({ total, page, totalPages, pageSize, onGoto, onSize }) {
-  const maxNumbered = 5;
-  let startP = Math.max(1, page - Math.floor(maxNumbered / 2));
-  let endP = Math.min(totalPages, startP + maxNumbered - 1);
-  if (endP - startP + 1 < maxNumbered) startP = Math.max(1, endP - maxNumbered + 1);
-  const numbers = [];
-  for (let i = startP; i <= endP; i++) numbers.push(i);
-  const rangeStart = total === 0 ? 0 : (page - 1) * (pageSize > 0 ? pageSize : total) + 1;
-  const rangeEnd = pageSize > 0 ? Math.min(page * pageSize, total) : total;
-
-  return (
-    <div className="uidai-pagination">
-      <div className="uidai-pagination__info">
-        Showing {rangeStart}–{rangeEnd} of {total} milestone{total === 1 ? "" : "s"}
-      </div>
-      <div className="uidai-pagination__controls">
-        <button
-          type="button"
-          className="uidai-pagination__btn"
-          onClick={() => onGoto(page - 1)}
-          disabled={page <= 1}
-        >
-          ‹ Prev
-        </button>
-        {startP > 1 && (
-          <>
-            <button type="button" className="uidai-pagination__btn" onClick={() => onGoto(1)}>
-              1
-            </button>
-            {startP > 2 && <span className="uidai-pagination__info">…</span>}
-          </>
-        )}
-        {numbers.map((i) => (
-          <button
-            key={i}
-            type="button"
-            className={`uidai-pagination__btn${
-              i === page ? " uidai-pagination__btn--active" : ""
-            }`}
-            onClick={() => onGoto(i)}
-          >
-            {i}
-          </button>
-        ))}
-        {endP < totalPages && (
-          <>
-            {endP < totalPages - 1 && <span className="uidai-pagination__info">…</span>}
-            <button
-              type="button"
-              className="uidai-pagination__btn"
-              onClick={() => onGoto(totalPages)}
-            >
-              {totalPages}
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className="uidai-pagination__btn"
-          onClick={() => onGoto(page + 1)}
-          disabled={page >= totalPages}
-        >
-          Next ›
-        </button>
-      </div>
-      <div className="uidai-pagination__size">
-        <label htmlFor="uidai-page-size" style={{ fontWeight: 600 }}>
-          Page size:
-        </label>
-        <select
-          id="uidai-page-size"
-          className="uidai-select"
-          value={pageSize}
-          onChange={(e) => onSize(parseInt(e.target.value, 10))}
-        >
-          <option value="5">5</option>
-          <option value="10">10</option>
-          <option value="20">20</option>
-          <option value="0">All</option>
-        </select>
-      </div>
     </div>
   );
 }
