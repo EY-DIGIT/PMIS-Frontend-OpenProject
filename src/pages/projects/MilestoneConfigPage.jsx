@@ -290,7 +290,6 @@ export default function MilestoneConfigPage({ mode }) {
     if (restoring || projectLoading) {
       return (
         <div>
-          <div className="uidai-page-title">Milestone Configuration</div>
           <div className="uidai-card-project">
             <div className="uidai-hint">
               {restoring ? "Restoring your session…" : "Loading project…"}
@@ -301,7 +300,6 @@ export default function MilestoneConfigPage({ mode }) {
     }
     return (
       <div>
-        <div className="uidai-page-title">Milestone Configuration</div>
         <div className="uidai-card-project">
           <div className="uidai-hint">
             {isOnboarding
@@ -1014,8 +1012,7 @@ export default function MilestoneConfigPage({ mode }) {
 
   return (
     <div>
-      <div className="uidai-page-header">
-        <div className="uidai-page-title">Milestone Configuration</div>
+      <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">{topActions}</div>
       </div>
 

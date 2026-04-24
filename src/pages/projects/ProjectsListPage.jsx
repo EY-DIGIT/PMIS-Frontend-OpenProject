@@ -145,7 +145,6 @@ export default function ProjectsListPage() {
 
   return (
     <div>
-      <div className="uidai-page-title">Project Management</div>
       <div className="uidai-card-project">
         <div
           className="uidai-grid"

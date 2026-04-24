@@ -497,7 +497,6 @@ export default function ProjectDetailsPage() {
     if (projectLoading) {
       return (
         <div>
-          <div className="uidai-page-title">Project Details</div>
           <div className="uidai-card-project">
             <div className="uidai-hint">Loading project…</div>
           </div>
@@ -506,7 +505,6 @@ export default function ProjectDetailsPage() {
     }
     return (
       <div>
-        <div className="uidai-page-title">Project Details</div>
         <div className="uidai-card-project">
           <div className="uidai-hint">
             {projectError
@@ -772,8 +770,7 @@ export default function ProjectDetailsPage() {
 
   return (
     <div>
-      <div className="uidai-page-header">
-        <div className="uidai-page-title">Project Details</div>
+      <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
           <button className="uidai-btn" onClick={toggleEdit}>
             {editing ? "Save" : "Edit"}

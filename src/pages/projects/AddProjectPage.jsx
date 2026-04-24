@@ -30,6 +30,21 @@ function makeEmpty() {
   };
 }
 
+/* ChipControl on this page uses vendor NAMES (strings) as its value. When a
+   project is created via the API, the response returns vendors as objects
+   {id, name}, which get persisted into the draft. On Back-navigation we must
+   flatten those back to string names, otherwise React will try to render
+   the object as a child and crash. */
+function normalizeVendorNames(vendors) {
+  return safeArray(vendors)
+    .map((v) => {
+      if (typeof v === "string") return v;
+      if (v && typeof v === "object") return v.name || "";
+      return "";
+    })
+    .filter(Boolean);
+}
+
 /* Merge an arbitrary draft on top of makeEmpty() so that every field the
    component reads is guaranteed to be defined. Prevents `.length` / etc.
    crashes when a persisted or partial draft comes in without, say, a
@@ -49,7 +64,7 @@ function normalizeFormShape(maybeDraft) {
     isPublic: maybeDraft.isPublic || "Yes",
     category: maybeDraft.category || "",
     categoryOtherReason: maybeDraft.categoryOtherReason || "",
-    vendors: safeArray(maybeDraft.vendors),
+    vendors: normalizeVendorNames(maybeDraft.vendors),
     milestones: safeArray(maybeDraft.milestones),
     auditLogs: safeArray(maybeDraft.auditLogs),
     resources: safeArray(maybeDraft.resources)
@@ -94,7 +109,13 @@ export default function AddProjectPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [vendorOptions, setVendorOptions] = useState(() => safeArray(VENDOR_MASTER));
-  const [vendorNameToId, setVendorNameToId] = useState({});
+  const [vendorNameToId, setVendorNameToId] = useState(() => {
+    const seeded = {};
+    safeArray(existingDraft?.vendors).forEach((v) => {
+      if (v && typeof v === "object" && v.name && v.id) seeded[v.name] = v.id;
+    });
+    return seeded;
+  });
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState("");
   const [errorCreated, setErrorCreated] = useState("");
@@ -282,7 +303,6 @@ export default function AddProjectPage() {
 
   return (
     <div>
-      <div className="uidai-page-title">Project Management</div>
       <div className="uidai-card-project">
         <div className="uidai-grid">
           <div className="uidai-field">

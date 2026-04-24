@@ -46,6 +46,35 @@ import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
 
 /* ─────────────────────────────────────────────────────────────
+   PageTitle — route-driven page heading. Rendered above the
+   breadcrumb so the heading sits at the very top of every page.
+   ───────────────────────────────────────────────────────────── */
+function PageTitle() {
+    const { pathname } = useLocation();
+    const segments = pathname.split("/").filter(Boolean);
+    if (segments.length === 0) return null; // hide on Dashboard
+
+    let title = "";
+    if (segments[0] === "projects") {
+        if (segments.length === 1) title = "Project Management";
+        else if (segments[1] === "add" && segments[2] === "config") title = "Milestone Configuration";
+        else if (segments[1] === "add") title = "Project Management";
+        else if (segments[2] === "config") title = "Milestone Configuration";
+        else if (segments[2] === "track") title = "Track Progress";
+        else title = "Project Details";
+    } else if (segments[0] === "vendors") {
+        title = "Vendors";
+    } else if (segments[0] === "users") {
+        title = "Users";
+    } else if (segments[0] === "master") {
+        title = "Master Data";
+    }
+
+    if (!title) return null;
+    return <div className="uidai-page-title">{title}</div>;
+}
+
+/* ─────────────────────────────────────────────────────────────
    Breadcrumbs — auto-built from the current URL.
    Works for every route because it reads useLocation().
    ───────────────────────────────────────────────────────────── */
@@ -119,6 +148,7 @@ export default function MainApp() {
                                 path="/*"
                                 element={
                                     <Layout>
+                                        <PageTitle />
                                         <Breadcrumbs />
                                         <Routes>
                                             <Route path="/" element={<Dashboard />} />

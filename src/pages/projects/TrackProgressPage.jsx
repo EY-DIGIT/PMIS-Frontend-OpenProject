@@ -57,7 +57,6 @@ export default function TrackProgressPage() {
   if (!project) {
     return (
       <div>
-        <div className="uidai-page-title">Track Progress</div>
         <div className="uidai-card-project">
           <div className="uidai-hint">Project not found.</div>
           <div className="uidai-card-project-actions" style={{ justifyContent: "flex-start" }}>
@@ -116,8 +115,7 @@ export default function TrackProgressPage() {
 
   return (
     <div>
-      <div className="uidai-page-header">
-        <div className="uidai-page-title">Track Progress</div>
+      <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
           <button
             type="button"
