@@ -75,6 +75,7 @@ export default function AddProjectPage() {
   const otherCat = !categoryInList && form.category ? form.category : "";
 
   const [otherCategory, setOtherCategory] = useState(otherCat);
+  const [otherCategoryReason, setOtherCategoryReason] = useState(form.categoryOtherReason || "");
   const [selectedCategory, setSelectedCategory] = useState(selCat);
 
   useEffect(() => {
@@ -149,6 +150,7 @@ export default function AddProjectPage() {
       owner: form.owner.trim(),
       category: isOther ? "Others" : selectedCategory,
       category_other: isOther ? otherCategory.trim() : "",
+      category_other_reason: isOther ? otherCategoryReason.trim() : "",
       vendor_ids: vendorIds,
       startDate: toIso(form.startDate),
       endDate: toIso(form.endDate)
@@ -162,6 +164,10 @@ export default function AddProjectPage() {
       selectedCategory === "Others" ? otherCategory.trim() : selectedCategory;
     if (selectedCategory === "Others" && !otherCategory.trim()) {
       uiStore.showMessage("Please specify the category.");
+      return;
+    }
+    if (selectedCategory === "Others" && !otherCategoryReason.trim()) {
+      uiStore.showMessage("Please provide a reason for the 'Others' category.");
       return;
     }
     if (!form.projectName.trim() || !form.owner.trim() || !form.startDate || !form.endDate) {
@@ -223,6 +229,7 @@ export default function AddProjectPage() {
         description: form.description.trim(),
         owner: form.owner.trim(),
         category: finalCat,
+        categoryOtherReason: selectedCategory === "Others" ? otherCategoryReason.trim() : "",
         baselineId: "-",
         status: "DRAFT",
         milestones: safeArray(form.milestones),
@@ -347,16 +354,32 @@ export default function AddProjectPage() {
           </div>
 
           {selectedCategory === "Others" && (
-            <div className="uidai-field">
-              <label className="uidai-field__label">
-                Specify Category <span className="uidai-required-project">*</span>
-              </label>
-              <input
-                className="uidai-input"
-                value={otherCategory}
-                onChange={(e) => setOtherCategory(e.target.value)}
-              />
-            </div>
+            <>
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  Specify Category <span className="uidai-required-project">*</span>
+                </label>
+                <input
+                  className="uidai-input"
+                  value={otherCategory}
+                  onChange={(e) => setOtherCategory(e.target.value)}
+                />
+              </div>
+              <div className="uidai-field uidai-grid__full">
+                <label className="uidai-field__label">
+                  Reason for 'Others' <span className="uidai-required-project">*</span>
+                </label>
+                <textarea
+                  className="uidai-textarea"
+                  maxLength={1000}
+                  value={otherCategoryReason}
+                  onChange={(e) => setOtherCategoryReason(e.target.value)}
+                />
+                <div className="uidai-char-count">
+                  {1000 - otherCategoryReason.length} characters remaining
+                </div>
+              </div>
+            </>
           )}
 
           <div className="uidai-field uidai-grid__full">

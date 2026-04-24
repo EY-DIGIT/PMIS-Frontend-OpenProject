@@ -82,6 +82,7 @@ function mapApiProject(p) {
     actualEndDate: stripTime(p.actualEndDate),
     category: p.category || "",
     categoryOther: p.categoryOther || "",
+    categoryOtherReason: p.categoryOtherReason || "",
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     isVersion: !!p.isVersion,
     versionOf: p.versionOf || null,
@@ -113,6 +114,7 @@ function mergeIntoStore(mapped) {
           actualEndDate: mapped.actualEndDate,
           category: mapped.category,
           categoryOther: mapped.categoryOther,
+          categoryOtherReason: mapped.categoryOtherReason,
           vendors: mapped.vendors,
           isVersion: mapped.isVersion,
           versionOf: mapped.versionOf,
@@ -142,6 +144,7 @@ export default function ProjectDetailsPage() {
   const [form, setForm] = useState(null);
   const [selCat, setSelCat] = useState("");
   const [otherCat, setOtherCat] = useState("");
+  const [otherCatReason, setOtherCatReason] = useState("");
   const [publishOpen, setPublishOpen] = useState(false);
   const [versionOpen, setVersionOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -292,6 +295,7 @@ export default function ProjectDetailsPage() {
     const catInList = CATEGORY_OPTIONS.includes(project.category || "");
     setSelCat(catInList ? project.category : project.category ? "Others" : "MSAP");
     setOtherCat(!catInList && project.category ? project.category : "");
+    setOtherCatReason(project.categoryOtherReason || "");
     setForm({
       projectName: project.projectName,
       description: project.description || "",
@@ -359,6 +363,7 @@ export default function ProjectDetailsPage() {
         owner: (form.owner || "").trim(),
         category: finalCat || "",
         category_other: finalCat === "Others" ? (otherCat || "").trim() : "",
+        category_other_reason: finalCat === "Others" ? (otherCatReason || "").trim() : "",
         vendor_ids: resolveVendorIds(form.vendors),
         startDate: toIsoDate(form.startDate),
         endDate: toIsoDate(form.endDate),
@@ -539,6 +544,10 @@ export default function ProjectDetailsPage() {
       uiStore.showError("Please specify the category.");
       return;
     }
+    if (canEditCat && selCat === "Others" && !(otherCatReason || "").trim()) {
+      uiStore.showError("Please provide a reason for the 'Others' category.");
+      return;
+    }
     if (!form.owner.trim() || (!isVersion && (!form.projectName.trim() || !form.startDate || !form.endDate))) {
       uiStore.showError("Fill required fields.");
       return;
@@ -570,6 +579,7 @@ export default function ProjectDetailsPage() {
         target.endDate = form.endDate;
         target.isPublic = form.isPublic;
         target.category = finalCat;
+        target.categoryOtherReason = finalCat === "Others" ? (otherCatReason || "").trim() : "";
         target.vendors = rebuiltVendors;
       }
       addAudit(target, "Update Project Details", before, deepClone(target));
@@ -928,13 +938,23 @@ export default function ProjectDetailsPage() {
                   ))}
                 </select>
                 {selCat === "Others" && (
-                  <input
-                    className="uidai-input"
-                    style={{ marginTop: 6 }}
-                    placeholder="Specify category"
-                    value={otherCat}
-                    onChange={(e) => setOtherCat(e.target.value)}
-                  />
+                  <>
+                    <input
+                      className="uidai-input"
+                      style={{ marginTop: 6 }}
+                      placeholder="Specify category"
+                      value={otherCat}
+                      onChange={(e) => setOtherCat(e.target.value)}
+                    />
+                    <textarea
+                      className="uidai-textarea"
+                      style={{ marginTop: 6 }}
+                      maxLength={1000}
+                      placeholder="Reason for 'Others' *"
+                      value={otherCatReason}
+                      onChange={(e) => setOtherCatReason(e.target.value)}
+                    />
+                  </>
                 )}
               </>
             ) : (

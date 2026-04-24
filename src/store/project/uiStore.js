@@ -54,6 +54,16 @@ export const uiStore = {
     });
   },
 
+  showError(msg, onOk) {
+    const clean = String(msg ?? "").trim().replace(/[.]+$/g, "");
+    setState({
+      messageOpen: true,
+      messageText: clean,
+      messageIsError: true,
+      messageOnOk: onOk || null
+    });
+  },
+
   closeMessage() {
     const onOk = state.messageOnOk;
     setState({ messageOpen: false, messageText: "", messageOnOk: null });

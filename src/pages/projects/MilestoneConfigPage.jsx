@@ -134,6 +134,7 @@ function mapApiProject(p) {
     actualEndDate: stripTime(p.actualEndDate),
     category: p.category || "",
     categoryOther: p.categoryOther || "",
+    categoryOtherReason: p.categoryOtherReason || "",
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     isVersion: !!p.isVersion,
     versionOf: p.versionOf || null,
