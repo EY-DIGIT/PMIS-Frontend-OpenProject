@@ -107,7 +107,6 @@ function stripTime(iso) {
   return idx > 0 ? s.slice(0, idx) : s;
 }
 
-/* Pull a friendly message out of a server error body. */
 async function readErrorBody(res) {
   const body = await res.text().catch(() => "");
   if (!body) return `Request failed (${res.status})`;
@@ -167,7 +166,8 @@ function mapApiMilestoneToNode(m) {
   };
 }
 
-/* ─── API activity → local node shape ─── */
+/* ─── API activity → local node shape. Stashes raw server type/resourceMode
+   so PATCH can round-trip them even when the UI hasn't changed the type. */
 function mapApiActivityToNode(a) {
   const apiType = String(a?.type || "").toLowerCase();
   let uiType = "Standard Type";
@@ -184,6 +184,8 @@ function mapApiActivityToNode(a) {
     uid: generateNodeUid("a"),
     apiId: a.id || "",
     id: a.id || "",
+    apiType: apiType || "standard",
+    apiResourceMode: a.resourceMode || null,
     name: a.name || "",
     description: a.description || "",
     startDate: toDateInputValue(a.startDate),
@@ -239,7 +241,6 @@ function extractListElements(raw) {
   return Array.isArray(elements) ? elements : [];
 }
 
-/* Activity endpoint resolver — which sub-path to POST to based on UI state. */
 function activityEndpointFor(formData) {
   const t = String(formData?.type || "").toLowerCase();
   if (t.includes("resource")) {
@@ -247,6 +248,20 @@ function activityEndpointFor(formData) {
   }
   if (t.includes("transactional")) return "transactional";
   return "standard";
+}
+
+/* UI type + resourceEntryType → server's (type, resourceMode) pair.
+   Used by PATCH activity since the single endpoint takes both. */
+function activityServerTypePair(formData) {
+  const t = String(formData?.type || "").toLowerCase();
+  if (t.includes("resource")) {
+    return {
+      type: "resource",
+      resourceMode: formData.resourceEntryType === "count" ? "count" : "details"
+    };
+  }
+  if (t.includes("transactional")) return { type: "transactional", resourceMode: null };
+  return { type: "standard", resourceMode: null };
 }
 
 export default function MilestoneConfigPage({ mode }) {
@@ -330,7 +345,6 @@ export default function MilestoneConfigPage({ mode }) {
     }
   }
 
-  /* ─── Restore onboarding draft ─── */
   useEffect(() => {
     if (!isOnboarding) {
       setRestoring(false);
@@ -363,7 +377,6 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Persist onboarding draft ─── */
   useEffect(() => {
     if (isOnboarding && project && project.projectId) {
       persistOnboardingDraft(project);
@@ -371,7 +384,6 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnboarding, pid, project && project.projectName]);
 
-  /* ─── Fetch project from API ─── */
   useEffect(() => {
     if (isOnboarding) return;
     if (!projectId) return;
@@ -445,7 +457,6 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isOnboarding]);
 
-  /* ─── GET /api/v3/milestones/{id}/activities ─── */
   async function loadActivitiesForMilestone(milestoneApiId) {
     if (!milestoneApiId) return [];
     const token = getToken();
@@ -473,7 +484,6 @@ export default function MilestoneConfigPage({ mode }) {
     }
   }
 
-  /* ─── Load milestones, then activities for each ─── */
   async function loadMilestonesFromApi() {
     if (!pid) return;
     const token = getToken();
@@ -523,10 +533,8 @@ export default function MilestoneConfigPage({ mode }) {
         target.milestones = mapped;
         try { normalizeProject(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
-        // Render milestones first (empty activity rows), then fill activities
         commitUpdate(target);
 
-        // Phase 2: fetch activities for every milestone in parallel.
         if (mapped.length > 0) {
           const activityLists = await Promise.all(
             mapped.map((m) =>
@@ -681,7 +689,7 @@ export default function MilestoneConfigPage({ mode }) {
     setModalCtx(null);
   }
 
-  /* ─── POST /milestones/create ─── */
+  /* ─── Milestone APIs ─── */
   async function createMilestoneApi(formData) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -722,7 +730,6 @@ export default function MilestoneConfigPage({ mode }) {
     return raw?.data ?? raw ?? {};
   }
 
-  /* ─── PATCH /milestones/{id} ─── */
   async function updateMilestoneApi(milestoneServerId, formData) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -763,7 +770,6 @@ export default function MilestoneConfigPage({ mode }) {
     return raw?.data ?? raw ?? {};
   }
 
-  /* ─── DELETE /milestones/{id} ─── */
   async function deleteMilestoneApi(milestoneServerId) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -792,7 +798,6 @@ export default function MilestoneConfigPage({ mode }) {
     return true;
   }
 
-  /* ─── POST /projects/{id}/save ─── */
   async function saveProjectApi(projectServerId) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -824,8 +829,8 @@ export default function MilestoneConfigPage({ mode }) {
     return raw?.data ?? raw ?? {};
   }
 
-  /* ─── POST /milestones/{id}/activities/{kind}/create
-     Four endpoints — standard, transactional, resource/count, resource/details. */
+  /* ─── Activity APIs ─── */
+
   async function createActivityApi(milestoneApiId, formData) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -850,12 +855,8 @@ export default function MilestoneConfigPage({ mode }) {
       payload = { ...base };
     } else if (endpoint === "resource/count") {
       const rc = formData.resourceCount || {};
-      payload = {
-        ...base,
-        resourceCount: parseInt(rc.count, 10) || 1
-      };
+      payload = { ...base, resourceCount: parseInt(rc.count, 10) || 1 };
     } else {
-      // resource/details
       const rd = formData.resourceDetails || {};
       payload = {
         ...base,
@@ -900,6 +901,108 @@ export default function MilestoneConfigPage({ mode }) {
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
+  }
+
+  /* PATCH /api/v3/activities/{id} — single endpoint, takes type + resourceMode
+     + full payload. Build based on UI state. */
+  async function updateActivityApi(activityServerId, formData) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const { type, resourceMode } = activityServerTypePair(formData);
+
+    const payload = {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      type,
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
+      actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
+      position: 0,
+      status: mapStatusForApi(formData.status || "Not Completed"),
+      dependsOn: []
+    };
+
+    if (type === "resource") {
+      payload.resourceMode = resourceMode;
+      if (resourceMode === "count") {
+        const rc = formData.resourceCount || {};
+        payload.resourceCount = parseInt(rc.count, 10) || 1;
+      } else {
+        const rd = formData.resourceDetails || {};
+        payload.resource = {
+          resourceName: rd.resourceName || "",
+          onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
+          actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
+          offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
+          actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
+          position: rd.position || "",
+          designation: rd.designation || "",
+          jobRole: rd.jobRole || "",
+          qualification: rd.qualification || "",
+          experienceYears: parseFloat(rd.experience) || 0,
+          typeOfResourceId: rd.resType || "",
+          division: rd.division || "",
+          divisionOther: ""
+        };
+      }
+    }
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
+  }
+
+  /* DELETE /api/v3/activities/{id} */
+  async function deleteActivityApi(activityServerId) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const res = await fetch(
+      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          accept: "application/json",
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok && res.status !== 204) {
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
+    }
+    return true;
   }
 
   function saveNodeFromModal(formData) {
@@ -1026,7 +1129,7 @@ export default function MilestoneConfigPage({ mode }) {
       !!milestoneServerId &&
       !!getToken();
 
-    /* ── Activity remote branch — parent milestone's server UUID ── */
+    /* ── Activity remote branches ── */
     let activityParentMilestoneApiId = null;
     if (modeAction === "add" && kind === "activity" && parentUid) {
       const mLoc = locateNode(project, parentUid);
@@ -1036,6 +1139,17 @@ export default function MilestoneConfigPage({ mode }) {
       modeAction === "add" &&
       kind === "activity" &&
       !!activityParentMilestoneApiId &&
+      !!getToken();
+
+    let activityServerId = null;
+    if (modeAction === "edit" && kind === "activity" && nodeUid) {
+      const loc = locateNode(project, nodeUid);
+      activityServerId = loc && loc.node ? loc.node.apiId || null : null;
+    }
+    const shouldUpdateActivityRemotely =
+      modeAction === "edit" &&
+      kind === "activity" &&
+      !!activityServerId &&
       !!getToken();
 
     const doLocal = (apiData) => {
@@ -1253,6 +1367,24 @@ export default function MilestoneConfigPage({ mode }) {
       return;
     }
 
+    if (shouldUpdateActivityRemotely) {
+      updateActivityApi(activityServerId, formData)
+        .then((updated) => {
+          doLocal(updated);
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to update activity");
+        });
+      return;
+    }
+
     const apiCall = (() => {
       if (isOnboarding || !tokenStore.get()) return null;
       if (modeAction === "add") {
@@ -1319,10 +1451,16 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.showMessage("Removed");
     };
 
+    /* ── Resolve remote delete by kind ── */
     const milestoneServerId =
       kind === "milestone" && loc.node ? loc.node.apiId || null : null;
+    const activityServerIdForDelete =
+      kind === "activity" && loc.node ? loc.node.apiId || null : null;
+
     const shouldDeleteMilestoneRemotely =
       kind === "milestone" && !!milestoneServerId && !!getToken();
+    const shouldDeleteActivityRemotely =
+      kind === "activity" && !!activityServerIdForDelete && !!getToken();
 
     if (shouldDeleteMilestoneRemotely) {
       deleteMilestoneApi(milestoneServerId)
@@ -1338,6 +1476,24 @@ export default function MilestoneConfigPage({ mode }) {
             return;
           }
           uiStore.showMessage(err?.message || "Failed to delete milestone");
+        });
+      return;
+    }
+
+    if (shouldDeleteActivityRemotely) {
+      deleteActivityApi(activityServerIdForDelete)
+        .then(() => {
+          doLocal();
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to delete activity");
         });
       return;
     }

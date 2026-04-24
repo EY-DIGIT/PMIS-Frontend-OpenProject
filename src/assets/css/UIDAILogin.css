@@ -51,11 +51,14 @@
 .uidai-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10, 30, 80, 0.75);
+  /* background: rgba(10, 30, 80, 0.75); */
   display: flex;
   justify-content: flex-end;
   align-items: center;
   padding: 40px;
+  background-image: url("../background.jpg");
+  background-size: cover;
+  background-position: center;
 }
 
 /* ===== CARD ===== */
