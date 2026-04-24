@@ -17,11 +17,10 @@ import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
 import CreateVersionModal from "../../components/projects/modals/CreateVersionModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
-import { tokenStore } from "../../api/client";
+import { tokenStore, API_BASE } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
+import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
-
-const API_BASE = "http://10.1.131.199:8000";
 
 function stripTime(iso) {
   if (!iso) return "";
@@ -185,7 +184,7 @@ export default function ProjectDetailsPage() {
       const token = getToken();
       if (!token) return;
       try {
-        const res = await fetch(`${API_BASE}/api/v3/vendors`, {
+        const res = await fetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
           method: "GET",
           headers: {
             accept: "application/json",
@@ -241,7 +240,7 @@ export default function ProjectDetailsPage() {
       setProjectError("");
       try {
         const res = await fetch(
-          `${API_BASE}/api/v3/projects/${encodeURIComponent(projectId)}`,
+          `${API_BASE}${ENDPOINTS.projects.get(projectId)}`,
           {
             method: "GET",
             headers: {
@@ -375,7 +374,7 @@ export default function ProjectDetailsPage() {
     }
 
     const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}`,
+      `${API_BASE}${ENDPOINTS.projects.update(projectServerId)}`,
       {
         method: "PATCH",
         headers: {
@@ -407,7 +406,7 @@ export default function ProjectDetailsPage() {
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
     const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/publish`,
+      `${API_BASE}${ENDPOINTS.projects.publish(projectServerId)}`,
       {
         method: "POST",
         headers: {
@@ -439,7 +438,7 @@ export default function ProjectDetailsPage() {
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
     const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/versions/create`,
+      `${API_BASE}${ENDPOINTS.projects.createVersion(projectServerId)}`,
       {
         method: "POST",
         headers: {
@@ -471,7 +470,7 @@ export default function ProjectDetailsPage() {
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
     const res = await fetch(
-      `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}`,
+      `${API_BASE}${ENDPOINTS.projects.remove(projectServerId)}`,
       {
         method: "DELETE",
         headers: {

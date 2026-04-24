@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ENDPOINTS } from './endpoint';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
@@ -22,29 +23,29 @@ function fromApi(u) {
 }
 
 export async function list({ offset = 1, pageSize = 50, status } = {}) {
-  const res = await api.get('/api/v3/users', { query: { offset, pageSize, status } });
+  const res = await api.get(ENDPOINTS.users.list, { query: { offset, pageSize, status } });
   return unwrap(res).map(fromApi);
 }
 
 export async function get(id) {
-  const res = await api.get(`/api/v3/users/${id}`);
+  const res = await api.get(ENDPOINTS.users.get(id));
   return fromApi(res);
 }
 
 export async function create(body) {
-  const res = await api.post('/api/v3/users/create', body);
+  const res = await api.post(ENDPOINTS.users.create, body);
   return fromApi(res);
 }
 
 export async function update(id, patch) {
-  const res = await api.patch(`/api/v3/users/${id}`, patch);
+  const res = await api.patch(ENDPOINTS.users.update(id), patch);
   return fromApi(res);
 }
 
 export async function updatePassword(id, password) {
-  return api.patch(`/api/v3/users/${id}/password`, { password });
+  return api.patch(ENDPOINTS.users.updatePassword(id), { password });
 }
 
 export async function remove(id) {
-  return api.del(`/api/v3/users/${id}`);
+  return api.del(ENDPOINTS.users.remove(id));
 }

@@ -1,4 +1,10 @@
-const BASE = import.meta.env.VITE_API_BASE_URL || 'http://10.1.131.199:8000/';
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL || 'http://10.1.131.199:8000/';
+
+// Exported for modules that use raw `fetch` (e.g. milestoneConfigApi, project pages).
+// Normalized to NOT end with a slash so callers can do `${API_BASE}${ENDPOINTS.x}`.
+export const API_BASE = RAW_BASE.replace(/\/+$/, '');
+
+const BASE = RAW_BASE;
 
 const TOKEN_KEY = 'pmis_token';
 const REFRESH_KEY = 'pmis_refresh_token';

@@ -7,8 +7,7 @@ import { safeArray } from "../../utils/project/helpers";
 import ChipControl from "../../components/projects/ChipControl";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
-// Move this to an env / config file later
-const API_BASE = "http://10.1.131.199:8000";
+import { API_BASE } from "../../api/client";
 
 function makeEmpty() {
   return {
@@ -119,7 +118,7 @@ export default function AddProjectPage() {
       setVendorsLoading(true);
       setVendorsError("");
       try {
-        const res = await fetch(`${API_BASE}/api/v3/vendors`, {
+        const res = await fetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
           method: "GET",
           headers: { accept: "application/json", Authorization: `Bearer ${token}` }
         });
@@ -227,7 +226,7 @@ export default function AddProjectPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}${ENDPOINTS.create}`, {
+      const res = await fetch(`${API_BASE}${ENDPOINTS.projects.create}`, {
         method: "POST",
         headers: {
           accept: "application/json",
@@ -312,7 +311,7 @@ export default function AddProjectPage() {
 
           <div className="uidai-field">
             <label className="uidai-field__label">Status</label>
-            <input className="uidai-input" value="DRAFT" disabled />
+            <input className="uidai-input" value="NEW" disabled />
           </div>
 
           <div className="uidai-field">

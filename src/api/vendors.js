@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ENDPOINTS } from './endpoint';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
@@ -26,16 +27,16 @@ function fromApi(v) {
 }
 
 export async function list() {
-  const res = await api.get('/api/v3/vendors');
+  const res = await api.get(ENDPOINTS.vendors.list);
   return unwrap(res).map(fromApi);
 }
 
 export async function create({ name, description, active = true }) {
-  const res = await api.post('/api/v3/vendors/create', { name, description, active });
+  const res = await api.post(ENDPOINTS.vendors.create, { name, description, active });
   return fromApi(res);
 }
 
 export async function update(id, patch) {
-  const res = await api.patch(`/api/v3/vendors/${id}`, patch);
+  const res = await api.patch(ENDPOINTS.vendors.update(id), patch);
   return fromApi(res);
 }

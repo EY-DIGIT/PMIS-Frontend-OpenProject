@@ -9,6 +9,8 @@
    - Returns the unwrapped `data` payload (server wraps as {data, error, status})
    ══════════════════════════════════════════════════════════════════ */
 
+import { API_BASE } from "./client";
+import { ENDPOINTS } from "./endpoint";
 import { getToken, logout } from "./auth";
 import {
   readErrorBody,
@@ -27,7 +29,7 @@ import {
   extractListElements
 } from "../utils/project/milestoneConfigHelpers";
 
-const API_BASE = "http://10.1.131.199:8000";
+const LIST_QS = "?offset=1&pageSize=20&includeDeleted=false";
 
 function jsonHeaders(token) {
   return {
@@ -67,6 +69,57 @@ async function throwHttp(res) {
   throw new Error(msg);
 }
 
+function url(path) {
+  return `${API_BASE}${path}`;
+}
+
+/* GET with standard 401/error handling. Used for most reads. */
+async function apiGet(path) {
+  const token = requireToken();
+  const res = await fetch(url(path), { method: "GET", headers: getHeaders(token) });
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return res.json().catch(() => ({}));
+}
+
+/* GET that returns [] on any failure — used for child lists where
+   a missing parent shouldn't crash the UI. */
+async function apiGetOrEmpty(path) {
+  const token = getToken();
+  if (!token) return [];
+  try {
+    const res = await fetch(url(path), { method: "GET", headers: getHeaders(token) });
+    if (!res.ok) return [];
+    return await res.json().catch(() => ({}));
+  } catch {
+    return [];
+  }
+}
+
+async function apiSend(method, path, body) {
+  const token = requireToken();
+  const res = await fetch(url(path), {
+    method,
+    headers: jsonHeaders(token),
+    body: JSON.stringify(body ?? {})
+  });
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+async function apiDelete(path) {
+  const token = requireToken();
+  const res = await fetch(url(path), { method: "DELETE", headers: getHeaders(token) });
+  if (res.status === 401) throwAuth();
+  if (!res.ok && res.status !== 204) await throwHttp(res);
+  return true;
+}
+
+function sortByPosition(list) {
+  return list.slice().sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0));
+}
+
 /* Common base fields for activity/task create & update. Tasks and
    activities share the same contract for dates, dependsOn, position. */
 function buildActivityLikeBase(formData) {
@@ -82,127 +135,64 @@ function buildActivityLikeBase(formData) {
   };
 }
 
+function buildMilestonePayload(project, formData) {
+  return {
+    name: formData.name.trim(),
+    description: (formData.description || "").trim(),
+    startDate: toMilestoneIsoStart(formData.startDate),
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    status: mapStatusForApi(formData.status || "Not Completed"),
+    vendorIds: resolveVendorIds(project, formData.vendor)
+  };
+}
+
 /* ════════════════ Project APIs ════════════════ */
 
 export async function loadProjectById(projectId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/projects/${encodeURIComponent(projectId)}`,
-    { method: "GET", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  const raw = await res.json().catch(() => ({}));
+  const raw = await apiGet(ENDPOINTS.projects.get(projectId));
   return mapApiProject(raw?.data ?? raw);
 }
 
 export async function saveProjectApi(projectServerId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/projects/${encodeURIComponent(projectServerId)}/save`,
-    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify({}) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok && res.status !== 204) await throwHttp(res);
-  return parseData(res);
+  return apiSend("POST", ENDPOINTS.projects.save(projectServerId), {});
 }
 
 /* ════════════════ Milestone APIs ════════════════ */
 
 export async function loadMilestonesForProject(projectId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/projects/${encodeURIComponent(projectId)}/milestones`,
-    { method: "GET", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  const raw = await res.json().catch(() => ({}));
-  return extractListElements(raw)
-    .slice()
-    .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-    .map(mapApiMilestoneToNode);
+  const raw = await apiGet(ENDPOINTS.projects.milestones(projectId));
+  return sortByPosition(extractListElements(raw)).map(mapApiMilestoneToNode);
 }
 
 export async function createMilestoneApi(project, formData) {
-  const token = requireToken();
-
-  const payload = {
-    name: formData.name.trim(),
-    description: (formData.description || "").trim(),
-    startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate),
-    status: mapStatusForApi(formData.status || "Not Completed"),
-    vendorIds: resolveVendorIds(project, formData.vendor)
-  };
-
-  const res = await fetch(
-    `${API_BASE}/api/v3/projects/${encodeURIComponent(project.projectId)}/milestones/create`,
-    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  return apiSend(
+    "POST",
+    ENDPOINTS.projects.milestoneCreate(project.projectId),
+    buildMilestonePayload(project, formData)
   );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
 }
 
 export async function updateMilestoneApi(milestoneServerId, formData, project) {
-  const token = requireToken();
-
-  const payload = {
-    name: formData.name.trim(),
-    description: (formData.description || "").trim(),
-    startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate),
-    status: mapStatusForApi(formData.status || "Not Completed"),
-    vendorIds: resolveVendorIds(project, formData.vendor)
-  };
-
-  const res = await fetch(
-    `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
-    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
+  return apiSend(
+    "PATCH",
+    ENDPOINTS.milestones.update(milestoneServerId),
+    buildMilestonePayload(project, formData)
   );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
 }
 
 export async function deleteMilestoneApi(milestoneServerId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneServerId)}`,
-    { method: "DELETE", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok && res.status !== 204) await throwHttp(res);
-  return true;
+  return apiDelete(ENDPOINTS.milestones.remove(milestoneServerId));
 }
 
 /* ════════════════ Activity APIs ════════════════ */
 
 export async function loadActivitiesForMilestone(milestoneApiId) {
   if (!milestoneApiId) return [];
-  const token = getToken();
-  if (!token) return [];
-
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities?offset=1&pageSize=20&includeDeleted=false`,
-      { method: "GET", headers: getHeaders(token) }
-    );
-    if (!res.ok) return [];
-    const raw = await res.json().catch(() => ({}));
-    return extractListElements(raw)
-      .slice()
-      .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-      .map(mapApiActivityToNode);
-  } catch (e) {
-    return [];
-  }
+  const raw = await apiGetOrEmpty(ENDPOINTS.milestones.activities(milestoneApiId) + LIST_QS);
+  return sortByPosition(extractListElements(raw)).map(mapApiActivityToNode);
 }
 
 export async function createActivityApi(milestoneApiId, formData) {
-  const token = requireToken();
-
   const endpoint = activityEndpointFor(formData);
   const base = buildActivityLikeBase(formData);
 
@@ -216,20 +206,14 @@ export async function createActivityApi(milestoneApiId, formData) {
     payload = { ...base, ...buildResourcePayload(formData) };
   }
 
-  const url = `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities/${endpoint}/create`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: jsonHeaders(token),
-    body: JSON.stringify(payload)
-  });
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend(
+    "POST",
+    ENDPOINTS.milestones.activityCreate(milestoneApiId, endpoint),
+    payload
+  );
 }
 
 export async function updateActivityApi(activityServerId, formData) {
-  const token = requireToken();
-
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
@@ -243,56 +227,24 @@ export async function updateActivityApi(activityServerId, formData) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  const res = await fetch(
-    `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
-    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend("PATCH", ENDPOINTS.activities.update(activityServerId), payload);
 }
 
 export async function deleteActivityApi(activityServerId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/activities/${encodeURIComponent(activityServerId)}`,
-    { method: "DELETE", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok && res.status !== 204) await throwHttp(res);
-  return true;
+  return apiDelete(ENDPOINTS.activities.remove(activityServerId));
 }
 
 /* ════════════════ Task APIs ════════════════ */
 
-/* GET /api/v3/activities/{id}/tasks — returns mapped task nodes. */
 export async function loadTasksForActivity(activityApiId) {
   if (!activityApiId) return [];
-  const token = getToken();
-  if (!token) return [];
-
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/v3/activities/${encodeURIComponent(activityApiId)}/tasks?offset=1&pageSize=20&includeDeleted=false`,
-      { method: "GET", headers: getHeaders(token) }
-    );
-    if (!res.ok) return [];
-    const raw = await res.json().catch(() => ({}));
-    return extractListElements(raw)
-      .slice()
-      .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-      .map(mapApiTaskToNode);
-  } catch (e) {
-    return [];
-  }
+  const raw = await apiGetOrEmpty(ENDPOINTS.activities.tasks(activityApiId) + LIST_QS);
+  return sortByPosition(extractListElements(raw)).map(mapApiTaskToNode);
 }
 
-/* POST /api/v3/activities/{id}/tasks/create
-   Single endpoint — type is auto-derived server-side from resourceMode.
+/* Single create endpoint — type is auto-derived server-side from resourceMode.
    We send resourceMode + resourceCount/resource for Resource Type, else base. */
 export async function createTaskApi(activityApiId, formData) {
-  const token = requireToken();
-
   const { type, resourceMode } = activityServerTypePair(formData);
   const payload = buildActivityLikeBase(formData);
 
@@ -301,19 +253,11 @@ export async function createTaskApi(activityApiId, formData) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  const res = await fetch(
-    `${API_BASE}/api/v3/activities/${encodeURIComponent(activityApiId)}/tasks/create`,
-    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(payload) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend("POST", ENDPOINTS.activities.taskCreate(activityApiId), payload);
 }
 
-/* PATCH /api/v3/tasks/{id} — full payload, same shape as activity PATCH. */
+/* Full payload, same shape as activity PATCH. */
 export async function updateTaskApi(taskServerId, formData) {
-  const token = requireToken();
-
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
@@ -326,57 +270,24 @@ export async function updateTaskApi(taskServerId, formData) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  const res = await fetch(
-    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskServerId)}`,
-    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend("PATCH", ENDPOINTS.tasks.update(taskServerId), payload);
 }
 
-/* DELETE /api/v3/tasks/{id} */
 export async function deleteTaskApi(taskServerId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskServerId)}`,
-    { method: "DELETE", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok && res.status !== 204) await throwHttp(res);
-  return true;
+  return apiDelete(ENDPOINTS.tasks.remove(taskServerId));
 }
 
 /* ════════════════ Subtask APIs ════════════════ */
 
-/* GET /api/v3/tasks/{id}/subtasks — returns mapped subtask nodes. */
 export async function loadSubtasksForTask(taskApiId) {
   if (!taskApiId) return [];
-  const token = getToken();
-  if (!token) return [];
-
-  try {
-    const res = await fetch(
-      `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskApiId)}/subtasks?offset=1&pageSize=20&includeDeleted=false`,
-      { method: "GET", headers: getHeaders(token) }
-    );
-    if (!res.ok) return [];
-    const raw = await res.json().catch(() => ({}));
-    return extractListElements(raw)
-      .slice()
-      .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
-      .map(mapApiSubtaskToNode);
-  } catch (e) {
-    return [];
-  }
+  const raw = await apiGetOrEmpty(ENDPOINTS.tasks.subtasks(taskApiId) + LIST_QS);
+  return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
 }
 
-/* POST /api/v3/tasks/{id}/subtasks/create
-   Create payload is deliberately minimal — only name, description, and dates.
+/* Create payload is deliberately minimal — only name, description, and dates.
    Type/resource fields are NOT accepted by the create endpoint (only by PATCH). */
 export async function createSubtaskApi(taskApiId, formData) {
-  const token = requireToken();
-
   const payload = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
@@ -385,20 +296,11 @@ export async function createSubtaskApi(taskApiId, formData) {
     actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
     actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null
   };
-
-  const res = await fetch(
-    `${API_BASE}/api/v3/tasks/${encodeURIComponent(taskApiId)}/subtasks/create`,
-    { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(payload) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend("POST", ENDPOINTS.tasks.subtaskCreate(taskApiId), payload);
 }
 
-/* PATCH /api/v3/subtasks/{id} — full payload same as task/activity PATCH. */
+/* Full payload same as task/activity PATCH. */
 export async function updateSubtaskApi(subtaskServerId, formData) {
-  const token = requireToken();
-
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
@@ -411,23 +313,9 @@ export async function updateSubtaskApi(subtaskServerId, formData) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  const res = await fetch(
-    `${API_BASE}/api/v3/subtasks/${encodeURIComponent(subtaskServerId)}`,
-    { method: "PATCH", headers: jsonHeaders(token), body: JSON.stringify(payload) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok) await throwHttp(res);
-  return parseData(res);
+  return apiSend("PATCH", ENDPOINTS.subtasks.update(subtaskServerId), payload);
 }
 
-/* DELETE /api/v3/subtasks/{id} */
 export async function deleteSubtaskApi(subtaskServerId) {
-  const token = requireToken();
-  const res = await fetch(
-    `${API_BASE}/api/v3/subtasks/${encodeURIComponent(subtaskServerId)}`,
-    { method: "DELETE", headers: getHeaders(token) }
-  );
-  if (res.status === 401) throwAuth();
-  if (!res.ok && res.status !== 204) await throwHttp(res);
-  return true;
+  return apiDelete(ENDPOINTS.subtasks.remove(subtaskServerId));
 }

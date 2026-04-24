@@ -5,8 +5,8 @@ import { uiStore } from "../../store/project/uiStore";
 import { formatDateDisplay } from "../../utils/project/helpers";
 import { hydrateProjects } from "../../store/project/apiSync";
 import { getToken, logout } from "../../api/auth";
-
-const API_BASE = "http://10.1.131.199:8000";
+import { API_BASE } from "../../api/client";
+import { ENDPOINTS } from "../../api/endpoint";
 
 /* "2026-04-24T23:59:59" → "2026-04-24" */
 function stripTime(iso) {
@@ -81,7 +81,7 @@ export default function ProjectsListPage() {
       setError("");
       try {
         const res = await fetch(
-          `${API_BASE}/api/v3/projects?offset=1&pageSize=20`,
+          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=20`,
           {
             method: "GET",
             headers: {

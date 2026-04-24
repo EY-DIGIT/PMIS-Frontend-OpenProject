@@ -1,4 +1,5 @@
 import { api, tokenStore } from './client';
+import { ENDPOINTS } from './endpoint';
 
 const TOKEN_KEY = 'auth_token';
 const REFRESH_KEY = 'auth_refresh_token';
@@ -6,7 +7,7 @@ const USER_KEY = 'auth_user';
 
 export async function login({ login, password }) {
   const res = await api.post(
-    '/api/v3/users/login',
+    ENDPOINTS.auth.login,
     { login, password },
     { auth: false }
   );
@@ -19,7 +20,6 @@ export async function login({ login, password }) {
 
   if (!token) throw new Error('Login response missing token');
 
-  // keep your existing store + persist to localStorage
   tokenStore.set(token);
   localStorage.setItem(TOKEN_KEY, token);
 
@@ -36,11 +36,11 @@ export async function login({ login, password }) {
 }
 
 export async function me() {
-  return api.get('/api/v3/users/me');
+  return api.get(ENDPOINTS.auth.me);
 }
 
 export async function introspect() {
-  return api.post('/api/v3/users/introspect', {});
+  return api.post(ENDPOINTS.auth.introspect, {});
 }
 
 export function logout() {
@@ -51,7 +51,6 @@ export function logout() {
 }
 
 export function getToken() {
-  // prefer in-memory store; fall back to localStorage (page reloads, new tabs)
   try {
     return tokenStore.get() || localStorage.getItem(TOKEN_KEY) || '';
   } catch {

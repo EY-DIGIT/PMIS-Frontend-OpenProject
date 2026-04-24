@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ENDPOINTS } from './endpoint';
 import { fromApiProject, toApiProject } from './adapters';
 
 function unwrapList(res) {
@@ -10,53 +11,53 @@ function unwrapList(res) {
 }
 
 export async function list({ offset = 1, pageSize = 50, active } = {}) {
-  const res = await api.get('/api/v3/projects', {
+  const res = await api.get(ENDPOINTS.projects.list, {
     query: { offset, pageSize, active },
   });
   return unwrapList(res).map(fromApiProject);
 }
 
 export async function get(uuid) {
-  const res = await api.get(`/api/v3/projects/${uuid}`);
+  const res = await api.get(ENDPOINTS.projects.get(uuid));
   return fromApiProject(res);
 }
 
 export async function getTree(uuid) {
-  const res = await api.get(`/api/v3/projects/${uuid}/tree`);
+  const res = await api.get(ENDPOINTS.projects.tree(uuid));
   return fromApiProject(res);
 }
 
 export async function create(ui) {
-  const res = await api.post('/api/v3/projects/create', toApiProject(ui));
+  const res = await api.post(ENDPOINTS.projects.create, toApiProject(ui));
   return fromApiProject(res);
 }
 
 export async function update(uuid, ui) {
-  const res = await api.patch(`/api/v3/projects/${uuid}`, toApiProject(ui));
+  const res = await api.patch(ENDPOINTS.projects.update(uuid), toApiProject(ui));
   return fromApiProject(res);
 }
 
 export async function save(uuid) {
-  return api.post(`/api/v3/projects/${uuid}/save`, {});
+  return api.post(ENDPOINTS.projects.save(uuid), {});
 }
 
 export async function publish(uuid) {
-  return api.post(`/api/v3/projects/${uuid}/publish`, {});
+  return api.post(ENDPOINTS.projects.publish(uuid), {});
 }
 
 export async function close(uuid) {
-  return api.post(`/api/v3/projects/${uuid}/close`, {});
+  return api.post(ENDPOINTS.projects.close(uuid), {});
 }
 
 export async function suspend(uuid) {
-  return api.post(`/api/v3/projects/${uuid}/suspend`, {});
+  return api.post(ENDPOINTS.projects.suspend(uuid), {});
 }
 
 export async function createVersion(uuid) {
-  const res = await api.post(`/api/v3/projects/${uuid}/versions/create`, {});
+  const res = await api.post(ENDPOINTS.projects.createVersion(uuid), {});
   return fromApiProject(res);
 }
 
 export async function remove(uuid) {
-  return api.del(`/api/v3/projects/${uuid}`);
+  return api.del(ENDPOINTS.projects.remove(uuid));
 }

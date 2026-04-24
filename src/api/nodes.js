@@ -1,4 +1,5 @@
 import { api } from './client';
+import { ENDPOINTS } from './endpoint';
 import { toApiDate, toApiNodeStatus, mapTypeUiToApi } from './adapters';
 
 function nodeBase(ui) {
@@ -27,17 +28,17 @@ function resourcePayload(ui) {
 export async function createMilestone(projectUuid, ui) {
   const body = nodeBase(ui);
   if (ui.vendor) body.vendor = ui.vendor;
-  return api.post(`/api/v3/projects/${projectUuid}/milestones/create`, body);
+  return api.post(ENDPOINTS.projects.milestoneCreate(projectUuid), body);
 }
 
 export async function updateMilestone(id, ui) {
   const body = nodeBase(ui);
   if ('vendor' in ui) body.vendor = ui.vendor || '';
-  return api.patch(`/api/v3/milestones/${id}`, body);
+  return api.patch(ENDPOINTS.milestones.update(id), body);
 }
 
 export async function removeMilestone(id) {
-  return api.del(`/api/v3/milestones/${id}`);
+  return api.del(ENDPOINTS.milestones.remove(id));
 }
 
 // ── Activities ─────────────────────────────────────────────
@@ -88,18 +89,18 @@ export async function createActivity(milestoneId, ui) {
       }
     };
   }
-  return api.post(`/api/v3/milestones/${milestoneId}/activities/${endpoint}/create`, body);
+  return api.post(ENDPOINTS.milestones.activityCreate(milestoneId, endpoint), body);
 }
 
 export async function updateActivity(id, ui) {
   const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
   const rp = resourcePayload(ui);
   if (rp) Object.assign(body, rp);
-  return api.patch(`/api/v3/activities/${id}`, body);
+  return api.patch(ENDPOINTS.activities.update(id), body);
 }
 
 export async function removeActivity(id) {
-  return api.del(`/api/v3/activities/${id}`);
+  return api.del(ENDPOINTS.activities.remove(id));
 }
 
 // ── Tasks ──────────────────────────────────────────────────
@@ -110,18 +111,18 @@ export async function createTask(activityId, ui) {
   const body = nodeBase(ui);
   const rp = resourcePayload(ui);
   if (rp) Object.assign(body, rp);
-  return api.post(`/api/v3/activities/${activityId}/tasks/create`, body);
+  return api.post(ENDPOINTS.activities.taskCreate(activityId), body);
 }
 
 export async function updateTask(id, ui) {
   const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
   const rp = resourcePayload(ui);
   if (rp) Object.assign(body, rp);
-  return api.patch(`/api/v3/tasks/${id}`, body);
+  return api.patch(ENDPOINTS.tasks.update(id), body);
 }
 
 export async function removeTask(id) {
-  return api.del(`/api/v3/tasks/${id}`);
+  return api.del(ENDPOINTS.tasks.remove(id));
 }
 
 // ── Subtasks ───────────────────────────────────────────────
@@ -129,18 +130,18 @@ export async function createSubtask(taskId, ui) {
   const body = nodeBase(ui);
   const rp = resourcePayload(ui);
   if (rp) Object.assign(body, rp);
-  return api.post(`/api/v3/tasks/${taskId}/subtasks/create`, body);
+  return api.post(ENDPOINTS.tasks.subtaskCreate(taskId), body);
 }
 
 export async function updateSubtask(id, ui) {
   const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
   const rp = resourcePayload(ui);
   if (rp) Object.assign(body, rp);
-  return api.patch(`/api/v3/subtasks/${id}`, body);
+  return api.patch(ENDPOINTS.subtasks.update(id), body);
 }
 
 export async function removeSubtask(id) {
-  return api.del(`/api/v3/subtasks/${id}`);
+  return api.del(ENDPOINTS.subtasks.remove(id));
 }
 
 // ── Polymorphic helpers used by UI ─────────────────────────
