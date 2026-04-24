@@ -107,6 +107,18 @@ function stripTime(iso) {
   return idx > 0 ? s.slice(0, idx) : s;
 }
 
+/* Pull a friendly message out of a server error body. */
+async function readErrorBody(res) {
+  const body = await res.text().catch(() => "");
+  if (!body) return `Request failed (${res.status})`;
+  try {
+    const parsed = JSON.parse(body);
+    return parsed?.error?.message || parsed?.message || parsed?.detail || body;
+  } catch (e) {
+    return body;
+  }
+}
+
 function mapApiProject(p) {
   if (!p) return null;
   return {
@@ -153,13 +165,87 @@ function mapApiMilestoneToNode(m) {
     position: typeof m.position === "number" ? m.position : undefined
   };
 }
-function extractMilestonesFromResponse(raw) {
+
+/* ─── API activity → local node shape ─── */
+function mapApiActivityToNode(a) {
+  const apiType = String(a?.type || "").toLowerCase();
+  let uiType = "Standard Type";
+  let resourceEntryType = "details";
+
+  if (apiType === "resource") {
+    uiType = "Resource Type";
+    resourceEntryType = a.resourceMode === "count" ? "count" : "details";
+  } else if (apiType === "transactional") {
+    uiType = "Transactional";
+  }
+
+  const node = {
+    uid: generateNodeUid("a"),
+    apiId: a.id || "",
+    id: a.id || "",
+    name: a.name || "",
+    description: a.description || "",
+    startDate: toDateInputValue(a.startDate),
+    endDate: toDateInputValue(a.endDate),
+    actualStartDate: toDateInputValue(a.actualStartDate),
+    actualEndDate: toDateInputValue(a.actualEndDate),
+    status: mapStatusFromApi(a.status),
+    type: uiType,
+    resourceEntryType,
+    dependsOn: [],
+    tasks: [],
+    comments: [],
+    attachments: [],
+    position: typeof a.position === "number" ? a.position : 0
+  };
+
+  if (apiType === "resource" && a.resourceMode === "count") {
+    node.resourceCount = {
+      resType: "RFP",
+      count: a.resourceCount || 1,
+      onboardingDate: "",
+      division: ""
+    };
+  }
+
+  if (apiType === "resource" && a.resourceMode === "details" && a.resource) {
+    const r = a.resource || {};
+    node.resourceDetails = {
+      resourceName: r.resourceName || "",
+      resType: r.typeOfResourceId || "RFP",
+      division: r.division || "",
+      onboardingDate: toDateInputValue(r.onboardDate),
+      offboardingDate: toDateInputValue(r.offboardDate),
+      actualOnboardingDate: toDateInputValue(r.actualOnboardDate),
+      actualOffboardingDate: toDateInputValue(r.actualOffboardDate),
+      position: r.position || "",
+      designation: r.designation || "",
+      jobRole: r.jobRole || "",
+      qualification: r.qualification || "",
+      experience: r.experienceYears != null ? String(r.experienceYears) : ""
+    };
+  }
+
+  return node;
+}
+
+function extractListElements(raw) {
   const elements =
     raw?.data?._embedded?.elements ??
     raw?._embedded?.elements ??
     raw?.data ??
     [];
   return Array.isArray(elements) ? elements : [];
+}
+
+/* Activity endpoint resolver — which sub-path to POST to based on UI state. */
+function activityEndpointFor(formData) {
+  const t = String(formData?.type || "").toLowerCase();
+  if (t.includes("resource")) {
+    return (formData.resourceEntryType === "count") ? "resource/count" : "resource/details";
+  }
+  if (t.includes("transactional")) return "transactional";
+  return "standard";
 }
 
 export default function MilestoneConfigPage({ mode }) {
@@ -179,10 +265,6 @@ export default function MilestoneConfigPage({ mode }) {
   const [milestonesLoading, setMilestonesLoading] = useState(false);
   const [milestonesError, setMilestonesError] = useState("");
 
-  // Local "view-ref" copy of the project. In update mode we force a new
-  // reference here after every mutation — the store mutates in place and its
-  // refresh() doesn't change the object identity, so useMemo below never saw
-  // the milestone update. apiProjectLocal solves that.
   const [apiProjectLocal, setApiProjectLocal] = useState(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
@@ -193,8 +275,6 @@ export default function MilestoneConfigPage({ mode }) {
     return !!readPersistedOnboardingDraft();
   });
 
-  // Prefer apiProjectLocal (fresh ref after every mutation) over realProject
-  // (may be the same ref after store mutation). Draft wins during onboarding.
   const project = isOnboarding ? draft : (apiProjectLocal || realProject);
 
   const totalMilestones = project ? safeArray(project.milestones).length : 0;
@@ -239,8 +319,6 @@ export default function MilestoneConfigPage({ mode }) {
 
   const pid = project && project.projectId ? project.projectId : null;
 
-  /* Helper: push the latest target shape into React as a fresh reference,
-     and also notify the store so other pages stay in sync. */
   function commitUpdate(target) {
     if (!target) return;
     if (isOnboarding) {
@@ -251,7 +329,7 @@ export default function MilestoneConfigPage({ mode }) {
     }
   }
 
-  /* ─── Restore onboarding draft from localStorage if needed ─── */
+  /* ─── Restore onboarding draft ─── */
   useEffect(() => {
     if (!isOnboarding) {
       setRestoring(false);
@@ -284,7 +362,7 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ─── Persist onboarding draft when it has a projectId ─── */
+  /* ─── Persist onboarding draft ─── */
   useEffect(() => {
     if (isOnboarding && project && project.projectId) {
       persistOnboardingDraft(project);
@@ -292,7 +370,7 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOnboarding, pid, project && project.projectName]);
 
-  /* ─── Fetch project from API when not onboarding and the store is empty ─── */
+  /* ─── Fetch project from API ─── */
   useEffect(() => {
     if (isOnboarding) return;
     if (!projectId) return;
@@ -300,8 +378,6 @@ export default function MilestoneConfigPage({ mode }) {
     let cancelled = false;
 
     async function loadProject() {
-      // If the store already has it, seed apiProjectLocal from the store so we
-      // have a fresh-ref starting point, then skip the network call.
       const fromStore = projectsStore.find ? projectsStore.find(projectId) : null;
       if (fromStore) {
         setApiProjectLocal({ ...fromStore });
@@ -338,8 +414,8 @@ export default function MilestoneConfigPage({ mode }) {
         }
 
         if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          throw new Error(body || `Failed to load project (${res.status})`);
+          const msg = await readErrorBody(res);
+          throw new Error(msg);
         }
 
         const raw = await res.json().catch(() => ({}));
@@ -354,7 +430,7 @@ export default function MilestoneConfigPage({ mode }) {
               projectsStore.addProject(mapped);
               if (projectsStore.refresh) projectsStore.refresh();
             }
-          } catch (e) { /* store shape mismatch — local copy still works */ }
+          } catch (e) {}
         }
       } catch (err) {
         if (!cancelled) setProjectError(err?.message || "Failed to load project");
@@ -368,7 +444,35 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isOnboarding]);
 
-  /* ─── Load milestones once we have a projectId ─── */
+  /* ─── GET /api/v3/milestones/{id}/activities ─── */
+  async function loadActivitiesForMilestone(milestoneApiId) {
+    if (!milestoneApiId) return [];
+    const token = getToken();
+    if (!token) return [];
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities?offset=1&pageSize=20&includeDeleted=false`,
+        {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+      if (!res.ok) return [];
+      const raw = await res.json().catch(() => ({}));
+      return extractListElements(raw)
+        .slice()
+        .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0))
+        .map(mapApiActivityToNode);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* ─── Load milestones, then activities for each ─── */
   async function loadMilestonesFromApi() {
     if (!pid) return;
     const token = getToken();
@@ -396,20 +500,16 @@ export default function MilestoneConfigPage({ mode }) {
       }
 
       if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        throw new Error(body || `Failed to load milestones (${res.status})`);
+        const msg = await readErrorBody(res);
+        throw new Error(msg);
       }
 
       const raw = await res.json().catch(() => ({}));
-      const apiList = extractMilestonesFromResponse(raw)
+      const apiList = extractListElements(raw)
         .slice()
         .sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0));
       const mapped = apiList.map(mapApiMilestoneToNode);
 
-      // Resolve target we're going to mutate:
-      //   onboarding → the draft
-      //   update     → store copy (so audit/version logic still works),
-      //                else the apiProjectLocal we already have.
       let target = null;
       if (isOnboarding) {
         target = draft;
@@ -422,7 +522,21 @@ export default function MilestoneConfigPage({ mode }) {
         target.milestones = mapped;
         try { normalizeProject(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
+        // Render milestones first (empty activity rows), then fill activities
         commitUpdate(target);
+
+        // Phase 2: fetch activities for every milestone in parallel.
+        if (mapped.length > 0) {
+          const activityLists = await Promise.all(
+            mapped.map((m) =>
+              m.apiId ? loadActivitiesForMilestone(m.apiId) : Promise.resolve([])
+            )
+          );
+          mapped.forEach((m, i) => { m.activities = activityLists[i] || []; });
+          try { normalizeProject(target); } catch (e) {}
+          try { recomputeActualDates(target); } catch (e) {}
+          commitUpdate(target);
+        }
       }
     } catch (err) {
       setMilestonesError(err?.message || "Failed to load milestones");
@@ -600,8 +714,8 @@ export default function MilestoneConfigPage({ mode }) {
       throw err;
     }
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
@@ -641,8 +755,8 @@ export default function MilestoneConfigPage({ mode }) {
       throw err;
     }
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
@@ -671,13 +785,13 @@ export default function MilestoneConfigPage({ mode }) {
       throw err;
     }
     if (!res.ok && res.status !== 204) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
     }
     return true;
   }
 
-  /* ─── POST /projects/{id}/save — finalize the project ─── */
+  /* ─── POST /projects/{id}/save ─── */
   async function saveProjectApi(projectServerId) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
@@ -702,8 +816,86 @@ export default function MilestoneConfigPage({ mode }) {
       throw err;
     }
     if (!res.ok && res.status !== 204) {
-      const body = await res.text().catch(() => "");
-      throw new Error(body || `Request failed (${res.status})`);
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
+    }
+    const raw = await res.json().catch(() => ({}));
+    return raw?.data ?? raw ?? {};
+  }
+
+  /* ─── POST /milestones/{id}/activities/{kind}/create
+     Four endpoints — standard, transactional, resource/count, resource/details. */
+  async function createActivityApi(milestoneApiId, formData) {
+    const token = getToken();
+    if (!token) throw new Error("Your session has expired. Please sign in again.");
+
+    const endpoint = activityEndpointFor(formData);
+
+    const base = {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
+      actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
+      position: 0,
+      dependsOn: []
+    };
+
+    let payload;
+    if (endpoint === "standard") {
+      payload = { ...base, status: mapStatusForApi(formData.status || "Not Completed") };
+    } else if (endpoint === "transactional") {
+      payload = { ...base };
+    } else if (endpoint === "resource/count") {
+      const rc = formData.resourceCount || {};
+      payload = {
+        ...base,
+        resourceCount: parseInt(rc.count, 10) || 1
+      };
+    } else {
+      // resource/details
+      const rd = formData.resourceDetails || {};
+      payload = {
+        ...base,
+        resource: {
+          resourceName: rd.resourceName || "",
+          onboardDate: rd.onboardingDate ? toMilestoneIsoStart(rd.onboardingDate) : null,
+          actualOnboardDate: rd.actualOnboardingDate ? toMilestoneIsoStart(rd.actualOnboardingDate) : null,
+          offboardDate: rd.offboardingDate ? toMilestoneIsoEnd(rd.offboardingDate) : null,
+          actualOffboardDate: rd.actualOffboardingDate ? toMilestoneIsoEnd(rd.actualOffboardingDate) : null,
+          position: rd.position || "",
+          designation: rd.designation || "",
+          jobRole: rd.jobRole || "",
+          qualification: rd.qualification || "",
+          experienceYears: parseFloat(rd.experience) || 0,
+          typeOfResourceId: rd.resType || "",
+          division: rd.division || "",
+          divisionOther: ""
+        }
+      };
+    }
+
+    const url = `${API_BASE}/api/v3/milestones/${encodeURIComponent(milestoneApiId)}/activities/${endpoint}/create`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.status === 401) {
+      logout();
+      const err = new Error("Session expired. Please sign in again.");
+      err.isAuth = true;
+      throw err;
+    }
+    if (!res.ok) {
+      const msg = await readErrorBody(res);
+      throw new Error(msg);
     }
     const raw = await res.json().catch(() => ({}));
     return raw?.data ?? raw ?? {};
@@ -815,6 +1007,7 @@ export default function MilestoneConfigPage({ mode }) {
       resourceCount: formData.resourceCount,
     };
 
+    /* ── Milestone remote branches ── */
     const shouldCreateMilestoneRemotely =
       modeAction === "add" &&
       kind === "milestone" &&
@@ -830,6 +1023,18 @@ export default function MilestoneConfigPage({ mode }) {
       modeAction === "edit" &&
       kind === "milestone" &&
       !!milestoneServerId &&
+      !!getToken();
+
+    /* ── Activity remote branch — parent milestone's server UUID ── */
+    let activityParentMilestoneApiId = null;
+    if (modeAction === "add" && kind === "activity" && parentUid) {
+      const mLoc = locateNode(project, parentUid);
+      if (mLoc && mLoc.node) activityParentMilestoneApiId = mLoc.node.apiId || null;
+    }
+    const shouldCreateActivityRemotely =
+      modeAction === "add" &&
+      kind === "activity" &&
+      !!activityParentMilestoneApiId &&
       !!getToken();
 
     const doLocal = (apiData) => {
@@ -1025,6 +1230,24 @@ export default function MilestoneConfigPage({ mode }) {
             return;
           }
           uiStore.showMessage(err?.message || "Failed to update milestone");
+        });
+      return;
+    }
+
+    if (shouldCreateActivityRemotely) {
+      createActivityApi(activityParentMilestoneApiId, formData)
+        .then((created) => {
+          doLocal(created);
+          loadMilestonesFromApi();
+        })
+        .catch((err) => {
+          uiStore.hideLoader();
+          if (err && err.isAuth) {
+            uiStore.showMessage(err.message);
+            navigate("/login");
+            return;
+          }
+          uiStore.showMessage(err?.message || "Failed to create activity");
         });
       return;
     }
