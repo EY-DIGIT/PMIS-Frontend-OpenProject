@@ -35,6 +35,7 @@ export function fromApiProject(api) {
   if (!api) return null;
   return {
     projectId: api.uuid || api.id,
+    projectCode: api.projectCode || '',
     projectName: api.name || '',
     description: api.description || '',
     owner: api.owner || '',

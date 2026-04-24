@@ -275,6 +275,7 @@ export default function AddProjectPage() {
       const next = {
         ...form,
         projectId: created.id ?? created._id ?? created.projectId ?? null,
+        projectCode: created.projectCode ?? created.project_code ?? "",
         projectName: (form.projectName || "").trim(),
         description: (form.description || "").trim(),
         owner: (form.owner || "").trim(),

@@ -875,9 +875,10 @@ export default function MilestoneConfigPage({ mode }) {
     }
     uiStore.showLoader("Saving project...");
 
-    const doLocal = (idOverride) => {
+    const doLocal = (idOverride, codeOverride) => {
       const p = deepClone(project);
       p.projectId = idOverride || p.projectId || projectsStore.getNextProjectId();
+      if (codeOverride) p.projectCode = codeOverride;
       p.status = "DRAFT";
       p.baselineId = "-";
       p.auditLogs = [];
@@ -886,7 +887,8 @@ export default function MilestoneConfigPage({ mode }) {
       draftStore.clear();
       clearPersistedOnboardingDraft();
       uiStore.hideLoader();
-      uiStore.showMessage(`Project ${p.projectId} added successfully!`, () =>
+      const label = p.projectCode || p.projectId;
+      uiStore.showMessage(`Project ${label} added successfully!`, () =>
         navigate("/projects")
       );
     };
@@ -948,7 +950,7 @@ export default function MilestoneConfigPage({ mode }) {
         }
         try { await saveProjectApi(projectUuid); } catch {}
         hydrateProjects({ force: true });
-        doLocal(projectUuid);
+        doLocal(projectUuid, created.projectCode);
       } catch (err) {
         uiStore.hideLoader();
         uiStore.showMessage(err?.message || "Failed to create project");
