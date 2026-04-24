@@ -14,7 +14,8 @@ export default function MilestonePagination({
   totalPages,
   pageSize,
   onGoto,
-  onSize
+  onSize,
+  itemLabel = "milestone"
 }) {
   const maxNumbered = 5;
   let startP = Math.max(1, page - Math.floor(maxNumbered / 2));
@@ -33,7 +34,7 @@ export default function MilestonePagination({
   return (
     <div className="uidai-pagination">
       <div className="uidai-pagination__info">
-        Showing {rangeStart}–{rangeEnd} of {total} milestone{total === 1 ? "" : "s"}
+        Showing {rangeStart}–{rangeEnd} of {total} {itemLabel}{total === 1 ? "" : "s"}
       </div>
       <div className="uidai-pagination__controls">
         <button

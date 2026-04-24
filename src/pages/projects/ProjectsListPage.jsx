@@ -7,6 +7,7 @@ import { hydrateProjects } from "../../store/project/apiSync";
 import { getToken, logout } from "../../api/auth";
 import { API_BASE } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
+import MilestonePagination from "../../components/projects/MilestonePagination";
 
 /* "2026-04-24T23:59:59" → "2026-04-24" */
 function stripTime(iso) {
@@ -62,6 +63,8 @@ export default function ProjectsListPage() {
   const [apiProjects, setApiProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     // legacy store refresh (harmless if other screens still rely on it)
@@ -81,7 +84,7 @@ export default function ProjectsListPage() {
       setError("");
       try {
         const res = await fetch(
-          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=20`,
+          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
           {
             method: "GET",
             headers: {
@@ -139,8 +142,33 @@ export default function ProjectsListPage() {
     );
   }, [apiProjects, submitted]);
 
+  const total = filtered.length;
+  const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+
+  // Clamp page when filter or page-size shrinks the list below current page
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const paged = useMemo(() => {
+    if (pageSize <= 0) return filtered;
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
+
   function doSearch() {
     setSubmitted(query);
+    setPage(1);
+  }
+
+  function gotoPage(next) {
+    const clamped = Math.max(1, Math.min(totalPages, next));
+    setPage(clamped);
+  }
+
+  function changePageSize(next) {
+    setPageSize(next);
+    setPage(1);
   }
 
   return (
@@ -199,7 +227,7 @@ export default function ProjectsListPage() {
                     Loading projects...
                   </td>
                 </tr>
-              ) : filtered.length === 0 ? (
+              ) : paged.length === 0 ? (
                 <tr>
                   <td colSpan={11} style={{ textAlign: "center", padding: 16 }}>
                     {apiProjects.length === 0
@@ -208,7 +236,7 @@ export default function ProjectsListPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
+                paged.map((p) => (
                   <tr key={p.projectId}>
                     <td>
                       <button
@@ -239,6 +267,18 @@ export default function ProjectsListPage() {
             </tbody>
           </table>
         </div>
+
+        {!loading && total > 0 && (
+          <MilestonePagination
+            total={total}
+            page={page}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onGoto={gotoPage}
+            onSize={changePageSize}
+            itemLabel="project"
+          />
+        )}
       </div>
     </div>
   );
