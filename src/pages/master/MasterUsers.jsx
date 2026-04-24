@@ -6,7 +6,6 @@ export default function MasterUsers() {
 
   return (
     <>
-      <div className="uidai-pmis-title">User Data</div>
       <p className="uidai-pmis-subtitle">
         User master records currently stored in the system
       </p>

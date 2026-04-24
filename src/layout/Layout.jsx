@@ -4,6 +4,7 @@
 // ============================================================
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FiMenu, FiHome, FiUser } from "react-icons/fi";
 
 import { useProjects } from "../store/Projectstore";
 import Sidebar from "../components/Sidebar";
@@ -11,6 +12,8 @@ import Sidebar from "../components/Sidebar";
 // import MessageModal from "../components/MessageModal";
 
 import Aadhar from "../assets/Aadhaar.png";
+
+const ICON_SIZE = 18;
 
 const FONT_SIZES = { decrease: "14px", reset: "", increase: "18px" };
 
@@ -75,14 +78,18 @@ export default function Layout({ children }) {
       {/* ── Navbar ── */}
       <div className="pmis-navbar">
         <div className="pmis-menu-home-block">
-          <span onClick={() => setCollapsed((c) => !c)}>☰ Menu</span>
-          <span onClick={() => navigate("/")}>🏠 Home</span>
+          <span onClick={() => setCollapsed((c) => !c)}>
+            <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
+          </span>
+          <span onClick={() => navigate("/")}>
+            <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
+          </span>
         </div>
         <div
           className="pmis-profile"
           onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}
         >
-          👤
+          <FiUser size={ICON_SIZE} aria-hidden="true" />
           <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
             <div>Profile</div>
             <div onClick={() => navigate("/login")}>Sign Out</div>

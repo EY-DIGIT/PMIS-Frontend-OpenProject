@@ -1,6 +1,20 @@
 // ─── Sidebar ──────────────────────────────────────────────────
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import {
+  FiGrid,
+  FiFolder,
+  FiPlus,
+  FiSearch,
+  FiDatabase,
+  FiBriefcase,
+  FiUser,
+  FiUsers,
+  FiChevronRight,
+  FiChevronDown
+} from "react-icons/fi";
+
+const ICON_SIZE = 18;
 
 export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const navigate = useNavigate();
@@ -16,6 +30,9 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const isActive = (prefix) =>
     location.pathname === prefix || location.pathname.startsWith(prefix + "/");
 
+  const Chevron = ({ open }) =>
+    open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
+
   return (
     <div className={`pmis-sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="pmis-menu">
@@ -24,7 +41,8 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           className={location.pathname === "/" ? "active" : ""}
           onClick={() => navigate("/")}
         >
-          📊 <span className="pmis-text">Dashboard</span>
+          <FiGrid size={ICON_SIZE} />
+          <span className="pmis-text">Dashboard</span>
         </a>
 
         {/* Project Management */}
@@ -32,22 +50,20 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           className={isActive("/projects") ? "active" : ""}
           onClick={() => setPmOpen(!pmOpen)}
         >
-          📁 <span className="pmis-text">Project Management</span>
-          <span className="pmis-submenu-arrow">{pmOpen ? "▼" : "▶"}</span>
+          <FiFolder size={ICON_SIZE} />
+          <span className="pmis-text">Project Management</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={pmOpen} />
+          </span>
         </a>
         <div className={`pmis-submenu${pmOpen ? " open" : ""}`}>
-          {/* Add Project — direct click, no dropdown */}
-          <div
-            onClick={() => navigate("/projects/add")}
-          >
-            ➕ <span className="pmis-text">Add Project</span>
+          <div onClick={() => navigate("/projects/add")}>
+            <FiPlus size={ICON_SIZE} />
+            <span className="pmis-text">Add Project</span>
           </div>
-
-          {/* Search Project — direct click */}
-          <div
-            onClick={() =>  navigate("/projects")}
-          >
-            🔍 <span className="pmis-text">Search Project</span>
+          <div onClick={() => navigate("/projects")}>
+            <FiSearch size={ICON_SIZE} />
+            <span className="pmis-text">Search Project</span>
           </div>
         </div>
 
@@ -60,15 +76,20 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             if (next) navigate("/master");
           }}
         >
-          🗂️ <span className="pmis-text">Master Data</span>
-          <span className="pmis-submenu-arrow">{mdOpen ? "▼" : "▶"}</span>
+          <FiDatabase size={ICON_SIZE} />
+          <span className="pmis-text">Master Data</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={mdOpen} />
+          </span>
         </a>
         <div className={`pmis-submenu${mdOpen ? " open" : ""}`}>
           <div onClick={() => navigate("/master/vendors")}>
-            🏢 <span className="pmis-text">Vendor Data</span>
+            <FiBriefcase size={ICON_SIZE} />
+            <span className="pmis-text">Vendor Data</span>
           </div>
           <div onClick={() => navigate("/master/users")}>
-            👤 <span className="pmis-text">User Data</span>
+            <FiUsers size={ICON_SIZE} />
+            <span className="pmis-text">User Data</span>
           </div>
         </div>
 
@@ -77,15 +98,20 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           className={isActive("/vendors") ? "active" : ""}
           onClick={() => setVmOpen(!vmOpen)}
         >
-          🏢 <span className="pmis-text">Vendor Management</span>
-          <span className="pmis-submenu-arrow">{vmOpen ? "▼" : "▶"}</span>
+          <FiBriefcase size={ICON_SIZE} />
+          <span className="pmis-text">Vendor Management</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={vmOpen} />
+          </span>
         </a>
         <div className={`pmis-submenu${vmOpen ? " open" : ""}`}>
           <div onClick={() => navigate("/vendors/new")}>
-            ➕ <span className="pmis-text">Add Vendor</span>
+            <FiPlus size={ICON_SIZE} />
+            <span className="pmis-text">Add Vendor</span>
           </div>
           <div onClick={() => navigate("/vendors")}>
-            🔍 <span className="pmis-text">Search Vendor</span>
+            <FiSearch size={ICON_SIZE} />
+            <span className="pmis-text">Search Vendor</span>
           </div>
         </div>
 
@@ -94,15 +120,20 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           className={isActive("/users") ? "active" : ""}
           onClick={() => setUmOpen(!umOpen)}
         >
-          👤 <span className="pmis-text">User Management</span>
-          <span className="pmis-submenu-arrow">{umOpen ? "▼" : "▶"}</span>
+          <FiUser size={ICON_SIZE} />
+          <span className="pmis-text">User Management</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={umOpen} />
+          </span>
         </a>
         <div className={`pmis-submenu${umOpen ? " open" : ""}`}>
           <div onClick={() => navigate("/users/new")}>
-            ➕ <span className="pmis-text">Add User</span>
+            <FiPlus size={ICON_SIZE} />
+            <span className="pmis-text">Add User</span>
           </div>
           <div onClick={() => navigate("/users")}>
-            🔍 <span className="pmis-text">Search User</span>
+            <FiSearch size={ICON_SIZE} />
+            <span className="pmis-text">Search User</span>
           </div>
         </div>
       </div>

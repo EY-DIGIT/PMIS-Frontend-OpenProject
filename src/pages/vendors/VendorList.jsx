@@ -47,7 +47,6 @@ export default function VendorList() {
 
   return (
     <>
-      <div className="uidai-pmis-title">Vendor Management</div>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-search-row">
           <input

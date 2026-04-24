@@ -63,11 +63,13 @@ function PageTitle() {
         else if (segments[2] === "track") title = "Track Progress";
         else title = "Project Details";
     } else if (segments[0] === "vendors") {
-        title = "Vendors";
+        title = "Vendor Management";
     } else if (segments[0] === "users") {
-        title = "Users";
+        title = "User Management";
     } else if (segments[0] === "master") {
-        title = "Master Data";
+        if (segments[1] === "vendors") title = "Vendor Data";
+        else if (segments[1] === "users") title = "User Data";
+        else title = "Master Data";
     }
 
     if (!title) return null;

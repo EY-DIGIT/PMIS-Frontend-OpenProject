@@ -44,7 +44,6 @@ export default function UserList() {
 
   return (
     <>
-      <div className="uidai-pmis-title">User Management</div>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-search-row">
           <input

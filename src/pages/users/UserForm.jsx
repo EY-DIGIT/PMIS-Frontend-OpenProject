@@ -78,7 +78,6 @@ export default function UserForm() {
 
   return (
     <>
-      <div className="uidai-pmis-title">User Management</div>
       <div className="uidai-pmis-card">
         <h3>Add User</h3>
         <br />

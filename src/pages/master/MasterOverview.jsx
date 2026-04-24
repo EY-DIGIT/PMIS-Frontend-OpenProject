@@ -5,7 +5,6 @@ export default function MasterOverview() {
 
   return (
     <>
-      <div className="uidai-pmis-title">Master Data</div>
       <p className="uidai-pmis-subtitle">
         Consolidated vendor and user counts and status at a glance
       </p>

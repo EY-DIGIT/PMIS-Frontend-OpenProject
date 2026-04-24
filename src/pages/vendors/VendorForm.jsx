@@ -69,7 +69,6 @@ export default function VendorForm() {
 
   return (
     <>
-      <div className="uidai-pmis-title">Vendor Management</div>
       <div className="uidai-pmis-card">
         <h3>Add Vendor</h3>
         <br />

@@ -6,7 +6,6 @@ export default function MasterVendors() {
 
   return (
     <>
-      <div className="uidai-pmis-title">Vendor Data</div>
       <p className="uidai-pmis-subtitle">
         Vendor master records currently stored in the system.
       </p>
