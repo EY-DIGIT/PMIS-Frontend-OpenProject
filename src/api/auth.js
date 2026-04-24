@@ -43,11 +43,17 @@ export async function introspect() {
   return api.post(ENDPOINTS.auth.introspect, {});
 }
 
-export function logout() {
-  tokenStore.clear();
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-  localStorage.removeItem(USER_KEY);
+export async function logout() {
+  try {
+    await api.post(ENDPOINTS.auth.logout);
+  } finally {
+    tokenStore.clear();
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem('uidai_loggedIn');
+    sessionStorage.removeItem('uidai_user');
+  }
 }
 
 export function getToken() {

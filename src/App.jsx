@@ -1,7 +1,7 @@
 // ============================================================
 // MainApp.jsx  –  Providers + Router + Routes only
 // ============================================================
-import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
 
 import { ProjectProvider } from "./store/Projectstore";
 import { OnboardProvider } from "./store/Onboardstore";
@@ -134,6 +134,15 @@ function Breadcrumbs() {
     );
 }
 
+function RequireAuth({ children }) {
+    const loggedIn = sessionStorage.getItem('uidai_loggedIn') === 'true';
+    const location = useLocation();
+    if (!loggedIn) {
+        return <Navigate to="/login" replace state={{ from: location }} />;
+    }
+    return children;
+}
+
 export default function MainApp() {
     return (
 
@@ -149,6 +158,7 @@ export default function MainApp() {
                             <Route
                                 path="/*"
                                 element={
+                                    <RequireAuth>
                                     <Layout>
                                         <PageTitle />
                                         <Breadcrumbs />
@@ -193,6 +203,7 @@ export default function MainApp() {
                                             <Route path="master/users" element={<MasterUsers />} />
                                         </Routes>
                                     </Layout>
+                                    </RequireAuth>
                                 }
                             />
                         </Routes>

@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { FiMenu, FiHome, FiUser } from "react-icons/fi";
 
 import { useProjects } from "../store/Projectstore";
+import * as auth from "../api/auth";
 import Sidebar from "../components/Sidebar";
 // import LoaderModal from "../components/LoaderModal";
 // import MessageModal from "../components/MessageModal";
@@ -23,6 +24,20 @@ export default function Layout({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [fontMode, setFontMode] = useState("reset");
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await auth.logout();
+    } catch {
+      // token already cleared in auth.logout's finally block
+    } finally {
+      setSigningOut(false);
+      navigate("/login", { replace: true });
+    }
+  };
 
   const setFont = (mode) => {
     setFontMode(mode);
@@ -78,21 +93,30 @@ export default function Layout({ children }) {
       {/* ── Navbar ── */}
       <div className="pmis-navbar">
         <div className="pmis-menu-home-block">
-          <span onClick={() => setCollapsed((c) => !c)}>
+          <span
+            onClick={() => setCollapsed((c) => !c)}
+            style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          >
             <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
           </span>
-          <span onClick={() => navigate("/")}>
+          <span
+            onClick={() => navigate("/")}
+            style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          >
             <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
           </span>
         </div>
         <div
           className="pmis-profile"
           onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}
+          style={{ display: "flex", alignItems: "center", gap: "10px" }}
         >
           <FiUser size={ICON_SIZE} aria-hidden="true" />
           <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
             <div>Profile</div>
-            <div onClick={() => navigate("/login")}>Sign Out</div>
+            <div onClick={handleSignOut} style={{ pointerEvents: signingOut ? "none" : "auto", opacity: signingOut ? 0.6 : 1 }}>
+              {signingOut ? "Signing Out…" : "Sign Out"}
+            </div>
           </div>
         </div>
       </div>

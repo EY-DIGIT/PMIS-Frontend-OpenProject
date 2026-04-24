@@ -11,6 +11,7 @@ const enc = encodeURIComponent;
 export const ENDPOINTS = {
   auth: {
     login: '/api/v3/users/login',
+    logout: '/api/v3/users/logout',
     me: '/api/v3/users/me',
     introspect: '/api/v3/users/introspect',
   },
