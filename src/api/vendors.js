@@ -3,9 +3,19 @@ import { ENDPOINTS } from './endpoint';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
+  if (Array.isArray(res?._embedded?.elements)) return res._embedded.elements;
+  if (Array.isArray(res?.data?._embedded?.elements)) return res.data._embedded.elements;
   if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.data?.items)) return res.data.items;
   if (Array.isArray(res?.data)) return res.data;
   return [];
+}
+
+function unwrapOne(res) {
+  if (res && typeof res === 'object' && res.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
+    return res.data;
+  }
+  return res;
 }
 
 function fromApi(v) {
@@ -33,10 +43,10 @@ export async function list() {
 
 export async function create({ name, description, active = true }) {
   const res = await api.post(ENDPOINTS.vendors.create, { name, description, active });
-  return fromApi(res);
+  return fromApi(unwrapOne(res));
 }
 
 export async function update(id, patch) {
   const res = await api.patch(ENDPOINTS.vendors.update(id), patch);
-  return fromApi(res);
+  return fromApi(unwrapOne(res));
 }
