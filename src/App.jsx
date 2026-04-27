@@ -13,7 +13,7 @@ import HomePage from "./pages/Homepage";
 
 import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
-import ResetPassword from "./pages/Resetpassword";
+import ResetPassword from "./pages/ResetPassword";
 
 
 import VendorList from './pages/vendors/VendorList';
