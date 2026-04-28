@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Local API test artefacts (kept out of git — contains live response excerpts)
+pmis-api-test-report.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -55,23 +55,33 @@ function activityEndpointFor(ui) {
 
 export async function createActivity(milestoneId, ui) {
   const endpoint = activityEndpointFor(ui);
-  const base = nodeBase(ui);
+  // nodeBase() emits `depends` (milestone field name); activities expect `dependency`.
+  const { depends, ...base } = nodeBase(ui);
+  const dependency = depends || [];
   let body;
   if (endpoint === "standard") {
-    body = base;
+    body = { ...base, type: "standard", dependency };
   } else if (endpoint === "transactional") {
     // Server ignores status for transactional; strip it to avoid 422.
     const { status, ...rest } = base;
-    body = rest;
+    body = { ...rest, type: "transactional", dependency };
   } else if (endpoint === "resource/count") {
     const { status, ...rest } = base;
     const rc = ui.resourceCount || {};
-    body = { ...rest, resourceCount: parseInt(rc.count, 10) || 1 };
+    body = {
+      ...rest,
+      type: "resource",
+      resourceMode: "count",
+      resourceCount: parseInt(rc.count, 10) || 1,
+      dependency,
+    };
   } else {
     const { status, ...rest } = base;
     const rd = ui.resourceDetails || {};
     body = {
       ...rest,
+      type: "resource",
+      resourceMode: "details",
       resource: {
         resourceName: rd.resourceName || "",
         onboardDate: toApiDate(rd.onboardingDate),
@@ -85,8 +95,9 @@ export async function createActivity(milestoneId, ui) {
         experienceYears: parseFloat(rd.experience) || 0,
         typeOfResourceId: rd.resType || "",
         division: rd.division || "",
-        divisionOther: ""
-      }
+        divisionOther: rd.divisionOther || "",
+      },
+      dependency,
     };
   }
   return api.post(ENDPOINTS.milestones.activityCreate(milestoneId, endpoint), body);

@@ -102,6 +102,15 @@ export default function NodeModal({
     return loc ? loc.node : null;
   }, [open, nodeUid, project]);
 
+  // Backend rule: subtask resourceMode/resource is only valid when parent task's type is 'resource'.
+  // (Same applies if parent is itself a subtask — resource fields stay only inside a resource subtree.)
+  const parentNode = useMemo(() => {
+    if (!open || !parentUid || !project) return null;
+    const loc = locateNode(project, parentUid);
+    return loc ? loc.node : null;
+  }, [open, parentUid, project]);
+  const parentTypeIsResource = parentNode?.type === "Resource Type";
+
   const [form, setForm] = useState(() => makeDefaultForm(kind, node));
   const [commentText, setCommentText] = useState("");
   const [commentFiles, setCommentFiles] = useState([]);
@@ -250,24 +259,41 @@ export default function NodeModal({
             />
           </div>
 
-          {showType && (
-            <div className="uidai-field">
-              <label className="uidai-field__label">
-                {kind === "activity" ? "Activity" : kind === "task" ? "Task" : "Sub Task"} Type{" "}
-                <span className="uidai-required-project">*</span>
-              </label>
-              <select
-                className="uidai-select"
-                value={form.type}
-                onChange={(e) => updateField({ type: e.target.value })}
-                disabled={dis}
-              >
-                {NODE_TYPE_OPTIONS.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          {showType && (() => {
+            // For tasks/subtasks: backend rejects type='Resource Type' unless the parent is also resource.
+            // Activities don't have this constraint (parent milestone has no type).
+            // Only filter on add — edit mode keeps the existing value visible even if inconsistent.
+            const restrictResource =
+              isAdd &&
+              (kind === "task" || kind === "subtask") &&
+              !parentTypeIsResource;
+            const typeOptions = restrictResource
+              ? NODE_TYPE_OPTIONS.filter((t) => t !== "Resource Type")
+              : NODE_TYPE_OPTIONS;
+            return (
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  {kind === "activity" ? "Activity" : kind === "task" ? "Task" : "Sub Task"} Type{" "}
+                  <span className="uidai-required-project">*</span>
+                </label>
+                <select
+                  className="uidai-select"
+                  value={form.type}
+                  onChange={(e) => updateField({ type: e.target.value })}
+                  disabled={dis}
+                >
+                  {typeOptions.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+                {restrictResource && (
+                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                    Resource Type is only available when the parent {kind === "task" ? "activity" : "task"} is also Resource Type.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="uidai-field uidai-grid__full">
             <label className="uidai-field__label">Description</label>
