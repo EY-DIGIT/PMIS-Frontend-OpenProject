@@ -3,34 +3,31 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies first (cached layer — only re-runs if package.json changes)
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copy source
 COPY . .
 
-# VITE_API_BASE_URL must be baked into the JS bundle at build time.
-# Vite replaces import.meta.env.VITE_* at compile time, not runtime.
-# We accept it as a build arg so deploy.sh can pass the server IP in.
-ARG VITE_API_BASE_URL=http://10.1.131.199:8000
+# All VITE_ variables come from .env.development via deploy.sh build args.
+# Developer only needs to update .env.development — nothing else.
+# Add more ARG lines here if .env.development gets new VITE_ variables.
+ARG VITE_API_BASE_URL
+ARG VITE_APP_NAME
+ARG VITE_APP_ENV
+
+# Make them available to Vite at build time
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_APP_NAME=$VITE_APP_NAME
+ENV VITE_APP_ENV=$VITE_APP_ENV
 
 RUN npm run build
-# Output: /app/dist — fully bundled, minified static files
 
 # ── Stage 2: Serve ────────────────────────────────────────────────
 FROM nginx:1.25-alpine
 
-# Remove default nginx page
 RUN rm -rf /usr/share/nginx/html/*
-
-# Copy built assets from stage 1
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy our nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
-
 CMD ["nginx", "-g", "daemon off;"]
