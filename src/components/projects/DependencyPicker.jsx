@@ -297,6 +297,7 @@ export default function DependencyPicker({
                     <label key={it.uid} className="uidai-dep-final__item">
                       <input
                         type="checkbox"
+                        className="select_mildstone_id"
                         checked={selSet.has(it.uid)}
                         onChange={(e) => toggleItem(it.uid, e.target.checked)}
                       />

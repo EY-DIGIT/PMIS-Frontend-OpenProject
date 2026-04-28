@@ -286,6 +286,14 @@
   font-weight: 600;
 }
 
+.select_mildstone_id {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--cyan);
+  cursor: pointer;
+  margin: 0;
+}
+
 .uidai-dep-final__items {
   max-height: 240px;
   overflow-y: auto;
@@ -341,12 +349,15 @@
 .uidai-chip-kind-badge--milestone {
   background: #0b3c88;
 }
+
 .uidai-chip-kind-badge--activity {
   background: #0e6fa3;
 }
+
 .uidai-chip-kind-badge--task {
   background: #0aa1c0;
 }
+
 .uidai-chip-kind-badge--subtask {
   background: #6b4fb7;
 }
@@ -527,6 +538,7 @@
     grid-template-columns: 1fr;
     gap: 4px;
   }
+
   .uidai-dep-cascade__label {
     text-align: left;
     padding-right: 0;
@@ -537,9 +549,11 @@
   .uidai-comments__upload-row {
     grid-template-columns: 1fr;
   }
+
   .uidai-resource-radio {
     flex: 1 1 100%;
   }
+
   .uidai-modal__box {
     padding: 16px;
   }
