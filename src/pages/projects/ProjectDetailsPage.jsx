@@ -153,6 +153,8 @@ export default function ProjectDetailsPage() {
   const [projectError, setProjectError] = useState("");
 
   const [vendorMaster, setVendorMaster] = useState([]);
+  // baselineId (UUID) -> human-readable projectCode resolved via the detail API
+  const [baselineCode, setBaselineCode] = useState("");
 
   const project = realProject || apiProject;
 
@@ -282,6 +284,38 @@ export default function ProjectDetailsPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  /* Resolve baselineId (UUID) to human-readable projectCode by hitting the
+     project-detail API — mirrors the behaviour on ProjectsListPage. */
+  useEffect(() => {
+    const baselineId = project && project.baselineId;
+    if (!baselineId || baselineId === "-") {
+      setBaselineCode("");
+      return;
+    }
+    if (baselineId === project.projectId) {
+      setBaselineCode(project.projectCode || "");
+      return;
+    }
+
+    const token = getToken();
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${API_BASE}${ENDPOINTS.projects.get(baselineId)}`,
+          { method: "GET", headers: { accept: "application/json" } }
+        );
+        if (cancelled || !res.ok) return;
+        const raw = await res.json().catch(() => ({}));
+        const baseline = raw?.data ?? raw;
+        if (!cancelled) setBaselineCode(baseline?.projectCode || "");
+      } catch (e) { /* fall back to UUID */ }
+    })();
+    return () => { cancelled = true; };
+  }, [project && project.baselineId, project && project.projectId, project && project.projectCode]);
 
   useEffect(() => {
     if (!project) return;
@@ -827,7 +861,15 @@ export default function ProjectDetailsPage() {
           </div>
           <div className="uidai-field">
             <label className="uidai-field__label">Baseline ID</label>
-            <input className="uidai-input" value={project.baselineId || "-"} disabled />
+            <input
+              className="uidai-input"
+              value={
+                project.baselineId && project.baselineId !== "-"
+                  ? (baselineCode || project.baselineId)
+                  : "-"
+              }
+              disabled
+            />
           </div>
           <div className="uidai-field">
             <label className="uidai-field__label">Status</label>
