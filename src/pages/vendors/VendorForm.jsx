@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MultiSelect from '../../components/MultiSelect';
 import CharTextarea from '../../components/CharTextarea';
 import { VENDOR_TYPES, PROJECT_OPTIONS } from '../../data/demoData';
 import * as vendorsApi from '../../api/vendors';
-import { tokenStore } from '../../api/client';
+import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
+import { ENDPOINTS } from '../../api/endpoint';
 import { useData } from '../../data/DataContext';
 
 export default function VendorForm() {
@@ -19,8 +20,42 @@ export default function VendorForm() {
   const [phone, setPhone] = useState('');
   const [description, setDescription] = useState('');
   const [mapping, setMapping] = useState([]);
+  const [projectList, setProjectList] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
+          { method: 'GET', headers: { accept: 'application/json' } }
+        );
+        if (!res.ok) return;
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          raw?.data ??
+          [];
+        if (!cancelled && Array.isArray(elements)) setProjectList(elements);
+      } catch {
+        if (!cancelled) setProjectList([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const projectOptions = useMemo(() => {
+    if (!tokenStore.get()) return PROJECT_OPTIONS;
+    if (!projectList.length) return PROJECT_OPTIONS;
+    return projectList.map((p) => ({
+      label: p.name || p.projectCode || p.id,
+      value: p.id || p.uuid,
+    }));
+  }, [projectList]);
 
   const validate = () => {
     if (!name.trim()) return 'Vendor Name is required';
@@ -41,6 +76,10 @@ export default function VendorForm() {
           name: name.trim(),
           description: description.trim(),
           active: status === 'Active',
+          email: email.trim(),
+          contact_person: contact.trim(),
+          phone_number: phone.trim(),
+          projectMapping: mapping,
         });
         await refresh();
       } else {
@@ -109,7 +148,7 @@ export default function VendorForm() {
             <MultiSelect
               name="vendorProjectMapping"
               value={mapping}
-              options={PROJECT_OPTIONS}
+              options={projectOptions}
               onChange={setMapping}
             />
           </div>

@@ -37,6 +37,11 @@ export default function MasterUsers() {
                   </td>
                 </tr>
               ))}
+              {users.length === 0 && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={9}>No data found.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

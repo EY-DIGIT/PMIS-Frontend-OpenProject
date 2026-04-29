@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { demoVendors, demoUsers } from './demoData';
 import * as vendorsApi from '../api/vendors';
 import * as usersApi from '../api/users';
 import { tokenStore } from '../api/client';
@@ -14,23 +13,23 @@ export function DataProvider({ children }) {
 
   const refresh = useCallback(async () => {
     if (!tokenStore.get()) {
-      setVendors(demoVendors);
-      setUsers(demoUsers);
+      setVendors([]);
+      setUsers([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const [v, u] = await Promise.all([
-        vendorsApi.list().catch(() => demoVendors),
-        usersApi.list().catch(() => demoUsers),
+        vendorsApi.list().catch(() => []),
+        usersApi.list().catch(() => []),
       ]);
-      setVendors(v);
-      setUsers(u);
+      setVendors(Array.isArray(v) ? v : []);
+      setUsers(Array.isArray(u) ? u : []);
     } catch (e) {
       setError(e);
-      setVendors(demoVendors);
-      setUsers(demoUsers);
+      setVendors([]);
+      setUsers([]);
     } finally {
       setLoading(false);
     }

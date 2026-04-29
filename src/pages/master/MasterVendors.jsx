@@ -37,6 +37,11 @@ export default function MasterVendors() {
                   <td>{formatDateDisplay(v.endDate)}</td>
                 </tr>
               ))}
+              {vendors.length === 0 && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={9}>No data found.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -1,5 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeMapping } from '../utils/helpers';
+
+function toOption(opt) {
+  if (opt && typeof opt === 'object') {
+    return { label: String(opt.label ?? opt.value ?? ''), value: opt.value ?? opt.label ?? '' };
+  }
+  return { label: String(opt ?? ''), value: opt };
+}
 
 export default function MultiSelect({
   name,
@@ -13,7 +20,13 @@ export default function MultiSelect({
   const [query, setQuery] = useState('');
   const wrapRef = useRef(null);
 
+  const normalizedOptions = useMemo(() => (options || []).map(toOption), [options]);
   const selected = normalizeMapping(value);
+  const labelByValue = useMemo(() => {
+    const map = new Map();
+    normalizedOptions.forEach((o) => map.set(String(o.value), o.label));
+    return map;
+  }, [normalizedOptions]);
 
   useEffect(() => {
     function handleOutside(e) {
@@ -25,16 +38,17 @@ export default function MultiSelect({
     return () => document.removeEventListener('click', handleOutside);
   }, []);
 
-  function toggleValue(opt) {
+  function toggleValue(val) {
     if (disabled) return;
-    const set = new Set(selected);
-    if (set.has(opt)) set.delete(opt);
-    else set.add(opt);
+    const key = String(val);
+    const set = new Set(selected.map(String));
+    if (set.has(key)) set.delete(key);
+    else set.add(key);
     onChange?.(Array.from(set));
   }
 
-  const filteredOptions = options.filter((opt) =>
-    opt.toLowerCase().includes(query.trim().toLowerCase())
+  const filteredOptions = normalizedOptions.filter((opt) =>
+    opt.label.toLowerCase().includes(query.trim().toLowerCase())
   );
 
   return (
@@ -53,7 +67,7 @@ export default function MultiSelect({
             <div className="uidai-pmis-ms-tags">
               {selected.map((v) => (
                 <span className="uidai-pmis-ms-tag" key={v}>
-                  {v}
+                  {labelByValue.get(String(v)) ?? v}
                 </span>
               ))}
             </div>
@@ -77,14 +91,14 @@ export default function MultiSelect({
           <div className="uidai-pmis-ms-options">
             {filteredOptions.length ? (
               filteredOptions.map((opt) => (
-                <label className="uidai-pmis-ms-option" key={opt}>
+                <label className="uidai-pmis-ms-option" key={String(opt.value)}>
                   <input
                     type="checkbox"
-                    checked={selected.includes(opt)}
+                    checked={selected.map(String).includes(String(opt.value))}
                     disabled={disabled}
-                    onChange={() => toggleValue(opt)}
+                    onChange={() => toggleValue(opt.value)}
                   />
-                  <span>{opt}</span>
+                  <span>{opt.label}</span>
                 </label>
               ))
             ) : (

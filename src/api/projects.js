@@ -4,7 +4,10 @@ import { fromApiProject, toApiProject } from './adapters';
 
 function unwrapList(res) {
   if (Array.isArray(res)) return res;
+  if (Array.isArray(res?._embedded?.elements)) return res._embedded.elements;
+  if (Array.isArray(res?.data?._embedded?.elements)) return res.data._embedded.elements;
   if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.data?.items)) return res.data.items;
   if (Array.isArray(res?.data)) return res.data;
   if (Array.isArray(res?.results)) return res.results;
   return [];

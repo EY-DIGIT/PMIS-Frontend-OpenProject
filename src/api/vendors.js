@@ -19,16 +19,20 @@ function unwrapOne(res) {
 }
 
 function fromApi(v) {
+  const projects = Array.isArray(v.projects) ? v.projects : [];
   return {
-    vendorId: v.uuid || v.id,
+    vendorId: v.id || v.uuid || '',
     vendorName: v.name || '',
     description: v.description || '',
     status: v.active === false ? 'Inactive' : 'Active',
     vendorType: v.type || v.vendorType || 'Standard Vendor',
-    contact: v.contact || '',
+    contact: v.contactPerson || v.contact_person || v.contact || '',
     email: v.email || '',
-    phone: v.phone || '',
-    projectMapping: v.projectMapping || [],
+    phone: v.phoneNumber || v.phone_number || v.phone || '',
+    projectMapping: projects.map((p) => p.name).filter(Boolean),
+    projects,
+    createdAt: v.createdAt || '',
+    updatedAt: v.updatedAt || '',
     startDate: (v.startDate || '').slice(0, 10),
     endDate: (v.endDate || '').slice(0, 10),
     address: v.address || '',
@@ -41,8 +45,24 @@ export async function list() {
   return unwrap(res).map(fromApi);
 }
 
-export async function create({ name, description, active = true }) {
-  const res = await api.post(ENDPOINTS.vendors.create, { name, description, active });
+export async function create({
+  name,
+  description,
+  active = true,
+  email,
+  contact_person,
+  phone_number,
+  projectMapping,
+}) {
+  const res = await api.post(ENDPOINTS.vendors.create, {
+    name,
+    description,
+    active,
+    email,
+    contact_person,
+    phone_number,
+    projects: Array.isArray(projectMapping) ? projectMapping : [],
+  });
   return fromApi(unwrapOne(res));
 }
 
