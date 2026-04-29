@@ -65,6 +65,8 @@ export default function ProjectsListPage() {
   const [error, setError] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  // baselineId (UUID) -> human-readable projectCode resolved via the detail API
+  const [baselineCodes, setBaselineCodes] = useState({});
 
   useEffect(() => {
     // legacy store refresh (harmless if other screens still rely on it)
@@ -120,6 +122,56 @@ export default function ProjectsListPage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Resolve each unique baselineId (UUID) to its human-readable projectCode
+  // by hitting the project-detail API. Already-resolved IDs are skipped.
+  useEffect(() => {
+    if (!apiProjects.length) return;
+
+    const ids = Array.from(
+      new Set(
+        apiProjects
+          .map((p) => p.baselineId)
+          .filter((id) => id && id !== "-" && !(id in baselineCodes))
+      )
+    );
+    if (!ids.length) return;
+
+    let cancelled = false;
+
+    async function resolveBaselines() {
+      const token = getToken();
+      if (!token) return;
+
+      const entries = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const res = await authorizedFetch(
+              `${API_BASE}${ENDPOINTS.projects.get(id)}`,
+              { method: "GET", headers: { accept: "application/json" } }
+            );
+            if (!res.ok) return [id, ""];
+            const raw = await res.json().catch(() => ({}));
+            const project = raw?.data ?? raw;
+            return [id, project?.projectCode || ""];
+          } catch (e) {
+            return [id, ""];
+          }
+        })
+      );
+
+      if (cancelled) return;
+      setBaselineCodes((prev) => {
+        const next = { ...prev };
+        for (const [id, code] of entries) next[id] = code;
+        return next;
+      });
+    }
+
+    resolveBaselines();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiProjects]);
 
   const filtered = useMemo(() => {
     const q = submitted.trim().toLowerCase();
@@ -248,7 +300,11 @@ export default function ProjectsListPage() {
                     </td>
                     <td>{p.projectName}</td>
                     <td>{p.description || ""}</td>
-                    <td>{p.baselineId || "-"}</td>
+                    <td>
+                      {p.baselineId && p.baselineId !== "-"
+                        ? (baselineCodes[p.baselineId] || p.baselineId)
+                        : "-"}
+                    </td>
                     <td>{p.status}</td>
                     <td>{formatDateDisplay(p.startDate)}</td>
                     <td>{formatDateDisplay(p.endDate)}</td>
