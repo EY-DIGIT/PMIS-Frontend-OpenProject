@@ -1,13 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../data/DataContext';
+import { tokenStore } from '../../api/client';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
 
 export default function UserList() {
-  const { users } = useData();
+  const { users, refresh } = useData();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (tokenStore.get()) refresh();
+  }, [refresh]);
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
