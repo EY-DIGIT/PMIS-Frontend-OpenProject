@@ -14,6 +14,7 @@ export const ENDPOINTS = {
     logout: '/api/v3/users/logout',
     me: '/api/v3/users/me',
     introspect: '/api/v3/users/introspect',
+    refresh: '/api/v3/users/refresh',
   },
 
   users: {
@@ -29,6 +30,10 @@ export const ENDPOINTS = {
     list: '/api/v3/vendors',
     create: '/api/v3/vendors/create',
     update: (id) => `/api/v3/vendors/${enc(id)}`,
+  },
+
+  divisions: {
+    list: '/api/v3/divisions',
   },
 
   projects: {

@@ -17,7 +17,7 @@ import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
 import CreateVersionModal from "../../components/projects/modals/CreateVersionModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
-import { tokenStore, API_BASE } from "../../api/client";
+import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
@@ -184,12 +184,9 @@ export default function ProjectDetailsPage() {
       const token = getToken();
       if (!token) return;
       try {
-        const res = await fetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
+        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
           method: "GET",
-          headers: {
-            accept: "application/json",
-            Authorization: `Bearer ${token}`
-          }
+          headers: { accept: "application/json" }
         });
 
         if (cancelled) return;
@@ -239,14 +236,11 @@ export default function ProjectDetailsPage() {
       setProjectLoading(true);
       setProjectError("");
       try {
-        const res = await fetch(
+        const res = await authorizedFetch(
           `${API_BASE}${ENDPOINTS.projects.get(projectId)}`,
           {
             method: "GET",
-            headers: {
-              accept: "application/json",
-              Authorization: `Bearer ${token}`
-            }
+            headers: { accept: "application/json" }
           }
         );
 
@@ -373,14 +367,13 @@ export default function ProjectDetailsPage() {
       if (project.parentId) payload.parent_id = project.parentId;
     }
 
-    const res = await fetch(
+    const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.update(projectServerId)}`,
       {
         method: "PATCH",
         headers: {
           accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       }
@@ -405,14 +398,13 @@ export default function ProjectDetailsPage() {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
-    const res = await fetch(
+    const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.publish(projectServerId)}`,
       {
         method: "POST",
         headers: {
           accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({})
       }
@@ -437,14 +429,13 @@ export default function ProjectDetailsPage() {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
-    const res = await fetch(
+    const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.createVersion(projectServerId)}`,
       {
         method: "POST",
         headers: {
           accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({})
       }
@@ -469,14 +460,11 @@ export default function ProjectDetailsPage() {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
-    const res = await fetch(
+    const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.remove(projectServerId)}`,
       {
         method: "DELETE",
-        headers: {
-          accept: "application/json",
-          Authorization: `Bearer ${token}`
-        }
+        headers: { accept: "application/json" }
       }
     );
 

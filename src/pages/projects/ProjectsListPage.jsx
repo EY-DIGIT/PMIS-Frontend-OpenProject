@@ -5,7 +5,7 @@ import { uiStore } from "../../store/project/uiStore";
 import { formatDateDisplay } from "../../utils/project/helpers";
 import { hydrateProjects } from "../../store/project/apiSync";
 import { getToken, logout } from "../../api/auth";
-import { API_BASE } from "../../api/client";
+import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import MilestonePagination from "../../components/projects/MilestonePagination";
 
@@ -83,14 +83,11 @@ export default function ProjectsListPage() {
       setLoading(true);
       setError("");
       try {
-        const res = await fetch(
+        const res = await authorizedFetch(
           `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
           {
             method: "GET",
-            headers: {
-              accept: "application/json",
-              Authorization: `Bearer ${token}`
-            }
+            headers: { accept: "application/json" }
           }
         );
 

@@ -9,7 +9,7 @@
    - Returns the unwrapped `data` payload (server wraps as {data, error, status})
    ══════════════════════════════════════════════════════════════════ */
 
-import { API_BASE } from "./client";
+import { API_BASE, authorizedFetch } from "./client";
 import { ENDPOINTS } from "./endpoint";
 import { getToken, logout } from "./auth";
 import {
@@ -30,21 +30,6 @@ import {
 } from "../utils/project/milestoneConfigHelpers";
 
 const LIST_QS = "?offset=1&pageSize=20&includeDeleted=false";
-
-function jsonHeaders(token) {
-  return {
-    accept: "application/json",
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`
-  };
-}
-
-function getHeaders(token) {
-  return {
-    accept: "application/json",
-    Authorization: `Bearer ${token}`
-  };
-}
 
 function throwAuth() {
   logout();
@@ -75,8 +60,11 @@ function url(path) {
 
 /* GET with standard 401/error handling. Used for most reads. */
 async function apiGet(path) {
-  const token = requireToken();
-  const res = await fetch(url(path), { method: "GET", headers: getHeaders(token) });
+  requireToken();
+  const res = await authorizedFetch(url(path), {
+    method: "GET",
+    headers: { accept: "application/json" }
+  });
   if (res.status === 401) throwAuth();
   if (!res.ok) await throwHttp(res);
   return res.json().catch(() => ({}));
@@ -88,7 +76,10 @@ async function apiGetOrEmpty(path) {
   const token = getToken();
   if (!token) return [];
   try {
-    const res = await fetch(url(path), { method: "GET", headers: getHeaders(token) });
+    const res = await authorizedFetch(url(path), {
+      method: "GET",
+      headers: { accept: "application/json" }
+    });
     if (!res.ok) return [];
     return await res.json().catch(() => ({}));
   } catch {
@@ -97,10 +88,13 @@ async function apiGetOrEmpty(path) {
 }
 
 async function apiSend(method, path, body) {
-  const token = requireToken();
-  const res = await fetch(url(path), {
+  requireToken();
+  const res = await authorizedFetch(url(path), {
     method,
-    headers: jsonHeaders(token),
+    headers: {
+      accept: "application/json",
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify(body ?? {})
   });
   if (res.status === 401) throwAuth();
@@ -109,8 +103,11 @@ async function apiSend(method, path, body) {
 }
 
 async function apiDelete(path) {
-  const token = requireToken();
-  const res = await fetch(url(path), { method: "DELETE", headers: getHeaders(token) });
+  requireToken();
+  const res = await authorizedFetch(url(path), {
+    method: "DELETE",
+    headers: { accept: "application/json" }
+  });
   if (res.status === 401) throwAuth();
   if (!res.ok && res.status !== 204) await throwHttp(res);
   return true;

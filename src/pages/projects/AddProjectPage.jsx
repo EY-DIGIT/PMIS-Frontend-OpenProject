@@ -7,7 +7,7 @@ import { safeArray } from "../../utils/project/helpers";
 import ChipControl from "../../components/projects/ChipControl";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
-import { API_BASE } from "../../api/client";
+import { API_BASE, authorizedFetch } from "../../api/client";
 
 function makeEmpty() {
   return {
@@ -98,6 +98,19 @@ function extractVendors(raw) {
     .map((v) => ({ id: v.id, name: v.name }));
 }
 
+function extractDivisions(raw) {
+  const elements =
+    raw?.data?._embedded?.elements ??
+    raw?._embedded?.elements ??
+    raw?.data ??
+    raw ??
+    [];
+  const list = Array.isArray(elements) ? elements : [];
+  return list
+    .filter((d) => d?.code && d?.label)
+    .map((d) => ({ code: d.code, label: d.label, requiresOther: !!d.requiresOther }));
+}
+
 export default function AddProjectPage() {
   const navigate = useNavigate();
   const existingDraft = useDraft();
@@ -118,6 +131,9 @@ export default function AddProjectPage() {
   });
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState("");
+  const [divisionOptions, setDivisionOptions] = useState([]);
+  const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [divisionsError, setDivisionsError] = useState("");
   const [errorCreated, setErrorCreated] = useState("");
   const minDate = tomorrowStr();
 
@@ -139,9 +155,9 @@ export default function AddProjectPage() {
       setVendorsLoading(true);
       setVendorsError("");
       try {
-        const res = await fetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
+        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.vendors.list}`, {
           method: "GET",
-          headers: { accept: "application/json", Authorization: `Bearer ${token}` }
+          headers: { accept: "application/json" }
         });
 
         if (cancelled) return;
@@ -178,6 +194,51 @@ export default function AddProjectPage() {
     }
 
     loadVendors();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDivisions() {
+      const token = getToken();
+      if (!token) return;
+
+      setDivisionsLoading(true);
+      setDivisionsError("");
+      try {
+        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.divisions.list}`, {
+          method: "GET",
+          headers: { accept: "application/json" }
+        });
+
+        if (cancelled) return;
+
+        if (res.status === 401) {
+          logout();
+          setErrorCreated("Session expired. Please sign in again.");
+          navigate("/login");
+          return;
+        }
+
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          throw new Error(errBody || `Failed to load divisions (${res.status})`);
+        }
+
+        const raw = await res.json().catch(() => ({}));
+        const divisions = extractDivisions(raw);
+
+        if (!cancelled) setDivisionOptions(divisions);
+      } catch (err) {
+        if (!cancelled) setDivisionsError(err?.message || "Failed to load divisions");
+      } finally {
+        if (!cancelled) setDivisionsLoading(false);
+      }
+    }
+
+    loadDivisions();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -247,12 +308,11 @@ export default function AddProjectPage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE}${ENDPOINTS.projects.create}`, {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.create}`, {
         method: "POST",
         headers: {
           accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(buildPayload())
       });
@@ -339,11 +399,25 @@ export default function AddProjectPage() {
             <label className="uidai-field__label">
               Owner <span className="uidai-required-project">*</span>
             </label>
-            <input
-              className="uidai-input"
+            <select
+              className="uidai-select"
               value={form.owner || ""}
               onChange={(e) => update({ owner: e.target.value })}
-            />
+              disabled={divisionsLoading}
+            >
+              <option value="" disabled>
+                {divisionsLoading
+                  ? "Loading..."
+                  : divisionsError
+                    ? "Could not load divisions"
+                    : "Select owner"}
+              </option>
+              {divisionOptions.map((d) => (
+                <option key={d.code} value={d.code}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="uidai-field">

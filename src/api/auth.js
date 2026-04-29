@@ -1,5 +1,7 @@
-import { api, tokenStore } from './client';
+import { api, tokenStore, refreshAccessToken, authorizedFetch } from './client';
 import { ENDPOINTS } from './endpoint';
+
+export { refreshAccessToken, authorizedFetch };
 
 const TOKEN_KEY = 'auth_token';
 const REFRESH_KEY = 'auth_refresh_token';
