@@ -330,7 +330,7 @@ export default function ProjectDetailsPage() {
      Server enforces a different editable-field set for version vs baseline
      projects. Sending a forbidden field returns 422 with errorIdentifier
      "invalid_field". So branch the payload by mode. */
-  async function updateProjectApi(projectServerId, finalCat, isVersionMode) {
+  async function updateProjectApi(projectServerId, selectedCat, isOthers, isVersionMode) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
@@ -346,17 +346,18 @@ export default function ProjectDetailsPage() {
       };
     } else {
       // Baseline / new projects: full edit allowed.
+      // status is intentionally omitted — the field is shown read-only and
+      // the server manages transitions via publish/suspend/close endpoints.
       payload = {
         name: (form.projectName || "").trim(),
         description: (form.description || "").trim(),
         active: true,
         isPublic: form.isPublic === "Yes",
         status_explanation: project.statusExplanation || "",
-        status: (project.status || "new").toLowerCase(),
         owner: (form.owner || "").trim(),
-        category: finalCat || "",
-        category_other: finalCat === "Others" ? (otherCat || "").trim() : "",
-        category_other_reason: finalCat === "Others" ? (otherCatReason || "").trim() : "",
+        category: isOthers ? "other" : (selectedCat || ""),
+        category_other: isOthers ? (otherCat || "").trim() : "",
+        category_other_reason: isOthers ? (otherCatReason || "").trim() : "",
         vendor_ids: resolveVendorIds(form.vendors),
         startDate: toIsoDate(form.startDate),
         endDate: toIsoDate(form.endDate),
@@ -523,13 +524,12 @@ export default function ProjectDetailsPage() {
 
   function save() {
     if (!form) return;
-    const finalCat =
-      selCat === "Others" ? (otherCat || "").trim() : selCat;
-    if (canEditCat && selCat === "Others" && !finalCat) {
+    const isOthers = selCat === "Others";
+    if (canEditCat && isOthers && !(otherCat || "").trim()) {
       uiStore.showError("Please specify the category.");
       return;
     }
-    if (canEditCat && selCat === "Others" && !(otherCatReason || "").trim()) {
+    if (canEditCat && isOthers && !(otherCatReason || "").trim()) {
       uiStore.showError("Please provide a reason for the 'Others' category.");
       return;
     }
@@ -563,8 +563,9 @@ export default function ProjectDetailsPage() {
         target.startDate = form.startDate;
         target.endDate = form.endDate;
         target.isPublic = form.isPublic;
-        target.category = finalCat;
-        target.categoryOtherReason = finalCat === "Others" ? (otherCatReason || "").trim() : "";
+        target.category = isOthers ? "Others" : selCat;
+        target.categoryOther = isOthers ? (otherCat || "").trim() : "";
+        target.categoryOtherReason = isOthers ? (otherCatReason || "").trim() : "";
         target.vendors = rebuiltVendors;
       }
       addAudit(target, "Update Project Details", before, deepClone(target));
@@ -586,7 +587,7 @@ export default function ProjectDetailsPage() {
     uiStore.showLoader("Saving project details...");
 
     if (getToken()) {
-      updateProjectApi(project.projectId, finalCat, isVersion)
+      updateProjectApi(project.projectId, selCat, isOthers, isVersion)
         .then((updated) => { doLocal(updated); })
         .catch((err) => {
           uiStore.hideLoader();
