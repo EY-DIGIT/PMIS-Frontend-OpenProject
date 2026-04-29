@@ -61,7 +61,7 @@ export async function create({
     email,
     contact_person,
     phone_number,
-    projects: Array.isArray(projectMapping) ? projectMapping : [],
+    projectIds: Array.isArray(projectMapping) ? projectMapping : [],
   });
   return fromApi(unwrapOne(res));
 }
