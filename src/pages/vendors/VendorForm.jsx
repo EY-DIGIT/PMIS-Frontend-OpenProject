@@ -50,7 +50,6 @@ export default function VendorForm() {
 
   const projectOptions = useMemo(() => {
     if (!tokenStore.get()) return PROJECT_OPTIONS;
-    if (!projectList.length) return PROJECT_OPTIONS;
     return projectList.map((p) => ({
       label: p.name || p.projectCode || p.id,
       value: p.id || p.uuid,
