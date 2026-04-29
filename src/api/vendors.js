@@ -30,6 +30,7 @@ function fromApi(v) {
     email: v.email || '',
     phone: v.phoneNumber || v.phone_number || v.phone || '',
     projectMapping: projects.map((p) => p.name).filter(Boolean),
+    projectIds: projects.map((p) => p.id || p.uuid).filter(Boolean),
     projects,
     createdAt: v.createdAt || '',
     updatedAt: v.updatedAt || '',
@@ -43,6 +44,11 @@ function fromApi(v) {
 export async function list() {
   const res = await api.get(ENDPOINTS.vendors.list);
   return unwrap(res).map(fromApi);
+}
+
+export async function get(id) {
+  const res = await api.get(ENDPOINTS.vendors.get(id));
+  return fromApi(unwrapOne(res));
 }
 
 export async function create({
@@ -66,8 +72,26 @@ export async function create({
   return fromApi(unwrapOne(res));
 }
 
-export async function update(id, patch) {
-  const res = await api.patch(ENDPOINTS.vendors.update(id), patch);
+export async function update(id, {
+  name,
+  description,
+  active,
+  email,
+  contact_person,
+  phone_number,
+  projectMapping,
+}) {
+  const body = {};
+  if (name !== undefined) body.name = name;
+  if (description !== undefined) body.description = description;
+  if (active !== undefined) body.active = active;
+  if (email !== undefined) body.email = email;
+  if (contact_person !== undefined) body.contact_person = contact_person;
+  if (phone_number !== undefined) body.phone_number = phone_number;
+  if (projectMapping !== undefined) {
+    body.project_ids = Array.isArray(projectMapping) ? projectMapping : [];
+  }
+  const res = await api.patch(ENDPOINTS.vendors.update(id), body);
   return fromApi(unwrapOne(res));
 }
 

@@ -28,6 +28,7 @@ export const ENDPOINTS = {
 
   vendors: {
     list: '/api/v3/vendors',
+    get: (id) => `/api/v3/vendors/${enc(id)}`,
     create: '/api/v3/vendors/create',
     update: (id) => `/api/v3/vendors/${enc(id)}`,
     remove: (id) => `/api/v3/vendors/${enc(id)}`,
