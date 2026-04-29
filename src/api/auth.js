@@ -56,6 +56,8 @@ export async function logout() {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem('pmis_last_activity');
+    localStorage.removeItem('pmis_last_refresh_at');
     sessionStorage.removeItem('uidai_loggedIn');
     sessionStorage.removeItem('uidai_user');
   }
