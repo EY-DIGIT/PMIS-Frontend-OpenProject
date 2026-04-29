@@ -16,6 +16,8 @@ import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/ResetPassword";
 
 
+import { useSessionManager } from "./api/sessionManager";
+
 import VendorList from './pages/vendors/VendorList';
 import VendorForm from './pages/vendors/VendorForm';
 import VendorDetails from './pages/vendors/VendorDetails';
@@ -149,13 +151,23 @@ function Breadcrumbs() {
     );
 }
 
+function SessionManager() {
+    useSessionManager();
+    return null;
+}
+
 function RequireAuth({ children }) {
     const loggedIn = sessionStorage.getItem('uidai_loggedIn') === 'true';
     const location = useLocation();
     if (!loggedIn) {
         return <Navigate to="/login" replace state={{ from: location }} />;
     }
-    return children;
+    return (
+        <>
+            <SessionManager />
+            {children}
+        </>
+    );
 }
 
 export default function MainApp() {

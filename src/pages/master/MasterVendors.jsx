@@ -1,5 +1,5 @@
 import { useData } from '../../data/DataContext';
-import { formatDateDisplay, renderMappingText } from '../../utils/helpers';
+import { renderMappingText } from '../../utils/helpers';
 
 export default function MasterVendors() {
   const { vendors } = useData();
@@ -16,7 +16,7 @@ export default function MasterVendors() {
               <tr>
                 <th>Vendor ID</th><th>Vendor Name</th><th>Type</th><th>Status</th>
                 <th>Contact Person</th><th>Email</th><th>Phone</th>
-                <th>Project Mapping</th><th>Contract End</th>
+                <th>Project Mapping</th>
               </tr>
             </thead>
             <tbody>
@@ -34,12 +34,11 @@ export default function MasterVendors() {
                   <td>{v.email}</td>
                   <td>{v.phone}</td>
                   <td>{renderMappingText(v.projectMapping)}</td>
-                  <td>{formatDateDisplay(v.endDate)}</td>
                 </tr>
               ))}
               {vendors.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={9}>No data found.</td>
+                  <td colSpan={8}>No data found.</td>
                 </tr>
               )}
             </tbody>

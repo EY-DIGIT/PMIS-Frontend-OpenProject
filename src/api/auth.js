@@ -1,4 +1,4 @@
-import { api, tokenStore, refreshAccessToken, authorizedFetch } from './client';
+import { api, tokenStore, refreshAccessToken, authorizedFetch, readExpiresAt } from './client';
 import { ENDPOINTS } from './endpoint';
 
 export { refreshAccessToken, authorizedFetch };
@@ -33,6 +33,9 @@ export async function login({ login, password }) {
     tokenStore.setUser(user);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   }
+
+  const expiresAt = readExpiresAt(res?.data);
+  if (expiresAt) tokenStore.setExpiresAt(expiresAt);
 
   return { token, refresh, user };
 }

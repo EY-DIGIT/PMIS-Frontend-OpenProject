@@ -10,6 +10,7 @@ const REFRESH_PATH = '/api/v3/users/refresh';
 const TOKEN_KEY = 'pmis_token';
 const REFRESH_KEY = 'pmis_refresh_token';
 const USER_KEY = 'pmis_user';
+const EXPIRES_AT_KEY = 'pmis_access_expires_at';
 
 // Mirror keys used by auth.js so legacy callers and tab-restored sessions stay
 // in sync. Read = session-first then local fallback; Write = both; Clear = both.
@@ -32,9 +33,11 @@ export const tokenStore = {
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(REFRESH_KEY);
     sessionStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(EXPIRES_AT_KEY);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(EXPIRES_AT_KEY);
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(LEGACY_REFRESH_KEY);
     localStorage.removeItem(LEGACY_USER_KEY);
@@ -62,7 +65,35 @@ export const tokenStore = {
     localStorage.setItem(USER_KEY, v);
     localStorage.setItem(LEGACY_USER_KEY, v);
   },
+  getExpiresAt: () => {
+    const v =
+      sessionStorage.getItem(EXPIRES_AT_KEY) ||
+      localStorage.getItem(EXPIRES_AT_KEY);
+    const n = v ? parseInt(v, 10) : 0;
+    return Number.isFinite(n) ? n : 0;
+  },
+  setExpiresAt: (epochMs) => {
+    if (!epochMs) return;
+    const v = String(epochMs);
+    sessionStorage.setItem(EXPIRES_AT_KEY, v);
+    localStorage.setItem(EXPIRES_AT_KEY, v);
+  },
 };
+
+// Pull an absolute "access token expires at" epoch (ms) from a server payload
+// that may use either ISO `accessTokenExpiresAt` or `expiresInSeconds`.
+export function readExpiresAt(payload) {
+  if (!payload) return 0;
+  if (payload.accessTokenExpiresAt) {
+    const t = Date.parse(payload.accessTokenExpiresAt);
+    if (Number.isFinite(t)) return t;
+  }
+  if (payload.expiresInSeconds) {
+    const s = Number(payload.expiresInSeconds);
+    if (Number.isFinite(s) && s > 0) return Date.now() + s * 1000;
+  }
+  return 0;
+}
 
 export class ApiError extends Error {
   constructor(message, { status, body } = {}) {
@@ -106,6 +137,8 @@ export function refreshAccessToken() {
       tokenStore.set(newAccess);
       if (newRefresh) tokenStore.setRefresh(newRefresh);
       if (data.user) tokenStore.setUser(data.user);
+      const expiresAt = readExpiresAt(data);
+      if (expiresAt) tokenStore.setExpiresAt(expiresAt);
       return newAccess;
     } catch {
       return null;
