@@ -34,6 +34,9 @@ function fromApi(u) {
   const projectMapping = projects
     .map((p) => (typeof p === 'string' ? p : p?.name || p?.id || ''))
     .filter(Boolean);
+  const projectIds = projects
+    .map((p) => (typeof p === 'string' ? p : p?.id || p?.uuid || ''))
+    .filter(Boolean);
   return {
     userId: u.id || u.uuid,
     fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
@@ -45,6 +48,7 @@ function fromApi(u) {
     division: u.division || '',
     divisionOther: u.division_other || u.divisionOther || '',
     projectMapping,
+    projectIds,
     status: u.active === false || u.status === 'inactive' ? 'Inactive' : 'Active',
   };
 }
@@ -64,8 +68,26 @@ export async function create(body) {
   return fromApi(unwrapOne(res));
 }
 
-export async function update(id, patch) {
-  const res = await api.patch(ENDPOINTS.users.update(id), patch);
+export async function update(id, {
+  email,
+  firstName,
+  lastName,
+  admin,
+  status,
+  vendor_id,
+  division,
+  division_other,
+}) {
+  const body = {};
+  if (email !== undefined) body.email = email;
+  if (firstName !== undefined) body.firstName = firstName;
+  if (lastName !== undefined) body.lastName = lastName;
+  if (admin !== undefined) body.admin = admin;
+  if (status !== undefined) body.status = status;
+  if (vendor_id !== undefined) body.vendor_id = vendor_id;
+  if (division !== undefined) body.division = division;
+  if (division_other !== undefined) body.division_other = division_other;
+  const res = await api.patch(ENDPOINTS.users.update(id), body);
   return fromApi(unwrapOne(res));
 }
 
