@@ -70,3 +70,7 @@ export async function update(id, patch) {
   const res = await api.patch(ENDPOINTS.vendors.update(id), patch);
   return fromApi(unwrapOne(res));
 }
+
+export async function remove(id) {
+  return api.del(ENDPOINTS.vendors.remove(id));
+}

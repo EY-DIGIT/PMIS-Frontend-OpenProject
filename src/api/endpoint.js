@@ -30,6 +30,7 @@ export const ENDPOINTS = {
     list: '/api/v3/vendors',
     create: '/api/v3/vendors/create',
     update: (id) => `/api/v3/vendors/${enc(id)}`,
+    remove: (id) => `/api/v3/vendors/${enc(id)}`,
   },
 
   divisions: {

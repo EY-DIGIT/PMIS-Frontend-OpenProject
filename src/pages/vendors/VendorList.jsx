@@ -1,17 +1,38 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaTrashAlt } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
+import * as vendorsApi from '../../api/vendors';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import FilterShell from '../../components/FilterShell';
 
 export default function VendorList() {
-  const { vendors, refresh } = useData();
+  const { vendors, setVendors, refresh } = useData();
   const navigate = useNavigate();
+  const [deletingId, setDeletingId] = useState('');
 
   useEffect(() => {
     if (tokenStore.get()) refresh();
   }, [refresh]);
+
+  async function handleDelete(v) {
+    const ok = window.confirm(`Delete vendor "${v.vendorName}"?`);
+    if (!ok) return;
+    if (tokenStore.get()) {
+      try {
+        setDeletingId(v.vendorId);
+        await vendorsApi.remove(v.vendorId);
+        await refresh();
+      } catch (err) {
+        window.alert(err?.message || 'Failed to delete vendor');
+      } finally {
+        setDeletingId('');
+      }
+    } else {
+      setVendors(vendors.filter((x) => x.vendorId !== v.vendorId));
+    }
+  }
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
@@ -147,7 +168,7 @@ export default function VendorList() {
             <thead>
               <tr>
                 <th>Vendor ID</th><th>Vendor Name</th><th>Type</th><th>Status</th>
-                <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th>
+                <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -167,11 +188,34 @@ export default function VendorList() {
                   <td>{v.email}</td>
                   <td>{v.phone}</td>
                   <td>{renderMappingText(v.projectMapping)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      title="Delete vendor"
+                      aria-label="Delete vendor"
+                      disabled={deletingId === v.vendorId}
+                      onClick={() => handleDelete(v)}
+                      style={{
+                        border: '1px solid #d32f2f',
+                        background: '#fff',
+                        color: '#d32f2f',
+                        borderRadius: 4,
+                        padding: '4px 8px',
+                        cursor: deletingId === v.vendorId ? 'not-allowed' : 'pointer',
+                        opacity: deletingId === v.vendorId ? 0.6 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <FaTrashAlt />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8}>No matching vendors found.</td>
+                  <td colSpan={9}>No matching vendors found.</td>
                 </tr>
               )}
             </tbody>
