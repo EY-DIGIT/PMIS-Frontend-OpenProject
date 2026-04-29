@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
 import { USER_ROLES, DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
-import { tokenStore } from '../../api/client';
+import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
+import { ENDPOINTS } from '../../api/endpoint';
 
 export default function UserForm() {
   const { vendors, refresh, setUsers, users } = useData();
@@ -15,18 +16,97 @@ export default function UserForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(USER_ROLES[0]);
-  const [vendorName, setVendorName] = useState('');
-  const [division, setDivision] = useState(DIVISION_OPTIONS[0]);
+  const [vendorId, setVendorId] = useState('');
+  const [division, setDivision] = useState('');
+  const [divisionOther, setDivisionOther] = useState('');
   const [mapping, setMapping] = useState([]);
+  const [projectList, setProjectList] = useState([]);
+  const [divisionList, setDivisionList] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
+          { method: 'GET', headers: { accept: 'application/json' } }
+        );
+        if (!res.ok) return;
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          raw?.data ??
+          [];
+        if (!cancelled && Array.isArray(elements)) setProjectList(elements);
+      } catch {
+        if (!cancelled) setProjectList([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${API_BASE}${ENDPOINTS.divisions.list}`,
+          { method: 'GET', headers: { accept: 'application/json' } }
+        );
+        if (!res.ok) return;
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          raw?.data ??
+          [];
+        const divisions = (Array.isArray(elements) ? elements : [])
+          .filter((d) => d?.code && d?.label)
+          .map((d) => ({ code: d.code, label: d.label, requiresOther: !!d.requiresOther }));
+        if (!cancelled) setDivisionList(divisions);
+      } catch {
+        if (!cancelled) setDivisionList([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const projectOptions = useMemo(() => {
+    if (!tokenStore.get()) return PROJECT_OPTIONS;
+    return projectList.map((p) => ({
+      label: p.name || p.projectCode || p.id,
+      value: p.id || p.uuid,
+    }));
+  }, [projectList]);
+
+  const divisionOptions = useMemo(() => {
+    if (!tokenStore.get() || divisionList.length === 0) {
+      return DIVISION_OPTIONS.map((d) => ({ code: d, label: d, requiresOther: false }));
+    }
+    return divisionList;
+  }, [divisionList]);
+
+  const selectedDivision = divisionOptions.find((d) => d.code === division);
+  const divisionRequiresOther =
+    !!selectedDivision &&
+    (selectedDivision.requiresOther ||
+      String(selectedDivision.label || '').toLowerCase() === 'others' ||
+      String(selectedDivision.code || '').toLowerCase() === 'others');
+
+  const selectedVendor = vendors.find((v) => v.vendorId === vendorId);
 
   const validate = () => {
     if (!fullName.trim()) return 'Full Name is required';
     if (!employeeId.trim()) return 'Employee ID is required';
     if (!email.trim()) return 'Email is required';
     if (!password) return 'Temporary Password is required';
-    if (!vendorName) return 'Please select an associated vendor';
+    if (!vendorId) return 'Please select an associated vendor';
+    if (divisionRequiresOther && !divisionOther.trim()) return 'Please specify the division';
     return '';
   };
 
@@ -50,6 +130,10 @@ export default function UserForm() {
           firstName,
           lastName,
           admin: role === 'Admin',
+          vendor_id: vendorId,
+          division,
+          division_other: divisionRequiresOther ? divisionOther.trim() : '',
+          project_ids: Array.isArray(mapping) ? mapping : [],
         });
         await refresh();
       } else {
@@ -61,7 +145,7 @@ export default function UserForm() {
             employeeId: employeeId.trim(),
             email: email.trim(),
             role,
-            vendorName,
+            vendorName: selectedVendor?.vendorName || '',
             division,
             projectMapping: mapping,
             status: 'Active',
@@ -106,25 +190,47 @@ export default function UserForm() {
           </div>
           <div className="uidai-pmis-field">
             <label>Associated Vendor Name <span className="uidai-pmis-required">*</span></label>
-            <select value={vendorName} onChange={(e) => setVendorName(e.target.value)}>
+            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
               <option value="" disabled>Select Vendor</option>
               {vendors.map((v) => (
-                <option key={v.vendorId}>{v.vendorName}</option>
+                <option key={v.vendorId} value={v.vendorId}>{v.vendorName}</option>
               ))}
             </select>
           </div>
           <div className="uidai-pmis-field">
             <label>Division <span className="uidai-pmis-required">*</span></label>
-            <select value={division} onChange={(e) => setDivision(e.target.value)}>
-              {DIVISION_OPTIONS.map((d) => <option key={d}>{d}</option>)}
+            <select
+              value={division}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDivision(next);
+                const nextDiv = divisionOptions.find((d) => d.code === next);
+                const stillNeedsOther =
+                  !!nextDiv &&
+                  (nextDiv.requiresOther ||
+                    String(nextDiv.label || '').toLowerCase() === 'others' ||
+                    String(nextDiv.code || '').toLowerCase() === 'others');
+                if (!stillNeedsOther) setDivisionOther('');
+              }}
+            >
+              <option value="" disabled>Select Division</option>
+              {divisionOptions.map((d) => (
+                <option key={d.code} value={d.code}>{d.label}</option>
+              ))}
             </select>
           </div>
+          {divisionRequiresOther && (
+            <div className="uidai-pmis-field">
+              <label>Specify Division <span className="uidai-pmis-required">*</span></label>
+              <input value={divisionOther} onChange={(e) => setDivisionOther(e.target.value)} />
+            </div>
+          )}
           <div className="uidai-pmis-field">
             <label>Project Mapping <span className="uidai-pmis-required">*</span></label>
             <MultiSelect
               name="userProjectMapping"
               value={mapping}
-              options={PROJECT_OPTIONS}
+              options={projectOptions}
               onChange={setMapping}
             />
           </div>

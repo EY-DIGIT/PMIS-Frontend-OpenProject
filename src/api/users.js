@@ -19,16 +19,33 @@ function unwrapOne(res) {
 }
 
 function fromApi(u) {
+  const firstName = u.firstName || u.first_name || '';
+  const lastName = u.lastName || u.last_name || '';
+  const vendorObj = u.vendor && typeof u.vendor === 'object' ? u.vendor : null;
+  const vendorName = vendorObj?.name || u.vendorName || u.vendor_name || '';
+  const vendorId = vendorObj?.id || u.vendor_id || u.vendorId || '';
+  const projects = Array.isArray(u.projects)
+    ? u.projects
+    : Array.isArray(u.project_ids)
+      ? u.project_ids
+      : Array.isArray(u.projectMapping)
+        ? u.projectMapping
+        : [];
+  const projectMapping = projects
+    .map((p) => (typeof p === 'string' ? p : p?.name || p?.id || ''))
+    .filter(Boolean);
   return {
     userId: u.id || u.uuid,
-    fullName: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.login || '',
-    employeeId: u.employeeId || u.login || '',
+    fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
+    employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',
     role: u.admin ? 'Admin' : (u.role || 'Viewer'),
-    vendorName: u.vendorName || '',
+    vendorId,
+    vendorName,
     division: u.division || '',
-    projectMapping: u.projectMapping || [],
-    status: u.status === 'inactive' ? 'Inactive' : 'Active',
+    divisionOther: u.division_other || u.divisionOther || '',
+    projectMapping,
+    status: u.active === false || u.status === 'inactive' ? 'Inactive' : 'Active',
   };
 }
 

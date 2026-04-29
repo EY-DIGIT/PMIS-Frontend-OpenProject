@@ -1,18 +1,39 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaTrashAlt } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
+import * as usersApi from '../../api/users';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
 
 export default function UserList() {
-  const { users, refresh } = useData();
+  const { users, setUsers, refresh } = useData();
   const navigate = useNavigate();
+  const [deletingId, setDeletingId] = useState('');
 
   useEffect(() => {
     if (tokenStore.get()) refresh();
   }, [refresh]);
+
+  async function handleDelete(u) {
+    const ok = window.confirm(`Delete user "${u.fullName || u.email}"?`);
+    if (!ok) return;
+    if (tokenStore.get()) {
+      try {
+        setDeletingId(u.userId);
+        await usersApi.remove(u.userId);
+        await refresh();
+      } catch (err) {
+        window.alert(err?.message || 'Failed to delete user');
+      } finally {
+        setDeletingId('');
+      }
+    } else {
+      setUsers(users.filter((x) => x.userId !== u.userId));
+    }
+  }
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
@@ -138,7 +159,7 @@ export default function UserList() {
               <tr>
                 <th>User ID</th><th>Full Name</th><th>Employee ID</th><th>Email</th>
                 <th>Role</th><th>Associated Vendor</th><th>Division</th>
-                <th>Project Mapping</th><th>Status</th>
+                <th>Project Mapping</th><th>Status</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -159,11 +180,34 @@ export default function UserList() {
                       {u.status}
                     </span>
                   </td>
+                  <td>
+                    <button
+                      type="button"
+                      title="Delete user"
+                      aria-label="Delete user"
+                      disabled={deletingId === u.userId}
+                      onClick={() => handleDelete(u)}
+                      style={{
+                        border: '1px solid #d32f2f',
+                        background: '#fff',
+                        color: '#d32f2f',
+                        borderRadius: 4,
+                        padding: '4px 8px',
+                        cursor: deletingId === u.userId ? 'not-allowed' : 'pointer',
+                        opacity: deletingId === u.userId ? 0.6 : 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <FaTrashAlt />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={9}>No matching users found.</td>
+                  <td colSpan={10}>No matching users found.</td>
                 </tr>
               )}
             </tbody>

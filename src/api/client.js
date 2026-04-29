@@ -199,7 +199,17 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
 
   if (!res.ok) {
     if (res.status === 401) tokenStore.clear();
-    const msg = (payload && (payload.message || payload.error)) || `${method} ${path} failed (${res.status})`;
+    const nested =
+      (payload && typeof payload === 'object' && payload.error && typeof payload.error === 'object'
+        ? payload.error.message
+        : null) ||
+      (payload && typeof payload.error === 'string' ? payload.error : null);
+    const flat = payload && typeof payload === 'object' ? payload.message : null;
+    const msg =
+      (typeof nested === 'string' && nested) ||
+      (typeof flat === 'string' && flat) ||
+      (typeof payload === 'string' && payload) ||
+      `${method} ${path} failed (${res.status})`;
     throw new ApiError(msg, { status: res.status, body: payload });
   }
   return payload;
