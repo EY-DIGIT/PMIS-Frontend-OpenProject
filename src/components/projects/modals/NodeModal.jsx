@@ -44,8 +44,13 @@ function vendorKey(v) {
   return "";
 }
 
-function makeDefaultForm(kind, node) {
+function makeDefaultForm(kind, node, mode, parentNode) {
   const n = node || {};
+  const inheritFromParent =
+    mode === "add" &&
+    (kind === "task" || kind === "subtask") &&
+    parentNode &&
+    parentNode.type;
   return {
     name: n.name || "",
     description: n.description || "",
@@ -54,7 +59,9 @@ function makeDefaultForm(kind, node) {
     actualStartDate: n.actualStartDate || "",
     actualEndDate: n.actualEndDate || "",
     status: n.status || "Not Completed",
-    type: n.type || (kind === "milestone" ? "" : "Standard Type"),
+    type: inheritFromParent
+      ? parentNode.type
+      : n.type || (kind === "milestone" ? "" : "Standard Type"),
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
     resourceEntryType: n.resourceEntryType || "details",
@@ -111,19 +118,19 @@ export default function NodeModal({
   }, [open, parentUid, project]);
   const parentTypeIsResource = parentNode?.type === "Resource Type";
 
-  const [form, setForm] = useState(() => makeDefaultForm(kind, node));
+  const [form, setForm] = useState(() => makeDefaultForm(kind, node, mode, parentNode));
   const [commentText, setCommentText] = useState("");
   const [commentFiles, setCommentFiles] = useState([]);
   const [attachError, setAttachError] = useState("");
 
   useEffect(() => {
     if (open) {
-      setForm(makeDefaultForm(kind, node));
+      setForm(makeDefaultForm(kind, node, mode, parentNode));
       setCommentText("");
       setCommentFiles([]);
       setAttachError("");
     }
-  }, [open, kind, node]);
+  }, [open, kind, node, mode, parentNode]);
 
   if (!open || !project) return null;
 
@@ -270,6 +277,11 @@ export default function NodeModal({
             const typeOptions = restrictResource
               ? NODE_TYPE_OPTIONS.filter((t) => t !== "Resource Type")
               : NODE_TYPE_OPTIONS;
+            // When adding a task or subtask, lock its type to the parent's type.
+            const lockToParentType =
+              isAdd &&
+              (kind === "task" || kind === "subtask") &&
+              !!(parentNode && parentNode.type);
             return (
               <div className="uidai-field">
                 <label className="uidai-field__label">
@@ -280,13 +292,18 @@ export default function NodeModal({
                   className="uidai-select"
                   value={form.type}
                   onChange={(e) => updateField({ type: e.target.value })}
-                  disabled={dis}
+                  disabled={dis || lockToParentType}
                 >
                   {typeOptions.map((t) => (
                     <option key={t}>{t}</option>
                   ))}
                 </select>
-                {restrictResource && (
+                {lockToParentType && (
+                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                    Inherited from parent {kind === "task" ? "activity" : "task"} type.
+                  </div>
+                )}
+                {restrictResource && !lockToParentType && (
                   <div className="uidai-field__hint" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
                     Resource Type is only available when the parent {kind === "task" ? "activity" : "task"} is also Resource Type.
                   </div>
