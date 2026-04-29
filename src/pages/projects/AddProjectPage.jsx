@@ -14,6 +14,7 @@ function makeEmpty() {
     projectName: "",
     description: "",
     owner: "",
+    ownerOther: "",
     startDate: "",
     endDate: "",
     actualEndDate: "",
@@ -58,6 +59,7 @@ function normalizeFormShape(maybeDraft) {
     projectName: maybeDraft.projectName || "",
     description: maybeDraft.description || "",
     owner: maybeDraft.owner || "",
+    ownerOther: maybeDraft.ownerOther || "",
     startDate: maybeDraft.startDate || "",
     endDate: maybeDraft.endDate || "",
     actualEndDate: maybeDraft.actualEndDate || "",
@@ -247,6 +249,13 @@ export default function AddProjectPage() {
     setForm((f) => ({ ...f, ...patch }));
   }
 
+  const selectedDivision = divisionOptions.find((d) => d.code === form.owner);
+  const ownerRequiresOther =
+    !!selectedDivision &&
+    (selectedDivision.requiresOther ||
+      String(selectedDivision.label || "").toLowerCase() === "others" ||
+      String(selectedDivision.code || "").toLowerCase() === "others");
+
   function buildPayload() {
     const isOther = selectedCategory === "Others";
     const selectedNames = safeArray(form.vendors);
@@ -260,6 +269,7 @@ export default function AddProjectPage() {
       status_explanation: "",
       status: "new",
       owner: (form.owner || "").trim(),
+      ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
       category: isOther ? "Others" : selectedCategory,
       category_other: isOther ? otherCategory.trim() : "",
       category_other_reason: isOther ? otherCategoryReason.trim() : "",
@@ -284,6 +294,10 @@ export default function AddProjectPage() {
     }
     if (!(form.projectName || "").trim() || !(form.owner || "").trim() || !form.startDate || !form.endDate) {
       setErrorCreated("Fill required fields");
+      return;
+    }
+    if (ownerRequiresOther && !(form.ownerOther || "").trim()) {
+      setErrorCreated("Please specify the owner.");
       return;
     }
     if (form.startDate < minDate) {
@@ -402,7 +416,19 @@ export default function AddProjectPage() {
             <select
               className="uidai-select"
               value={form.owner || ""}
-              onChange={(e) => update({ owner: e.target.value })}
+              onChange={(e) => {
+                const nextCode = e.target.value;
+                const nextDiv = divisionOptions.find((d) => d.code === nextCode);
+                const stillNeedsOther =
+                  !!nextDiv &&
+                  (nextDiv.requiresOther ||
+                    String(nextDiv.label || "").toLowerCase() === "others" ||
+                    String(nextDiv.code || "").toLowerCase() === "others");
+                update({
+                  owner: nextCode,
+                  ownerOther: stillNeedsOther ? form.ownerOther || "" : ""
+                });
+              }}
               disabled={divisionsLoading}
             >
               <option value="" disabled>
@@ -419,6 +445,19 @@ export default function AddProjectPage() {
               ))}
             </select>
           </div>
+
+          {ownerRequiresOther && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">
+                Specify Owner <span className="uidai-required-project">*</span>
+              </label>
+              <input
+                className="uidai-input"
+                value={form.ownerOther || ""}
+                onChange={(e) => update({ ownerOther: e.target.value })}
+              />
+            </div>
+          )}
 
           <div className="uidai-field">
             <label className="uidai-field__label">
