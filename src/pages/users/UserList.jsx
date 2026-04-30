@@ -168,7 +168,11 @@ export default function UserList() {
                   <td className="uidai-pmis-link" onClick={() => navigate(`/users/${u.userId}`)}>
                     {u.userId}
                   </td>
-                  <td>{u.fullName}</td>
+                  <td>
+                    <div className="uidai-clamp-2" title={u.fullName}>
+                      {u.fullName}
+                    </div>
+                  </td>
                   <td>{u.employeeId}</td>
                   <td>{u.email}</td>
                   <td>{u.role}</td>

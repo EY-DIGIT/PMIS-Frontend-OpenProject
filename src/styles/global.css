@@ -243,6 +243,18 @@
 }
 .uidai-pmis-table tr:hover { background: #f9fcff; }
 
+/* 2-line text clamp for long values in list-style tables */
+.uidai-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+  max-width: 260px;
+}
+
 .uidai-pmis-link {
   color: #0b3c88;
   font-weight: 600;

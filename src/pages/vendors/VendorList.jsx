@@ -177,7 +177,11 @@ export default function VendorList() {
                   <td className="uidai-pmis-link" onClick={() => navigate(`/vendors/${v.vendorId}`)}>
                     {v.vendorId}
                   </td>
-                  <td>{v.vendorName}</td>
+                  <td>
+                    <div className="uidai-clamp-2" title={v.vendorName}>
+                      {v.vendorName}
+                    </div>
+                  </td>
                   <td>{v.vendorType}</td>
                   <td>
                     <span className={`uidai-pmis-badge ${v.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>

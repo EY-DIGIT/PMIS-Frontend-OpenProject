@@ -298,7 +298,11 @@ export default function ProjectsListPage() {
                         {p.projectCode || p.projectId}
                       </button>
                     </td>
-                    <td>{p.projectName}</td>
+                    <td>
+                      <div className="uidai-clamp-2" title={p.projectName}>
+                        {p.projectName}
+                      </div>
+                    </td>
                     {/* <td>{p.description || ""}</td> */}
                     <td>
                       {p.baselineId && p.baselineId !== "-"
