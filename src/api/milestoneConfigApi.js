@@ -143,6 +143,32 @@ function buildMilestonePayload(project, formData) {
   };
 }
 
+/* ════════════════ Resource Types ════════════════ */
+
+export async function loadResourceTypes() {
+  const raw = await apiGet(ENDPOINTS.resourceTypes.list);
+  return extractListElements(raw)
+    .filter((r) => r && r.active !== false)
+    .map((r) => ({
+      id: r.id || "",
+      code: r.code || "",
+      name: r.name || r.code || ""
+    }));
+}
+
+/* ════════════════ Divisions ════════════════ */
+
+export async function loadDivisions() {
+  const raw = await apiGet(ENDPOINTS.divisions.list);
+  return extractListElements(raw)
+    .filter((d) => d && d.code && d.label)
+    .map((d) => ({
+      code: d.code,
+      label: d.label,
+      requiresOther: !!d.requiresOther
+    }));
+}
+
 /* ════════════════ Project APIs ════════════════ */
 
 export async function loadProjectById(projectId) {

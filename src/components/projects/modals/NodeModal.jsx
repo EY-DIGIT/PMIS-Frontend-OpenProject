@@ -15,6 +15,8 @@ import {
   safeArray
 } from "../../../utils/project/nodeUtils";
 import { formatDateDisplay, formatDateTime } from "../../../utils/project/helpers";
+import { loadResourceTypes, loadDivisions } from "../../../api/milestoneConfigApi";
+import { getToken } from "../../../api/auth";
 
 const TITLE_MAP = {
   milestone: "Milestone",
@@ -67,8 +69,9 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     resourceEntryType: n.resourceEntryType || "details",
     resourceDetails: {
       resourceName: "",
-      resType: "RFP",
+      resType: "",
       division: "",
+      divisionOther: "",
       onboardingDate: "",
       offboardingDate: "",
       actualOnboardingDate: "",
@@ -81,10 +84,11 @@ function makeDefaultForm(kind, node, mode, parentNode) {
       ...(n.resourceDetails || {})
     },
     resourceCount: {
-      resType: "RFP",
+      resType: "",
       count: 1,
       onboardingDate: "",
       division: "",
+      divisionOther: "",
       ...(n.resourceCount || {})
     },
     comments: safeArray(n.comments).slice()
@@ -122,6 +126,10 @@ export default function NodeModal({
   const [commentText, setCommentText] = useState("");
   const [commentFiles, setCommentFiles] = useState([]);
   const [attachError, setAttachError] = useState("");
+  const [resourceTypes, setResourceTypes] = useState([]);
+  const [resourceTypesLoading, setResourceTypesLoading] = useState(false);
+  const [divisions, setDivisions] = useState([]);
+  const [divisionsLoading, setDivisionsLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -131,6 +139,22 @@ export default function NodeModal({
       setAttachError("");
     }
   }, [open, kind, node, mode, parentNode]);
+
+  useEffect(() => {
+    if (!open || kind === "milestone" || !getToken()) return;
+    let cancelled = false;
+    setResourceTypesLoading(true);
+    setDivisionsLoading(true);
+    loadResourceTypes()
+      .then((list) => { if (!cancelled) setResourceTypes(list); })
+      .catch(() => { if (!cancelled) setResourceTypes([]); })
+      .finally(() => { if (!cancelled) setResourceTypesLoading(false); });
+    loadDivisions()
+      .then((list) => { if (!cancelled) setDivisions(list); })
+      .catch(() => { if (!cancelled) setDivisions([]); })
+      .finally(() => { if (!cancelled) setDivisionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, kind]);
 
   if (!open || !project) return null;
 
@@ -455,6 +479,10 @@ export default function NodeModal({
               adjResCount={adjResCount}
               dis={dis}
               editable={editable}
+              resourceTypes={resourceTypes}
+              resourceTypesLoading={resourceTypesLoading}
+              divisions={divisions}
+              divisionsLoading={divisionsLoading}
             />
           )}
         </div>
@@ -486,16 +514,72 @@ export default function NodeModal({
   );
 }
 
-function ResourceSection({ form, updateField, adjResCount, dis, editable }) {
+function ResourceSection({
+  form,
+  updateField,
+  adjResCount,
+  dis,
+  editable,
+  resourceTypes,
+  resourceTypesLoading,
+  divisions,
+  divisionsLoading
+}) {
   const entry = form.resourceEntryType;
   const rd = form.resourceDetails;
   const rc = form.resourceCount;
+
+  const apiList = safeArray(resourceTypes);
+  const useApi = apiList.length > 0;
+
+  const divisionFallback = DIVISION_OPTIONS.map((o) => ({
+    code: o.toLowerCase() === "others" ? "others" : o,
+    label: o,
+    requiresOther: o.toLowerCase() === "others"
+  }));
+  const effectiveDivisions = safeArray(divisions).length ? divisions : divisionFallback;
 
   function updateRd(patch) {
     updateField({ resourceDetails: { ...rd, ...patch } });
   }
   function updateRc(patch) {
     updateField({ resourceCount: { ...rc, ...patch } });
+  }
+
+  function handleDivisionChange(target, code) {
+    const needsOther = divisionRequiresOther(effectiveDivisions, code);
+    const patch = {
+      division: code,
+      divisionOther: needsOther ? (target.divisionOther || "") : ""
+    };
+    if (target === rd) updateRd(patch); else updateRc(patch);
+  }
+
+  function renderResourceTypeOptions(currentValue) {
+    if (!useApi) {
+      return RESOURCE_TYPE_CODES.map((t) => <option key={t}>{t}</option>);
+    }
+    const opts = apiList.map((r) => (
+      <option key={r.id} value={r.id}>
+        {r.name}
+      </option>
+    ));
+    const hasMatch = apiList.some((r) => r.id === currentValue);
+    if (currentValue && !hasMatch) {
+      opts.unshift(
+        <option key={`legacy-${currentValue}`} value={currentValue}>
+          {currentValue}
+        </option>
+      );
+    }
+    if (!currentValue) {
+      opts.unshift(
+        <option key="__placeholder" value="">
+          — Select —
+        </option>
+      );
+    }
+    return opts;
   }
 
   return (
@@ -549,23 +633,41 @@ function ResourceSection({ form, updateField, adjResCount, dis, editable }) {
               <label className="uidai-field__label">Resource Type</label>
               <select
                 className="uidai-select"
-                value={rd.resType || "RFP"}
+                value={rd.resType || ""}
                 onChange={(e) => updateRd({ resType: e.target.value })}
-                disabled={dis}
+                disabled={dis || resourceTypesLoading}
               >
-                {RESOURCE_TYPE_CODES.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
+                {renderResourceTypeOptions(rd.resType || "")}
               </select>
+              {resourceTypesLoading && (
+                <div className="uidai-field__hint" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  Loading resource types…
+                </div>
+              )}
             </div>
             <div className="uidai-field">
               <label className="uidai-field__label">Resource Division</label>
-              <DivisionField
+              <DivisionDropdown
                 value={rd.division || ""}
-                onChange={(v) => updateRd({ division: v })}
-                disabled={dis}
+                onChange={(v) => handleDivisionChange(rd, v)}
+                disabled={dis || divisionsLoading}
+                divisions={effectiveDivisions}
+                loading={divisionsLoading}
               />
             </div>
+            {divisionRequiresOther(effectiveDivisions, rd.division) && (
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  Specify Division <span className="uidai-required-project">*</span>
+                </label>
+                <input
+                  className="uidai-input"
+                  value={rd.divisionOther || ""}
+                  onChange={(e) => updateRd({ divisionOther: e.target.value })}
+                  disabled={dis}
+                />
+              </div>
+            )}
             <div className="uidai-field">
               <label className="uidai-field__label">Onboarding Date</label>
               <input
@@ -666,14 +768,17 @@ function ResourceSection({ form, updateField, adjResCount, dis, editable }) {
               <label className="uidai-field__label">Resource Type</label>
               <select
                 className="uidai-select"
-                value={rc.resType || "RFP"}
+                value={rc.resType || ""}
                 onChange={(e) => updateRc({ resType: e.target.value })}
-                disabled={dis}
+                disabled={dis || resourceTypesLoading}
               >
-                {RESOURCE_TYPE_CODES.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
+                {renderResourceTypeOptions(rc.resType || "")}
               </select>
+              {resourceTypesLoading && (
+                <div className="uidai-field__hint" style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                  Loading resource types…
+                </div>
+              )}
             </div>
             <div className="uidai-field">
               <label className="uidai-field__label">Resource Count</label>
@@ -717,12 +822,27 @@ function ResourceSection({ form, updateField, adjResCount, dis, editable }) {
             </div>
             <div className="uidai-field">
               <label className="uidai-field__label">Resource Division</label>
-              <DivisionField
+              <DivisionDropdown
                 value={rc.division || ""}
-                onChange={(v) => updateRc({ division: v })}
-                disabled={dis}
+                onChange={(v) => handleDivisionChange(rc, v)}
+                disabled={dis || divisionsLoading}
+                divisions={effectiveDivisions}
+                loading={divisionsLoading}
               />
             </div>
+            {divisionRequiresOther(effectiveDivisions, rc.division) && (
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  Specify Division <span className="uidai-required-project">*</span>
+                </label>
+                <input
+                  className="uidai-input"
+                  value={rc.divisionOther || ""}
+                  onChange={(e) => updateRc({ divisionOther: e.target.value })}
+                  disabled={dis}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -730,50 +850,56 @@ function ResourceSection({ form, updateField, adjResCount, dis, editable }) {
   );
 }
 
-function DivisionField({ value, onChange, disabled }) {
-  const standard = DIVISION_OPTIONS.filter((o) => o !== "Others");
-  const isStandard = standard.includes(value);
-  const select = isStandard ? value : value ? "Others" : "";
-  const [otherText, setOtherText] = useState(isStandard ? "" : value);
+function isOthersOption(d) {
+  if (!d) return false;
+  if (d.requiresOther) return true;
+  return (
+    String(d.code || "").toLowerCase() === "others" ||
+    String(d.label || "").toLowerCase() === "others"
+  );
+}
 
-  useEffect(() => {
-    setOtherText(isStandard ? "" : value);
-  }, [value, isStandard]);
+function divisionRequiresOther(list, code) {
+  const opt = list.find((d) => d.code === code);
+  return isOthersOption(opt);
+}
+
+/* DivisionDropdown — pure code-only dropdown, mirrors AddProjectPage's owner
+   select. The Others free-text input is rendered as a separate sibling field
+   by the caller (so the layout matches owner / ownerOther). */
+function DivisionDropdown({ value, onChange, disabled, divisions, loading }) {
+  const apiList = safeArray(divisions);
+  const fallback = DIVISION_OPTIONS.map((o) => ({
+    code: o.toLowerCase() === "others" ? "others" : o,
+    label: o,
+    requiresOther: o.toLowerCase() === "others"
+  }));
+  const list = apiList.length > 0 ? apiList : fallback;
+
+  // Resolve the form's stored value against the list (case-insensitive on
+  // code OR label) so legacy uppercase strings still light up the right row.
+  const lower = String(value || "").toLowerCase();
+  const matched = list.find(
+    (d) =>
+      String(d.code || "").toLowerCase() === lower ||
+      String(d.label || "").toLowerCase() === lower
+  );
+  const selectCode = matched ? matched.code : "";
 
   return (
-    <div>
-      <select
-        className="uidai-select"
-        value={select}
-        onChange={(e) => {
-          if (e.target.value === "Others") {
-            onChange(otherText || "");
-          } else {
-            onChange(e.target.value);
-          }
-        }}
-        disabled={disabled}
-      >
-        <option value="">— Select —</option>
-        {DIVISION_OPTIONS.map((o) => (
-          <option key={o}>{o}</option>
-        ))}
-      </select>
-      {select === "Others" && (
-        <input
-          className="uidai-input"
-          type="text"
-          placeholder="Specify division"
-          style={{ marginTop: 6 }}
-          value={otherText}
-          onChange={(e) => {
-            setOtherText(e.target.value);
-            onChange(e.target.value);
-          }}
-          disabled={disabled}
-        />
-      )}
-    </div>
+    <select
+      className="uidai-select"
+      value={selectCode}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+    >
+      <option value="">{loading ? "Loading…" : "— Select —"}</option>
+      {list.map((d) => (
+        <option key={d.code} value={d.code}>
+          {d.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

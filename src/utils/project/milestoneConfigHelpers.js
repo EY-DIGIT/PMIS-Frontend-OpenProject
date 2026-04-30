@@ -200,10 +200,11 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
 
   if (apiType === "resource" && a.resourceMode === "count") {
     node.resourceCount = {
-      resType: "RFP",
+      resType: a.typeOfResourceId || "",
       count: a.resourceCount || 1,
       onboardingDate: "",
-      division: ""
+      division: a.division || "",
+      divisionOther: a.divisionOther || ""
     };
   }
 
@@ -211,8 +212,9 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     const r = a.resource || {};
     node.resourceDetails = {
       resourceName: r.resourceName || "",
-      resType: r.typeOfResourceId || "RFP",
+      resType: r.typeOfResourceId || "",
       division: r.division || "",
+      divisionOther: r.divisionOther || "",
       onboardingDate: toDateInputValue(r.onboardDate),
       offboardingDate: toDateInputValue(r.offboardDate),
       actualOnboardingDate: toDateInputValue(r.actualOnboardDate),
@@ -275,6 +277,13 @@ export function activityServerTypePair(formData) {
   return { type: "standard", resourceMode: null };
 }
 
+/* ─── Map UI division code → server-friendly value.
+   Form already stores the API code (e.g. "tmd1"); we just lowercase to be
+   safe in case any legacy uppercase value sneaks in. */
+function normalizeDivisionCode(code) {
+  return String(code || "").trim().toLowerCase();
+}
+
 /* ─── Resource sub-payload builder ──────────────────────────────
    Returns the portion of the payload that describes resource data for
    the current form state. Used by both task and activity create/update,
@@ -285,10 +294,17 @@ export function buildResourcePayload(formData) {
 
   if (formData.resourceEntryType === "count") {
     const rc = formData.resourceCount || {};
-    return { resourceCount: parseInt(rc.count, 10) || 1 };
+    const division = normalizeDivisionCode(rc.division);
+    return {
+      resourceCount: parseInt(rc.count, 10) || 1,
+      typeOfResourceId: rc.resType || "",
+      division,
+      divisionOther: division === "others" ? (rc.divisionOther || "") : ""
+    };
   }
 
   const rd = formData.resourceDetails || {};
+  const division = normalizeDivisionCode(rd.division);
   return {
     resource: {
       resourceName: rd.resourceName || "",
@@ -302,8 +318,8 @@ export function buildResourcePayload(formData) {
       qualification: rd.qualification || "",
       experienceYears: parseFloat(rd.experience) || 0,
       typeOfResourceId: rd.resType || "",
-      division: rd.division || "",
-      divisionOther: ""
+      division,
+      divisionOther: division === "others" ? (rd.divisionOther || "") : ""
     }
   };
 }

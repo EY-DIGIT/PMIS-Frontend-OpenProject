@@ -38,6 +38,10 @@ export const ENDPOINTS = {
     list: '/api/v3/divisions',
   },
 
+  resourceTypes: {
+    list: '/api/v3/resource_types',
+  },
+
   projects: {
     list: '/api/v3/projects',
     get: (uuid) => `/api/v3/projects/${enc(uuid)}`,

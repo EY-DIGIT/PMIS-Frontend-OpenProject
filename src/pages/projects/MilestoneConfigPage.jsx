@@ -487,6 +487,23 @@ export default function MilestoneConfigPage({ mode }) {
       }
     }
 
+    if (formData.type === "Resource Type") {
+      const isCount = formData.resourceEntryType === "count";
+      const res = isCount ? (formData.resourceCount || {}) : (formData.resourceDetails || {});
+      if (!res.resType) {
+        uiStore.showMessage("Please select a Resource Type.");
+        return;
+      }
+      if (!res.division) {
+        uiStore.showMessage("Please select a Resource Division.");
+        return;
+      }
+      if (String(res.division).toLowerCase() === "others" && !(res.divisionOther || "").trim()) {
+        uiStore.showMessage("Please specify the division.");
+        return;
+      }
+    }
+
     if (formData.status === "Completed") {
       const unmet = safeArray(formData.dependsOn)
         .map((uid) => {
