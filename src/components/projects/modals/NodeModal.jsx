@@ -15,7 +15,13 @@ import {
   safeArray
 } from "../../../utils/project/nodeUtils";
 import { formatDateDisplay, formatDateTime } from "../../../utils/project/helpers";
-import { loadResourceTypes, loadDivisions } from "../../../api/milestoneConfigApi";
+import {
+  loadResourceTypes,
+  loadDivisions,
+  loadActivityById,
+  loadTaskById,
+  loadSubtaskById
+} from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
 
 const TITLE_MAP = {
@@ -155,6 +161,29 @@ export default function NodeModal({
       .finally(() => { if (!cancelled) setDivisionsLoading(false); });
     return () => { cancelled = true; };
   }, [open, kind]);
+
+  /* Edit mode: list endpoints return summary rows that omit the nested
+     `resource` object — fetch the full single record so the form prefills
+     correctly (especially for Resource Type activities/tasks/subtasks). */
+  useEffect(() => {
+    if (!open || mode !== "edit" || !node?.apiId || !getToken()) return;
+    if (kind === "milestone") return;
+    const fetcher =
+      kind === "activity" ? loadActivityById :
+      kind === "task" ? loadTaskById :
+      kind === "subtask" ? loadSubtaskById :
+      null;
+    if (!fetcher) return;
+    let cancelled = false;
+    fetcher(node.apiId)
+      .then((full) => {
+        if (cancelled || !full) return;
+        setForm(makeDefaultForm(kind, full, mode, parentNode));
+      })
+      .catch(() => { /* keep cached node form on failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, kind, node && node.apiId]);
 
   if (!open || !project) return null;
 

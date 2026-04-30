@@ -68,6 +68,7 @@ export const ENDPOINTS = {
   },
 
   activities: {
+    get: (id) => `/api/v3/activities/${enc(id)}`,
     update: (id) => `/api/v3/activities/${enc(id)}`,
     remove: (id) => `/api/v3/activities/${enc(id)}`,
     tasks: (id) => `/api/v3/activities/${enc(id)}/tasks`,
@@ -75,6 +76,7 @@ export const ENDPOINTS = {
   },
 
   tasks: {
+    get: (id) => `/api/v3/tasks/${enc(id)}`,
     update: (id) => `/api/v3/tasks/${enc(id)}`,
     remove: (id) => `/api/v3/tasks/${enc(id)}`,
     subtasks: (id) => `/api/v3/tasks/${enc(id)}/subtasks`,
@@ -82,6 +84,7 @@ export const ENDPOINTS = {
   },
 
   subtasks: {
+    get: (id) => `/api/v3/subtasks/${enc(id)}`,
     update: (id) => `/api/v3/subtasks/${enc(id)}`,
     remove: (id) => `/api/v3/subtasks/${enc(id)}`,
   },

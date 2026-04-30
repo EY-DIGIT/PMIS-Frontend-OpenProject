@@ -215,6 +215,15 @@ export async function loadActivitiesForMilestone(milestoneApiId) {
   return sortByPosition(extractListElements(raw)).map(mapApiActivityToNode);
 }
 
+/* Single-record fetch — list endpoints return summaries that omit the
+   nested `resource` object, so edit modals fetch the full record here. */
+export async function loadActivityById(activityApiId) {
+  if (!activityApiId) return null;
+  const raw = await apiGet(ENDPOINTS.activities.get(activityApiId));
+  const a = raw?.data ?? raw;
+  return a && (a.id || a.uuid || a.name) ? mapApiActivityToNode(a) : null;
+}
+
 export async function createActivityApi(milestoneApiId, formData) {
   const endpoint = activityEndpointFor(formData);
   const base = buildActivityLikeBase(formData);
@@ -265,6 +274,13 @@ export async function loadTasksForActivity(activityApiId) {
   return sortByPosition(extractListElements(raw)).map(mapApiTaskToNode);
 }
 
+export async function loadTaskById(taskApiId) {
+  if (!taskApiId) return null;
+  const raw = await apiGet(ENDPOINTS.tasks.get(taskApiId));
+  const t = raw?.data ?? raw;
+  return t && (t.id || t.uuid || t.name) ? mapApiTaskToNode(t) : null;
+}
+
 /* Single create endpoint — type is auto-derived server-side from resourceMode.
    We send resourceMode + resourceCount/resource for Resource Type, else base. */
 export async function createTaskApi(activityApiId, formData) {
@@ -306,6 +322,13 @@ export async function loadSubtasksForTask(taskApiId) {
   if (!taskApiId) return [];
   const raw = await apiGetOrEmpty(ENDPOINTS.tasks.subtasks(taskApiId) + LIST_QS);
   return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+}
+
+export async function loadSubtaskById(subtaskApiId) {
+  if (!subtaskApiId) return null;
+  const raw = await apiGet(ENDPOINTS.subtasks.get(subtaskApiId));
+  const s = raw?.data ?? raw;
+  return s && (s.id || s.uuid || s.name) ? mapApiSubtaskToNode(s) : null;
 }
 
 /* Create payload is deliberately minimal — only name, description, and dates.
