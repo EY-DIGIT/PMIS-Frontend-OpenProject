@@ -147,16 +147,22 @@ export default function MilestoneGridRow({
       <td className="uidai-msgrid__cell uidai-msgrid__cell--date">
         {formatDateDisplay(node.endDate)}
       </td>
-      <td className="uidai-msgrid__cell">
+      <td className="uidai-msgrid__cell" style={{textAlign:"center"}}>
         {kind === "milestone" && node.vendor ? (
           <span className="uidai-vendor-tag">{node.vendor}</span>
         ) : (
-          <span className="uidai-dep-empty">—</span>
+          // <span className="uidai-dep-empty">—</span>
+          <>
+          
+          </>
         )}
       </td>
-      <td className="uidai-msgrid__cell">
+      <td className="uidai-msgrid__cell" style={{textAlign:"center"}}>
         {deps.length === 0 ? (
-          <span className="uidai-dep-empty">—</span>
+          <>
+          
+          </>
+          // <span className="uidai-dep-empty">—</span>
         ) : (
           deps.map((d, i) => (
             <span key={i} className="uidai-dep-tag">

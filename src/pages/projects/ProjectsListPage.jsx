@@ -258,7 +258,7 @@ export default function ProjectsListPage() {
               <tr>
                 <th>Project ID</th>
                 <th>Name</th>
-                <th>Description</th>
+                {/* <th>Description</th> */}
                 <th>Baseline ID</th>
                 <th>Status</th>
                 <th>Expected Start Date</th>
@@ -299,7 +299,7 @@ export default function ProjectsListPage() {
                       </button>
                     </td>
                     <td>{p.projectName}</td>
-                    <td>{p.description || ""}</td>
+                    {/* <td>{p.description || ""}</td> */}
                     <td>
                       {p.baselineId && p.baselineId !== "-"
                         ? (baselineCodes[p.baselineId] || p.baselineId)

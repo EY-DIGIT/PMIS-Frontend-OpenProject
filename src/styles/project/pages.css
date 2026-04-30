@@ -211,7 +211,7 @@
 .uidai-vendor-tag {
   display: inline-block;
   padding: 4px 10px;
-  border-radius: 999px;
+  /* border-radius: 999px; */
   background: #e8f0fe;
   color: #1a56db;
   font-size: 12px;

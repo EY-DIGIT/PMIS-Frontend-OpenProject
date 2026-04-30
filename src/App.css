@@ -288,6 +288,9 @@ body {
 
 .pmis-menu {
   padding: 15px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .pmis-menu a,
