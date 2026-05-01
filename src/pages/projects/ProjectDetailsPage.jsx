@@ -38,6 +38,15 @@ function toIsoDate(d) {
   }
 }
 
+function toIsoStartDate(d) {
+  if (!d) return null;
+  try {
+    return new Date(`${d}T00:00:00Z`).toISOString();
+  } catch (e) {
+    return null;
+  }
+}
+
 function vendorName(v) {
   if (!v) return "";
   if (typeof v === "object") return v.name || "";
@@ -92,6 +101,7 @@ function mapApiProject(p) {
     statusExplanation: p.statusExplanation || "",
     startDate: stripTime(p.startDate),
     endDate: stripTime(p.endDate),
+    actualStartDate: stripTime(p.actualStartDate),
     actualEndDate: stripTime(p.actualEndDate),
     category: p.category || "",
     categoryOther: p.categoryOther || "",
@@ -125,6 +135,7 @@ function mergeIntoStore(mapped) {
           statusExplanation: mapped.statusExplanation,
           startDate: mapped.startDate,
           endDate: mapped.endDate,
+          actualStartDate: mapped.actualStartDate,
           actualEndDate: mapped.actualEndDate,
           category: mapped.category,
           categoryOther: mapped.categoryOther,
@@ -276,67 +287,70 @@ export default function ProjectDetailsPage() {
     return () => { cancelled = true; };
   }, []);
 
+  /* Fetch the detail endpoint and push the mapped result into both
+     `apiProject` state and the projects store. Returns the mapped
+     project on success, null otherwise. Used by the initial-load
+     useEffect and re-invoked after a successful PATCH so the UI
+     reflects whatever the server stored. */
+  async function fetchProjectDetail({ silent = false } = {}) {
+    if (!projectId) return null;
+    const token = getToken();
+    if (!token) {
+      if (!silent) {
+        uiStore.showError("Please sign in to continue");
+        navigate("/login");
+      }
+      return null;
+    }
+
+    if (!silent) {
+      setProjectLoading(true);
+      setProjectError("");
+    }
+    try {
+      const res = await authorizedFetch(
+        `${API_BASE}${ENDPOINTS.projects.get(projectId)}`,
+        { method: "GET", headers: { accept: "application/json" } }
+      );
+
+      if (res.status === 401) {
+        logout();
+        if (!silent) {
+          uiStore.showError("Session expired. Please sign in again.");
+          navigate("/login");
+        }
+        return null;
+      }
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        throw new Error(msg);
+      }
+
+      const raw = await res.json().catch(() => ({}));
+      const mapped = mapApiProject(raw?.data ?? raw);
+
+      if (mapped) {
+        setApiProject(mapped);
+        mergeIntoStore(mapped);
+      }
+      return mapped;
+    } catch (err) {
+      const msg = err?.message || "Failed to load project";
+      if (!silent) {
+        setProjectError(msg);
+        uiStore.showError(msg);
+      }
+      return null;
+    } finally {
+      if (!silent) setProjectLoading(false);
+    }
+  }
+
   /* ─── GET /api/v3/projects/{id} ─── */
   useEffect(() => {
     if (!projectId) return;
-
-    let cancelled = false;
-
-    async function loadProject() {
-      const token = getToken();
-      if (!token) {
-        uiStore.showError("Please sign in to continue");
-        navigate("/login");
-        return;
-      }
-
-      setProjectLoading(true);
-      setProjectError("");
-      try {
-        const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.projects.get(projectId)}`,
-          {
-            method: "GET",
-            headers: { accept: "application/json" }
-          }
-        );
-
-        if (cancelled) return;
-
-        if (res.status === 401) {
-          logout();
-          uiStore.showError("Session expired. Please sign in again.");
-          navigate("/login");
-          return;
-        }
-
-        if (!res.ok) {
-          const msg = await readErrorMessage(res);
-          throw new Error(msg);
-        }
-
-        const raw = await res.json().catch(() => ({}));
-        const mapped = mapApiProject(raw?.data ?? raw);
-
-        if (cancelled) return;
-
-        if (mapped) {
-          setApiProject(mapped);
-          mergeIntoStore(mapped);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const msg = err?.message || "Failed to load project";
-          setProjectError(msg);
-          uiStore.showError(msg);
-        }
-      } finally {
-        if (!cancelled) setProjectLoading(false);
-      }
-    }
-
-    loadProject();
-    return () => { cancelled = true; };
+    fetchProjectDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -374,6 +388,10 @@ export default function ProjectDetailsPage() {
 
   useEffect(() => {
     if (!project) return;
+    // Don't clobber the user's in-progress edits when fields land late from
+    // the detail GET. The form is reseeded only on project switch or when
+    // toggling in/out of edit mode.
+    if (editing) return;
     const catInList = CATEGORY_OPTIONS.includes(project.category || "");
     setSelCat(catInList ? project.category : project.category ? "Others" : "MSAP");
     setOtherCat(!catInList && project.category ? project.category : "");
@@ -386,11 +404,19 @@ export default function ProjectDetailsPage() {
       startDate: project.startDate,
       endDate: project.endDate,
       isPublic: project.isPublic,
+      actualStartDate: project.actualStartDate || "",
       actualEndDate: project.actualEndDate || "",
       vendors: vendorsToNames(project.vendors)
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project && project.projectId, editing]);
+  }, [
+    project && project.projectId,
+    project && project.actualStartDate,
+    project && project.actualEndDate,
+    project && project.owner,
+    project && project.ownerOther,
+    editing
+  ]);
 
   const selectedDivision = useMemo(
     () => divisionOptions.find((d) => d.code === (form && form.owner)),
@@ -442,6 +468,7 @@ export default function ProjectDetailsPage() {
         owner: (form.owner || "").trim(),
         ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
         isPublic: form.isPublic === "Yes",
+        actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
         actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
         status_explanation: project.statusExplanation || ""
       };
@@ -463,6 +490,7 @@ export default function ProjectDetailsPage() {
         vendor_ids: resolveVendorIds(form.vendors),
         startDate: toIsoDate(form.startDate),
         endDate: toIsoDate(form.endDate),
+        actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
         actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
       };
       // parent_id only meaningful when present — sending empty string causes
@@ -662,6 +690,7 @@ export default function ProjectDetailsPage() {
         target.owner = form.owner.trim();
         target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
         target.isPublic = form.isPublic;
+        target.actualStartDate = form.actualStartDate || "";
         target.actualEndDate = form.actualEndDate || "";
       } else {
         target.projectName = form.projectName.trim();
@@ -696,7 +725,12 @@ export default function ProjectDetailsPage() {
 
     if (getToken()) {
       updateProjectApi(project.projectId, selCat, isOthers, isVersion)
-        .then((updated) => { doLocal(updated); })
+        .then((updated) => {
+          doLocal(updated);
+          // Re-pull the canonical record from the server so any field the
+          // PATCH response omitted (or that the server normalized) shows up.
+          fetchProjectDetail({ silent: true });
+        })
         .catch((err) => {
           uiStore.hideLoader();
           if (err && err.isAuth) {
@@ -1049,18 +1083,26 @@ export default function ProjectDetailsPage() {
               disabled={!(editing && !isVersion)}
             />
           </div>
-          {isVersion && (
-            <div className="uidai-field">
-              <label className="uidai-field__label">Actual End Date</label>
-              <input
-                className="uidai-input"
-                type="date"
-                value={form.actualEndDate}
-                onChange={(e) => setForm((f) => ({ ...f, actualEndDate: e.target.value }))}
-                disabled={!editing}
-              />
-            </div>
-          )}
+          <div className="uidai-field">
+            <label className="uidai-field__label">Actual Start Date</label>
+            <input
+              className="uidai-input"
+              type="date"
+              value={form.actualStartDate}
+              onChange={(e) => setForm((f) => ({ ...f, actualStartDate: e.target.value }))}
+              disabled={!editing}
+            />
+          </div>
+          <div className="uidai-field">
+            <label className="uidai-field__label">Actual End Date</label>
+            <input
+              className="uidai-input"
+              type="date"
+              value={form.actualEndDate}
+              onChange={(e) => setForm((f) => ({ ...f, actualEndDate: e.target.value }))}
+              disabled={!editing}
+            />
+          </div>
           <div className="uidai-field">
             <label className="uidai-field__label">
               Is Public <span className="uidai-required-project">*</span>
