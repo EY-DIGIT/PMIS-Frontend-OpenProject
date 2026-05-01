@@ -47,6 +47,19 @@ function vendorsToNames(list) {
   return safeArray(list).map(vendorName).filter(Boolean);
 }
 
+function extractDivisions(raw) {
+  const elements =
+    raw?.data?._embedded?.elements ??
+    raw?._embedded?.elements ??
+    raw?.data ??
+    raw ??
+    [];
+  const list = Array.isArray(elements) ? elements : [];
+  return list
+    .filter((d) => d?.code && d?.label)
+    .map((d) => ({ code: d.code, label: d.label, requiresOther: !!d.requiresOther }));
+}
+
 /* Pull a friendly message out of a server error body. The backend wraps
    errors as { error: { message, errorIdentifier, _embedded: { details } } }. */
 async function readErrorMessage(res) {
@@ -73,6 +86,7 @@ function mapApiProject(p) {
     projectName: p.name || "",
     description: p.description || "",
     owner: p.owner || "",
+    ownerOther: p.ownerOther || "",
     isPublic: p.isPublic ? "Yes" : "No",
     status: p.status ? String(p.status).toUpperCase() : "",
     statusExplanation: p.statusExplanation || "",
@@ -105,6 +119,7 @@ function mergeIntoStore(mapped) {
           projectName: mapped.projectName,
           description: mapped.description,
           owner: mapped.owner,
+          ownerOther: mapped.ownerOther,
           isPublic: mapped.isPublic,
           status: mapped.status,
           statusExplanation: mapped.statusExplanation,
@@ -153,6 +168,9 @@ export default function ProjectDetailsPage() {
   const [projectError, setProjectError] = useState("");
 
   const [vendorMaster, setVendorMaster] = useState([]);
+  const [divisionOptions, setDivisionOptions] = useState([]);
+  const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [divisionsError, setDivisionsError] = useState("");
   // baselineId (UUID) -> human-readable projectCode resolved via the detail API
   const [baselineCode, setBaselineCode] = useState("");
 
@@ -218,6 +236,43 @@ export default function ProjectDetailsPage() {
     }
 
     loadVendors();
+    return () => { cancelled = true; };
+  }, []);
+
+  /* ─── GET /api/v3/divisions ─── */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDivisions() {
+      const token = getToken();
+      if (!token) return;
+
+      setDivisionsLoading(true);
+      setDivisionsError("");
+      try {
+        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.divisions.list}`, {
+          method: "GET",
+          headers: { accept: "application/json" }
+        });
+
+        if (cancelled) return;
+        if (res.status === 401) return;
+        if (!res.ok) {
+          const msg = await readErrorMessage(res);
+          throw new Error(msg);
+        }
+
+        const raw = await res.json().catch(() => ({}));
+        const divisions = extractDivisions(raw);
+        if (!cancelled) setDivisionOptions(divisions);
+      } catch (err) {
+        if (!cancelled) setDivisionsError(err?.message || "Failed to load divisions");
+      } finally {
+        if (!cancelled) setDivisionsLoading(false);
+      }
+    }
+
+    loadDivisions();
     return () => { cancelled = true; };
   }, []);
 
@@ -327,6 +382,7 @@ export default function ProjectDetailsPage() {
       projectName: project.projectName,
       description: project.description || "",
       owner: project.owner,
+      ownerOther: project.ownerOther || "",
       startDate: project.startDate,
       endDate: project.endDate,
       isPublic: project.isPublic,
@@ -335,6 +391,16 @@ export default function ProjectDetailsPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project && project.projectId, editing]);
+
+  const selectedDivision = useMemo(
+    () => divisionOptions.find((d) => d.code === (form && form.owner)),
+    [divisionOptions, form && form.owner]
+  );
+  const ownerRequiresOther =
+    !!selectedDivision &&
+    (selectedDivision.requiresOther ||
+      String(selectedDivision.label || "").toLowerCase() === "others" ||
+      String(selectedDivision.code || "").toLowerCase() === "others");
 
   function resolveVendorIds(names) {
     return safeArray(names)
@@ -374,6 +440,7 @@ export default function ProjectDetailsPage() {
       // status_explanation are editable per the server.
       payload = {
         owner: (form.owner || "").trim(),
+        ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
         isPublic: form.isPublic === "Yes",
         actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
         status_explanation: project.statusExplanation || ""
@@ -389,6 +456,7 @@ export default function ProjectDetailsPage() {
         isPublic: form.isPublic === "Yes",
         status_explanation: project.statusExplanation || "",
         owner: (form.owner || "").trim(),
+        ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
         category: isOthers ? "other" : (selectedCat || ""),
         category_other: isOthers ? (otherCat || "").trim() : "",
         category_other_reason: isOthers ? (otherCatReason || "").trim() : "",
@@ -571,6 +639,10 @@ export default function ProjectDetailsPage() {
       uiStore.showError("Fill required fields.");
       return;
     }
+    if (ownerRequiresOther && !(form.ownerOther || "").trim()) {
+      uiStore.showError("Please specify the owner.");
+      return;
+    }
     if (!isVersion && form.endDate && form.startDate && form.endDate < form.startDate) {
       uiStore.showError("Expected End Date cannot be earlier than Expected Start Date.");
       return;
@@ -588,12 +660,14 @@ export default function ProjectDetailsPage() {
         // Match the API contract: only owner, isPublic, actualEndDate,
         // status_explanation are tracked locally for version projects.
         target.owner = form.owner.trim();
+        target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
         target.isPublic = form.isPublic;
         target.actualEndDate = form.actualEndDate || "";
       } else {
         target.projectName = form.projectName.trim();
         target.description = form.description.trim();
         target.owner = form.owner.trim();
+        target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
         target.startDate = form.startDate;
         target.endDate = form.endDate;
         target.isPublic = form.isPublic;
@@ -892,13 +966,65 @@ export default function ProjectDetailsPage() {
             <label className="uidai-field__label">
               Owner <span className="uidai-required-project">*</span>
             </label>
-            <input
-              className="uidai-input"
-              value={form.owner}
-              onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
-              disabled={!editing}
-            />
+            {editing ? (
+              <select
+                className="uidai-select"
+                value={form.owner || ""}
+                onChange={(e) => {
+                  const nextCode = e.target.value;
+                  const nextDiv = divisionOptions.find((d) => d.code === nextCode);
+                  const stillNeedsOther =
+                    !!nextDiv &&
+                    (nextDiv.requiresOther ||
+                      String(nextDiv.label || "").toLowerCase() === "others" ||
+                      String(nextDiv.code || "").toLowerCase() === "others");
+                  setForm((f) => ({
+                    ...f,
+                    owner: nextCode,
+                    ownerOther: stillNeedsOther ? f.ownerOther || "" : ""
+                  }));
+                }}
+                disabled={divisionsLoading}
+              >
+                <option value="" disabled>
+                  {divisionsLoading
+                    ? "Loading..."
+                    : divisionsError
+                      ? "Could not load divisions"
+                      : "Select owner"}
+                </option>
+                {divisionOptions.map((d) => (
+                  <option key={d.code} value={d.code}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="uidai-input"
+                value={
+                  (divisionOptions.find((d) => d.code === form.owner) || {}).label ||
+                  form.owner ||
+                  ""
+                }
+                disabled
+              />
+            )}
           </div>
+
+          {ownerRequiresOther && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">
+                Specify Owner <span className="uidai-required-project">*</span>
+              </label>
+              <input
+                className="uidai-input"
+                value={form.ownerOther || ""}
+                onChange={(e) => setForm((f) => ({ ...f, ownerOther: e.target.value }))}
+                disabled={!editing}
+              />
+            </div>
+          )}
           <div className="uidai-field">
             <label className="uidai-field__label">
               Expected Start Date <span className="uidai-required-project">*</span>

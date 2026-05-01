@@ -153,7 +153,10 @@ export function mapApiMilestoneToNode(m) {
     endDate: toDateInputValue(m.endDate),
     status: mapStatusFromApi(m.status),
     vendor: vendors.length ? vendors[0].name || "" : "",
-    dependsOn: [],
+    /* Raw `depends` from server — translated to local UIDs by the loader
+       after all siblings are mapped (entries can be either apiId UUIDs or
+       display IDs like "M1"). */
+    dependsOn: Array.isArray(m.depends) ? m.depends.slice() : [],
     activities: [],
     comments: [],
     attachments: [],
@@ -176,6 +179,16 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     uiType = "Transactional";
   }
 
+  /* Server may return the dependency list under any of these keys; later
+     a tree-wide pass translates these raw values into local UIDs. */
+  const rawDepends = Array.isArray(a.depends)
+    ? a.depends
+    : Array.isArray(a.dependency)
+    ? a.dependency
+    : Array.isArray(a.dependsOn)
+    ? a.dependsOn
+    : [];
+
   const node = {
     uid: generateNodeUid(kindLetter),
     apiId: a.id || "",
@@ -191,7 +204,7 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     status: mapStatusFromApi(a.status),
     type: uiType,
     resourceEntryType,
-    dependsOn: [],
+    dependsOn: rawDepends.slice(),
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0

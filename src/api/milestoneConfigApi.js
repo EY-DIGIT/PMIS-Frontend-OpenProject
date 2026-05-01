@@ -117,9 +117,30 @@ function sortByPosition(list) {
   return list.slice().sort((a, b) => (a?.position ?? 0) - (b?.position ?? 0));
 }
 
+/* Resolve form dependsOn (local node UIDs) → display IDs (M1, M2, …) by
+   walking the project tree. Unknown UIDs are dropped. */
+function resolveDepDisplayIds(project, uids) {
+  if (!project || !Array.isArray(uids) || uids.length === 0) return [];
+  const map = {};
+  function walk(list) {
+    if (!Array.isArray(list)) return;
+    for (const n of list) {
+      if (!n) continue;
+      if (n.uid && n.id) map[n.uid] = n.id;
+      if (n.activities) walk(n.activities);
+      if (n.tasks) walk(n.tasks);
+      if (n.subtasks) walk(n.subtasks);
+    }
+  }
+  walk(project.milestones);
+  return uids.map((u) => map[u]).filter(Boolean);
+}
+
 /* Common base fields for activity/task create & update. Tasks and
-   activities share the same contract for dates, dependsOn, position. */
-function buildActivityLikeBase(formData) {
+   activities share the same contract for dates, dependsOn, position.
+   Note: server uses `depends` for milestones but `dependsOn` for
+   activity/task/subtask. */
+function buildActivityLikeBase(project, formData) {
   return {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
@@ -128,7 +149,7 @@ function buildActivityLikeBase(formData) {
     actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
     actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
     position: 0,
-    dependsOn: []
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
 }
 
@@ -139,7 +160,8 @@ function buildMilestonePayload(project, formData) {
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
     status: mapStatusForApi(formData.status || "Not Completed"),
-    vendorIds: resolveVendorIds(project, formData.vendor)
+    vendorIds: resolveVendorIds(project, formData.vendor),
+    depends: resolveDepDisplayIds(project, formData.dependsOn)
   };
 }
 
@@ -187,6 +209,53 @@ export async function loadMilestonesForProject(projectId) {
   return sortByPosition(extractListElements(raw)).map(mapApiMilestoneToNode);
 }
 
+/* Walk the entire project tree and translate every node's `dependsOn`
+   from raw server values (UUID apiIds OR display IDs like "M1", "A1.2",
+   "T1.2.3") into the local UIDs the grid's depMap understands.
+   Idempotent: values that are already known local UIDs are kept as-is,
+   so it's safe to call repeatedly during the 4-phase progressive load. */
+export function resolveProjectDependsOn(project) {
+  if (!project) return;
+  const apiIdToUid = {};
+  const displayIdToUid = {};
+  const uidSet = new Set();
+
+  function indexNode(n) {
+    if (!n || !n.uid) return;
+    uidSet.add(n.uid);
+    if (n.apiId) apiIdToUid[n.apiId] = n.uid;
+    if (n.id) displayIdToUid[n.id] = n.uid;
+  }
+  function walkIndex(list) {
+    if (!Array.isArray(list)) return;
+    for (const n of list) {
+      indexNode(n);
+      if (n) {
+        if (n.activities) walkIndex(n.activities);
+        if (n.tasks) walkIndex(n.tasks);
+        if (n.subtasks) walkIndex(n.subtasks);
+      }
+    }
+  }
+  walkIndex(project.milestones);
+
+  function translate(n) {
+    if (!n) return;
+    if (Array.isArray(n.dependsOn)) {
+      n.dependsOn = n.dependsOn
+        .map((v) => {
+          if (uidSet.has(v)) return v;
+          return apiIdToUid[v] || displayIdToUid[v] || null;
+        })
+        .filter(Boolean);
+    }
+    if (n.activities) n.activities.forEach(translate);
+    if (n.tasks) n.tasks.forEach(translate);
+    if (n.subtasks) n.subtasks.forEach(translate);
+  }
+  if (Array.isArray(project.milestones)) project.milestones.forEach(translate);
+}
+
 export async function createMilestoneApi(project, formData) {
   return apiSend(
     "POST",
@@ -224,9 +293,9 @@ export async function loadActivityById(activityApiId) {
   return a && (a.id || a.uuid || a.name) ? mapApiActivityToNode(a) : null;
 }
 
-export async function createActivityApi(milestoneApiId, formData) {
+export async function createActivityApi(milestoneApiId, formData, project) {
   const endpoint = activityEndpointFor(formData);
-  const base = buildActivityLikeBase(formData);
+  const base = buildActivityLikeBase(project, formData);
 
   let payload;
   if (endpoint === "standard") {
@@ -245,11 +314,11 @@ export async function createActivityApi(milestoneApiId, formData) {
   );
 }
 
-export async function updateActivityApi(activityServerId, formData) {
+export async function updateActivityApi(activityServerId, formData, project) {
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
-    ...buildActivityLikeBase(formData),
+    ...buildActivityLikeBase(project, formData),
     type,
     status: mapStatusForApi(formData.status || "Not Completed")
   };
@@ -283,9 +352,9 @@ export async function loadTaskById(taskApiId) {
 
 /* Single create endpoint — type is auto-derived server-side from resourceMode.
    We send resourceMode + resourceCount/resource for Resource Type, else base. */
-export async function createTaskApi(activityApiId, formData) {
+export async function createTaskApi(activityApiId, formData, project) {
   const { type, resourceMode } = activityServerTypePair(formData);
-  const payload = buildActivityLikeBase(formData);
+  const payload = buildActivityLikeBase(project, formData);
 
   if (type === "resource") {
     payload.resourceMode = resourceMode;
@@ -296,11 +365,11 @@ export async function createTaskApi(activityApiId, formData) {
 }
 
 /* Full payload, same shape as activity PATCH. */
-export async function updateTaskApi(taskServerId, formData) {
+export async function updateTaskApi(taskServerId, formData, project) {
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
-    ...buildActivityLikeBase(formData),
+    ...buildActivityLikeBase(project, formData),
     type
   };
 
@@ -331,26 +400,28 @@ export async function loadSubtaskById(subtaskApiId) {
   return s && (s.id || s.uuid || s.name) ? mapApiSubtaskToNode(s) : null;
 }
 
-/* Create payload is deliberately minimal — only name, description, and dates.
-   Type/resource fields are NOT accepted by the create endpoint (only by PATCH). */
-export async function createSubtaskApi(taskApiId, formData) {
+/* Create payload is deliberately minimal — only name, description, dates,
+   and dependency list. Type/resource fields are NOT accepted by the
+   create endpoint (only by PATCH). */
+export async function createSubtaskApi(taskApiId, formData, project) {
   const payload = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
     actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null
+    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
   return apiSend("POST", ENDPOINTS.tasks.subtaskCreate(taskApiId), payload);
 }
 
 /* Full payload same as task/activity PATCH. */
-export async function updateSubtaskApi(subtaskServerId, formData) {
+export async function updateSubtaskApi(subtaskServerId, formData, project) {
   const { type, resourceMode } = activityServerTypePair(formData);
 
   const payload = {
-    ...buildActivityLikeBase(formData),
+    ...buildActivityLikeBase(project, formData),
     type
   };
 

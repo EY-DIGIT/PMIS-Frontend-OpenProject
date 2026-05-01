@@ -46,7 +46,8 @@ import {
   deleteTaskApi,
   createSubtaskApi,
   updateSubtaskApi,
-  deleteSubtaskApi
+  deleteSubtaskApi,
+  resolveProjectDependsOn
 } from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
 import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
@@ -230,6 +231,7 @@ export default function MilestoneConfigPage({ mode }) {
 
       target.milestones = milestones;
       try { normalizeProject(target); } catch (e) {}
+      try { resolveProjectDependsOn(target); } catch (e) {}
       try { recomputeActualDates(target); } catch (e) {}
       commitUpdate(target);
 
@@ -243,6 +245,7 @@ export default function MilestoneConfigPage({ mode }) {
       );
       milestones.forEach((m, i) => { m.activities = activityLists[i] || []; });
       try { normalizeProject(target); } catch (e) {}
+      try { resolveProjectDependsOn(target); } catch (e) {}
       try { recomputeActualDates(target); } catch (e) {}
       commitUpdate(target);
 
@@ -256,6 +259,7 @@ export default function MilestoneConfigPage({ mode }) {
         );
         allActivities.forEach((a, i) => { a.tasks = taskLists[i] || []; });
         try { normalizeProject(target); } catch (e) {}
+        try { resolveProjectDependsOn(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
         commitUpdate(target);
       }
@@ -270,6 +274,7 @@ export default function MilestoneConfigPage({ mode }) {
         );
         allTasks.forEach((t, i) => { t.subtasks = subtaskLists[i] || []; });
         try { normalizeProject(target); } catch (e) {}
+        try { resolveProjectDependsOn(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
         commitUpdate(target);
       }
@@ -758,22 +763,22 @@ export default function MilestoneConfigPage({ mode }) {
       return handleRemote(updateMilestoneApi(milestoneServerId, formData, project), "Failed to update milestone");
     }
     if (shouldCreateActivityRemotely) {
-      return handleRemote(createActivityApi(activityParentMilestoneApiId, formData), "Failed to create activity");
+      return handleRemote(createActivityApi(activityParentMilestoneApiId, formData, project), "Failed to create activity");
     }
     if (shouldUpdateActivityRemotely) {
-      return handleRemote(updateActivityApi(activityServerId, formData), "Failed to update activity");
+      return handleRemote(updateActivityApi(activityServerId, formData, project), "Failed to update activity");
     }
     if (shouldCreateTaskRemotely) {
-      return handleRemote(createTaskApi(taskParentActivityApiId, formData), "Failed to create task");
+      return handleRemote(createTaskApi(taskParentActivityApiId, formData, project), "Failed to create task");
     }
     if (shouldUpdateTaskRemotely) {
-      return handleRemote(updateTaskApi(taskServerId, formData), "Failed to update task");
+      return handleRemote(updateTaskApi(taskServerId, formData, project), "Failed to update task");
     }
     if (shouldCreateSubtaskRemotely) {
-      return handleRemote(createSubtaskApi(subtaskParentTaskApiId, formData), "Failed to create subtask");
+      return handleRemote(createSubtaskApi(subtaskParentTaskApiId, formData, project), "Failed to create subtask");
     }
     if (shouldUpdateSubtaskRemotely) {
-      return handleRemote(updateSubtaskApi(subtaskServerId, formData), "Failed to update subtask");
+      return handleRemote(updateSubtaskApi(subtaskServerId, formData, project), "Failed to update subtask");
     }
 
     /* Legacy fallback for anything not covered above (e.g. onboarding or
