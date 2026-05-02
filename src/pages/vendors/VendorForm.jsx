@@ -65,6 +65,8 @@ export default function VendorForm() {
       return 'Please enter a valid email address (e.g. name@example.com)';
     if (!phone.trim()) return 'Mobile Number is required';
     if (!/^[6-9]\d{9}$/.test(phone.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
+    if (!Array.isArray(mapping) || mapping.length === 0)
+      return 'At least one Project Mapping is required';
     return '';
   };
 

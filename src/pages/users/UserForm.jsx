@@ -20,7 +20,7 @@ export default function UserForm() {
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState(USER_ROLES[0]);
+  const [role, setRole] = useState('');
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
@@ -115,7 +115,9 @@ export default function UserForm() {
     if (!mobile.trim()) return 'Mobile Number is required';
     if (!/^[6-9]\d{9}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
     if (!password) return 'Temporary Password is required';
+    if (!role) return 'Please select a role';
     if (!vendorId) return 'Please select an associated vendor';
+    if (!division) return 'Please select a division';
     if (divisionRequiresOther && !divisionOther.trim()) return 'Please specify the division';
     if (!Array.isArray(permissions) || permissions.length === 0) return 'Please assign at least one role/permission';
     return '';
@@ -188,15 +190,28 @@ export default function UserForm() {
         <div className="uidai-pmis-grid-4">
           <div className="uidai-pmis-field">
             <label>Full Name <span className="uidai-pmis-required">*</span></label>
-            <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+            <input
+              placeholder="e.g. Ravi Kumar"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+            />
           </div>
           <div className="uidai-pmis-field">
             <label>Employee ID <span className="uidai-pmis-required">*</span></label>
-            <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
+            <input
+              placeholder="e.g. EMP001"
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value)}
+            />
           </div>
           <div className="uidai-pmis-field">
             <label>Email <span className="uidai-pmis-required">*</span></label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input
+              type="email"
+              placeholder="e.g. name@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div className="uidai-pmis-field">
             <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
@@ -224,6 +239,7 @@ export default function UserForm() {
             <div style={{ position: "relative", display: "block" }}>
               <input
                 type={showPassword ? "text" : "password"}
+                placeholder="Set a temporary password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 style={{ paddingRight: 36, width: "100%", boxSizing: "border-box" }}
@@ -256,7 +272,8 @@ export default function UserForm() {
           <div className="uidai-pmis-field">
             <label>Role <span className="uidai-pmis-required">*</span></label>
             <select value={role} onChange={(e) => setRole(e.target.value)}>
-              {USER_ROLES.map((r) => <option key={r}>{r}</option>)}
+              <option value="" disabled>Select Role</option>
+              {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
           <div className="uidai-pmis-field">
@@ -293,7 +310,11 @@ export default function UserForm() {
           {divisionRequiresOther && (
             <div className="uidai-pmis-field">
               <label>Specify Division <span className="uidai-pmis-required">*</span></label>
-              <input value={divisionOther} onChange={(e) => setDivisionOther(e.target.value)} />
+              <input
+                placeholder="Specify division name"
+                value={divisionOther}
+                onChange={(e) => setDivisionOther(e.target.value)}
+              />
             </div>
           )}
           <div className="uidai-pmis-field">
