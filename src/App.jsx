@@ -113,6 +113,14 @@ function Breadcrumbs() {
         ? (projects.find((p) => p.projectId === projectIdSeg)?.projectCode || "")
         : "";
 
+    /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
+       s-...) which is meaningless to users. Strip that trailing segment so
+       the breadcrumb stops at "Track Progress". */
+    const visibleSegments =
+        segments[0] === "projects" && segments[2] === "track" && segments.length > 3
+            ? segments.slice(0, 3)
+            : segments;
+
     return (
         <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
             paddingBottom: "10px",
@@ -127,10 +135,10 @@ function Breadcrumbs() {
             <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
                  Home
             </Link>
-            {segments.map((seg, i) => {
-                const to = "/" + segments.slice(0, i + 1).join("/");
-                const isLast = i === segments.length - 1;
-                const isProjectIdSeg = projectIdSeg && i === 1 && segments[0] === "projects";
+            {visibleSegments.map((seg, i) => {
+                const to = "/" + visibleSegments.slice(0, i + 1).join("/");
+                const isLast = i === visibleSegments.length - 1;
+                const isProjectIdSeg = projectIdSeg && i === 1 && visibleSegments[0] === "projects";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
                     : (LABELS[seg] || decodeURIComponent(seg));
