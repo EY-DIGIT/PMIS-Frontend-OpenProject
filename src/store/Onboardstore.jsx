@@ -7,13 +7,12 @@ import { createContext, useContext, useState } from "react";
 const OnboardContext = createContext(null);
 
 export function OnboardProvider({ children }) {
-  const [draft,    setDraft   ] = useState(null);   // partial project object
-  const [category, setCategory] = useState(null);   // "MSAP" | "MSIP" | "BSP" …
+  const [draft, setDraft] = useState(null);   // partial project object
 
-  const clearDraft = () => { setDraft(null); setCategory(null); };
+  const clearDraft = () => setDraft(null);
 
   return (
-    <OnboardContext.Provider value={{ draft, setDraft, category, setCategory, clearDraft }}>
+    <OnboardContext.Provider value={{ draft, setDraft, clearDraft }}>
       {children}
     </OnboardContext.Provider>
   );

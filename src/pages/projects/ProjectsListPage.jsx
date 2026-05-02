@@ -36,9 +36,7 @@ function mapApiProjectToRow(p) {
     startDate: stripTime(p.startDate),
     endDate: stripTime(p.endDate),
     actualEndDate: stripTime(p.actualEndDate),
-    isPublic: p.isPublic ? "Yes" : "No",
     owner: p.owner || "",
-    category: p.category || "",
     isVersion: !!p.isVersion,
     vendors: Array.isArray(p.vendors) ? p.vendors : []
   };
@@ -185,7 +183,6 @@ export default function ProjectsListPage() {
         p.baselineId,
         p.status,
         p.owner,
-        p.category,
         p.actualEndDate
       ].some((v) => String(v ?? "").toLowerCase().includes(q))
     );
@@ -274,21 +271,19 @@ export default function ProjectsListPage() {
                 <th>Expected Start Date</th>
                 <th>Expected End Date</th>
                 <th>Actual End Date</th>
-                <th>Is Public</th>
                 <th>Owner</th>
-                <th>Category</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: "center", padding: 16 }}>
+                  <td colSpan={9} style={{ textAlign: "center", padding: 16 }}>
                     Loading projects...
                   </td>
                 </tr>
               ) : paged.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: "center", padding: 16 }}>
+                  <td colSpan={9} style={{ textAlign: "center", padding: 16 }}>
                     {apiProjects.length === 0
                       ? "No projects found."
                       : "No matching projects found."}
@@ -325,9 +320,7 @@ export default function ProjectsListPage() {
                     <td>
                       {p.isVersion ? formatDateDisplay(p.actualEndDate || "-") : "-"}
                     </td>
-                    <td>{p.isPublic}</td>
                     <td>{p.owner}</td>
-                    <td>{p.category || ""}</td>
                   </tr>
                 ))
               )}

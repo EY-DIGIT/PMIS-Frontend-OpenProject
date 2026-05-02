@@ -509,14 +509,12 @@ export function propagateBaselineDetailsToVersions(allProjects, baseProject) {
     v.description = baseProject.description;
     v.startDate = baseProject.startDate;
     v.endDate = baseProject.endDate;
-    v.category = baseProject.category;
     v.vendors = deepClone(safeArray(baseProject.vendors));
     addAudit(v, "Baseline details synced", "-", {
       projectName: v.projectName,
       description: v.description,
       startDate: v.startDate,
-      endDate: v.endDate,
-      category: v.category
+      endDate: v.endDate
     });
   });
 }

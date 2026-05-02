@@ -1,7 +1,6 @@
 export const NODE_TYPE_OPTIONS = ["Standard Type", "Resource Type", "Transactional Type"];
 export const RESOURCE_TYPE_CODES = ["RFP", "ASG", "CCM"];
 export const DIVISION_OPTIONS = ["TMD1", "TMD2", "Others"];
-export const CATEGORY_OPTIONS = ["MSAP", "MSIP", "BSP", "Others"];
 export const VENDOR_MASTER = ["Vendor A", "Vendor B", "Vendor C", "Vendor D", "Vendor E"];
 
 export const DEP_KIND_LABEL = {

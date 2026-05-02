@@ -156,7 +156,6 @@ export default function MilestoneConfigPage({ mode }) {
       draftStore.set({
         projectName: "", description: "", owner: "",
         startDate: "", endDate: "", actualEndDate: "",
-        isPublic: "Yes", category: "",
         vendors: [], milestones: [], auditLogs: [], resources: [],
         ...persisted,
         milestones: []
@@ -972,8 +971,6 @@ export default function MilestoneConfigPage({ mode }) {
           projectName: project.projectName,
           description: project.description,
           owner: project.owner,
-          isPublic: project.isPublic,
-          category: project.category,
           startDate: project.startDate,
           endDate: project.endDate
         });

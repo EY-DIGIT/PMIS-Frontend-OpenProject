@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
-import { CATEGORY_OPTIONS, VENDOR_MASTER } from "../../utils/project/constants";
+import { VENDOR_MASTER } from "../../utils/project/constants";
 import { safeArray, deepClone } from "../../utils/project/helpers";
 import {
   isVersionProject,
@@ -96,16 +96,12 @@ function mapApiProject(p) {
     description: p.description || "",
     owner: p.owner || "",
     ownerOther: p.ownerOther || "",
-    isPublic: p.isPublic ? "Yes" : "No",
     status: p.status ? String(p.status).toUpperCase() : "",
     statusExplanation: p.statusExplanation || "",
     startDate: stripTime(p.startDate),
     endDate: stripTime(p.endDate),
     actualStartDate: stripTime(p.actualStartDate),
     actualEndDate: stripTime(p.actualEndDate),
-    category: p.category || "",
-    categoryOther: p.categoryOther || "",
-    categoryOtherReason: p.categoryOtherReason || "",
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     isVersion: !!p.isVersion,
     versionOf: p.versionOf || null,
@@ -130,16 +126,12 @@ function mergeIntoStore(mapped) {
           description: mapped.description,
           owner: mapped.owner,
           ownerOther: mapped.ownerOther,
-          isPublic: mapped.isPublic,
           status: mapped.status,
           statusExplanation: mapped.statusExplanation,
           startDate: mapped.startDate,
           endDate: mapped.endDate,
           actualStartDate: mapped.actualStartDate,
           actualEndDate: mapped.actualEndDate,
-          category: mapped.category,
-          categoryOther: mapped.categoryOther,
-          categoryOtherReason: mapped.categoryOtherReason,
           vendors: mapped.vendors,
           isVersion: mapped.isVersion,
           versionOf: mapped.versionOf,
@@ -167,9 +159,6 @@ export default function ProjectDetailsPage() {
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
-  const [selCat, setSelCat] = useState("");
-  const [otherCat, setOtherCat] = useState("");
-  const [otherCatReason, setOtherCatReason] = useState("");
   const [publishOpen, setPublishOpen] = useState(false);
   const [versionOpen, setVersionOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -392,10 +381,6 @@ export default function ProjectDetailsPage() {
     // the detail GET. The form is reseeded only on project switch or when
     // toggling in/out of edit mode.
     if (editing) return;
-    const catInList = CATEGORY_OPTIONS.includes(project.category || "");
-    setSelCat(catInList ? project.category : project.category ? "Others" : "MSAP");
-    setOtherCat(!catInList && project.category ? project.category : "");
-    setOtherCatReason(project.categoryOtherReason || "");
     setForm({
       projectName: project.projectName,
       description: project.description || "",
@@ -403,7 +388,6 @@ export default function ProjectDetailsPage() {
       ownerOther: project.ownerOther || "",
       startDate: project.startDate,
       endDate: project.endDate,
-      isPublic: project.isPublic,
       actualStartDate: project.actualStartDate || "",
       actualEndDate: project.actualEndDate || "",
       vendors: vendorsToNames(project.vendors)
@@ -456,18 +440,17 @@ export default function ProjectDetailsPage() {
      Server enforces a different editable-field set for version vs baseline
      projects. Sending a forbidden field returns 422 with errorIdentifier
      "invalid_field". So branch the payload by mode. */
-  async function updateProjectApi(projectServerId, selectedCat, isOthers, isVersionMode) {
+  async function updateProjectApi(projectServerId, isVersionMode) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
     let payload;
     if (isVersionMode) {
-      // Version projects: only owner, isPublic, actualEndDate,
+      // Version projects: only owner, actualEndDate,
       // status_explanation are editable per the server.
       payload = {
         owner: (form.owner || "").trim(),
         ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
-        isPublic: form.isPublic === "Yes",
         actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
         actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
         status_explanation: project.statusExplanation || ""
@@ -480,13 +463,9 @@ export default function ProjectDetailsPage() {
         name: (form.projectName || "").trim(),
         description: (form.description || "").trim(),
         active: true,
-        isPublic: form.isPublic === "Yes",
         status_explanation: project.statusExplanation || "",
         owner: (form.owner || "").trim(),
         ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
-        category: isOthers ? "other" : (selectedCat || ""),
-        category_other: isOthers ? (otherCat || "").trim() : "",
-        category_other_reason: isOthers ? (otherCatReason || "").trim() : "",
         vendor_ids: resolveVendorIds(form.vendors),
         startDate: toIsoDate(form.startDate),
         endDate: toIsoDate(form.endDate),
@@ -642,7 +621,6 @@ export default function ProjectDetailsPage() {
 
   const isVersion = isVersionProject(project);
   const isPubBase = isPublishedBaseline(project);
-  const canEditCat = editing && !isVersion;
 
   function toggleEdit() {
     if (!editing) {
@@ -654,15 +632,6 @@ export default function ProjectDetailsPage() {
 
   function save() {
     if (!form) return;
-    const isOthers = selCat === "Others";
-    if (canEditCat && isOthers && !(otherCat || "").trim()) {
-      uiStore.showError("Please specify the category.");
-      return;
-    }
-    if (canEditCat && isOthers && !(otherCatReason || "").trim()) {
-      uiStore.showError("Please provide a reason for the 'Others' category.");
-      return;
-    }
     if (!form.owner.trim() || (!isVersion && (!form.projectName.trim() || !form.startDate || !form.endDate))) {
       uiStore.showError("Fill required fields.");
       return;
@@ -685,11 +654,10 @@ export default function ProjectDetailsPage() {
       if (!target) { uiStore.hideLoader(); return; }
       const before = deepClone(target);
       if (isVersion) {
-        // Match the API contract: only owner, isPublic, actualEndDate,
+        // Match the API contract: only owner, actualEndDate,
         // status_explanation are tracked locally for version projects.
         target.owner = form.owner.trim();
         target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
-        target.isPublic = form.isPublic;
         target.actualStartDate = form.actualStartDate || "";
         target.actualEndDate = form.actualEndDate || "";
       } else {
@@ -699,10 +667,6 @@ export default function ProjectDetailsPage() {
         target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
         target.startDate = form.startDate;
         target.endDate = form.endDate;
-        target.isPublic = form.isPublic;
-        target.category = isOthers ? "Others" : selCat;
-        target.categoryOther = isOthers ? (otherCat || "").trim() : "";
-        target.categoryOtherReason = isOthers ? (otherCatReason || "").trim() : "";
         target.vendors = rebuiltVendors;
       }
       addAudit(target, "Update Project Details", before, deepClone(target));
@@ -724,7 +688,7 @@ export default function ProjectDetailsPage() {
     uiStore.showLoader("Saving project details...");
 
     if (getToken()) {
-      updateProjectApi(project.projectId, selCat, isOthers, isVersion)
+      updateProjectApi(project.projectId, isVersion)
         .then((updated) => {
           doLocal(updated);
           // Re-pull the canonical record from the server so any field the
@@ -1105,59 +1069,6 @@ export default function ProjectDetailsPage() {
               onChange={(e) => setForm((f) => ({ ...f, actualEndDate: e.target.value }))}
               disabled={!editing}
             />
-          </div>
-          <div className="uidai-field">
-            <label className="uidai-field__label">
-              Is Public <span className="uidai-required-project">*</span>
-            </label>
-            <select
-              className="uidai-select"
-              value={form.isPublic}
-              onChange={(e) => setForm((f) => ({ ...f, isPublic: e.target.value }))}
-              disabled={!editing}
-            >
-              <option>Yes</option>
-              <option>No</option>
-            </select>
-          </div>
-          <div className="uidai-field">
-            <label className="uidai-field__label">
-              Category <span className="uidai-required-project">*</span>
-            </label>
-            {canEditCat ? (
-              <>
-                <select
-                  className="uidai-select"
-                  value={selCat}
-                  onChange={(e) => setSelCat(e.target.value)}
-                >
-                  {CATEGORY_OPTIONS.map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
-                </select>
-                {selCat === "Others" && (
-                  <>
-                    <input
-                      className="uidai-input"
-                      style={{ marginTop: 6 }}
-                      placeholder="Specify category"
-                      value={otherCat}
-                      onChange={(e) => setOtherCat(e.target.value)}
-                    />
-                    <textarea
-                      className="uidai-textarea"
-                      style={{ marginTop: 6 }}
-                      maxLength={1000}
-                      placeholder="Reason for 'Others' *"
-                      value={otherCatReason}
-                      onChange={(e) => setOtherCatReason(e.target.value)}
-                    />
-                  </>
-                )}
-              </>
-            ) : (
-              <input className="uidai-input" value={project.category || ""} disabled />
-            )}
           </div>
         </div>
 
