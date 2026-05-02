@@ -14,7 +14,6 @@ export default function VendorForm() {
 
   const [name, setName] = useState('');
   const [type, setType] = useState(VENDOR_TYPES[0]);
-  const [status, setStatus] = useState('Active');
   const [contact, setContact] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -75,7 +74,7 @@ export default function VendorForm() {
         await vendorsApi.create({
           name: name.trim(),
           description: description.trim(),
-          active: status === 'Active',
+          active: true,
           email: email.trim(),
           contact_person: contact.trim(),
           phone_number: phone.trim(),
@@ -89,7 +88,7 @@ export default function VendorForm() {
             vendorId: `VND${String(vendors.length + 1).padStart(3, '0')}`,
             vendorName: name.trim(),
             vendorType: type,
-            status,
+            status: 'Active',
             contact: contact.trim(),
             email: email.trim(),
             phone: phone.trim(),
@@ -122,13 +121,6 @@ export default function VendorForm() {
               {VENDOR_TYPES.map((t) => (
                 <option key={t}>{t}</option>
               ))}
-            </select>
-          </div>
-          <div className="uidai-pmis-field">
-            <label>Status <span className="uidai-pmis-required">*</span></label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option>Active</option>
-              <option>Inactive</option>
             </select>
           </div>
           <div className="uidai-pmis-field">
