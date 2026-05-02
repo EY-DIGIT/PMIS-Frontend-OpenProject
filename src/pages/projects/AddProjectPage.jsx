@@ -72,15 +72,6 @@ function toIso(d) {
   return new Date(`${d}T23:59:59Z`).toISOString();
 }
 
-function tomorrowStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function extractVendors(raw) {
   const elements =
     raw?.data?._embedded?.elements ??
@@ -131,7 +122,20 @@ export default function AddProjectPage() {
   const [divisionsLoading, setDivisionsLoading] = useState(false);
   const [divisionsError, setDivisionsError] = useState("");
   const [errorCreated, setErrorCreated] = useState("");
-  const minDate = tomorrowStr();
+  /* Per-field errors keyed by field name. Populated on submit, cleared as
+     the user edits each field. */
+  const [errors, setErrors] = useState({});
+
+  function clearFieldError(field) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+  const errClass = (field) =>
+    errors[field] ? "uidai-field has-error" : "uidai-field";
 
   useEffect(() => {
     let cancelled = false;
@@ -260,33 +264,37 @@ export default function AddProjectPage() {
     };
   }
 
+  /* Collect ALL field errors at once so every invalid input is highlighted
+     simultaneously and the popup lists every missing/invalid field. */
+  function validate() {
+    const errs = {};
+    if (!(form.projectName || "").trim()) errs.projectName = "Project Name is required";
+    if (!(form.owner || "").trim()) errs.owner = "Owner is required";
+    if (ownerRequiresOther && !(form.ownerOther || "").trim())
+      errs.ownerOther = "Please specify the owner";
+    if (!form.startDate) errs.startDate = "Expected Start Date is required";
+    if (!form.endDate) errs.endDate = "Expected End Date is required";
+    if (form.startDate && form.endDate && form.endDate < form.startDate)
+      errs.endDate = "Expected End Date cannot be earlier than Expected Start Date";
+    return errs;
+  }
+
   async function goNext() {
     if (submitting) return;
 
-    if (!(form.projectName || "").trim() || !(form.owner || "").trim() || !form.startDate || !form.endDate) {
-      setErrorCreated("Fill required fields");
-      return;
-    }
-    if (ownerRequiresOther && !(form.ownerOther || "").trim()) {
-      setErrorCreated("Please specify the owner.");
-      return;
-    }
-    if (form.startDate < minDate) {
-      setErrorCreated("Expected Start Date must be a future date.");
-      return;
-    }
-    if (form.endDate < minDate) {
-      setErrorCreated("Expected End Date must be a future date.");
-      return;
-    }
-    if (form.endDate < form.startDate) {
-      setErrorCreated("Expected End Date cannot be earlier than Expected Start Date.");
+    const errs = validate();
+    setErrors(errs);
+    const errList = Object.values(errs);
+    if (errList.length) {
+      setErrorCreated("");
+      uiStore.showError(`Please fix the highlighted fields\n• ${errList.join("\n• ")}`);
       return;
     }
 
     const token = getToken();
     if (!token) {
       setErrorCreated("Your session has expired. Please sign in again.");
+      uiStore.showError("Your session has expired. Please sign in again.");
       navigate("/login");
       return;
     }
@@ -304,7 +312,9 @@ export default function AddProjectPage() {
 
       if (res.status === 401) {
         logout();
-        setErrorCreated("Session expired. Please sign in again.");
+        const m = "Session expired. Please sign in again.";
+        setErrorCreated(m);
+        uiStore.showError(m);
         navigate("/login");
         return;
       }
@@ -334,7 +344,9 @@ export default function AddProjectPage() {
       draftStore.set(next);
       navigate("/projects/add/config");
     } catch (err) {
-      setErrorCreated(err?.message || "Failed to create project");
+      const m = err?.message || "Failed to create project";
+      setErrorCreated(m);
+      uiStore.showError(m);
     } finally {
       setSubmitting(false);
     }
@@ -349,15 +361,21 @@ export default function AddProjectPage() {
     <div>
       <div className="uidai-card-project">
         <div className="uidai-grid">
-          <div className="uidai-field">
+          <div className={errClass("projectName")}>
             <label className="uidai-field__label">
               Project Name <span className="uidai-required-project">*</span>
             </label>
             <input
               className="uidai-input"
               value={form.projectName || ""}
-              onChange={(e) => update({ projectName: e.target.value })}
+              onChange={(e) => {
+                update({ projectName: e.target.value });
+                clearFieldError("projectName");
+              }}
             />
+            {errors.projectName && (
+              <div className="uidai-field-error">{errors.projectName}</div>
+            )}
           </div>
 
           <div className="uidai-field uidai-grid__full">
@@ -378,7 +396,7 @@ export default function AddProjectPage() {
             <input className="uidai-input" value="NEW" disabled />
           </div>
 
-          <div className="uidai-field">
+          <div className={errClass("owner")}>
             <label className="uidai-field__label">
               Owner <span className="uidai-required-project">*</span>
             </label>
@@ -397,6 +415,7 @@ export default function AddProjectPage() {
                   owner: nextCode,
                   ownerOther: stillNeedsOther ? form.ownerOther || "" : ""
                 });
+                clearFieldError("owner");
               }}
               disabled={divisionsLoading}
             >
@@ -413,45 +432,66 @@ export default function AddProjectPage() {
                 </option>
               ))}
             </select>
+            {errors.owner && (
+              <div className="uidai-field-error">{errors.owner}</div>
+            )}
           </div>
 
           {ownerRequiresOther && (
-            <div className="uidai-field">
+            <div className={errClass("ownerOther")}>
               <label className="uidai-field__label">
                 Specify Owner <span className="uidai-required-project">*</span>
               </label>
               <input
                 className="uidai-input"
+                placeholder="Specify owner name"
                 value={form.ownerOther || ""}
-                onChange={(e) => update({ ownerOther: e.target.value })}
+                onChange={(e) => {
+                  update({ ownerOther: e.target.value });
+                  clearFieldError("ownerOther");
+                }}
               />
+              {errors.ownerOther && (
+                <div className="uidai-field-error">{errors.ownerOther}</div>
+              )}
             </div>
           )}
 
-          <div className="uidai-field">
+          <div className={errClass("startDate")}>
             <label className="uidai-field__label">
               Expected Start Date <span className="uidai-required-project">*</span>
             </label>
             <input
               className="uidai-input"
               type="date"
-              min={minDate}
               value={form.startDate || ""}
-              onChange={(e) => update({ startDate: e.target.value })}
+              onChange={(e) => {
+                update({ startDate: e.target.value });
+                clearFieldError("startDate");
+              }}
             />
+            {errors.startDate && (
+              <div className="uidai-field-error">{errors.startDate}</div>
+            )}
           </div>
 
-          <div className="uidai-field">
+          <div className={errClass("endDate")}>
             <label className="uidai-field__label">
               Expected End Date <span className="uidai-required-project">*</span>
             </label>
             <input
               className="uidai-input"
               type="date"
-              min={form.startDate || minDate}
+              min={form.startDate || undefined}
               value={form.endDate || ""}
-              onChange={(e) => update({ endDate: e.target.value })}
+              onChange={(e) => {
+                update({ endDate: e.target.value });
+                clearFieldError("endDate");
+              }}
             />
+            {errors.endDate && (
+              <div className="uidai-field-error">{errors.endDate}</div>
+            )}
           </div>
 
           <div className="uidai-field uidai-grid__full">

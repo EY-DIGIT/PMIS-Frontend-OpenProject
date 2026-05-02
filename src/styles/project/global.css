@@ -106,6 +106,20 @@ body {
   box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.12);
 }
 
+/* Inline field errors — same pattern as the uidai-pmis-* forms. */
+.uidai-field-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--uidai-red, #d32f2f);
+  line-height: 1.4;
+}
+.uidai-field.has-error .uidai-input,
+.uidai-field.has-error .uidai-select,
+.uidai-field.has-error .uidai-textarea {
+  border-color: var(--uidai-red, #d32f2f) !important;
+  box-shadow: 0 0 0 1px rgba(211, 47, 47, .12);
+}
+
 /* Buttons */
 .uidai-btn {
   background: linear-gradient(90deg, var(--uidai-navy), var(--uidai-cyan));
