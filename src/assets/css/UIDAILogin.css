@@ -270,18 +270,17 @@
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  /* compensate for the label that sits inside the wrapper above the input */
-  margin-top: 14px;
   cursor: pointer;
   border: none;
   background: transparent;
   color: #6b7280;
   padding: 4px;
   border-radius: 4px;
-  display: flex;
   align-items: center;
   justify-content: center;
+  line-height: 0;
 }
+.uidai-eye-btn svg { display: block; }
 .uidai-eye-btn:hover { color: var(--uidai-navy); background: #f1f5f9; }
 .uidai-eye-btn:focus-visible {
   outline: 2px solid var(--uidai-cyan);
