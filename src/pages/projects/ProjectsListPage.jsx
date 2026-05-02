@@ -239,7 +239,17 @@ export default function ProjectsListPage() {
               }}
             />
           </div>
-          <div>
+          <div className="uidai-field">
+            {/* Invisible label keeps this column's vertical structure
+                identical to the search-input column so the button's bottom
+                aligns with the input's bottom. */}
+            <label
+              className="uidai-field__label"
+              aria-hidden="true"
+              style={{ visibility: "hidden" }}
+            >
+              Search
+            </label>
             <button className="uidai-btn" onClick={doSearch}>
               Search
             </button>
