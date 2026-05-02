@@ -7,7 +7,28 @@ export default function MessageModal() {
 
   return (
     <div className="uidai-modal uidai-alert-modal" style={{ zIndex: 1800 }}>
-      <div className="uidai-modal__box">
+      <div className="uidai-modal__box" style={{ position: "relative" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={() => uiStore.closeMessage()}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 10,
+            width: 28,
+            height: 28,
+            border: "none",
+            background: "transparent",
+            fontSize: 22,
+            lineHeight: 1,
+            cursor: "pointer",
+            color: "#666",
+            padding: 0
+          }}
+        >
+          ×
+        </button>
         <div
           className={`uidai-message-icon${state.messageIsError ? " uidai-message-icon--error" : ""}`}
         >

@@ -5,7 +5,28 @@ export default function PublishModal({ open, project, onCancel, onConfirm }) {
 
   return (
     <div className="uidai-modal">
-      <div className="uidai-modal__box">
+      <div className="uidai-modal__box" style={{ position: "relative" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onCancel}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 10,
+            width: 28,
+            height: 28,
+            border: "none",
+            background: "transparent",
+            fontSize: 22,
+            lineHeight: 1,
+            cursor: "pointer",
+            color: "#666",
+            padding: 0
+          }}
+        >
+          ×
+        </button>
         <h3 className="uidai-modal__title">Publish Project</h3>
         <div className="uidai-hint" style={{ marginTop: 10 }}>
           You are about to publish the baseline version of {project.projectName}. After publishing

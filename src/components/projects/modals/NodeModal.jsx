@@ -291,7 +291,28 @@ export default function NodeModal({
 
   return (
     <div className="uidai-modal">
-      <div className="uidai-modal__box uidai-modal__box--wide">
+      <div className="uidai-modal__box uidai-modal__box--wide" style={{ position: "relative" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onCancel}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 10,
+            width: 28,
+            height: 28,
+            border: "none",
+            background: "transparent",
+            fontSize: 22,
+            lineHeight: 1,
+            cursor: "pointer",
+            color: "#666",
+            padding: 0
+          }}
+        >
+          ×
+        </button>
         <h3 className="uidai-modal__title">{title}</h3>
         <div className="uidai-hint" style={{ marginBottom: 12 }}>
           {hintText}
