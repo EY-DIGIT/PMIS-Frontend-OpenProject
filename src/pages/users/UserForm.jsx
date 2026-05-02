@@ -7,6 +7,7 @@ import { USER_ROLES, DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoDa
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
+import { uiStore } from '../../store/project/uiStore';
 
 export default function UserForm() {
   const { vendors, refresh, setUsers, users } = useData();
@@ -122,6 +123,7 @@ export default function UserForm() {
     if (msg) { setError(msg); return; }
     setError('');
     setSubmitting(true);
+    uiStore.showLoader('Adding user...');
     try {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
@@ -154,9 +156,13 @@ export default function UserForm() {
           },
         ]);
       }
-      navigate('/users');
+      uiStore.hideLoader();
+      uiStore.showMessage('User added successfully', () => navigate('/users'));
     } catch (err) {
-      setError(err?.message || 'Failed to add user');
+      uiStore.hideLoader();
+      const errMsg = err?.message || 'Failed to add user';
+      setError(errMsg);
+      uiStore.showError(errMsg);
     } finally {
       setSubmitting(false);
     }
