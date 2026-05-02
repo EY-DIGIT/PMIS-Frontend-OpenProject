@@ -929,9 +929,23 @@ export default function MilestoneConfigPage({ mode }) {
 
     if (project.projectId && getToken()) {
       saveProjectApi(project.projectId)
-        .then(() => {
+        .then(async (saved) => {
           try { hydrateProjects({ force: true }); } catch (e) {}
-          doLocal(project.projectId);
+          // Resolve the friendliest possible label for the success toast:
+          // prefer the projectCode returned by save, then the draft's, then
+          // a fresh GET as a last resort before falling back to the UUID.
+          let code =
+            saved?.projectCode ||
+            saved?.project_code ||
+            project.projectCode ||
+            "";
+          if (!code) {
+            try {
+              const fresh = await loadProjectById(project.projectId);
+              code = fresh?.projectCode || "";
+            } catch (e) { /* swallow — toast will fall back to UUID */ }
+          }
+          doLocal(project.projectId, code);
         })
         .catch((err) => {
           uiStore.hideLoader();
