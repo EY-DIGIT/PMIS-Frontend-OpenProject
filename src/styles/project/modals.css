@@ -385,7 +385,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: end;
+  /* Top-align so the Post-Comment button lines up with the file input
+     itself, not with the hint/error text that sits below the input. */
+  align-items: start;
 }
 
 .uidai-comments__list {
