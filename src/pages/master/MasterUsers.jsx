@@ -4,7 +4,7 @@ import { tokenStore } from '../../api/client';
 import { renderMappingText } from '../../utils/helpers';
 
 export default function MasterUsers() {
-  const { users, refresh } = useData();
+  const { users, refresh, loading } = useData();
 
   useEffect(() => {
     if (tokenStore.get()) refresh();
@@ -26,7 +26,14 @@ export default function MasterUsers() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {loading && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 16 }}>
+                    Loading users...
+                  </td>
+                </tr>
+              )}
+              {!loading && users.map((u) => (
                 <tr key={u.userId}>
                   <td>{u.userId}</td>
                   <td>{u.fullName}</td>
@@ -43,7 +50,7 @@ export default function MasterUsers() {
                   </td>
                 </tr>
               ))}
-              {users.length === 0 && (
+              {!loading && users.length === 0 && (
                 <tr className="uidai-pmis-no-results">
                   <td colSpan={9}>No data found.</td>
                 </tr>

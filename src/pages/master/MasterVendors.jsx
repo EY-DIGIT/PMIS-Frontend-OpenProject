@@ -4,7 +4,7 @@ import { tokenStore } from '../../api/client';
 import { renderMappingText } from '../../utils/helpers';
 
 export default function MasterVendors() {
-  const { vendors, refresh } = useData();
+  const { vendors, refresh, loading } = useData();
 
   useEffect(() => {
     if (tokenStore.get()) refresh();
@@ -26,7 +26,14 @@ export default function MasterVendors() {
               </tr>
             </thead>
             <tbody>
-              {vendors.map((v) => (
+              {loading && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 16 }}>
+                    Loading vendors...
+                  </td>
+                </tr>
+              )}
+              {!loading && vendors.map((v) => (
                 <tr key={v.vendorId}>
                   <td>{v.vendorId}</td>
                   <td>{v.vendorName}</td>
@@ -42,7 +49,7 @@ export default function MasterVendors() {
                   <td>{renderMappingText(v.projectMapping)}</td>
                 </tr>
               ))}
-              {vendors.length === 0 && (
+              {!loading && vendors.length === 0 && (
                 <tr className="uidai-pmis-no-results">
                   <td colSpan={8}>No data found.</td>
                 </tr>

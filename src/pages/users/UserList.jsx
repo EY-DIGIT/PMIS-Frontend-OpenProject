@@ -13,6 +13,7 @@ export default function UserList() {
   const navigate = useNavigate();
   const location = useLocation();
   const [deletingId, setDeletingId] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Directly hit the list endpoint on every mount/navigation. No token guard
   // here — if the token is missing, the request still fires (and surfaces as
@@ -20,6 +21,7 @@ export default function UserList() {
   // shared refresh()'s silent early-return.
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const list = await usersApi.list();
@@ -27,6 +29,8 @@ export default function UserList() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[UserList] Failed to load users', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -179,7 +183,14 @@ export default function UserList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u) => (
+              {loading && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={10} style={{ textAlign: 'center', padding: 16 }}>
+                    Loading users...
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.map((u) => (
                 <tr key={u.userId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/users/${u.userId}`)}>
                     {u.userId}
@@ -225,7 +236,7 @@ export default function UserList() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
                   <td colSpan={10}>No matching users found.</td>
                 </tr>

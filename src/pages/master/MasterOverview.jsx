@@ -3,11 +3,13 @@ import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
 
 export default function MasterOverview() {
-  const { vendors, users, refresh } = useData();
+  const { vendors, users, refresh, loading } = useData();
 
   useEffect(() => {
     if (tokenStore.get()) refresh();
   }, [refresh]);
+
+  const kpiValue = (n) => (loading ? '…' : n);
 
   return (
     <>
@@ -17,22 +19,22 @@ export default function MasterOverview() {
       <div className="uidai-pmis-kpi-row">
         <div className="uidai-pmis-kpi">
           <div className="uidai-pmis-kpi-label">Total Vendors</div>
-          <div className="uidai-pmis-kpi-value">{vendors.length}</div>
+          <div className="uidai-pmis-kpi-value">{kpiValue(vendors.length)}</div>
           <div className="uidai-pmis-kpi-meta">All vendor records</div>
         </div>
         <div className="uidai-pmis-kpi">
           <div className="uidai-pmis-kpi-label">Total Users</div>
-          <div className="uidai-pmis-kpi-value">{users.length}</div>
+          <div className="uidai-pmis-kpi-value">{kpiValue(users.length)}</div>
           <div className="uidai-pmis-kpi-meta">All user records</div>
         </div>
         <div className="uidai-pmis-kpi">
           <div className="uidai-pmis-kpi-label">Active Vendors</div>
-          <div className="uidai-pmis-kpi-value">{vendors.filter((v) => v.status === 'Active').length}</div>
+          <div className="uidai-pmis-kpi-value">{kpiValue(vendors.filter((v) => v.status === 'Active').length)}</div>
           <div className="uidai-pmis-kpi-meta">Currently enabled</div>
         </div>
         <div className="uidai-pmis-kpi">
           <div className="uidai-pmis-kpi-label">Active Users</div>
-          <div className="uidai-pmis-kpi-value">{users.filter((u) => u.status === 'Active').length}</div>
+          <div className="uidai-pmis-kpi-value">{kpiValue(users.filter((u) => u.status === 'Active').length)}</div>
           <div className="uidai-pmis-kpi-meta">Currently enabled</div>
         </div>
       </div>

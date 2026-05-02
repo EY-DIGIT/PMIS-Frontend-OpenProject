@@ -12,6 +12,7 @@ export default function VendorList() {
   const navigate = useNavigate();
   const location = useLocation();
   const [deletingId, setDeletingId] = useState('');
+  const [loading, setLoading] = useState(false);
 
   // Directly hit the list endpoint on every mount/navigation. No token guard
   // here — if the token is missing, the request still fires (and surfaces as
@@ -19,6 +20,7 @@ export default function VendorList() {
   // shared refresh()'s silent early-return.
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const list = await vendorsApi.list();
@@ -26,6 +28,8 @@ export default function VendorList() {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error('[VendorList] Failed to load vendors', err);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -188,7 +192,14 @@ export default function VendorList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((v) => (
+              {loading && (
+                <tr className="uidai-pmis-no-results">
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 16 }}>
+                    Loading vendors...
+                  </td>
+                </tr>
+              )}
+              {!loading && filtered.map((v) => (
                 <tr key={v.vendorId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/vendors/${v.vendorId}`)}>
                     {v.vendorId}
@@ -233,7 +244,7 @@ export default function VendorList() {
                   </td>
                 </tr>
               ))}
-              {filtered.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
                   <td colSpan={9}>No matching vendors found.</td>
                 </tr>
