@@ -1008,11 +1008,9 @@ export default function MilestoneConfigPage({ mode }) {
     </>
   ) : (
     <>
-      {!isVersion && (
-        <button type="button" className="uidai-btn" onClick={toggleEdit}>
-          {editingConfig ? "Save" : "Edit"}
-        </button>
-      )}
+      <button type="button" className="uidai-btn" onClick={toggleEdit}>
+        {editingConfig ? "Save" : "Edit"}
+      </button>
       <button
         type="button"
         className="uidai-btn uidai-btn--cancel"
@@ -1157,9 +1155,12 @@ export default function MilestoneConfigPage({ mode }) {
           nodeUid={modalCtx.nodeUid}
           editable={(() => {
             if (!canMod) return false;
-            // Version projects: every node opens in read-only mode regardless
-            // of which kind it is or whether it came from the baseline.
-            if (isVersion) return false;
+            // Version projects: milestones and activities open in view-only
+            // mode; tasks and sub-tasks stay editable (and addable) so the
+            // user can flesh out the version's lower-level work.
+            if (isVersion) {
+              return modalCtx.kind === "task" || modalCtx.kind === "subtask";
+            }
             if (modalCtx.mode !== "edit" || !modalCtx.nodeUid) return true;
             const loc = locateNode(project, modalCtx.nodeUid);
             if (!loc) return true;

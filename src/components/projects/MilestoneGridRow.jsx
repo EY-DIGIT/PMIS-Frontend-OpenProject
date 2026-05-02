@@ -47,12 +47,15 @@ export default function MilestoneGridRow({
     .filter(Boolean);
 
   const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
-  // Version projects are entirely read-only: treat every node as locked so
-  // the action button shows "View" and the delete button is disabled.
-  const locked = isVersion || isNodeBaselineLocked(project, node);
+  // Version projects: milestones and activities are view-only. Tasks and
+  // sub-tasks remain editable so users can adjust their progress fields
+  // and add new ones beneath baseline-inherited activities/tasks.
+  const locked = isVersion
+    ? (kind === "milestone" || kind === "activity")
+    : isNodeBaselineLocked(project, node);
 
   let addChildBtn = null;
-  if (canMod && !isVersion) {
+  if (canMod) {
     if (kind === "milestone" && !isVersion) {
       addChildBtn = (
         <button
