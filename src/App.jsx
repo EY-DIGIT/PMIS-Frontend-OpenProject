@@ -103,6 +103,16 @@ function Breadcrumbs() {
         dashboard: "Dashboard"
     };
 
+    /* Some "new" routes are conceptually a single step from the Dashboard,
+       not a sub-page of a parent list. Render them as one breadcrumb item
+       with a friendlier label so users see "Home › New User" instead of
+       "Home › Users › New". */
+    const NEW_ROUTE_OVERRIDES = {
+        "/users/new": { to: "/users/new", label: "New User" },
+        "/vendors/new": { to: "/vendors/new", label: "New Vendor" }
+    };
+    const newRouteOverride = NEW_ROUTE_OVERRIDES[pathname];
+
     /* Under /projects/:projectId/... segments[1] is the project's id — swap
        to projectCode if we have it in the store. */
     const projectIdSeg =
@@ -135,7 +145,12 @@ function Breadcrumbs() {
             <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
                  Home
             </Link>
-            {visibleSegments.map((seg, i) => {
+            {newRouteOverride ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ color: "#999" }}>›</span>
+                    <span style={{ color: "#333", fontWeight: 600 }}>{newRouteOverride.label}</span>
+                </span>
+            ) : visibleSegments.map((seg, i) => {
                 const to = "/" + visibleSegments.slice(0, i + 1).join("/");
                 const isLast = i === visibleSegments.length - 1;
                 const isProjectIdSeg = projectIdSeg && i === 1 && visibleSegments[0] === "projects";
