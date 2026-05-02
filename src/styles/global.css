@@ -116,6 +116,130 @@
   margin-top: 4px;
 }
 
+/* =====================================================================
+   App-wide success / error popup — matches the HTML reference's
+   .modal-overlay / .modal / .modal-icon design:
+   - navy→cyan 4px top stripe via ::before
+   - 62×62 circular SVG icon (success / danger / warn / info colour scheme)
+   - 18 px navy bold title + soft 14 px body
+   - Single centered action button.
+   Namespaced uidai-app-modal- so it can't collide with other modal classes. */
+.uidai-app-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 42, 99, .45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1800;
+  padding: 16px;
+  animation: uidaiAppModalFadeIn .18s ease;
+}
+.uidai-app-modal-overlay--show { display: flex; }
+@keyframes uidaiAppModalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes uidaiAppModalPopIn {
+  from { opacity: 0; transform: translateY(8px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.uidai-app-modal {
+  background: #fff;
+  border-radius: 14px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+  overflow: hidden;
+  position: relative;
+  animation: uidaiAppModalPopIn .22s ease;
+  font-family: inherit;
+  color: var(--uidai-pmis-text);
+}
+.uidai-app-modal::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--uidai-pmis-navy) 0%, var(--uidai-pmis-cyan) 100%);
+  z-index: 2;
+}
+.uidai-app-modal__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  z-index: 3;
+}
+.uidai-app-modal__body {
+  padding: 30px 24px 24px;
+  text-align: center;
+}
+.uidai-app-modal__icon {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 14px;
+  font-size: 30px;
+  font-weight: 700;
+}
+.uidai-app-modal__icon svg { width: 32px; height: 32px; }
+.uidai-app-modal__icon--success { background: #e8f7ee; color: #1a7f37; }
+.uidai-app-modal__icon--danger  { background: #fdecec; color: #b42318; }
+.uidai-app-modal__icon--warn    { background: #fff4e5; color: #b25e00; }
+.uidai-app-modal__icon--info    { background: #eaf4ff; color: #114a8d; }
+.uidai-app-modal__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--uidai-pmis-navy);
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+.uidai-app-modal__message {
+  font-size: 14px;
+  color: #5a6680;
+  line-height: 1.55;
+  margin-bottom: 18px;
+  word-break: break-word;
+  /* Preserve newlines so caller-supplied "• item\n• item" bullet lists
+     render on separate lines without needing inline HTML. */
+  white-space: pre-line;
+  text-align: left;
+}
+.uidai-app-modal__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ---------- inline field errors ---------- */
+.uidai-pmis-field-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--uidai-pmis-red);
+  line-height: 1.4;
+}
+.uidai-pmis-field.uidai-pmis-has-error input,
+.uidai-pmis-field.uidai-pmis-has-error select,
+.uidai-pmis-field.uidai-pmis-has-error textarea,
+.uidai-pmis-field.uidai-pmis-has-error .uidai-pmis-phone-input,
+.uidai-pmis-field.uidai-pmis-has-error .uidai-pmis-ms-toggle {
+  border-color: var(--uidai-pmis-red) !important;
+  box-shadow: 0 0 0 1px rgba(211, 47, 47, .12);
+}
+
 /* ---------- Phone input (with +91 prefix) ---------- */
 .uidai-pmis-phone-input {
   display: flex;

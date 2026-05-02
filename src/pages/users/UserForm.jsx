@@ -30,6 +30,19 @@ export default function UserForm() {
   const [divisionList, setDivisionList] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // Per-field errors keyed by field name. Populated on submit, cleared as
+  // the user edits each field.
+  const [errors, setErrors] = useState({});
+
+  function clearFieldError(field) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+  const errClass = (field) => (errors[field] ? 'uidai-pmis-field uidai-pmis-has-error' : 'uidai-pmis-field');
 
   useEffect(() => {
     if (!tokenStore.get()) return;
@@ -106,21 +119,26 @@ export default function UserForm() {
 
   const selectedVendor = vendors.find((v) => v.vendorId === vendorId);
 
+  /* Collect ALL field errors at once so every invalid input is highlighted
+     simultaneously and the popup lists every missing/invalid field. */
   const validate = () => {
-    if (!fullName.trim()) return 'Full Name is required';
-    if (!employeeId.trim()) return 'Employee ID is required';
-    if (!email.trim()) return 'Email is required';
-    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
-      return 'Please enter a valid email address (e.g. name@example.com)';
-    if (!mobile.trim()) return 'Mobile Number is required';
-    if (!/^[6-9]\d{9}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
-    if (!password) return 'Temporary Password is required';
-    if (!role) return 'Please select a role';
-    if (!vendorId) return 'Please select an associated vendor';
-    if (!division) return 'Please select a division';
-    if (divisionRequiresOther && !divisionOther.trim()) return 'Please specify the division';
-    if (!Array.isArray(permissions) || permissions.length === 0) return 'Please assign at least one role/permission';
-    return '';
+    const errs = {};
+    if (!fullName.trim()) errs.fullName = 'Full Name is required';
+    if (!employeeId.trim()) errs.employeeId = 'Employee ID is required';
+    if (!email.trim()) errs.email = 'Email is required';
+    else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
+      errs.email = 'Enter a valid email (e.g. name@example.com)';
+    if (!mobile.trim()) errs.mobile = 'Mobile Number is required';
+    else if (!/^[6-9]\d{9}$/.test(mobile.trim()))
+      errs.mobile = 'Enter a valid 10-digit number starting with 6-9';
+    if (!password) errs.password = 'Temporary Password is required';
+    if (!role) errs.role = 'Please select a role';
+    if (!vendorId) errs.vendorId = 'Please select an associated vendor';
+    if (!division) errs.division = 'Please select a division';
+    if (divisionRequiresOther && !divisionOther.trim()) errs.divisionOther = 'Please specify the division';
+    if (!Array.isArray(permissions) || permissions.length === 0)
+      errs.permissions = 'Please assign at least one role/permission';
+    return errs;
   };
 
   const splitName = (n) => {
@@ -129,8 +147,14 @@ export default function UserForm() {
   };
 
   const handleAdd = async () => {
-    const msg = validate();
-    if (msg) { setError(msg); return; }
+    const errs = validate();
+    setErrors(errs);
+    const errList = Object.values(errs);
+    if (errList.length) {
+      setError('');
+      uiStore.showError(`Please fix the highlighted fields\n• ${errList.join('\n• ')}`);
+      return;
+    }
     setError('');
     setSubmitting(true);
     uiStore.showLoader('Adding user...');
@@ -188,32 +212,35 @@ export default function UserForm() {
         <h3>Add User</h3>
         <br />
         <div className="uidai-pmis-grid-4">
-          <div className="uidai-pmis-field">
+          <div className={errClass('fullName')}>
             <label>Full Name <span className="uidai-pmis-required">*</span></label>
             <input
               placeholder="e.g. Ravi Kumar"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => { setFullName(e.target.value); clearFieldError('fullName'); }}
             />
+            {errors.fullName && <div className="uidai-pmis-field-error">{errors.fullName}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('employeeId')}>
             <label>Employee ID <span className="uidai-pmis-required">*</span></label>
             <input
               placeholder="e.g. EMP001"
               value={employeeId}
-              onChange={(e) => setEmployeeId(e.target.value)}
+              onChange={(e) => { setEmployeeId(e.target.value); clearFieldError('employeeId'); }}
             />
+            {errors.employeeId && <div className="uidai-pmis-field-error">{errors.employeeId}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('email')}>
             <label>Email <span className="uidai-pmis-required">*</span></label>
             <input
               type="email"
               placeholder="e.g. name@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
             />
+            {errors.email && <div className="uidai-pmis-field-error">{errors.email}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('mobile')}>
             <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
             <div className="uidai-pmis-phone-input">
               <span className="uidai-pmis-phone-prefix" aria-hidden="true">+91</span>
@@ -227,21 +254,23 @@ export default function UserForm() {
                 onChange={(e) => {
                   const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
                   setMobile(cleaned);
+                  clearFieldError('mobile');
                 }}
                 onKeyPress={(e) => {
                   if (e.key.length === 1 && !/[0-9]/.test(e.key)) e.preventDefault();
                 }}
               />
             </div>
+            {errors.mobile && <div className="uidai-pmis-field-error">{errors.mobile}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('password')}>
             <label>Temporary Password <span className="uidai-pmis-required">*</span></label>
             <div style={{ position: "relative", display: "block" }}>
               <input
                 type={showPassword ? "text" : "password"}
                 placeholder="Set a temporary password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); clearFieldError('password'); }}
                 style={{ paddingRight: 36, width: "100%", boxSizing: "border-box" }}
               />
               <button
@@ -268,30 +297,40 @@ export default function UserForm() {
                 {showPassword ? <FaEyeSlash /> : <FaEye />}
               </button>
             </div>
+            {errors.password && <div className="uidai-pmis-field-error">{errors.password}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('role')}>
             <label>Role <span className="uidai-pmis-required">*</span></label>
-            <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <select
+              value={role}
+              onChange={(e) => { setRole(e.target.value); clearFieldError('role'); }}
+            >
               <option value="" disabled>Select Role</option>
               {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
+            {errors.role && <div className="uidai-pmis-field-error">{errors.role}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('vendorId')}>
             <label>Associated Vendor Name <span className="uidai-pmis-required">*</span></label>
-            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+            <select
+              value={vendorId}
+              onChange={(e) => { setVendorId(e.target.value); clearFieldError('vendorId'); }}
+            >
               <option value="" disabled>Select Vendor</option>
               {vendors.map((v) => (
                 <option key={v.vendorId} value={v.vendorId}>{v.vendorName}</option>
               ))}
             </select>
+            {errors.vendorId && <div className="uidai-pmis-field-error">{errors.vendorId}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('division')}>
             <label>Division <span className="uidai-pmis-required">*</span></label>
             <select
               value={division}
               onChange={(e) => {
                 const next = e.target.value;
                 setDivision(next);
+                clearFieldError('division');
                 const nextDiv = divisionOptions.find((d) => d.code === next);
                 const stillNeedsOther =
                   !!nextDiv &&
@@ -306,19 +345,21 @@ export default function UserForm() {
                 <option key={d.code} value={d.code}>{d.label}</option>
               ))}
             </select>
+            {errors.division && <div className="uidai-pmis-field-error">{errors.division}</div>}
           </div>
           {divisionRequiresOther && (
-            <div className="uidai-pmis-field">
+            <div className={errClass('divisionOther')}>
               <label>Specify Division <span className="uidai-pmis-required">*</span></label>
               <input
                 placeholder="Specify division name"
                 value={divisionOther}
-                onChange={(e) => setDivisionOther(e.target.value)}
+                onChange={(e) => { setDivisionOther(e.target.value); clearFieldError('divisionOther'); }}
               />
+              {errors.divisionOther && <div className="uidai-pmis-field-error">{errors.divisionOther}</div>}
             </div>
           )}
           <div className="uidai-pmis-field">
-            <label>Project Mapping <span className="uidai-pmis-required">*</span></label>
+            <label>Project Mapping</label>
             <MultiSelect
               name="userProjectMapping"
               value={mapping}
@@ -326,9 +367,14 @@ export default function UserForm() {
               onChange={setMapping}
             />
           </div>
-          <div className="uidai-pmis-field uidai-pmis-full">
+          <div className={`${errClass('permissions')} uidai-pmis-full`}>
             <label>Role &amp; Permissions <span className="uidai-pmis-required">*</span></label>
-            <AssignRoleField value={permissions} onChange={setPermissions} editable />
+            <AssignRoleField
+              value={permissions}
+              onChange={(next) => { setPermissions(next); clearFieldError('permissions'); }}
+              editable
+            />
+            {errors.permissions && <div className="uidai-pmis-field-error">{errors.permissions}</div>}
           </div>
         </div>
         {error && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{error}</div>}

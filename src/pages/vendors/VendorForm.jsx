@@ -23,6 +23,19 @@ export default function VendorForm() {
   const [projectList, setProjectList] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // Per-field errors keyed by field name. Populated by validate() on submit
+  // and cleared as the user edits the corresponding field.
+  const [errors, setErrors] = useState({});
+
+  function clearFieldError(field) {
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+  const errClass = (field) => (errors[field] ? 'uidai-pmis-field uidai-pmis-has-error' : 'uidai-pmis-field');
 
   useEffect(() => {
     if (!tokenStore.get()) return;
@@ -56,24 +69,34 @@ export default function VendorForm() {
     }));
   }, [projectList]);
 
+  /* Collect ALL field errors so we can highlight every invalid input at
+     once, return them as { name: 'msg', email: 'msg', ... }. */
   const validate = () => {
-    if (!name.trim()) return 'Vendor Name is required';
-    if (!contact.trim()) return 'Contact Person is required';
-    if (!/^[A-Za-z][A-Za-z\s\-'.]*$/.test(contact.trim()))
-      return "Contact Person can only contain letters, spaces, hyphens, apostrophes, and full stops";
-    if (!email.trim()) return 'Email is required';
-    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
-      return 'Please enter a valid email address (e.g. name@example.com)';
-    if (!phone.trim()) return 'Mobile Number is required';
-    if (!/^[6-9]\d{9}$/.test(phone.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
+    const errs = {};
+    if (!name.trim()) errs.name = 'Vendor Name is required';
+    if (!contact.trim()) errs.contact = 'Contact Person is required';
+    else if (!/^[A-Za-z][A-Za-z\s\-'.]*$/.test(contact.trim()))
+      errs.contact = "Only letters, spaces, hyphens, apostrophes and full stops allowed";
+    if (!email.trim()) errs.email = 'Email is required';
+    else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
+      errs.email = 'Enter a valid email (e.g. name@example.com)';
+    if (!phone.trim()) errs.phone = 'Mobile Number is required';
+    else if (!/^[6-9]\d{9}$/.test(phone.trim()))
+      errs.phone = 'Enter a valid 10-digit number starting with 6-9';
     if (!Array.isArray(mapping) || mapping.length === 0)
-      return 'At least one Project Mapping is required';
-    return '';
+      errs.mapping = 'At least one Project Mapping is required';
+    return errs;
   };
 
   const handleAdd = async () => {
-    const msg = validate();
-    if (msg) { setError(msg); return; }
+    const errs = validate();
+    setErrors(errs);
+    const errList = Object.values(errs);
+    if (errList.length) {
+      setError('');
+      uiStore.showError(`Please fix the highlighted fields\n• ${errList.join('\n• ')}`);
+      return;
+    }
     setError('');
     setSubmitting(true);
     uiStore.showLoader('Adding vendor...');
@@ -123,9 +146,14 @@ export default function VendorForm() {
         <h3>Add Vendor</h3>
         <br />
         <div className="uidai-pmis-grid-4">
-          <div className="uidai-pmis-field">
+          <div className={errClass('name')}>
             <label>Vendor Name <span className="uidai-pmis-required">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              placeholder="e.g. Apex Solutions"
+              value={name}
+              onChange={(e) => { setName(e.target.value); clearFieldError('name'); }}
+            />
+            {errors.name && <div className="uidai-pmis-field-error">{errors.name}</div>}
           </div>
           <div className="uidai-pmis-field">
             <label>Vendor Type <span className="uidai-pmis-required">*</span></label>
@@ -135,7 +163,7 @@ export default function VendorForm() {
               ))}
             </select>
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('contact')}>
             <label>Contact Person <span className="uidai-pmis-required">*</span></label>
             <input
               value={contact}
@@ -145,6 +173,7 @@ export default function VendorForm() {
                 // Allow only letters, spaces, hyphens, apostrophes, fullstops
                 const cleaned = e.target.value.replace(/[^A-Za-z\s\-'.]/g, '');
                 setContact(cleaned);
+                clearFieldError('contact');
               }}
               onKeyDown={(e) => {
                 // Block disallowed single-character keys (digits, special chars)
@@ -153,12 +182,19 @@ export default function VendorForm() {
                 }
               }}
             />
+            {errors.contact && <div className="uidai-pmis-field-error">{errors.contact}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('email')}>
             <label>Email <span className="uidai-pmis-required">*</span></label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input
+              type="email"
+              placeholder="e.g. name@example.com"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
+            />
+            {errors.email && <div className="uidai-pmis-field-error">{errors.email}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('phone')}>
             <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
             <div className="uidai-pmis-phone-input">
               <span className="uidai-pmis-phone-prefix" aria-hidden="true">+91</span>
@@ -172,21 +208,24 @@ export default function VendorForm() {
                 onChange={(e) => {
                   const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
                   setPhone(cleaned);
+                  clearFieldError('phone');
                 }}
                 onKeyPress={(e) => {
                   if (e.key.length === 1 && !/[0-9]/.test(e.key)) e.preventDefault();
                 }}
               />
             </div>
+            {errors.phone && <div className="uidai-pmis-field-error">{errors.phone}</div>}
           </div>
-          <div className="uidai-pmis-field">
+          <div className={errClass('mapping')}>
             <label>Project Mapping <span className="uidai-pmis-required">*</span></label>
             <MultiSelect
               name="vendorProjectMapping"
               value={mapping}
               options={projectOptions}
-              onChange={setMapping}
+              onChange={(next) => { setMapping(next); clearFieldError('mapping'); }}
             />
+            {errors.mapping && <div className="uidai-pmis-field-error">{errors.mapping}</div>}
           </div>
           <div className="uidai-pmis-field uidai-pmis-full">
             <label>Vendor Description</label>
