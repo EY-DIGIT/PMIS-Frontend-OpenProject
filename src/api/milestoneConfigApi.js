@@ -137,9 +137,9 @@ function resolveDepDisplayIds(project, uids) {
 }
 
 /* Common base fields for activity/task create & update. Tasks and
-   activities share the same contract for dates, dependsOn, position.
-   The server now expects `dependsOn` consistently across every entity
-   (milestone, activity, task, subtask). */
+   activities share the same contract for dates and dependsOn. The server
+   now expects `dependsOn` consistently across every entity (milestone,
+   activity, task, subtask). */
 function buildActivityLikeBase(project, formData) {
   return {
     name: formData.name.trim(),
@@ -148,7 +148,6 @@ function buildActivityLikeBase(project, formData) {
     endDate: toMilestoneIsoEnd(formData.endDate),
     actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
     actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-    position: 0,
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
 }
