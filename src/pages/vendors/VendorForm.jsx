@@ -7,6 +7,7 @@ import * as vendorsApi from '../../api/vendors';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { useData } from '../../data/DataContext';
+import { uiStore } from '../../store/project/uiStore';
 
 export default function VendorForm() {
   const navigate = useNavigate();
@@ -75,6 +76,7 @@ export default function VendorForm() {
     if (msg) { setError(msg); return; }
     setError('');
     setSubmitting(true);
+    uiStore.showLoader('Adding vendor...');
     try {
       if (tokenStore.get()) {
         await vendorsApi.create({
@@ -103,9 +105,13 @@ export default function VendorForm() {
           },
         ]);
       }
-      navigate('/vendors');
+      uiStore.hideLoader();
+      uiStore.showMessage('Vendor added successfully', () => navigate('/vendors'));
     } catch (err) {
-      setError(err?.message || 'Failed to add vendor');
+      uiStore.hideLoader();
+      const errMsg = err?.message || 'Failed to add vendor';
+      setError(errMsg);
+      uiStore.showError(errMsg);
     } finally {
       setSubmitting(false);
     }
