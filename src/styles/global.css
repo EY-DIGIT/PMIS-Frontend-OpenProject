@@ -215,7 +215,7 @@
   /* Preserve newlines so caller-supplied "• item\n• item" bullet lists
      render on separate lines without needing inline HTML. */
   white-space: pre-line;
-  text-align: left;
+  text-align: center;
 }
 .uidai-app-modal__actions {
   display: flex;

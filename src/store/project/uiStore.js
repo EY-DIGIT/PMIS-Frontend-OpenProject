@@ -43,8 +43,37 @@ export const uiStore = {
     const clean = String(msg ?? "")
       .trim()
       .replace(/[.]+$/g, "");
-    const errorPattern =
-      /(not found|fill required fields|type the phrase above|invalid|warning|cannot|please specify|add at least one|please wait)/i;
+    /* Anything that LOOKS like an error → render with the danger icon /
+       title. Covers required-field prompts, date-range bounds, parent-not-
+       found, session-expired, server failures, and similar phrasings. */
+    const errorPattern = new RegExp(
+      [
+        "not found",
+        "fill required fields",
+        "type the phrase above",
+        "invalid",
+        "warning",
+        "cannot",
+        "must be",
+        "must contain",
+        "should be",
+        "is required",
+        "are required",
+        "please specify",
+        "please select",
+        "please sign in",
+        "please assign",
+        "please provide",
+        "session expired",
+        "add at least one",
+        "at least one",
+        "please wait",
+        "failed",
+        "no permissions",
+        "before saving"
+      ].join("|"),
+      "i"
+    );
     const isError = errorPattern.test(clean);
     setState({
       messageOpen: true,
