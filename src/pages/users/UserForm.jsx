@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
 import { USER_ROLES, DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
@@ -15,6 +16,7 @@ export default function UserForm() {
   const [employeeId, setEmployeeId] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState(USER_ROLES[0]);
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
@@ -180,7 +182,37 @@ export default function UserForm() {
           </div>
           <div className="uidai-pmis-field">
             <label>Temporary Password <span className="uidai-pmis-required">*</span></label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <div style={{ position: "relative", display: "block" }}>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{ paddingRight: 36, width: "100%", boxSizing: "border-box" }}
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setShowPassword((v) => !v)}
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  right: 8,
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  fontSize: 16,
+                  lineHeight: 1,
+                  color: "#555",
+                  zIndex: 2
+                }}
+              >
+                {showPassword ? <FaEyeSlash /> : <FaEye />}
+              </button>
+            </div>
           </div>
           <div className="uidai-pmis-field">
             <label>Role <span className="uidai-pmis-required">*</span></label>

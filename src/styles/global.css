@@ -94,6 +94,13 @@
 }
 .uidai-pmis-field textarea { height: 110px; resize: none; }
 
+/* Hide the browser-native password reveal/clear buttons (Edge/IE) so the
+   custom eye-toggle is the only one displayed on password inputs. */
+.uidai-pmis-field input::-ms-reveal,
+.uidai-pmis-field input::-ms-clear {
+  display: none;
+}
+
 .uidai-pmis-field input:disabled,
 .uidai-pmis-field select:disabled,
 .uidai-pmis-field textarea:disabled {
