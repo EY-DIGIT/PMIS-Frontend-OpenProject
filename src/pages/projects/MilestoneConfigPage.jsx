@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -61,6 +61,14 @@ import { hydrateProjects } from "../../store/project/apiSync";
 export default function MilestoneConfigPage({ mode }) {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // `isVersion` is passed in via navigation state from ProjectDetailsPage.
+  // We still derive a fallback below from the loaded project so deep-links
+  // and refreshes keep working.
+  const navIsVersion =
+    location && location.state && typeof location.state.isVersion === "boolean"
+      ? location.state.isVersion
+      : null;
 
   useProjects();
   const draft = useDraft();
@@ -329,7 +337,11 @@ export default function MilestoneConfigPage({ mode }) {
 
   const editable = isOnboarding ? true : editingConfig;
   const canMod = isOnboarding || editable;
-  const isVersion = !isOnboarding && isVersionProject(project);
+  // Prefer the explicit nav-state flag (fresh from the project-detail GET);
+  // fall back to whatever the loaded project says.
+  const isVersion =
+    !isOnboarding &&
+    (navIsVersion !== null ? navIsVersion : isVersionProject(project));
 
   normalizeProject(project);
   try { recomputeActualDates(project); } catch (e) {}
@@ -996,9 +1008,11 @@ export default function MilestoneConfigPage({ mode }) {
     </>
   ) : (
     <>
-      <button type="button" className="uidai-btn" onClick={toggleEdit}>
-        {editingConfig ? "Save" : "Edit"}
-      </button>
+      {!isVersion && (
+        <button type="button" className="uidai-btn" onClick={toggleEdit}>
+          {editingConfig ? "Save" : "Edit"}
+        </button>
+      )}
       <button
         type="button"
         className="uidai-btn uidai-btn--cancel"
@@ -1143,6 +1157,9 @@ export default function MilestoneConfigPage({ mode }) {
           nodeUid={modalCtx.nodeUid}
           editable={(() => {
             if (!canMod) return false;
+            // Version projects: every node opens in read-only mode regardless
+            // of which kind it is or whether it came from the baseline.
+            if (isVersion) return false;
             if (modalCtx.mode !== "edit" || !modalCtx.nodeUid) return true;
             const loc = locateNode(project, modalCtx.nodeUid);
             if (!loc) return true;

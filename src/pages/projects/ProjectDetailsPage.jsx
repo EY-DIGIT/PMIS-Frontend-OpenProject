@@ -928,7 +928,10 @@ export default function ProjectDetailsPage() {
             className="uidai-btn"
             disabled={editing}
             onClick={() =>
-              navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
+              navigate(
+                `/projects/${encodeURIComponent(project.projectId)}/config`,
+                { state: { isVersion: !!project.isVersion } }
+              )
             }
           >
             Go to Milestones Configuration

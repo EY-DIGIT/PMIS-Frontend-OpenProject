@@ -47,10 +47,12 @@ export default function MilestoneGridRow({
     .filter(Boolean);
 
   const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
-  const locked = isNodeBaselineLocked(project, node);
+  // Version projects are entirely read-only: treat every node as locked so
+  // the action button shows "View" and the delete button is disabled.
+  const locked = isVersion || isNodeBaselineLocked(project, node);
 
   let addChildBtn = null;
-  if (canMod) {
+  if (canMod && !isVersion) {
     if (kind === "milestone" && !isVersion) {
       addChildBtn = (
         <button
@@ -125,7 +127,11 @@ export default function MilestoneGridRow({
           {locked && (
             <span
               className="uidai-baseline-lock-icon"
-              title="Baseline item — locked in this version"
+              title={
+                isVersion
+                  ? "Version project — view-only"
+                  : "Baseline item — locked in this version"
+              }
             >
               🔒
             </span>
