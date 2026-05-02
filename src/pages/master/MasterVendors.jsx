@@ -1,8 +1,14 @@
+import { useEffect } from 'react';
 import { useData } from '../../data/DataContext';
+import { tokenStore } from '../../api/client';
 import { renderMappingText } from '../../utils/helpers';
 
 export default function MasterVendors() {
-  const { vendors } = useData();
+  const { vendors, refresh } = useData();
+
+  useEffect(() => {
+    if (tokenStore.get()) refresh();
+  }, [refresh]);
 
   return (
     <>

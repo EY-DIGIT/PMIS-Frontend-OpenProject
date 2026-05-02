@@ -161,7 +161,7 @@ export default function VendorForm() {
           <button className="uidai-pmis-btn" onClick={handleAdd} disabled={submitting}>
             {submitting ? 'Adding…' : 'Add'}
           </button>
-          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/vendors')}>
+          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>
             Cancel
           </button>
         </div>

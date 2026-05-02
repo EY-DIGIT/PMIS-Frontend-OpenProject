@@ -1,8 +1,14 @@
+import { useEffect } from 'react';
 import { useData } from '../../data/DataContext';
+import { tokenStore } from '../../api/client';
 import { renderMappingText } from '../../utils/helpers';
 
 export default function MasterUsers() {
-  const { users } = useData();
+  const { users, refresh } = useData();
+
+  useEffect(() => {
+    if (tokenStore.get()) refresh();
+  }, [refresh]);
 
   return (
     <>

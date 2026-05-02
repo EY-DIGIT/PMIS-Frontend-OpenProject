@@ -272,7 +272,7 @@ export default function UserForm() {
           <button className="uidai-pmis-btn" onClick={handleAdd} disabled={submitting}>
             {submitting ? 'Adding…' : 'Add'}
           </button>
-          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/users')}>Cancel</button>
+          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>Cancel</button>
         </div>
       </div>
     </>

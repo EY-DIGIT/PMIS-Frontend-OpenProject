@@ -1,7 +1,13 @@
+import { useEffect } from 'react';
 import { useData } from '../../data/DataContext';
+import { tokenStore } from '../../api/client';
 
 export default function MasterOverview() {
-  const { vendors, users } = useData();
+  const { vendors, users, refresh } = useData();
+
+  useEffect(() => {
+    if (tokenStore.get()) refresh();
+  }, [refresh]);
 
   return (
     <>

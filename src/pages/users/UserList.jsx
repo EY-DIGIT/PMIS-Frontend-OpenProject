@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { FaTrashAlt } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
@@ -11,11 +11,27 @@ import FilterShell from '../../components/FilterShell';
 export default function UserList() {
   const { users, setUsers, refresh } = useData();
   const navigate = useNavigate();
+  const location = useLocation();
   const [deletingId, setDeletingId] = useState('');
 
+  // Directly hit the list endpoint on every mount/navigation. No token guard
+  // here — if the token is missing, the request still fires (and surfaces as
+  // 401 in the Network tab), which is far better for debugging than the
+  // shared refresh()'s silent early-return.
   useEffect(() => {
-    if (tokenStore.get()) refresh();
-  }, [refresh]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await usersApi.list();
+        if (!cancelled) setUsers(Array.isArray(list) ? list : []);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[UserList] Failed to load users', err);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.key]);
 
   async function handleDelete(u) {
     const ok = window.confirm(`Delete user "${u.fullName || u.email}"?`);
@@ -217,7 +233,6 @@ export default function UserList() {
             </tbody>
           </table>
         </div>
-        <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>Cancel</button>
       </div>
     </>
   );
