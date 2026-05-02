@@ -110,6 +110,8 @@ export default function UserForm() {
     if (!fullName.trim()) return 'Full Name is required';
     if (!employeeId.trim()) return 'Employee ID is required';
     if (!email.trim()) return 'Email is required';
+    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
+      return 'Please enter a valid email address (e.g. name@example.com)';
     if (!mobile.trim()) return 'Mobile Number is required';
     if (!/^[6-9]\d{9}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
     if (!password) return 'Temporary Password is required';

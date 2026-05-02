@@ -58,7 +58,11 @@ export default function VendorForm() {
   const validate = () => {
     if (!name.trim()) return 'Vendor Name is required';
     if (!contact.trim()) return 'Contact Person is required';
+    if (!/^[A-Za-z][A-Za-z\s\-'.]*$/.test(contact.trim()))
+      return "Contact Person can only contain letters, spaces, hyphens, apostrophes, and full stops";
     if (!email.trim()) return 'Email is required';
+    if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
+      return 'Please enter a valid email address (e.g. name@example.com)';
     if (!phone.trim()) return 'Mobile Number is required';
     if (!/^[6-9]\d{9}$/.test(phone.trim())) return 'Enter a valid 10-digit mobile number starting with 6-9';
     return '';
@@ -125,7 +129,22 @@ export default function VendorForm() {
           </div>
           <div className="uidai-pmis-field">
             <label>Contact Person <span className="uidai-pmis-required">*</span></label>
-            <input value={contact} onChange={(e) => setContact(e.target.value)} />
+            <input
+              value={contact}
+              maxLength={100}
+              placeholder="e.g. Ravi Kumar"
+              onChange={(e) => {
+                // Allow only letters, spaces, hyphens, apostrophes, fullstops
+                const cleaned = e.target.value.replace(/[^A-Za-z\s\-'.]/g, '');
+                setContact(cleaned);
+              }}
+              onKeyDown={(e) => {
+                // Block disallowed single-character keys (digits, special chars)
+                if (e.key.length === 1 && !/[A-Za-z\s\-'.]/.test(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+            />
           </div>
           <div className="uidai-pmis-field">
             <label>Email <span className="uidai-pmis-required">*</span></label>
