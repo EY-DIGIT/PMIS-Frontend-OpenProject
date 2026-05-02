@@ -42,9 +42,15 @@ export default function MilestoneGridRow({
       ? (rolled ? "All children completed" : "Completed")
       : "Not Completed";
 
-  const deps = safeArray(node.dependsOn)
-    .map((uid) => depMap[uid])
-    .filter(Boolean);
+  /* Prefer the pre-resolved display IDs the loader stashes on the node
+     (M1 / A1.2 / T1.1.3 / …). Fall back to mapping local UIDs through
+     `depMap` so freshly-added (not-yet-saved) deps still render. */
+  const directDisplay = safeArray(node.dependsOnDisplay);
+  const deps = directDisplay.length
+    ? directDisplay.map((displayId) => ({ id: displayId, name: "" }))
+    : safeArray(node.dependsOn)
+        .map((uid) => depMap[uid])
+        .filter(Boolean);
 
   const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
   // Version projects: milestones and activities are view-only. Tasks and

@@ -10,7 +10,8 @@ function nodeBase(ui) {
     endDate: toApiDate(ui.endDate),
     status: toApiNodeStatus(ui.status),
   };
-  if (ui.dependsOn && ui.dependsOn.length) body.depends = ui.dependsOn;
+  // Standardized to `dependsOn` across milestone/activity/task/subtask.
+  if (ui.dependsOn && ui.dependsOn.length) body.dependsOn = ui.dependsOn;
   return body;
 }
 
@@ -55,16 +56,14 @@ function activityEndpointFor(ui) {
 
 export async function createActivity(milestoneId, ui) {
   const endpoint = activityEndpointFor(ui);
-  // nodeBase() emits `depends` (milestone field name); activities expect `dependency`.
-  const { depends, ...base } = nodeBase(ui);
-  const dependency = depends || [];
+  const base = nodeBase(ui);
   let body;
   if (endpoint === "standard") {
-    body = { ...base, type: "standard", dependency };
+    body = { ...base, type: "standard" };
   } else if (endpoint === "transactional") {
     // Server ignores status for transactional; strip it to avoid 422.
     const { status, ...rest } = base;
-    body = { ...rest, type: "transactional", dependency };
+    body = { ...rest, type: "transactional" };
   } else if (endpoint === "resource/count") {
     const { status, ...rest } = base;
     const rc = ui.resourceCount || {};
@@ -73,7 +72,6 @@ export async function createActivity(milestoneId, ui) {
       type: "resource",
       resourceMode: "count",
       resourceCount: parseInt(rc.count, 10) || 1,
-      dependency,
     };
   } else {
     const { status, ...rest } = base;
@@ -97,7 +95,6 @@ export async function createActivity(milestoneId, ui) {
         division: rd.division || "",
         divisionOther: rd.divisionOther || "",
       },
-      dependency,
     };
   }
   return api.post(ENDPOINTS.milestones.activityCreate(milestoneId, endpoint), body);

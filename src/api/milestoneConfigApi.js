@@ -138,8 +138,8 @@ function resolveDepDisplayIds(project, uids) {
 
 /* Common base fields for activity/task create & update. Tasks and
    activities share the same contract for dates, dependsOn, position.
-   Note: server uses `depends` for milestones but `dependsOn` for
-   activity/task/subtask. */
+   The server now expects `dependsOn` consistently across every entity
+   (milestone, activity, task, subtask). */
 function buildActivityLikeBase(project, formData) {
   return {
     name: formData.name.trim(),
@@ -161,7 +161,9 @@ function buildMilestonePayload(project, formData) {
     endDate: toMilestoneIsoEnd(formData.endDate),
     status: mapStatusForApi(formData.status || "Not Completed"),
     vendorIds: resolveVendorIds(project, formData.vendor),
-    depends: resolveDepDisplayIds(project, formData.dependsOn)
+    /* Standardized to `dependsOn` across every entity (milestone, activity,
+       task, subtask) so the server contract is uniform. */
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
 }
 
@@ -211,20 +213,26 @@ export async function loadMilestonesForProject(projectId) {
 
 /* Walk the entire project tree and translate every node's `dependsOn`
    from raw server values (UUID apiIds OR display IDs like "M1", "A1.2",
-   "T1.2.3") into the local UIDs the grid's depMap understands.
+   "T1.2.3") into the local UIDs the form-picker understands. The original
+   server display IDs are preserved on `dependsOnDisplay` so the table can
+   render them directly without depMap look-ups.
    Idempotent: values that are already known local UIDs are kept as-is,
    so it's safe to call repeatedly during the 4-phase progressive load. */
 export function resolveProjectDependsOn(project) {
   if (!project) return;
   const apiIdToUid = {};
   const displayIdToUid = {};
+  const uidToDisplayId = {};
   const uidSet = new Set();
 
   function indexNode(n) {
     if (!n || !n.uid) return;
     uidSet.add(n.uid);
     if (n.apiId) apiIdToUid[n.apiId] = n.uid;
-    if (n.id) displayIdToUid[n.id] = n.uid;
+    if (n.id) {
+      displayIdToUid[n.id] = n.uid;
+      uidToDisplayId[n.uid] = n.id;
+    }
   }
   function walkIndex(list) {
     if (!Array.isArray(list)) return;
@@ -242,12 +250,24 @@ export function resolveProjectDependsOn(project) {
   function translate(n) {
     if (!n) return;
     if (Array.isArray(n.dependsOn)) {
+      // Capture display IDs BEFORE translating to UIDs so the table can
+      // show "M1" / "A1.2" without going through depMap.
+      const display = n.dependsOn
+        .map((v) => {
+          if (uidSet.has(v)) return uidToDisplayId[v] || null;
+          return displayIdToUid[v] ? v : (apiIdToUid[v] ? uidToDisplayId[apiIdToUid[v]] : null);
+        })
+        .filter(Boolean);
+      n.dependsOnDisplay = display;
       n.dependsOn = n.dependsOn
         .map((v) => {
           if (uidSet.has(v)) return v;
           return apiIdToUid[v] || displayIdToUid[v] || null;
         })
         .filter(Boolean);
+    } else {
+      n.dependsOn = [];
+      n.dependsOnDisplay = [];
     }
     if (n.activities) n.activities.forEach(translate);
     if (n.tasks) n.tasks.forEach(translate);
