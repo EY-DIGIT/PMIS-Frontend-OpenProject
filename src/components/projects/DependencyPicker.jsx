@@ -54,23 +54,25 @@ export default function DependencyPicker({
   if (!editable) {
     return (
       <div className="uidai-dep-wizard">
-        <div className="uidai-dep-chips">
-          {value.map((uid) => {
-            const info = displayMap[uid];
-            const display = info ? `${info.id ? info.id + " — " : ""}${info.name}` : uid;
-            const badge = info ? (
-              <span className={`uidai-chip-kind-badge uidai-chip-kind-badge--${info.kind}`}>
-                {kindBadgeLetter(info.kind)}
-              </span>
-            ) : null;
-            return (
-              <span key={uid} className="uidai-chip">
-                {badge}
-                {display}
-              </span>
-            );
-          })}
-        </div>
+        {value.length > 0 && (
+          <div className="uidai-dep-chips">
+            {value.map((uid) => {
+              const info = displayMap[uid];
+              const display = info ? `${info.id ? info.id + " — " : ""}${info.name}` : uid;
+              const badge = info ? (
+                <span className={`uidai-chip-kind-badge uidai-chip-kind-badge--${info.kind}`}>
+                  {kindBadgeLetter(info.kind)}
+                </span>
+              ) : null;
+              return (
+                <span key={uid} className="uidai-chip">
+                  {badge}
+                  {display}
+                </span>
+              );
+            })}
+          </div>
+        )}
         {value.length === 0 && <div className="uidai-hint">No dependencies</div>}
       </div>
     );
@@ -155,30 +157,32 @@ export default function DependencyPicker({
 
   return (
     <div className="uidai-dep-wizard">
-      <div className="uidai-dep-chips">
-        {value.map((uid) => {
-          const info = displayMap[uid];
-          const display = info ? `${info.id ? info.id + " — " : ""}${info.name}` : uid;
-          const badge = info ? (
-            <span className={`uidai-chip-kind-badge uidai-chip-kind-badge--${info.kind}`}>
-              {kindBadgeLetter(info.kind)}
-            </span>
-          ) : null;
-          return (
-            <span key={uid} className="uidai-chip">
-              {badge}
-              {display}
-              <button
-                type="button"
-                className="uidai-chip__remove"
-                onClick={() => removeSelection(uid)}
-              >
-                ✕
-              </button>
-            </span>
-          );
-        })}
-      </div>
+      {value.length > 0 && (
+        <div className="uidai-dep-chips">
+          {value.map((uid) => {
+            const info = displayMap[uid];
+            const display = info ? `${info.id ? info.id + " — " : ""}${info.name}` : uid;
+            const badge = info ? (
+              <span className={`uidai-chip-kind-badge uidai-chip-kind-badge--${info.kind}`}>
+                {kindBadgeLetter(info.kind)}
+              </span>
+            ) : null;
+            return (
+              <span key={uid} className="uidai-chip">
+                {badge}
+                {display}
+                <button
+                  type="button"
+                  className="uidai-chip__remove"
+                  onClick={() => removeSelection(uid)}
+                >
+                  ✕
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
       {value.length === 0 && (
         <div className="uidai-hint">No dependencies yet — use the form below to link some.</div>
       )}
