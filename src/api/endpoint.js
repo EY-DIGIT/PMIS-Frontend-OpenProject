@@ -87,5 +87,7 @@ export const ENDPOINTS = {
     get: (id) => `/api/v3/subtasks/${enc(id)}`,
     update: (id) => `/api/v3/subtasks/${enc(id)}`,
     remove: (id) => `/api/v3/subtasks/${enc(id)}`,
+    subtasks: (id) => `/api/v3/subtasks/${enc(id)}/subtasks`,
+    subtaskCreate: (id) => `/api/v3/subtasks/${enc(id)}/subtasks/create`,
   },
 };

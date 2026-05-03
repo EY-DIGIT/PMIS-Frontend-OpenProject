@@ -4,7 +4,7 @@ import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
 import AssignRoleField from '../../components/AssignRoleField';
-import { USER_ROLES, DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
+import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
@@ -20,7 +20,6 @@ export default function UserForm() {
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState('');
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
@@ -129,10 +128,9 @@ export default function UserForm() {
     else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
       errs.email = 'Enter a valid email (e.g. name@example.com)';
     if (!mobile.trim()) errs.mobile = 'Mobile Number is required';
-    else if (!/^[6-9]\d{9}$/.test(mobile.trim()))
-      errs.mobile = 'Enter a valid 10-digit number starting with 6-9';
+    else if (!/^\d{10}$/.test(mobile.trim()))
+      errs.mobile = 'Enter a valid 10-digit mobile number';
     if (!password) errs.password = 'Temporary Password is required';
-    if (!role) errs.role = 'Please select a role';
     if (!vendorId) errs.vendorId = 'Please select an associated vendor';
     if (!division) errs.division = 'Please select a division';
     if (divisionRequiresOther && !divisionOther.trim()) errs.divisionOther = 'Please specify the division';
@@ -168,7 +166,6 @@ export default function UserForm() {
           password,
           firstName,
           lastName,
-          admin: role === 'Admin',
           vendor_id: vendorId,
           division,
           division_other: divisionRequiresOther ? divisionOther.trim() : '',
@@ -185,7 +182,6 @@ export default function UserForm() {
             employeeId: employeeId.trim(),
             email: email.trim(),
             mobile: mobile.trim(),
-            role,
             vendorName: selectedVendor?.vendorName || '',
             division,
             projectMapping: mapping,
@@ -298,17 +294,6 @@ export default function UserForm() {
               </button>
             </div>
             {errors.password && <div className="uidai-pmis-field-error">{errors.password}</div>}
-          </div>
-          <div className={errClass('role')}>
-            <label>Role <span className="uidai-pmis-required">*</span></label>
-            <select
-              value={role}
-              onChange={(e) => { setRole(e.target.value); clearFieldError('role'); }}
-            >
-              <option value="" disabled>Select Role</option>
-              {USER_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-            {errors.role && <div className="uidai-pmis-field-error">{errors.role}</div>}
           </div>
           <div className={errClass('vendorId')}>
             <label>Associated Vendor Name <span className="uidai-pmis-required">*</span></label>

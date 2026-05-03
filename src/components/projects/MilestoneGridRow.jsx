@@ -75,7 +75,7 @@ export default function MilestoneGridRow({
           + Activity
         </button>
       );
-    } else if (kind === "activity" && !isOnboarding && isVersion) {
+    } else if (kind === "activity" && !isOnboarding) {
       addChildBtn = (
         <button
           type="button"
@@ -88,7 +88,7 @@ export default function MilestoneGridRow({
           + Task
         </button>
       );
-    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && isVersion) {
+    } else if ((kind === "task" || kind === "subtask") && !isOnboarding) {
       addChildBtn = (
         <button
           type="button"

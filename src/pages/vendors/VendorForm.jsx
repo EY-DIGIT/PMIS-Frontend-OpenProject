@@ -81,8 +81,8 @@ export default function VendorForm() {
     else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
       errs.email = 'Enter a valid email (e.g. name@example.com)';
     if (!phone.trim()) errs.phone = 'Mobile Number is required';
-    else if (!/^[6-9]\d{9}$/.test(phone.trim()))
-      errs.phone = 'Enter a valid 10-digit number starting with 6-9';
+    else if (!/^\d{10}$/.test(phone.trim()))
+      errs.phone = 'Enter a valid 10-digit mobile number';
     if (!Array.isArray(mapping) || mapping.length === 0)
       errs.mapping = 'At least one Project Mapping is required';
     return errs;

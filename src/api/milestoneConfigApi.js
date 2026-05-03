@@ -412,6 +412,15 @@ export async function loadSubtasksForTask(taskApiId) {
   return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
 }
 
+/* Children of a subtask (nested subtasks). Mirrors loadSubtasksForTask
+   but uses /subtasks/{id}/subtasks so the loader can walk past one level
+   of subtasks and rebuild the full nested tree. */
+export async function loadSubtasksForSubtask(subtaskApiId) {
+  if (!subtaskApiId) return [];
+  const raw = await apiGetOrEmpty(ENDPOINTS.subtasks.subtasks(subtaskApiId) + LIST_QS);
+  return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+}
+
 export async function loadSubtaskById(subtaskApiId) {
   if (!subtaskApiId) return null;
   const raw = await apiGet(ENDPOINTS.subtasks.get(subtaskApiId));
@@ -421,8 +430,12 @@ export async function loadSubtaskById(subtaskApiId) {
 
 /* Create payload is deliberately minimal — only name, description, dates,
    and dependency list. Type/resource fields are NOT accepted by the
-   create endpoint (only by PATCH). */
-export async function createSubtaskApi(taskApiId, formData, project) {
+   create endpoint (only by PATCH).
+   Mirrors the rest of the hierarchy (project→milestone, milestone→
+   activity, activity→task, task→subtask). When `parentKind` is
+   "subtask" we POST to /subtasks/{id}/subtasks/create so a subtask can
+   contain another subtask, and so on, infinitely. */
+export async function createSubtaskApi(parentApiId, formData, project, parentKind = "task") {
   const payload = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
@@ -432,7 +445,11 @@ export async function createSubtaskApi(taskApiId, formData, project) {
     actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
-  return apiSend("POST", ENDPOINTS.tasks.subtaskCreate(taskApiId), payload);
+  const url =
+    parentKind === "subtask"
+      ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
+      : ENDPOINTS.tasks.subtaskCreate(parentApiId);
+  return apiSend("POST", url, payload);
 }
 
 /* Full payload same as task/activity PATCH. */

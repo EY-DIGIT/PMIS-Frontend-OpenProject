@@ -164,7 +164,11 @@ export default function NodeModal({
 
   /* Edit mode: list endpoints return summary rows that omit the nested
      `resource` object — fetch the full single record so the form prefills
-     correctly (especially for Resource Type activities/tasks/subtasks). */
+     correctly (especially for Resource Type activities/tasks/subtasks).
+     IMPORTANT: the freshly-fetched record's `dependsOn` contains the raw
+     server display IDs ("M1", "A1.2", …); the project-level resolver only
+     ran over the cached tree, so we keep the CACHED node's `dependsOn`
+     (already translated to local UIDs) when seeding the form. */
   useEffect(() => {
     if (!open || mode !== "edit" || !node?.apiId || !getToken()) return;
     if (kind === "milestone") return;
@@ -178,7 +182,12 @@ export default function NodeModal({
     fetcher(node.apiId)
       .then((full) => {
         if (cancelled || !full) return;
-        setForm(makeDefaultForm(kind, full, mode, parentNode));
+        const merged = {
+          ...full,
+          dependsOn: safeArray(node.dependsOn),
+          dependsOnDisplay: safeArray(node.dependsOnDisplay)
+        };
+        setForm(makeDefaultForm(kind, merged, mode, parentNode));
       })
       .catch(() => { /* keep cached node form on failure */ });
     return () => { cancelled = true; };

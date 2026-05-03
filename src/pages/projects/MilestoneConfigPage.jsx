@@ -34,6 +34,7 @@ import {
   loadActivitiesForMilestone,
   loadTasksForActivity,
   loadSubtasksForTask,
+  loadSubtasksForSubtask,
   createMilestoneApi,
   updateMilestoneApi,
   deleteMilestoneApi,
@@ -284,6 +285,28 @@ export default function MilestoneConfigPage({ mode }) {
         try { resolveProjectDependsOn(target); } catch (e) {}
         try { recomputeActualDates(target); } catch (e) {}
         commitUpdate(target);
+
+        // Phase 5+: walk past one level of subtasks. Sub-tasks can contain
+        // their own sub-tasks (and so on, infinitely), so we keep loading
+        // children one level at a time until none come back. A safety cap
+        // guards against any unexpected cycles.
+        let frontier = allTasks.flatMap((t) => safeArray(t.subtasks));
+        const SAFETY_DEPTH = 50;
+        for (let depth = 0; depth < SAFETY_DEPTH && frontier.length > 0; depth++) {
+          const childLists = await Promise.all(
+            frontier.map((s) =>
+              s.apiId ? loadSubtasksForSubtask(s.apiId) : Promise.resolve([])
+            )
+          );
+          frontier.forEach((s, i) => { s.subtasks = childLists[i] || []; });
+          const nextFrontier = frontier.flatMap((s) => safeArray(s.subtasks));
+          try { normalizeProject(target); } catch (e) {}
+          try { resolveProjectDependsOn(target); } catch (e) {}
+          try { recomputeActualDates(target); } catch (e) {}
+          commitUpdate(target);
+          if (!nextFrontier.length) break;
+          frontier = nextFrontier;
+        }
       }
     } catch (err) {
       if (err?.isAuth) return handleAuthError(err);
@@ -603,15 +626,29 @@ export default function MilestoneConfigPage({ mode }) {
       !!taskServerId && !!getToken();
 
     // ── Subtask remote branches ──
-    // Subtask create accepts ONLY a task id as parent. If the parent is a
-    // subtask in the UI (nested), we walk up to the enclosing task.
-    let subtaskParentTaskApiId = null;
+    // Subtask create follows the same parent→child pattern used everywhere
+    // else in the hierarchy:
+    //   • parent is a task    → POST /tasks/{id}/subtasks/create
+    //   • parent is a subtask → POST /subtasks/{id}/subtasks/create
+    // Lets the user nest sub-tasks inside sub-tasks indefinitely.
+    let subtaskParentApiId = null;
+    let subtaskParentKind = "task";
     if (modeAction === "add" && kind === "subtask" && parentUid) {
-      subtaskParentTaskApiId = findEnclosingTaskApiId(project, parentUid);
+      const ploc = locateNode(project, parentUid);
+      const parentNode = ploc && ploc.node;
+      if (parentNode && parentNode.apiId) {
+        subtaskParentApiId = parentNode.apiId;
+        subtaskParentKind = ploc.kind === "subtask" ? "subtask" : "task";
+      } else {
+        // Parent not yet persisted (just added in this session) — fall
+        // back to the enclosing task so the new sub-task can still save.
+        subtaskParentApiId = findEnclosingTaskApiId(project, parentUid);
+        subtaskParentKind = "task";
+      }
     }
     const shouldCreateSubtaskRemotely =
       modeAction === "add" && kind === "subtask" &&
-      !!subtaskParentTaskApiId && !!getToken();
+      !!subtaskParentApiId && !!getToken();
 
     let subtaskServerId = null;
     if (modeAction === "edit" && kind === "subtask" && nodeUid) {
@@ -786,7 +823,10 @@ export default function MilestoneConfigPage({ mode }) {
       return handleRemote(updateTaskApi(taskServerId, formData, project), "Failed to update task");
     }
     if (shouldCreateSubtaskRemotely) {
-      return handleRemote(createSubtaskApi(subtaskParentTaskApiId, formData, project), "Failed to create subtask");
+      return handleRemote(
+        createSubtaskApi(subtaskParentApiId, formData, project, subtaskParentKind),
+        "Failed to create subtask"
+      );
     }
     if (shouldUpdateSubtaskRemotely) {
       return handleRemote(updateSubtaskApi(subtaskServerId, formData, project), "Failed to update subtask");
