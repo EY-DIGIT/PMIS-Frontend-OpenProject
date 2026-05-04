@@ -44,15 +44,15 @@ export function normalizeProject(project) {
 
   project.milestones.forEach((m, mi) => {
     normalizeNode(m, "milestone");
-    m.id = `M${mi + 1}`;
+    m.id = m.serverDisplayCode || `M${mi + 1}`;
     m.activities = safeArray(m.activities);
     m.activities.forEach((a, ai) => {
       normalizeNode(a, "activity");
-      a.id = `A${mi + 1}.${ai + 1}`;
+      a.id = a.serverDisplayCode || `A${mi + 1}.${ai + 1}`;
       a.tasks = safeArray(a.tasks);
       a.tasks.forEach((t, ti) => {
         normalizeNode(t, "task");
-        t.id = `T${mi + 1}.${ai + 1}.${ti + 1}`;
+        t.id = t.serverDisplayCode || `T${mi + 1}.${ai + 1}.${ti + 1}`;
         t.subtasks = safeArray(t.subtasks);
         normalizeSubtaskList(t.subtasks, t.id);
       });
@@ -64,7 +64,10 @@ export function normalizeProject(project) {
 function normalizeSubtaskList(list, parentId) {
   list.forEach((s, si) => {
     normalizeNode(s, "subtask");
-    s.id = `${parentId}.${si + 1}`;
+    /* Prefer the server-assigned WBS code (e.g. "S1.1.1.1.1.1") so the
+       client matches whatever the API produces; fall back to a chained
+       parent-prefix ID for any legacy / un-mapped node. */
+    s.id = s.serverDisplayCode || `${parentId}.${si + 1}`;
     s.subtasks = safeArray(s.subtasks);
     normalizeSubtaskList(s.subtasks, s.id);
   });

@@ -4,7 +4,11 @@ import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
   DIVISION_OPTIONS,
-  MAX_ATTACHMENT_BYTES
+  MAX_ATTACHMENT_BYTES,
+  ALLOWED_FILE_EXTENSIONS,
+  ALLOWED_FILE_ACCEPT,
+  isAllowedAttachment,
+  getFileExtension
 } from "../../../utils/project/constants";
 import {
   locateNode,
@@ -231,6 +235,16 @@ export default function NodeModal({
   }
 
   function validateFiles(files) {
+    const disallowed = files.filter((f) => !isAllowedAttachment(f));
+    if (disallowed.length) {
+      const names = disallowed
+        .map((f) => `${f.name} (.${getFileExtension(f.name) || "?"})`)
+        .join(", ");
+      setAttachError(
+        `Unsupported file type: ${names}. Allowed types: ${ALLOWED_FILE_EXTENSIONS.join(", ")}.`
+      );
+      return false;
+    }
     const oversize = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
     if (oversize.length) {
       const names = oversize
@@ -417,6 +431,8 @@ export default function NodeModal({
               type="date"
               className="uidai-input"
               value={form.startDate}
+              min={(bounds && bounds.start) || undefined}
+              max={form.endDate || (bounds && bounds.end) || undefined}
               onChange={(e) => updateField({ startDate: e.target.value })}
               disabled={dis}
             />
@@ -435,9 +451,16 @@ export default function NodeModal({
               type="date"
               className="uidai-input"
               value={form.endDate}
+              min={form.startDate || (bounds && bounds.start) || undefined}
+              max={(bounds && bounds.end) || undefined}
               onChange={(e) => updateField({ endDate: e.target.value })}
               disabled={dis}
             />
+            {bounds && bounds.start && bounds.end && (
+              <div className="uidai-hint">
+                Allowed range: {formatDateDisplay(bounds.start)} to {formatDateDisplay(bounds.end)}
+              </div>
+            )}
           </div>
 
           {showActuals && (
@@ -987,9 +1010,15 @@ function CommentsPanel({
           </div>
           <div className="uidai-comments__upload-row">
             <div className="uidai-field">
-              <input type="file" multiple onChange={onFileChange} />
+              <input
+                type="file"
+                multiple
+                accept={ALLOWED_FILE_ACCEPT}
+                onChange={onFileChange}
+              />
               <div className="uidai-attach-hint">
                 Maximum file size: 25 MB per file. Multiple files allowed.
+                Allowed types: Documents (pdf, docx, xlsx, txt, csv), Images (jpg, png, heic), Videos (mp4, webm, mov).
               </div>
               {attachError && <div className="uidai-attach-error">{attachError}</div>}
             </div>

@@ -26,6 +26,7 @@ import {
   mapApiActivityToNode,
   mapApiTaskToNode,
   mapApiSubtaskToNode,
+  mapApiMilestoneTreeToNode,
   extractListElements
 } from "../utils/project/milestoneConfigHelpers";
 
@@ -197,6 +198,21 @@ export async function loadDivisions() {
 export async function loadProjectById(projectId) {
   const raw = await apiGet(ENDPOINTS.projects.get(projectId));
   return mapApiProject(raw?.data ?? raw);
+}
+
+/* One-shot tree fetch — /api/v3/projects/{id}/tree returns the full
+   nested document (project metadata + milestones → activities → tasks →
+   subtasks recursively). Replaces the 4-phase per-resource loader: one
+   round-trip, one tree, no client-side stitching. */
+export async function loadProjectTree(projectId) {
+  if (!projectId) return null;
+  const raw = await apiGet(ENDPOINTS.projects.tree(projectId) + "?includeDeleted=false");
+  const data = raw?.data ?? raw ?? {};
+  const project = mapApiProject(data.project);
+  if (!project) return null;
+  const milestones = Array.isArray(data.milestones) ? data.milestones : [];
+  project.milestones = milestones.map(mapApiMilestoneTreeToNode);
+  return project;
 }
 
 export async function saveProjectApi(projectServerId) {
@@ -406,19 +422,110 @@ export async function deleteTaskApi(taskServerId) {
 
 /* ════════════════ Subtask APIs ════════════════ */
 
+/* Pull the embedded direct-child subtasks out of a response. The same
+   helper handles four shapes:
+     1. response is itself an array of subtask records
+     2. response is a parent record with children under a known key
+        (subtasks / children / descendants / items / _embedded.{...})
+     3. response is wrapped under a `data` envelope (any of the above
+        nested one level deeper)
+     4. unknown key — last-resort scan of the response (and _embedded)
+        for any array whose first element looks like a subtask record
+        (has id / uuid / name).
+   Returns the first array found, or [] if none. */
+function extractEmbeddedSubtasks(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+
+  const data = raw.data;
+  if (Array.isArray(data)) return data;
+
+  const node = data ?? raw;
+  if (!node || typeof node !== "object") return [];
+  if (Array.isArray(node)) return node;
+
+  const candidates = [
+    node.subtasks,
+    node.children,
+    node.descendants,
+    node.items,
+    node._embedded?.subtasks,
+    node._embedded?.children,
+    node._embedded?.descendants,
+    node._embedded?.elements
+  ];
+  const known = candidates.find((c) => Array.isArray(c));
+  if (known) return known;
+
+  // Last-resort scan: walk every property of the node (and _embedded)
+  // and return the first array whose entries look like subtask records.
+  function looksLikeSubtaskList(val) {
+    if (!Array.isArray(val) || val.length === 0) return false;
+    const first = val[0];
+    return !!(first && typeof first === "object"
+      && (first.id || first.uuid || first.name));
+  }
+  for (const key of Object.keys(node)) {
+    if (looksLikeSubtaskList(node[key])) return node[key];
+  }
+  const emb = node._embedded;
+  if (emb && typeof emb === "object" && !Array.isArray(emb)) {
+    for (const key of Object.keys(emb)) {
+      if (looksLikeSubtaskList(emb[key])) return emb[key];
+    }
+  }
+  return [];
+}
+
+/* Direct sub-task children of a task — fully nested.
+
+   The list endpoint /api/v3/tasks/{id}/subtasks returns every descendant
+   sub-task under the task in a single flat list, where each entry carries
+   a `parentSubtaskId` that's null for direct children of the task and the
+   parent sub-task's UUID for nested ones. We rebuild the tree client-side
+   from those parent links — one HTTP call covers the whole sub-tree, no
+   matter how deeply nested the user has gone. */
 export async function loadSubtasksForTask(taskApiId) {
   if (!taskApiId) return [];
   const raw = await apiGetOrEmpty(ENDPOINTS.tasks.subtasks(taskApiId) + LIST_QS);
-  return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+  const flat = sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+  return buildSubtaskTree(flat);
 }
 
-/* Children of a subtask (nested subtasks). Mirrors loadSubtasksForTask
-   but uses /subtasks/{id}/subtasks so the loader can walk past one level
-   of subtasks and rebuild the full nested tree. */
+/* Group a flat sub-task list (each item carrying parentSubtaskApiId) into
+   a nested tree. Items whose parent is missing from the list (or null) are
+   treated as direct children of the task, so we never silently drop nodes
+   if the server returns an out-of-order or partial chain. */
+function buildSubtaskTree(flat) {
+  if (!Array.isArray(flat) || flat.length === 0) return [];
+  const byApiId = new Map();
+  flat.forEach((s) => {
+    if (s && s.apiId) byApiId.set(s.apiId, s);
+  });
+  const roots = [];
+  flat.forEach((s) => {
+    if (!s) return;
+    s.subtasks = [];
+    const parentId = s.parentSubtaskApiId;
+    if (parentId && byApiId.has(parentId)) {
+      const parent = byApiId.get(parentId);
+      parent.subtasks = parent.subtasks || [];
+      parent.subtasks.push(s);
+    } else {
+      roots.push(s);
+    }
+  });
+  return roots;
+}
+
+/* Kept for callers that explicitly want children of one subtask. The main
+   loader no longer needs this — loadSubtasksForTask returns the entire
+   nested tree in one shot. */
 export async function loadSubtasksForSubtask(subtaskApiId) {
   if (!subtaskApiId) return [];
   const raw = await apiGetOrEmpty(ENDPOINTS.subtasks.subtasks(subtaskApiId) + LIST_QS);
-  return sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+  const flat = sortByPosition(extractListElements(raw)).map(mapApiSubtaskToNode);
+  return flat.filter((s) => !s.parentSubtaskApiId || s.parentSubtaskApiId === subtaskApiId);
 }
 
 export async function loadSubtaskById(subtaskApiId) {
@@ -426,6 +533,23 @@ export async function loadSubtaskById(subtaskApiId) {
   const raw = await apiGet(ENDPOINTS.subtasks.get(subtaskApiId));
   const s = raw?.data ?? raw;
   return s && (s.id || s.uuid || s.name) ? mapApiSubtaskToNode(s) : null;
+}
+
+/* Single-GET on /api/v3/subtasks/{id}. Returns the refreshed node AND any
+   embedded child sub-tasks present in the response. Used to "pull on
+   demand" when the user expands a sub-task row — every expand fires this
+   endpoint (visible in the network tab) and any children the server
+   returns become this row's local children. If the response carries no
+   children, the caller keeps the existing local list, so initial-load
+   data isn't lost. */
+export async function loadSubtaskAndChildren(subtaskApiId) {
+  if (!subtaskApiId) return null;
+  const raw = await apiGetOrEmpty(ENDPOINTS.subtasks.get(subtaskApiId));
+  const data = raw?.data ?? raw;
+  if (!data || (!data.id && !data.uuid && !data.name)) return null;
+  const node = mapApiSubtaskToNode(data);
+  const children = extractEmbeddedSubtasks(raw).map(mapApiSubtaskToNode);
+  return { node, children };
 }
 
 /* Create payload is deliberately minimal — only name, description, dates,

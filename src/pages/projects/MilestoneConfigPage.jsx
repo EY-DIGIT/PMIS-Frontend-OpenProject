@@ -30,11 +30,8 @@ import {
 } from "../../utils/project/milestoneConfigHelpers";
 import {
   loadProjectById,
-  loadMilestonesForProject,
-  loadActivitiesForMilestone,
-  loadTasksForActivity,
-  loadSubtasksForTask,
-  loadSubtasksForSubtask,
+  loadProjectTree,
+  loadSubtaskAndChildren,
   createMilestoneApi,
   updateMilestoneApi,
   deleteMilestoneApi,
@@ -221,96 +218,61 @@ export default function MilestoneConfigPage({ mode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, isOnboarding]);
 
-  /* ─── 4-phase load: milestones → activities → tasks → subtasks.
-     Each phase commits a fresh target reference so the UI fills in
-     progressively rather than waiting for the whole tree. ─── */
+  /* ─── Single-call load: GET /api/v3/projects/{id}/tree returns the full
+     nested document (project metadata + milestones → activities → tasks →
+     subtasks recursively), so the page hydrates from one round-trip.
+
+     UID preservation: expansion state (and any other UI keyed by uid) is
+     stable across reloads — before replacing the tree, we snapshot apiId
+     → uid from the current tree, then restore those uids on every
+     freshly-mapped node that has a matching apiId. New nodes still get
+     freshly-generated uids. ─── */
   async function loadMilestonesFromApi() {
     if (!pid || !getToken()) return;
 
     setMilestonesLoading(true);
     setMilestonesError("");
-    try {
-      const milestones = await loadMilestonesForProject(pid);
 
-      let target = isOnboarding
+    const previous = isOnboarding
+      ? draft
+      : (projectsStore.find ? projectsStore.find(pid) : null) || apiProjectLocal;
+    const apiIdToUid = new Map();
+    if (previous) {
+      const collect = (list) => safeArray(list).forEach((n) => {
+        if (!n) return;
+        if (n.apiId && n.uid) apiIdToUid.set(n.apiId, n.uid);
+        collect(n.activities);
+        collect(n.tasks);
+        collect(n.subtasks);
+      });
+      collect(previous.milestones);
+    }
+    const restoreUids = (list) => safeArray(list).forEach((n) => {
+      if (!n) return;
+      if (n.apiId && apiIdToUid.has(n.apiId)) n.uid = apiIdToUid.get(n.apiId);
+      restoreUids(n.activities);
+      restoreUids(n.tasks);
+      restoreUids(n.subtasks);
+    });
+
+    try {
+      const fresh = await loadProjectTree(pid);
+      if (!fresh) return;
+
+      const target = isOnboarding
         ? draft
         : (projectsStore.find ? projectsStore.find(pid) : null) || apiProjectLocal;
       if (!target) return;
 
-      target.milestones = milestones;
+      target.milestones = safeArray(fresh.milestones);
+      restoreUids(target.milestones);
       try { normalizeProject(target); } catch (e) {}
       try { resolveProjectDependsOn(target); } catch (e) {}
       try { recomputeActualDates(target); } catch (e) {}
       commitUpdate(target);
-
-      if (milestones.length === 0) return;
-
-      // Phase 2: activities for every milestone in parallel
-      const activityLists = await Promise.all(
-        milestones.map((m) =>
-          m.apiId ? loadActivitiesForMilestone(m.apiId) : Promise.resolve([])
-        )
-      );
-      milestones.forEach((m, i) => { m.activities = activityLists[i] || []; });
-      try { normalizeProject(target); } catch (e) {}
-      try { resolveProjectDependsOn(target); } catch (e) {}
-      try { recomputeActualDates(target); } catch (e) {}
-      commitUpdate(target);
-
-      // Phase 3: tasks for every activity in parallel
-      const allActivities = milestones.flatMap((m) => safeArray(m.activities));
-      if (allActivities.length > 0) {
-        const taskLists = await Promise.all(
-          allActivities.map((a) =>
-            a.apiId ? loadTasksForActivity(a.apiId) : Promise.resolve([])
-          )
-        );
-        allActivities.forEach((a, i) => { a.tasks = taskLists[i] || []; });
-        try { normalizeProject(target); } catch (e) {}
-        try { resolveProjectDependsOn(target); } catch (e) {}
-        try { recomputeActualDates(target); } catch (e) {}
-        commitUpdate(target);
-      }
-
-      // Phase 4: subtasks for every task in parallel
-      const allTasks = allActivities.flatMap((a) => safeArray(a.tasks));
-      if (allTasks.length > 0) {
-        const subtaskLists = await Promise.all(
-          allTasks.map((t) =>
-            t.apiId ? loadSubtasksForTask(t.apiId) : Promise.resolve([])
-          )
-        );
-        allTasks.forEach((t, i) => { t.subtasks = subtaskLists[i] || []; });
-        try { normalizeProject(target); } catch (e) {}
-        try { resolveProjectDependsOn(target); } catch (e) {}
-        try { recomputeActualDates(target); } catch (e) {}
-        commitUpdate(target);
-
-        // Phase 5+: walk past one level of subtasks. Sub-tasks can contain
-        // their own sub-tasks (and so on, infinitely), so we keep loading
-        // children one level at a time until none come back. A safety cap
-        // guards against any unexpected cycles.
-        let frontier = allTasks.flatMap((t) => safeArray(t.subtasks));
-        const SAFETY_DEPTH = 50;
-        for (let depth = 0; depth < SAFETY_DEPTH && frontier.length > 0; depth++) {
-          const childLists = await Promise.all(
-            frontier.map((s) =>
-              s.apiId ? loadSubtasksForSubtask(s.apiId) : Promise.resolve([])
-            )
-          );
-          frontier.forEach((s, i) => { s.subtasks = childLists[i] || []; });
-          const nextFrontier = frontier.flatMap((s) => safeArray(s.subtasks));
-          try { normalizeProject(target); } catch (e) {}
-          try { resolveProjectDependsOn(target); } catch (e) {}
-          try { recomputeActualDates(target); } catch (e) {}
-          commitUpdate(target);
-          if (!nextFrontier.length) break;
-          frontier = nextFrontier;
-        }
-      }
     } catch (err) {
       if (err?.isAuth) return handleAuthError(err);
-      setMilestonesError(err?.message || "Failed to load milestones");
+      setMilestonesError(err?.message || "Failed to load project tree");
     } finally {
       setMilestonesLoading(false);
     }
@@ -425,9 +387,64 @@ export default function MilestoneConfigPage({ mode }) {
           }
         });
       }
+      // When expanding a sub-task, hit /api/v3/subtasks/{id} so the
+      // network tab shows the call, and any children embedded in that
+      // response replace this row's local children (with UID preservation
+      // so any already-expanded grandchildren stay expanded).
+      if (loc && loc.kind === "subtask" && loc.node && loc.node.apiId && getToken()) {
+        refreshSubtaskOnExpand(loc.node);
+      }
       next.add(uid);
     }
     setExpandedRows(next);
+  }
+
+  async function refreshSubtaskOnExpand(node) {
+    try {
+      const result = await loadSubtaskAndChildren(node.apiId);
+      if (!result) return;
+      const target = isOnboarding
+        ? draft
+        : (projectsStore.find ? projectsStore.find(pid) : null) || apiProjectLocal;
+      if (!target) return;
+      const loc = locateNode(target, node.uid);
+      if (!loc || !loc.node) return;
+      // Refresh top-level fields from the server response
+      const fresh = result.node;
+      Object.assign(loc.node, {
+        name: fresh.name || loc.node.name,
+        description: fresh.description || loc.node.description,
+        startDate: fresh.startDate || loc.node.startDate,
+        endDate: fresh.endDate || loc.node.endDate,
+        actualStartDate: fresh.actualStartDate || loc.node.actualStartDate,
+        actualEndDate: fresh.actualEndDate || loc.node.actualEndDate,
+        type: fresh.type || loc.node.type,
+        status: fresh.status || loc.node.status,
+        serverDisplayCode: fresh.serverDisplayCode || loc.node.serverDisplayCode,
+        parentSubtaskApiId: fresh.parentSubtaskApiId ?? loc.node.parentSubtaskApiId,
+        taskApiId: fresh.taskApiId ?? loc.node.taskApiId
+      });
+      // If the server embedded children in the single-GET response, swap
+      // them in (preserving uids by apiId so nested expansion state holds).
+      if (Array.isArray(result.children) && result.children.length > 0) {
+        const apiIdToUid = new Map();
+        safeArray(loc.node.subtasks).forEach((s) => {
+          if (s && s.apiId && s.uid) apiIdToUid.set(s.apiId, s.uid);
+        });
+        result.children.forEach((s) => {
+          if (s && s.apiId && apiIdToUid.has(s.apiId)) s.uid = apiIdToUid.get(s.apiId);
+          if (s && !s.subtasks) s.subtasks = [];
+        });
+        loc.node.subtasks = result.children;
+      }
+      try { normalizeProject(target); } catch (e) {}
+      try { resolveProjectDependsOn(target); } catch (e) {}
+      try { recomputeActualDates(target); } catch (e) {}
+      commitUpdate(target);
+    } catch (e) {
+      // Silent — initial-load data continues to render. The network
+      // request still fired, which is the visible part the user wants.
+    }
   }
 
   function goToPage(n) {
@@ -718,7 +735,19 @@ export default function MilestoneConfigPage({ mode }) {
         }
 
         if (parentUid) {
-          setExpandedRows((prev) => new Set([...prev, parentUid]));
+          // Expand the immediate parent AND every ancestor up the chain so
+          // the freshly-added node is visible even when a higher level was
+          // collapsed (matters most for nested sub-task → sub-task → ...).
+          const ancestorUids = [parentUid];
+          const ploc = locateNode(target, parentUid);
+          if (ploc && Array.isArray(ploc.chain)) {
+            ploc.chain.forEach((entry) => {
+              if (entry && entry.node && entry.node.uid) {
+                ancestorUids.push(entry.node.uid);
+              }
+            });
+          }
+          setExpandedRows((prev) => new Set([...prev, ...ancestorUids]));
         }
 
         if (kind === "milestone" && pageSize > 0) {

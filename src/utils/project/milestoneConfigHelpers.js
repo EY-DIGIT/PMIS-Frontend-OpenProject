@@ -149,6 +149,10 @@ export function mapApiMilestoneToNode(m) {
     uid: generateNodeUid("m"),
     apiId: m.id || "",
     id: m.id || "",
+    /* Server-assigned WBS code (e.g. "M1"). Preferred over the
+       client-side fallback when present — used as `node.id` after
+       normalizeProject runs. */
+    serverDisplayCode: m.displayCode || "",
     name: m.name || "",
     description: m.description || "",
     startDate: toDateInputValue(m.startDate),
@@ -197,6 +201,10 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     uid: generateNodeUid(kindLetter),
     apiId: a.id || "",
     id: a.id || "",
+    /* Server-assigned WBS code (e.g. "S1.1.1.1.1.1" for sub-tasks,
+       "T1.1.1" for tasks). Preferred over client-side numbering when
+       present — survives the project's normalize pass via normalizeProject. */
+    serverDisplayCode: a.displayCode || "",
     apiType: apiType || "standard",
     apiResourceMode: a.resourceMode || null,
     name: a.name || "",
@@ -258,8 +266,50 @@ export function mapApiTaskToNode(t) {
 
 export function mapApiSubtaskToNode(s) {
   // Subtasks can technically contain other subtasks in the local UI; keep an
-  // empty `subtasks` array on each so the tree walkers don't crash.
-  return buildActivityLikeNode(s, "s", "subtasks");
+  // empty `subtasks` array on each so the tree walkers don't crash. We also
+  // stash the server's parent linkage (parentSubtaskId / taskId) on the node
+  // so the loader can rebuild the nested tree from the flat list endpoint.
+  const node = buildActivityLikeNode(s, "s", "subtasks");
+  node.parentSubtaskApiId = s?.parentSubtaskId || null;
+  node.taskApiId = s?.taskId || null;
+  return node;
+}
+
+/* ─── Tree mappers — used by /api/v3/projects/{id}/tree ──────────────
+   The tree endpoint returns one fully nested document with children
+   embedded under `activities` / `tasks` / `subtasks` (subtasks recursively).
+   These wrappers reuse the flat mappers above and just walk into each
+   embedded child list. */
+export function mapApiSubtaskTreeToNode(s) {
+  const node = mapApiSubtaskToNode(s);
+  if (Array.isArray(s?.subtasks) && s.subtasks.length > 0) {
+    node.subtasks = s.subtasks.map(mapApiSubtaskTreeToNode);
+  }
+  return node;
+}
+
+export function mapApiTaskTreeToNode(t) {
+  const node = mapApiTaskToNode(t);
+  if (Array.isArray(t?.subtasks)) {
+    node.subtasks = t.subtasks.map(mapApiSubtaskTreeToNode);
+  }
+  return node;
+}
+
+export function mapApiActivityTreeToNode(a) {
+  const node = mapApiActivityToNode(a);
+  if (Array.isArray(a?.tasks)) {
+    node.tasks = a.tasks.map(mapApiTaskTreeToNode);
+  }
+  return node;
+}
+
+export function mapApiMilestoneTreeToNode(m) {
+  const node = mapApiMilestoneToNode(m);
+  if (Array.isArray(m?.activities)) {
+    node.activities = m.activities.map(mapApiActivityTreeToNode);
+  }
+  return node;
 }
 
 /* ─── Extract { data: { _embedded: { elements: [...] } } } safely. */
