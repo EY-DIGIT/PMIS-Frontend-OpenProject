@@ -114,8 +114,7 @@ export default function NodeModal({
   nodeUid,
   editable,
   onCancel,
-  onSave,
-  onError
+  onSave
 }) {
   const node = useMemo(() => {
     if (!open || !nodeUid || !project) return null;
@@ -267,25 +266,6 @@ export default function NodeModal({
     setCommentFiles(files);
   }
 
-  function postComment() {
-    if (!editable) return;
-    const text = commentText.trim();
-    if (!text && commentFiles.length === 0) {
-      if (typeof onError === "function") onError("Write a comment or attach a file first.");
-      return;
-    }
-    const entry = {
-      who: "Admin",
-      when: new Date().toISOString(),
-      text,
-      attachments: commentFiles.map((f) => ({ name: f.name, size: f.size }))
-    };
-    setForm((f) => ({ ...f, comments: [entry, ...f.comments] }));
-    setCommentText("");
-    setCommentFiles([]);
-    setAttachError("");
-  }
-
   function adjResCount(delta) {
     setForm((f) => ({
       ...f,
@@ -297,10 +277,13 @@ export default function NodeModal({
   }
 
   function save() {
-    onSave({
-      ...form,
-      bounds
-    });
+    const payload = { ...form, bounds };
+    if (isAdd) {
+      const body = commentText.trim();
+      if (body) payload.body = body;
+      if (commentFiles.length) payload.files = commentFiles;
+    }
+    onSave(payload);
   }
 
   const dis = editable ? false : true;
@@ -577,7 +560,6 @@ export default function NodeModal({
             setCommentText={setCommentText}
             onFileChange={handleFileChange}
             attachError={attachError}
-            onPost={postComment}
           />
         )}
 
@@ -991,8 +973,7 @@ function CommentsPanel({
   commentText,
   setCommentText,
   onFileChange,
-  attachError,
-  onPost
+  attachError
 }) {
   return (
     <div className="uidai-comments">
@@ -1021,11 +1002,6 @@ function CommentsPanel({
                 Allowed types: Documents (pdf, docx, xlsx, txt, csv), Images (jpg, png, heic), Videos (mp4, webm, mov).
               </div>
               {attachError && <div className="uidai-attach-error">{attachError}</div>}
-            </div>
-            <div>
-              <button type="button" className="uidai-btn" onClick={onPost}>
-                Post Comment
-              </button>
             </div>
           </div>
         </div>

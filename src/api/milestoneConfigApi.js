@@ -167,6 +167,62 @@ function buildMilestonePayload(project, formData) {
   };
 }
 
+/* Add optional `body` (comment text) to a create payload. The Comments &
+   Attachments panel feeds this for add operations only. File uploads are
+   sent separately as multipart via the entity-scoped /attachments
+   endpoint after the entity is created (see uploadAttachmentsAfterCreate). */
+function attachBody(payload, formData) {
+  const body = typeof formData.body === "string" ? formData.body.trim() : "";
+  if (body) payload.body = body;
+  return payload;
+}
+
+/* Multipart POST a single File to {API_BASE}{path}. Used to push
+   attachments to /api/v3/{entity}/{id}/attachments after the entity has
+   been created. Auth is injected by authorizedFetch; we deliberately do
+   NOT set Content-Type so the browser writes the correct multipart
+   boundary. */
+async function uploadFile(path, file) {
+  requireToken();
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const res = await authorizedFetch(url(path), {
+    method: "POST",
+    headers: { accept: "application/json" },
+    body: fd
+  });
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* Resolve the new entity's ID from a create response. Server wrappers
+   sometimes nest the record under `data`; we look in both spots. */
+function extractNewEntityId(apiData) {
+  if (!apiData) return null;
+  return apiData.id || apiData.uuid || apiData.data?.id || apiData.data?.uuid || null;
+}
+
+/* After a successful create, push every selected file to the entity's
+   /attachments endpoint. Errors here are swallowed so the modal still
+   reports success — the entity was created; attachment failures are
+   secondary. */
+async function uploadAttachmentsAfterCreate(buildAttachmentsPath, apiData, files) {
+  if (!Array.isArray(files) || files.length === 0) return apiData;
+  const id = extractNewEntityId(apiData);
+  if (!id) return apiData;
+  const path = buildAttachmentsPath(id);
+  for (const file of files) {
+    if (!file) continue;
+    try {
+      await uploadFile(path, file);
+    } catch {
+      /* swallow — entity is already created, attachment is best-effort */
+    }
+  }
+  return apiData;
+}
+
 /* ════════════════ Resource Types ════════════════ */
 
 export async function loadResourceTypes() {
@@ -292,11 +348,12 @@ export function resolveProjectDependsOn(project) {
 }
 
 export async function createMilestoneApi(project, formData) {
-  return apiSend(
+  const created = await apiSend(
     "POST",
     ENDPOINTS.projects.milestoneCreate(project.projectId),
-    buildMilestonePayload(project, formData)
+    attachBody(buildMilestonePayload(project, formData), formData)
   );
+  return uploadAttachmentsAfterCreate(ENDPOINTS.milestones.attachments, created, formData.files);
 }
 
 export async function updateMilestoneApi(milestoneServerId, formData, project) {
@@ -342,11 +399,12 @@ export async function createActivityApi(milestoneApiId, formData, project) {
     payload = { ...base, ...buildResourcePayload(formData) };
   }
 
-  return apiSend(
+  const created = await apiSend(
     "POST",
     ENDPOINTS.milestones.activityCreate(milestoneApiId, endpoint),
-    payload
+    attachBody(payload, formData)
   );
+  return uploadAttachmentsAfterCreate(ENDPOINTS.activities.attachments, created, formData.files);
 }
 
 export async function updateActivityApi(activityServerId, formData, project) {
@@ -396,7 +454,12 @@ export async function createTaskApi(activityApiId, formData, project) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  return apiSend("POST", ENDPOINTS.activities.taskCreate(activityApiId), payload);
+  const created = await apiSend(
+    "POST",
+    ENDPOINTS.activities.taskCreate(activityApiId),
+    attachBody(payload, formData)
+  );
+  return uploadAttachmentsAfterCreate(ENDPOINTS.tasks.attachments, created, formData.files);
 }
 
 /* Full payload, same shape as activity PATCH. */
@@ -569,11 +632,12 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
     actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
-  const url =
+  const createPath =
     parentKind === "subtask"
       ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
       : ENDPOINTS.tasks.subtaskCreate(parentApiId);
-  return apiSend("POST", url, payload);
+  const created = await apiSend("POST", createPath, attachBody(payload, formData));
+  return uploadAttachmentsAfterCreate(ENDPOINTS.subtasks.attachments, created, formData.files);
 }
 
 /* Full payload same as task/activity PATCH. */
