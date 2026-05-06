@@ -113,7 +113,7 @@ export default function Layout({ children }) {
         >
           <FiUser size={ICON_SIZE} aria-hidden="true" />
           <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
-            <div>Profile</div>
+            <div onClick={() => { setProfileOpen(false); navigate("/profile"); }}>Profile</div>
             <div onClick={handleSignOut} style={{ pointerEvents: signingOut ? "none" : "auto", opacity: signingOut ? 0.6 : 1 }}>
               {signingOut ? "Signing Out…" : "Sign Out"}
             </div>

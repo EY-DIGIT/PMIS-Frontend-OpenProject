@@ -38,8 +38,8 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
       <div className="pmis-menu">
         {/* Dashboard */}
         <a
-          className={location.pathname === "/" ? "active" : ""}
-          onClick={() => navigate("/")}
+          className={location.pathname === "/dashboard" ? "active" : ""}
+          onClick={() => navigate("/dashboard")}
         >
           <FiGrid size={ICON_SIZE} />
           <span className="pmis-text">Dashboard</span>

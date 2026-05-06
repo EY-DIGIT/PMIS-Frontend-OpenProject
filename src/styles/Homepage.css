@@ -1,0 +1,92 @@
+/* Welcome panel + 3 info cards (mirrors PMIS_Screens / Home Screen.html) */
+
+.uidai-home-panel {
+  width: 100%;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #e9eef6;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(11, 60, 136, 0.08);
+  padding: 28px;
+  position: relative;
+}
+
+.uidai-home-panel::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 4px;
+  background: linear-gradient(90deg, #0b3c88 0%, #0aa1c0 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.uidai-home-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: #0b3c88;
+  line-height: 1.25;
+  margin-bottom: 6px;
+  padding-left: 16px;
+  letter-spacing: -0.2px;
+}
+
+.uidai-home-subtitle {
+  font-size: 15px;
+  color: #5a6680;
+  line-height: 1.75;
+  max-width: 980px;
+  margin-left: 16px;
+}
+
+.uidai-home-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.uidai-home-card {
+  background: #fff;
+  border: 1px solid #e9eef6;
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 2px 8px rgba(11, 60, 136, 0.05);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.uidai-home-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(11, 60, 136, 0.1);
+  border-color: #c8d6ee;
+}
+
+.uidai-home-card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0b3c88;
+  margin: 0 0 6px 0;
+}
+
+.uidai-home-tag {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1a8a3d;
+  margin-bottom: 6px;
+}
+
+.uidai-home-card p {
+  font-size: 13px;
+  color: #5a6680;
+  line-height: 1.7;
+  margin: 0;
+}
+
+@media (max-width: 960px) {
+  .uidai-home-grid {
+    grid-template-columns: 1fr;
+  }
+  .uidai-home-title {
+    font-size: 22px;
+  }
+}

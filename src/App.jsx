@@ -10,6 +10,7 @@ import Layout from "./layout/Layout";
 
 // ── Page components ────────────────────────────────────────
 import HomePage from "./pages/Homepage";
+import Profile from "./pages/Profile";
 
 import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
@@ -74,6 +75,10 @@ function PageTitle() {
         if (segments[1] === "vendors") title = "Vendor Data";
         else if (segments[1] === "users") title = "User Data";
         else title = "Master Data";
+    } else if (segments[0] === "dashboard") {
+        title = "Dashboard";
+    } else if (segments[0] === "profile") {
+        title = "";
     }
 
     if (!title) return null;
@@ -215,7 +220,9 @@ export default function MainApp() {
                                         <PageTitle />
                                         <Breadcrumbs />
                                         <Routes>
-                                            <Route path="/" element={<Dashboard />} />
+                                            <Route path="/" element={<HomePage />} />
+                                            <Route path="/dashboard" element={<Dashboard />} />
+                                            <Route path="/profile" element={<Profile />} />
 
                                             <Route path="/projects" element={<ProjectsListPage />} />
 
