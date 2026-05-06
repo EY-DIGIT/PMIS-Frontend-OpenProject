@@ -23,10 +23,15 @@ function stripTime(iso) {
   return idx > 0 ? s.slice(0, idx) : s;
 }
 
+/* Anchor the date to IST so the timestamp truncates to the same day on
+   the backend (running in IST). UTC anchoring shifts end-dates forward
+   by one day. */
+const IST_OFFSET = "+05:30";
+
 function toIsoDate(d) {
   if (!d) return null;
   try {
-    return new Date(`${d}T23:59:59Z`).toISOString();
+    return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
   } catch (e) {
     return null;
   }
@@ -35,7 +40,7 @@ function toIsoDate(d) {
 function toIsoStartDate(d) {
   if (!d) return null;
   try {
-    return new Date(`${d}T00:00:00Z`).toISOString();
+    return new Date(`${d}T00:00:00${IST_OFFSET}`).toISOString();
   } catch (e) {
     return null;
   }

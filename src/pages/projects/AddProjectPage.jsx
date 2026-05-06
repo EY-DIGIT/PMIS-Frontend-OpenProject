@@ -64,9 +64,15 @@ function normalizeFormShape(maybeDraft) {
   };
 }
 
-function toIso(d) {
+/* IST-anchored so the date truncates to the same day on the backend. */
+const IST_OFFSET = "+05:30";
+function toIsoStart(d) {
   if (!d) return null;
-  return new Date(`${d}T23:59:59Z`).toISOString();
+  return new Date(`${d}T00:00:00${IST_OFFSET}`).toISOString();
+}
+function toIsoEnd(d) {
+  if (!d) return null;
+  return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
 }
 
 function extractVendors(raw) {
@@ -256,8 +262,8 @@ export default function AddProjectPage() {
       owner: (form.owner || "").trim(),
       ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
       vendor_ids: vendorIds,
-      startDate: toIso(form.startDate),
-      endDate: toIso(form.endDate)
+      startDate: toIsoStart(form.startDate),
+      endDate: toIsoEnd(form.endDate)
     };
   }
 
