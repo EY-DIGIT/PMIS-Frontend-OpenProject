@@ -14,7 +14,6 @@ import { ENDPOINTS } from "./endpoint";
 import { getToken, logout } from "./auth";
 import {
   readErrorBody,
-  resolveVendorIds,
   toMilestoneIsoStart,
   toMilestoneIsoEnd,
   mapStatusForApi,
@@ -154,27 +153,42 @@ function buildActivityLikeBase(project, formData) {
 }
 
 function buildMilestonePayload(project, formData) {
+  // PMIS_Screens design: vendor lives on activities, not milestones.
+  // The API still accepts vendors[] here but the FE no longer sends it.
   return {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
     status: mapStatusForApi(formData.status || "Not Completed"),
-    vendorIds: resolveVendorIds(project, formData.vendor),
     /* Standardized to `dependsOn` across every entity (milestone, activity,
        task, subtask) so the server contract is uniform. */
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
 }
 
-/* Add optional `body` (comment text) to a create payload. The Comments &
-   Attachments panel feeds this for add operations only. File uploads are
-   sent separately as multipart via the entity-scoped /attachments
-   endpoint after the entity is created (see uploadAttachmentsAfterCreate). */
-function attachBody(payload, formData) {
-  const body = typeof formData.body === "string" ? formData.body.trim() : "";
-  if (body) payload.body = body;
-  return payload;
+/* After a successful create, post the typed Comments-&-Attachments inputs
+   (text + files) to the new entity's /comments endpoint as a single
+   multipart record. The backend silently ignores a `body` field on the
+   entity-create payload — comments must be POSTed separately. Best-effort:
+   failures here don't fail the parent create. */
+async function postCommentAndAttachmentsAfterCreate(
+  buildCommentsPath,
+  apiData,
+  formData
+) {
+  const id = extractNewEntityId(apiData);
+  if (!id) return apiData;
+  const text =
+    typeof formData?.body === "string" ? formData.body.trim() : "";
+  const files = Array.isArray(formData?.files) ? formData.files : [];
+  if (!text && files.length === 0) return apiData;
+  try {
+    await postCommentMultipart(buildCommentsPath(id), text, files);
+  } catch {
+    /* swallow — entity is already created */
+  }
+  return apiData;
 }
 
 /* Multipart POST a single File to {API_BASE}{path}. Used to push
@@ -201,26 +215,6 @@ async function uploadFile(path, file) {
 function extractNewEntityId(apiData) {
   if (!apiData) return null;
   return apiData.id || apiData.uuid || apiData.data?.id || apiData.data?.uuid || null;
-}
-
-/* After a successful create, push every selected file to the entity's
-   /attachments endpoint. Errors here are swallowed so the modal still
-   reports success — the entity was created; attachment failures are
-   secondary. */
-async function uploadAttachmentsAfterCreate(buildAttachmentsPath, apiData, files) {
-  if (!Array.isArray(files) || files.length === 0) return apiData;
-  const id = extractNewEntityId(apiData);
-  if (!id) return apiData;
-  const path = buildAttachmentsPath(id);
-  for (const file of files) {
-    if (!file) continue;
-    try {
-      await uploadFile(path, file);
-    } catch {
-      /* swallow — entity is already created, attachment is best-effort */
-    }
-  }
-  return apiData;
 }
 
 /* Post a comment as multipart/form-data: optional text body + zero or more
@@ -398,9 +392,9 @@ export async function createMilestoneApi(project, formData) {
   const created = await apiSend(
     "POST",
     ENDPOINTS.projects.milestoneCreate(project.projectId),
-    attachBody(buildMilestonePayload(project, formData), formData)
+    buildMilestonePayload(project, formData)
   );
-  return uploadAttachmentsAfterCreate(ENDPOINTS.milestones.attachments, created, formData.files);
+  return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);
 }
 
 export async function updateMilestoneApi(milestoneServerId, formData, project) {
@@ -455,9 +449,9 @@ export async function createActivityApi(milestoneApiId, formData, project) {
   const created = await apiSend(
     "POST",
     ENDPOINTS.milestones.activityCreate(milestoneApiId, endpoint),
-    attachBody(payload, formData)
+    payload
   );
-  return uploadAttachmentsAfterCreate(ENDPOINTS.activities.attachments, created, formData.files);
+  return postCommentAndAttachmentsAfterCreate(ENDPOINTS.activities.comments, created, formData);
 }
 
 export async function updateActivityApi(activityServerId, formData, project) {
@@ -520,9 +514,9 @@ export async function createTaskApi(activityApiId, formData, project) {
   const created = await apiSend(
     "POST",
     ENDPOINTS.activities.taskCreate(activityApiId),
-    attachBody(payload, formData)
+    payload
   );
-  return uploadAttachmentsAfterCreate(ENDPOINTS.tasks.attachments, created, formData.files);
+  return postCommentAndAttachmentsAfterCreate(ENDPOINTS.tasks.comments, created, formData);
 }
 
 /* Full payload, same shape as activity PATCH. */
@@ -709,8 +703,8 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
     parentKind === "subtask"
       ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
       : ENDPOINTS.tasks.subtaskCreate(parentApiId);
-  const created = await apiSend("POST", createPath, attachBody(payload, formData));
-  return uploadAttachmentsAfterCreate(ENDPOINTS.subtasks.attachments, created, formData.files);
+  const created = await apiSend("POST", createPath, payload);
+  return postCommentAndAttachmentsAfterCreate(ENDPOINTS.subtasks.comments, created, formData);
 }
 
 /* Full payload same as task/activity PATCH. */

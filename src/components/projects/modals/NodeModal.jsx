@@ -203,7 +203,10 @@ export default function NodeModal({
   const showStatus = !isAdd;
   const showActuals = !isAdd && kind !== "milestone";
   const showType = kind !== "milestone";
-  const showVendor = kind === "milestone";
+  // PMIS_Screens design: vendor lives on activities, not milestones.
+  // Backend currently still accepts vendors[] on milestone-create but the
+  // FE no longer surfaces or sends it.
+  const showVendor = false;
   const hasKids = node ? getChildren(node).length > 0 : false;
   const effActuals = node ? computeEffectiveActuals(node) : { start: "", end: "" };
 
