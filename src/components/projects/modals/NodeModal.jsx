@@ -278,11 +278,9 @@ export default function NodeModal({
 
   function save() {
     const payload = { ...form, bounds };
-    if (isAdd) {
-      const body = commentText.trim();
-      if (body) payload.body = body;
-      if (commentFiles.length) payload.files = commentFiles;
-    }
+    const body = commentText.trim();
+    if (body) payload.body = body;
+    if (commentFiles.length) payload.files = commentFiles;
     onSave(payload);
   }
 

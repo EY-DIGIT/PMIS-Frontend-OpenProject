@@ -67,6 +67,7 @@ export const ENDPOINTS = {
     remove: (id) => `/api/v3/milestones/${enc(id)}`,
     activities: (id) => `/api/v3/milestones/${enc(id)}/activities`,
     attachments: (id) => `/api/v3/milestones/${enc(id)}/attachments`,
+    comments: (id) => `/api/v3/milestones/${enc(id)}/comments`,
     // endpoint = "standard" | "transactional" | "resource/count" | "resource/details"
     activityCreate: (milestoneId, endpoint) =>
       `/api/v3/milestones/${enc(milestoneId)}/activities/${endpoint}/create`,
@@ -79,6 +80,7 @@ export const ENDPOINTS = {
     tasks: (id) => `/api/v3/activities/${enc(id)}/tasks`,
     taskCreate: (id) => `/api/v3/activities/${enc(id)}/tasks/create`,
     attachments: (id) => `/api/v3/activities/${enc(id)}/attachments`,
+    comments: (id) => `/api/v3/activities/${enc(id)}/comments`,
   },
 
   tasks: {
@@ -88,6 +90,7 @@ export const ENDPOINTS = {
     subtasks: (id) => `/api/v3/tasks/${enc(id)}/subtasks`,
     subtaskCreate: (id) => `/api/v3/tasks/${enc(id)}/subtasks/create`,
     attachments: (id) => `/api/v3/tasks/${enc(id)}/attachments`,
+    comments: (id) => `/api/v3/tasks/${enc(id)}/comments`,
   },
 
   subtasks: {
@@ -97,5 +100,6 @@ export const ENDPOINTS = {
     subtasks: (id) => `/api/v3/subtasks/${enc(id)}/subtasks`,
     subtaskCreate: (id) => `/api/v3/subtasks/${enc(id)}/subtasks/create`,
     attachments: (id) => `/api/v3/subtasks/${enc(id)}/attachments`,
+    comments: (id) => `/api/v3/subtasks/${enc(id)}/comments`,
   },
 };

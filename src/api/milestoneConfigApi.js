@@ -223,6 +223,53 @@ async function uploadAttachmentsAfterCreate(buildAttachmentsPath, apiData, files
   return apiData;
 }
 
+/* Post a comment as multipart/form-data: optional text body + zero or more
+   files under the same form field name "files". The backend accepts this
+   shape on POST /api/v3/{entity}/{id}/comments — either body or at least
+   one file must be present. */
+async function postCommentMultipart(path, text, files) {
+  requireToken();
+  const fd = new FormData();
+  if (text) fd.append("body", text);
+  if (Array.isArray(files)) {
+    for (const file of files) {
+      if (!file) continue;
+      fd.append("files", file, file.name);
+    }
+  }
+  const res = await authorizedFetch(url(path), {
+    method: "POST",
+    headers: { accept: "application/json" },
+    body: fd
+  });
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  return parseData(res);
+}
+
+/* After an update succeeds, fold the typed Comments-&-Attachments inputs
+   (text + files) into a single comment via POST {commentsPath}, sent as
+   multipart so attachments hang off the same comment record. Best-effort
+   — failures here don't fail the parent save (the entity update has
+   already succeeded). Used by the update*Api functions so edit mode
+   persists what the user typed without a separate Post-Comment click. */
+async function postCommentAndAttachmentsAfterUpdate(
+  buildCommentsPath,
+  entityId,
+  formData
+) {
+  if (!entityId) return;
+  const text =
+    typeof formData?.body === "string" ? formData.body.trim() : "";
+  const files = Array.isArray(formData?.files) ? formData.files : [];
+  if (!text && files.length === 0) return;
+  try {
+    await postCommentMultipart(buildCommentsPath(entityId), text, files);
+  } catch {
+    /* swallow — entity is already updated */
+  }
+}
+
 /* ════════════════ Resource Types ════════════════ */
 
 export async function loadResourceTypes() {
@@ -357,11 +404,17 @@ export async function createMilestoneApi(project, formData) {
 }
 
 export async function updateMilestoneApi(milestoneServerId, formData, project) {
-  return apiSend(
+  const updated = await apiSend(
     "PATCH",
     ENDPOINTS.milestones.update(milestoneServerId),
     buildMilestonePayload(project, formData)
   );
+  await postCommentAndAttachmentsAfterUpdate(
+    ENDPOINTS.milestones.comments,
+    milestoneServerId,
+    formData
+  );
+  return updated;
 }
 
 export async function deleteMilestoneApi(milestoneServerId) {
@@ -421,7 +474,17 @@ export async function updateActivityApi(activityServerId, formData, project) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  return apiSend("PATCH", ENDPOINTS.activities.update(activityServerId), payload);
+  const updated = await apiSend(
+    "PATCH",
+    ENDPOINTS.activities.update(activityServerId),
+    payload
+  );
+  await postCommentAndAttachmentsAfterUpdate(
+    ENDPOINTS.activities.comments,
+    activityServerId,
+    formData
+  );
+  return updated;
 }
 
 export async function deleteActivityApi(activityServerId) {
@@ -476,7 +539,17 @@ export async function updateTaskApi(taskServerId, formData, project) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  return apiSend("PATCH", ENDPOINTS.tasks.update(taskServerId), payload);
+  const updated = await apiSend(
+    "PATCH",
+    ENDPOINTS.tasks.update(taskServerId),
+    payload
+  );
+  await postCommentAndAttachmentsAfterUpdate(
+    ENDPOINTS.tasks.comments,
+    taskServerId,
+    formData
+  );
+  return updated;
 }
 
 export async function deleteTaskApi(taskServerId) {
@@ -654,7 +727,17 @@ export async function updateSubtaskApi(subtaskServerId, formData, project) {
     Object.assign(payload, buildResourcePayload(formData));
   }
 
-  return apiSend("PATCH", ENDPOINTS.subtasks.update(subtaskServerId), payload);
+  const updated = await apiSend(
+    "PATCH",
+    ENDPOINTS.subtasks.update(subtaskServerId),
+    payload
+  );
+  await postCommentAndAttachmentsAfterUpdate(
+    ENDPOINTS.subtasks.comments,
+    subtaskServerId,
+    formData
+  );
+  return updated;
 }
 
 export async function deleteSubtaskApi(subtaskServerId) {
