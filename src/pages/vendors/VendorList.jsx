@@ -202,7 +202,7 @@ export default function VendorList() {
               {!loading && filtered.map((v) => (
                 <tr key={v.vendorId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/vendors/${v.vendorId}`)}>
-                    {v.vendorId}
+                    {v.vendorCode || v.vendorId}
                   </td>
                   <td>
                     <div className="uidai-clamp-2" title={v.vendorName}>

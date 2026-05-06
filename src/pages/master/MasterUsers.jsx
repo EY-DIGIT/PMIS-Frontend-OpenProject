@@ -35,7 +35,7 @@ export default function MasterUsers() {
               )}
               {!loading && users.map((u) => (
                 <tr key={u.userId}>
-                  <td>{u.userId}</td>
+                  <td>{u.userCode || u.userId}</td>
                   <td>{u.fullName}</td>
                   <td>{u.employeeId}</td>
                   <td>{u.email}</td>

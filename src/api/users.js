@@ -39,6 +39,7 @@ function fromApi(u) {
     .filter(Boolean);
   return {
     userId: u.id || u.uuid,
+    userCode: u.userCode || u.user_code || '',
     fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
     employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',

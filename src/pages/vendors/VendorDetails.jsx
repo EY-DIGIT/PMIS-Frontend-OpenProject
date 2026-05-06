@@ -193,7 +193,7 @@ export default function VendorDetails() {
         <div className="uidai-pmis-grid-4">
           <div className="uidai-pmis-field">
             <label>Vendor ID <span className="uidai-pmis-required">*</span></label>
-            <input value={vendor.vendorId} disabled />
+            <input value={vendor.vendorCode || vendor.vendorId} disabled />
           </div>
           <div className="uidai-pmis-field">
             <label>Vendor Name <span className="uidai-pmis-required">*</span></label>

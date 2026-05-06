@@ -246,7 +246,7 @@ export default function UserDetails() {
         <div className="uidai-pmis-grid-4">
           <div className="uidai-pmis-field">
             <label>User ID <span className="uidai-pmis-required">*</span></label>
-            <input value={user.userId} disabled />
+            <input value={user.userCode || user.userId} disabled />
           </div>
           <div className="uidai-pmis-field">
             <label>Full Name <span className="uidai-pmis-required">*</span></label>

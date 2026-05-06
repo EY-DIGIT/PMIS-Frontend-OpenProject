@@ -35,7 +35,7 @@ export default function MasterVendors() {
               )}
               {!loading && vendors.map((v) => (
                 <tr key={v.vendorId}>
-                  <td>{v.vendorId}</td>
+                  <td>{v.vendorCode || v.vendorId}</td>
                   <td>{v.vendorName}</td>
                   <td>{v.vendorType}</td>
                   <td>

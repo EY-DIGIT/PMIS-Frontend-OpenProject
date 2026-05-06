@@ -193,7 +193,7 @@ export default function UserList() {
               {!loading && filtered.map((u) => (
                 <tr key={u.userId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/users/${u.userId}`)}>
-                    {u.userId}
+                    {u.userCode || u.userId}
                   </td>
                   <td>
                     <div className="uidai-clamp-2" title={u.fullName}>

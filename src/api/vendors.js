@@ -22,6 +22,7 @@ function fromApi(v) {
   const projects = Array.isArray(v.projects) ? v.projects : [];
   return {
     vendorId: v.id || v.uuid || '',
+    vendorCode: v.vendorCode || v.vendor_code || '',
     vendorName: v.name || '',
     description: v.description || '',
     status: v.active === false ? 'Inactive' : 'Active',
