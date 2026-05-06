@@ -33,11 +33,7 @@ export function normalizeNode(node, kind) {
 
 export function normalizeProject(project) {
   if (!project.auditLogs) project.auditLogs = [];
-  if (!("isVersion" in project)) project.isVersion = false;
-  if (!("versionOf" in project)) project.versionOf = "";
-  if (!("versionNo" in project)) project.versionNo = 0;
   if (!("actualEndDate" in project)) project.actualEndDate = "";
-  if (!project.baselineId) project.baselineId = "-";
   if (!project.vendors) project.vendors = [];
   if (!project.resources) project.resources = [];
   project.milestones = safeArray(project.milestones);
@@ -71,36 +67,6 @@ function normalizeSubtaskList(list, parentId) {
     s.subtasks = safeArray(s.subtasks);
     normalizeSubtaskList(s.subtasks, s.id);
   });
-}
-
-/* ─────────────── Project helpers ─────────────── */
-export function isVersionProject(p) {
-  return !!p && !!p.isVersion;
-}
-
-export function isBaselineProject(p) {
-  return !!p && !p.isVersion;
-}
-
-export function isPublishedBaseline(p) {
-  return !!p && !p.isVersion && p.status === "PUBLISHED";
-}
-
-export function getRootProjectId(p) {
-  return p.versionOf || String(p.projectId || "").split("-V")[0];
-}
-
-export function isNodeBaselineLocked(project, node) {
-  if (!project || !node) return false;
-  if (!isVersionProject(project)) return false;
-  return !!node.fromBaseline;
-}
-
-export function markSubtreeFromBaseline(node) {
-  if (!node) return;
-  node.fromBaseline = true;
-  const kids = getChildren(node);
-  kids.forEach(markSubtreeFromBaseline);
 }
 
 /* ─────────────── Traversal ─────────────── */
@@ -437,87 +403,3 @@ export function findChildDateViolations(node, newStart, newEnd) {
   return out;
 }
 
-/* ─────────────── Baseline → version propagation ─────────────── */
-export function propagateNodeAddToVersions(allProjects, baseProject, parentUid, kind, newNode) {
-  const versions = allProjects.filter(
-    (p) => p.isVersion && (p.versionOf === baseProject.projectId || p.baselineId === baseProject.projectId)
-  );
-  versions.forEach((v) => {
-    const clone = deepClone(newNode);
-    markSubtreeFromBaseline(clone);
-    if (kind === "milestone") {
-      v.milestones = safeArray(v.milestones);
-      if (!v.milestones.some((m) => m.uid === clone.uid)) v.milestones.push(clone);
-    } else {
-      const loc = locateNode(v, parentUid);
-      if (!loc) return;
-      const list =
-        kind === "activity"
-          ? (loc.node.activities = safeArray(loc.node.activities))
-          : kind === "task"
-          ? (loc.node.tasks = safeArray(loc.node.tasks))
-          : (loc.node.subtasks = safeArray(loc.node.subtasks));
-      if (!list.some((x) => x.uid === clone.uid)) list.push(clone);
-    }
-    normalizeProject(v);
-    recomputeActualDates(v);
-    addAudit(v, `Baseline added ${kind}`, "-", deepClone(newNode));
-  });
-}
-
-export function propagateNodeUpdateToVersions(allProjects, baseProject, nodeUid, updatedFields) {
-  const versions = allProjects.filter(
-    (p) => p.isVersion && (p.versionOf === baseProject.projectId || p.baselineId === baseProject.projectId)
-  );
-  versions.forEach((v) => {
-    const loc = locateNode(v, nodeUid);
-    if (!loc) return;
-    const before = deepClone(loc.node);
-    Object.keys(updatedFields).forEach((k) => {
-      loc.node[k] = deepClone(updatedFields[k]);
-    });
-    recomputeActualDates(v);
-    addAudit(v, `Baseline updated ${loc.kind}`, before, deepClone(loc.node));
-  });
-}
-
-export function propagateNodeDeleteToVersions(allProjects, baseProject, nodeUid) {
-  const versions = allProjects.filter(
-    (p) => p.isVersion && (p.versionOf === baseProject.projectId || p.baselineId === baseProject.projectId)
-  );
-  versions.forEach((v) => {
-    const loc = locateNode(v, nodeUid);
-    if (!loc) return;
-    const { parent, parentKind, node } = loc;
-    const removed = deepClone(node);
-    let list;
-    if (parentKind === "project") list = parent.milestones;
-    else if (parentKind === "milestone") list = parent.activities;
-    else if (parentKind === "activity") list = parent.tasks;
-    else list = parent.subtasks;
-    const idx = list.findIndex((x) => x.uid === nodeUid);
-    if (idx >= 0) list.splice(idx, 1);
-    normalizeProject(v);
-    recomputeActualDates(v);
-    addAudit(v, `Baseline deleted ${loc.kind}`, removed, "-");
-  });
-}
-
-export function propagateBaselineDetailsToVersions(allProjects, baseProject) {
-  const versions = allProjects.filter(
-    (p) => p.isVersion && (p.versionOf === baseProject.projectId || p.baselineId === baseProject.projectId)
-  );
-  versions.forEach((v) => {
-    v.projectName = baseProject.projectName;
-    v.description = baseProject.description;
-    v.startDate = baseProject.startDate;
-    v.endDate = baseProject.endDate;
-    v.vendors = deepClone(safeArray(baseProject.vendors));
-    addAudit(v, "Baseline details synced", "-", {
-      projectName: v.projectName,
-      description: v.description,
-      startDate: v.startDate,
-      endDate: v.endDate
-    });
-  });
-}

@@ -7,10 +7,7 @@
 
 import React from "react";
 import { safeArray, formatDateDisplay } from "../../utils/project/helpers";
-import {
-  effectiveStatus,
-  isNodeBaselineLocked
-} from "../../utils/project/nodeUtils";
+import { effectiveStatus } from "../../utils/project/nodeUtils";
 
 export default function MilestoneGridRow({
   r,
@@ -19,7 +16,6 @@ export default function MilestoneGridRow({
   canMod,
   showStatusCol,
   isOnboarding,
-  isVersion,
   onToggle,
   onAddChild,
   onEdit,
@@ -53,16 +49,10 @@ export default function MilestoneGridRow({
         .filter(Boolean);
 
   const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
-  // Version projects: milestones and activities are view-only. Tasks and
-  // sub-tasks remain editable so users can adjust their progress fields
-  // and add new ones beneath baseline-inherited activities/tasks.
-  const locked = isVersion
-    ? (kind === "milestone" || kind === "activity")
-    : isNodeBaselineLocked(project, node);
 
   let addChildBtn = null;
   if (canMod) {
-    if (kind === "milestone" && !isVersion) {
+    if (kind === "milestone") {
       addChildBtn = (
         <button
           type="button"
@@ -104,8 +94,7 @@ export default function MilestoneGridRow({
     }
   }
 
-  const rowClass =
-    `uidai-msgrid__row--${kind}` + (locked ? " uidai-msgrid__row--locked" : "");
+  const rowClass = `uidai-msgrid__row--${kind}`;
 
   const parentUidForEdit =
     r.milestoneUid || r.activityUid || r.parentTaskUid || "";
@@ -133,18 +122,6 @@ export default function MilestoneGridRow({
           <span className="uidai-msgrid__row-label" title={node.name}>
             {node.name}
           </span>
-          {locked && (
-            <span
-              className="uidai-baseline-lock-icon"
-              title={
-                isVersion
-                  ? "Version project — view-only"
-                  : "Baseline item — locked in this version"
-              }
-            >
-              🔒
-            </span>
-          )}
           {addChildBtn}
         </div>
       </td>
@@ -201,13 +178,12 @@ export default function MilestoneGridRow({
           className="uidai-msgrid__btn-text"
           onClick={() => onEdit(kind, "edit", parentUidForEdit, node.uid)}
         >
-          {locked ? "View" : "Edit"}
+          Edit
         </button>
         <button
           type="button"
           className="uidai-msgrid__btn-text uidai-msgrid__btn-text--danger"
-          disabled={!canMod || locked}
-          title={locked ? "Baseline items cannot be deleted from a version" : ""}
+          disabled={!canMod}
           onClick={() => onDelete(kind, node.uid)}
         >
           Delete

@@ -28,9 +28,7 @@ export function persistOnboardingDraft(p) {
       startDate: p.startDate,
       endDate: p.endDate,
       vendors: safeArray(p.vendors),
-      baselineId: p.baselineId || "-",
-      status: p.status || "DRAFT",
-      isVersion: !!p.isVersion
+      status: p.status || "DRAFT"
     };
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
   } catch (e) {}
@@ -123,11 +121,7 @@ export function mapApiProject(p) {
     endDate: stripTime(p.endDate),
     actualEndDate: stripTime(p.actualEndDate),
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
-    isVersion: !!p.isVersion,
-    versionOf: p.versionOf || null,
-    versionNo: p.versionNo || null,
     parentId: p.parentId || null,
-    baselineId: p.baselineId || "-",
     milestones: [],
     auditLogs: [],
     resources: []

@@ -216,18 +216,7 @@ export default function NodeModal({
     : getParentDateBounds(project, nodeUid);
 
   const isOnboarding = !project.projectId;
-  const projectIsVersion = !!project.isVersion;
-  let showDepsSection = false;
-  if (isOnboarding) showDepsSection = false;
-  else if (projectIsVersion) {
-    if (kind === "milestone" || kind === "activity") {
-      showDepsSection = safeArray(node && node.dependsOn).length > 0;
-    } else {
-      showDepsSection = true;
-    }
-  } else {
-    showDepsSection = kind === "milestone" || kind === "activity";
-  }
+  const showDepsSection = !isOnboarding && (kind === "milestone" || kind === "activity");
 
   function updateField(patch) {
     setForm((f) => ({ ...f, ...patch }));

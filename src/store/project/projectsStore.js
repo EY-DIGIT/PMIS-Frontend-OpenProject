@@ -73,24 +73,6 @@ export const projectsStore = {
     return `PRJ${String(max + 1).padStart(3, "0")}`;
   },
 
-  getNextVersionId(base) {
-    let maxV = 0;
-    projects.forEach((p) => {
-      const root = p.versionOf || String(p.projectId || "").split("-V")[0];
-      if (root === base) {
-        const m = String(p.projectId || "").match(/-V(\d+)$/i);
-        if (m) maxV = Math.max(maxV, parseInt(m[1], 10));
-      }
-    });
-    return `${base}-V${maxV + 1}`;
-  },
-
-  getVersionsOf(baselineId) {
-    return projects.filter(
-      (p) => p.isVersion && (p.versionOf === baselineId || p.baselineId === baselineId)
-    );
-  },
-
   subscribe
 };
 

@@ -5,17 +5,11 @@ import { uiStore } from "../../store/project/uiStore";
 import { VENDOR_MASTER } from "../../utils/project/constants";
 import { safeArray, deepClone } from "../../utils/project/helpers";
 import {
-  isVersionProject,
-  isPublishedBaseline,
-  getRootProjectId,
   addAudit,
-  propagateBaselineDetailsToVersions,
-  markSubtreeFromBaseline,
   normalizeProject
 } from "../../utils/project/nodeUtils";
 import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
-import CreateVersionModal from "../../components/projects/modals/CreateVersionModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
 import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
@@ -103,11 +97,7 @@ function mapApiProject(p) {
     actualStartDate: stripTime(p.actualStartDate),
     actualEndDate: stripTime(p.actualEndDate),
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
-    isVersion: !!p.isVersion,
-    versionOf: p.versionOf || null,
-    versionNo: p.versionNo || null,
     parentId: p.parentId || null,
-    baselineId: p.baselineId || "-",
     milestones: [],
     auditLogs: [],
     resources: []
@@ -133,11 +123,7 @@ function mergeIntoStore(mapped) {
           actualStartDate: mapped.actualStartDate,
           actualEndDate: mapped.actualEndDate,
           vendors: mapped.vendors,
-          isVersion: mapped.isVersion,
-          versionOf: mapped.versionOf,
-          versionNo: mapped.versionNo,
-          parentId: mapped.parentId,
-          baselineId: mapped.baselineId
+          parentId: mapped.parentId
         });
         if (projectsStore.refresh) projectsStore.refresh();
         return true;
@@ -160,7 +146,6 @@ export default function ProjectDetailsPage() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [versionOpen, setVersionOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [apiProject, setApiProject] = useState(null);
@@ -171,8 +156,6 @@ export default function ProjectDetailsPage() {
   const [divisionOptions, setDivisionOptions] = useState([]);
   const [divisionsLoading, setDivisionsLoading] = useState(false);
   const [divisionsError, setDivisionsError] = useState("");
-  // baselineId (UUID) -> human-readable projectCode resolved via the detail API
-  const [baselineCode, setBaselineCode] = useState("");
 
   const project = realProject || apiProject;
 
@@ -343,38 +326,6 @@ export default function ProjectDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  /* Resolve baselineId (UUID) to human-readable projectCode by hitting the
-     project-detail API — mirrors the behaviour on ProjectsListPage. */
-  useEffect(() => {
-    const baselineId = project && project.baselineId;
-    if (!baselineId || baselineId === "-") {
-      setBaselineCode("");
-      return;
-    }
-    if (baselineId === project.projectId) {
-      setBaselineCode(project.projectCode || "");
-      return;
-    }
-
-    const token = getToken();
-    if (!token) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.projects.get(baselineId)}`,
-          { method: "GET", headers: { accept: "application/json" } }
-        );
-        if (cancelled || !res.ok) return;
-        const raw = await res.json().catch(() => ({}));
-        const baseline = raw?.data ?? raw;
-        if (!cancelled) setBaselineCode(baseline?.projectCode || "");
-      } catch (e) { /* fall back to UUID */ }
-    })();
-    return () => { cancelled = true; };
-  }, [project && project.baselineId, project && project.projectId, project && project.projectCode]);
-
   useEffect(() => {
     if (!project) return;
     // Don't clobber the user's in-progress edits when fields land late from
@@ -437,45 +388,26 @@ export default function ProjectDetailsPage() {
   }
 
   /* ─── PATCH /api/v3/projects/{id}
-     Server enforces a different editable-field set for version vs baseline
-     projects. Sending a forbidden field returns 422 with errorIdentifier
-     "invalid_field". So branch the payload by mode. */
-  async function updateProjectApi(projectServerId, isVersionMode) {
+     status is intentionally omitted — the field is shown read-only and the
+     server manages transitions via publish/close endpoints. */
+  async function updateProjectApi(projectServerId) {
     const token = getToken();
     if (!token) throw new Error("Your session has expired. Please sign in again.");
 
-    let payload;
-    if (isVersionMode) {
-      // Version projects: only owner, actualEndDate,
-      // status_explanation are editable per the server.
-      payload = {
-        owner: (form.owner || "").trim(),
-        ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
-        actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
-        actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
-        status_explanation: project.statusExplanation || ""
-      };
-    } else {
-      // Baseline / new projects: full edit allowed.
-      // status is intentionally omitted — the field is shown read-only and
-      // the server manages transitions via publish/suspend/close endpoints.
-      payload = {
-        name: (form.projectName || "").trim(),
-        description: (form.description || "").trim(),
-        active: true,
-        status_explanation: project.statusExplanation || "",
-        owner: (form.owner || "").trim(),
-        ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
-        vendor_ids: resolveVendorIds(form.vendors),
-        startDate: toIsoDate(form.startDate),
-        endDate: toIsoDate(form.endDate),
-        actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
-        actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
-      };
-      // parent_id only meaningful when present — sending empty string causes
-      // some endpoints to choke.
-      if (project.parentId) payload.parent_id = project.parentId;
-    }
+    const payload = {
+      name: (form.projectName || "").trim(),
+      description: (form.description || "").trim(),
+      active: true,
+      status_explanation: project.statusExplanation || "",
+      owner: (form.owner || "").trim(),
+      ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
+      vendor_ids: resolveVendorIds(form.vendors),
+      startDate: toIsoDate(form.startDate),
+      endDate: toIsoDate(form.endDate),
+      actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
+      actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
+    };
+    if (project.parentId) payload.parent_id = project.parentId;
 
     const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.update(projectServerId)}`,
@@ -510,37 +442,6 @@ export default function ProjectDetailsPage() {
 
     const res = await authorizedFetch(
       `${API_BASE}${ENDPOINTS.projects.publish(projectServerId)}`,
-      {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({})
-      }
-    );
-
-    if (res.status === 401) {
-      logout();
-      const err = new Error("Session expired. Please sign in again.");
-      err.isAuth = true;
-      throw err;
-    }
-    if (!res.ok && res.status !== 204) {
-      const msg = await readErrorMessage(res);
-      throw new Error(msg);
-    }
-    const raw = await res.json().catch(() => ({}));
-    return raw?.data ?? raw ?? {};
-  }
-
-  /* ─── POST /api/v3/projects/{id}/versions/create ─── */
-  async function createVersionApi(projectServerId) {
-    const token = getToken();
-    if (!token) throw new Error("Your session has expired. Please sign in again.");
-
-    const res = await authorizedFetch(
-      `${API_BASE}${ENDPOINTS.projects.createVersion(projectServerId)}`,
       {
         method: "POST",
         headers: {
@@ -619,8 +520,7 @@ export default function ProjectDetailsPage() {
     );
   }
 
-  const isVersion = isVersionProject(project);
-  const isPubBase = isPublishedBaseline(project);
+  const isPubBase = !!project && project.status === "PUBLISHED";
 
   function toggleEdit() {
     if (!editing) {
@@ -632,7 +532,7 @@ export default function ProjectDetailsPage() {
 
   function save() {
     if (!form) return;
-    if (!form.owner.trim() || (!isVersion && (!form.projectName.trim() || !form.startDate || !form.endDate))) {
+    if (!form.owner.trim() || !form.projectName.trim() || !form.startDate || !form.endDate) {
       uiStore.showError("Fill required fields.");
       return;
     }
@@ -640,7 +540,7 @@ export default function ProjectDetailsPage() {
       uiStore.showError("Please specify the owner.");
       return;
     }
-    if (!isVersion && form.endDate && form.startDate && form.endDate < form.startDate) {
+    if (form.endDate && form.startDate && form.endDate < form.startDate) {
       uiStore.showError("Expected End Date cannot be earlier than Expected Start Date.");
       return;
     }
@@ -653,24 +553,14 @@ export default function ProjectDetailsPage() {
       if (!target) target = apiProject;
       if (!target) { uiStore.hideLoader(); return; }
       const before = deepClone(target);
-      if (isVersion) {
-        // Match the API contract: only owner, actualEndDate,
-        // status_explanation are tracked locally for version projects.
-        target.owner = form.owner.trim();
-        target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
-        target.actualStartDate = form.actualStartDate || "";
-        target.actualEndDate = form.actualEndDate || "";
-      } else {
-        target.projectName = form.projectName.trim();
-        target.description = form.description.trim();
-        target.owner = form.owner.trim();
-        target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
-        target.startDate = form.startDate;
-        target.endDate = form.endDate;
-        target.vendors = rebuiltVendors;
-      }
+      target.projectName = form.projectName.trim();
+      target.description = form.description.trim();
+      target.owner = form.owner.trim();
+      target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
+      target.startDate = form.startDate;
+      target.endDate = form.endDate;
+      target.vendors = rebuiltVendors;
       addAudit(target, "Update Project Details", before, deepClone(target));
-      if (!isVersion) propagateBaselineDetailsToVersions(all, target);
       try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
 
       if (apiData && apiData.id) {
@@ -688,7 +578,7 @@ export default function ProjectDetailsPage() {
     uiStore.showLoader("Saving project details...");
 
     if (getToken()) {
-      updateProjectApi(project.projectId, isVersion)
+      updateProjectApi(project.projectId)
         .then((updated) => {
           doLocal(updated);
           // Re-pull the canonical record from the server so any field the
@@ -719,7 +609,6 @@ export default function ProjectDetailsPage() {
       if (!t) { uiStore.hideLoader(); return; }
       const before = deepClone(t);
       t.status = (apiData && apiData.status ? String(apiData.status).toUpperCase() : "PUBLISHED");
-      t.baselineId = apiData && apiData.baselineId ? apiData.baselineId : (t.baselineId || "-");
       addAudit(t, "Publish Project", before, deepClone(t));
       try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
 
@@ -745,77 +634,6 @@ export default function ProjectDetailsPage() {
             return;
           }
           uiStore.showError(err?.message || "Failed to publish project");
-        });
-    } else {
-      setTimeout(() => doLocal(null), 900);
-    }
-  }
-
-  function confirmCreateVersion() {
-    setVersionOpen(false);
-    uiStore.showLoader("Creating version...");
-
-    const doLocal = (apiData) => {
-      let newProjectUuid = apiData && apiData.id ? apiData.id : null;
-
-      if (apiData && apiData.id) {
-        const mapped = mapApiProject(apiData);
-        if (mapped) {
-          try {
-            if (projectsStore.addProject) projectsStore.addProject(mapped);
-            if (projectsStore.refresh) projectsStore.refresh();
-          } catch (e) {}
-        }
-      } else {
-        const base = getRootProjectId(project);
-        const src = projectsStore.find ? projectsStore.find(project.projectId) : null;
-        if (src) {
-          const np = deepClone(src);
-          np.projectId = newProjectUuid || (projectsStore.getNextVersionId
-            ? projectsStore.getNextVersionId(base)
-            : `${base}-v${(src.versionNo || 0) + 1}`);
-          np.versionOf = base;
-          np.isVersion = true;
-          np.versionNo = (src.versionNo || 0) + 1;
-          np.baselineId = base;
-          np.status = "NEW";
-          np.actualEndDate = "";
-          np.auditLogs = [];
-          safeArray(np.milestones).forEach(markSubtreeFromBaseline);
-          normalizeProject(np);
-          try {
-            projectsStore.addProject(np);
-            addAudit(np, "Create Version", deepClone(src), deepClone(np));
-            projectsStore.refresh();
-          } catch (e) {}
-          newProjectUuid = np.projectId;
-        }
-      }
-
-      uiStore.hideLoader();
-      uiStore.showMessage("Version created successfully", () => {
-        if (newProjectUuid) {
-          navigate(`/projects/${encodeURIComponent(newProjectUuid)}`);
-        } else {
-          navigate("/projects");
-        }
-      });
-    };
-
-    if (getToken()) {
-      createVersionApi(project.projectId)
-        .then((created) => {
-          try { hydrateProjects({ force: true }); } catch (e) {}
-          doLocal(created);
-        })
-        .catch((err) => {
-          uiStore.hideLoader();
-          if (err && err.isAuth) {
-            uiStore.showError(err.message);
-            navigate("/login");
-            return;
-          }
-          uiStore.showError(err?.message || "Failed to create version");
         });
     } else {
       setTimeout(() => doLocal(null), 900);
@@ -852,14 +670,8 @@ export default function ProjectDetailsPage() {
   }
 
   const disclaimer = isPubBase
-    ? "This is a published baseline project. You can still edit it — all changes will automatically be mirrored to every version created from this baseline."
-    : isVersion
-    ? "This is a version project. Version projects can edit Owner, Is Public, Actual End Date, and their own hierarchy. Changes to a version do NOT propagate back to the baseline."
-    : "Complete project details and milestone configuration, then publish to create a baseline.";
-
-  const versionId = projectsStore.getNextVersionId
-    ? projectsStore.getNextVersionId(getRootProjectId(project))
-    : "";
+    ? "This project is published. You can still edit details and milestone configuration."
+    : "Complete project details and milestone configuration, then publish.";
 
   if (!form) return null;
 
@@ -870,7 +682,7 @@ export default function ProjectDetailsPage() {
           <button className="uidai-btn" onClick={toggleEdit}>
             {editing ? "Save" : "Edit"}
           </button>
-          {!isVersion && project.status !== "PUBLISHED" && (
+          {project.status !== "PUBLISHED" && (
             <button
               className="uidai-btn"
               disabled={editing}
@@ -879,23 +691,11 @@ export default function ProjectDetailsPage() {
               Publish
             </button>
           )}
-          {!isVersion && project.status === "PUBLISHED" && (
-            <button
-              className="uidai-btn"
-              disabled={editing}
-              onClick={() => setVersionOpen(true)}
-            >
-              Create Version
-            </button>
-          )}
           <button
             className="uidai-btn"
             disabled={editing}
             onClick={() =>
-              navigate(
-                `/projects/${encodeURIComponent(project.projectId)}/config`,
-                { state: { isVersion: !!project.isVersion } }
-              )
+              navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
             }
           >
             Go to Milestones Configuration
@@ -931,19 +731,7 @@ export default function ProjectDetailsPage() {
               className="uidai-input"
               value={form.projectName}
               onChange={(e) => setForm((f) => ({ ...f, projectName: e.target.value }))}
-              disabled={!(editing && !isVersion)}
-            />
-          </div>
-          <div className="uidai-field">
-            <label className="uidai-field__label">Baseline ID</label>
-            <input
-              className="uidai-input"
-              value={
-                project.baselineId && project.baselineId !== "-"
-                  ? (baselineCode || project.baselineId)
-                  : "-"
-              }
-              disabled
+              disabled={!editing}
             />
           </div>
           <div className="uidai-field">
@@ -957,7 +745,7 @@ export default function ProjectDetailsPage() {
               maxLength={5000}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-              disabled={!(editing && !isVersion)}
+              disabled={!editing}
             />
             <div className="uidai-char-count">
               {5000 - form.description.length} characters remaining
@@ -1035,7 +823,7 @@ export default function ProjectDetailsPage() {
               type="date"
               value={form.startDate}
               onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-              disabled={!(editing && !isVersion)}
+              disabled={!editing}
             />
           </div>
           <div className="uidai-field">
@@ -1047,7 +835,7 @@ export default function ProjectDetailsPage() {
               type="date"
               value={form.endDate}
               onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-              disabled={!(editing && !isVersion)}
+              disabled={!editing}
             />
           </div>
           <div className="uidai-field">
@@ -1079,7 +867,7 @@ export default function ProjectDetailsPage() {
             options={vendorOptions}
             onChange={(next) => setForm((f) => ({ ...f, vendors: next }))}
             label="vendor"
-            disabled={!editing || isVersion}
+            disabled={!editing}
           />
         </div>
       </div>
@@ -1089,13 +877,6 @@ export default function ProjectDetailsPage() {
         project={project}
         onCancel={() => setPublishOpen(false)}
         onConfirm={confirmPublish}
-      />
-      <CreateVersionModal
-        open={versionOpen}
-        project={project}
-        newId={versionId}
-        onCancel={() => setVersionOpen(false)}
-        onConfirm={confirmCreateVersion}
       />
       <DeleteProjectModal
         open={deleteOpen}

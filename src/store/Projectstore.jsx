@@ -22,11 +22,7 @@ export function ensureFlags(n, exp) {
 export function normalizeProject(p) {
   if (!p) return p;
   if (!p.auditLogs) p.auditLogs = [];
-  if (!("isVersion"    in p)) p.isVersion    = false;
-  if (!("versionOf"    in p)) p.versionOf    = "";
-  if (!("versionNo"    in p)) p.versionNo    = 0;
   if (!("actualEndDate"in p)) p.actualEndDate= "";
-  if (!p.baselineId) p.baselineId = "-";
   p.milestones = safeArr(p.milestones);
   p.milestones.forEach((m, mi) => {
     if (!m.uid) m.uid = uid("m");

@@ -52,15 +52,6 @@ export async function close(uuid) {
   return api.post(ENDPOINTS.projects.close(uuid), {});
 }
 
-export async function suspend(uuid) {
-  return api.post(ENDPOINTS.projects.suspend(uuid), {});
-}
-
-export async function createVersion(uuid) {
-  const res = await api.post(ENDPOINTS.projects.createVersion(uuid), {});
-  return fromApiProject(res);
-}
-
 export async function remove(uuid) {
   return api.del(ENDPOINTS.projects.remove(uuid));
 }

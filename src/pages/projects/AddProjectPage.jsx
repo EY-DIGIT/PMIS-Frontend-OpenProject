@@ -18,9 +18,6 @@ function makeEmpty() {
     startDate: "",
     endDate: "",
     actualEndDate: "",
-    isVersion: false,
-    versionOf: "",
-    versionNo: 0,
     auditLogs: [],
     milestones: [],
     vendors: [],
@@ -334,7 +331,6 @@ export default function AddProjectPage() {
         projectName: (form.projectName || "").trim(),
         description: (form.description || "").trim(),
         owner: (form.owner || "").trim(),
-        baselineId: "-",
         status: "DRAFT",
         milestones: safeArray(form.milestones),
         vendors: Array.isArray(created.vendors) && created.vendors.length

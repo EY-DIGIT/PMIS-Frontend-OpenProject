@@ -56,8 +56,6 @@ export const ENDPOINTS = {
     save: (uuid) => `/api/v3/projects/${enc(uuid)}/save`,
     publish: (uuid) => `/api/v3/projects/${enc(uuid)}/publish`,
     close: (uuid) => `/api/v3/projects/${enc(uuid)}/close`,
-    suspend: (uuid) => `/api/v3/projects/${enc(uuid)}/suspend`,
-    createVersion: (uuid) => `/api/v3/projects/${enc(uuid)}/versions/create`,
     milestones: (uuid) => `/api/v3/projects/${enc(uuid)}/milestones`,
     milestoneCreate: (uuid) => `/api/v3/projects/${enc(uuid)}/milestones/create`,
   },

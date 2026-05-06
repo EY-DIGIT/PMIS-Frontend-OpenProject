@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -12,15 +12,9 @@ import {
   locateNode,
   effectiveStatus,
   buildDepDisplayMap,
-  isVersionProject,
-  isBaselineProject,
-  isNodeBaselineLocked,
   addAudit,
   collectDescendantUids,
-  findChildDateViolations,
-  propagateNodeAddToVersions,
-  propagateNodeUpdateToVersions,
-  propagateNodeDeleteToVersions
+  findChildDateViolations
 } from "../../utils/project/nodeUtils";
 import {
   persistOnboardingDraft,
@@ -59,14 +53,6 @@ import { hydrateProjects } from "../../store/project/apiSync";
 export default function MilestoneConfigPage({ mode }) {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
-  // `isVersion` is passed in via navigation state from ProjectDetailsPage.
-  // We still derive a fallback below from the loaded project so deep-links
-  // and refreshes keep working.
-  const navIsVersion =
-    location && location.state && typeof location.state.isVersion === "boolean"
-      ? location.state.isVersion
-      : null;
 
   useProjects();
   const draft = useDraft();
@@ -321,11 +307,6 @@ export default function MilestoneConfigPage({ mode }) {
 
   const editable = isOnboarding ? true : editingConfig;
   const canMod = isOnboarding || editable;
-  // Prefer the explicit nav-state flag (fresh from the project-detail GET);
-  // fall back to whatever the loaded project says.
-  const isVersion =
-    !isOnboarding &&
-    (navIsVersion !== null ? navIsVersion : isVersionProject(project));
 
   normalizeProject(project);
   try { recomputeActualDates(project); } catch (e) {}
@@ -470,37 +451,6 @@ export default function MilestoneConfigPage({ mode }) {
     if (!modalCtx) return;
     const { kind, mode: modeAction, parentUid, nodeUid } = modalCtx;
     const bounds = formData.bounds;
-
-    /* ─── Permission checks ─── */
-    if (isVersionProject(project)) {
-      if (modeAction === "add" && (kind === "milestone" || kind === "activity")) {
-        uiStore.showMessage(
-          "Cannot add " + kind + "s to a version project. Only Tasks and Sub-Tasks can be added."
-        );
-        return;
-      }
-      if (modeAction === "edit" && nodeUid) {
-        const loc = locateNode(project, nodeUid);
-        if (loc && isNodeBaselineLocked(project, loc.node)) {
-          uiStore.showMessage("Baseline items cannot be edited within a version.");
-          return;
-        }
-      }
-    } else if (!isOnboarding) {
-      if (modeAction === "add" && (kind === "task" || kind === "subtask")) {
-        uiStore.showMessage(
-          "Tasks and Sub-Tasks can only be added in a version. Publish this project and create a version first."
-        );
-        return;
-      }
-    } else {
-      if (modeAction === "add" && (kind === "task" || kind === "subtask")) {
-        uiStore.showMessage(
-          "Only Milestones and Activities can be added during onboarding. Tasks and Sub-Tasks are added later in a version."
-        );
-        return;
-      }
-    }
 
     /* ─── Field validations ─── */
     if (!formData.name.trim() || !formData.startDate || !formData.endDate) {
@@ -757,12 +707,6 @@ export default function MilestoneConfigPage({ mode }) {
 
         if (!isOnboarding) {
           addAudit(target, `Add ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, "-", deepClone(newNode));
-          if (isBaselineProject(target)) {
-            propagateNodeAddToVersions(
-              projectsStore.getAll ? projectsStore.getAll() : [],
-              target, parentUid, kind, newNode
-            );
-          }
         }
       } else {
         const loc = locateNode(target, nodeUid);
@@ -794,21 +738,6 @@ export default function MilestoneConfigPage({ mode }) {
 
         if (!isOnboarding) {
           addAudit(target, `Update ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, before, deepClone(node));
-          if (isBaselineProject(target)) {
-            propagateNodeUpdateToVersions(
-              projectsStore.getAll ? projectsStore.getAll() : [],
-              target, nodeUid,
-              {
-                name: node.name, description: node.description,
-                startDate: node.startDate, endDate: node.endDate,
-                status: node.status, dependsOn: node.dependsOn,
-                type: node.type, vendor: node.vendor,
-                resourceEntryType: node.resourceEntryType,
-                resourceDetails: node.resourceDetails,
-                resourceCount: node.resourceCount
-              }
-            );
-          }
         }
       }
 
@@ -891,10 +820,6 @@ export default function MilestoneConfigPage({ mode }) {
     if (!target) return;
     const loc = locateNode(target, uid);
     if (!loc) return;
-    if (isNodeBaselineLocked(target, loc.node)) {
-      uiStore.showMessage("Baseline items cannot be deleted from a version project.");
-      return;
-    }
     if (!window.confirm(`Remove ${kind} "${loc.node.name || uid}" and all of its children?`)) return;
 
     uiStore.showLoader("Removing...");
@@ -912,12 +837,6 @@ export default function MilestoneConfigPage({ mode }) {
 
       if (!isOnboarding) {
         addAudit(target, `Delete ${kind.charAt(0).toUpperCase() + kind.slice(1)}`, removed, "-");
-        if (isBaselineProject(target)) {
-          propagateNodeDeleteToVersions(
-            projectsStore.getAll ? projectsStore.getAll() : [],
-            target, uid
-          );
-        }
       }
 
       setExpandedRows((prev) => {
@@ -982,7 +901,6 @@ export default function MilestoneConfigPage({ mode }) {
       p.projectId = idOverride || p.projectId || projectsStore.getNextProjectId();
       if (codeOverride) p.projectCode = codeOverride;
       p.status = "DRAFT";
-      p.baselineId = "-";
       p.auditLogs = [];
       normalizeProject(p);
       projectsStore.addProject(p);
@@ -1103,7 +1021,7 @@ export default function MilestoneConfigPage({ mode }) {
 
   const expandAllLabel = allRowsExpanded() ? "Collapse All" : "Expand All";
   const addMilestoneBtn =
-    canMod && !isVersion ? (
+    canMod ? (
       <button
         type="button"
         className="uidai-btn uidai-btn--small"
@@ -1112,17 +1030,6 @@ export default function MilestoneConfigPage({ mode }) {
         + Add Milestone
       </button>
     ) : null;
-
-  const versionBanner = isVersion ? (
-    <div className="uidai-baseline-note">
-      🔒{" "}
-      <span>
-        <strong>Version project.</strong> Baseline milestones and activities are locked here. You
-        can add <em>Tasks</em> under existing activities and <em>Sub-Tasks</em> under existing
-        tasks. Progress on those new items rolls up to the baseline.
-      </span>
-    </div>
-  ) : null;
 
   const colSpan = showStatusCol ? 9 : 8;
 
@@ -1135,10 +1042,9 @@ export default function MilestoneConfigPage({ mode }) {
       <div className="uidai-card-project">
         <h3 style={{ marginTop: 0 }}>{title}</h3>
         <div className="uidai-hint">
-          Disclaimer: Every add, edit, delete, and version change is audited with who, when, what
+          Disclaimer: Every add, edit, and delete is audited with who, when, what
           changed, and before/after details.
         </div>
-        {versionBanner}
 
         {milestonesLoading && (
           <div className="uidai-hint" style={{ marginTop: 8 }}>
@@ -1196,7 +1102,6 @@ export default function MilestoneConfigPage({ mode }) {
                     canMod={canMod}
                     showStatusCol={showStatusCol}
                     isOnboarding={isOnboarding}
-                    isVersion={isVersion}
                     onToggle={toggleRow}
                     onAddChild={openNodeModal}
                     onEdit={openNodeModal}
@@ -1233,19 +1138,7 @@ export default function MilestoneConfigPage({ mode }) {
           project={project}
           parentUid={modalCtx.parentUid}
           nodeUid={modalCtx.nodeUid}
-          editable={(() => {
-            if (!canMod) return false;
-            // Version projects: milestones and activities open in view-only
-            // mode; tasks and sub-tasks stay editable (and addable) so the
-            // user can flesh out the version's lower-level work.
-            if (isVersion) {
-              return modalCtx.kind === "task" || modalCtx.kind === "subtask";
-            }
-            if (modalCtx.mode !== "edit" || !modalCtx.nodeUid) return true;
-            const loc = locateNode(project, modalCtx.nodeUid);
-            if (!loc) return true;
-            return !isNodeBaselineLocked(project, loc.node);
-          })()}
+          editable={canMod}
           onCancel={closeNodeModal}
           onSave={saveNodeFromModal}
           onError={(m) => uiStore.showMessage(m)}
