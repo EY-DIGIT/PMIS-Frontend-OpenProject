@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import '../assets/css/ResetPassword.css';
 import aadhaarLogo from '../assets/Aadhaar.png';
+import * as auth from '../api/auth';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const tokenOrCode =
+    searchParams.get('token') || searchParams.get('code') || '';
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -12,6 +16,7 @@ const ResetPassword = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [submitError, setSubmitError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const newPwdRef = useRef(null);
   const confirmPwdRef = useRef(null);
@@ -32,7 +37,7 @@ const ResetPassword = () => {
   const toggleNewPassword = () => setShowNewPassword((v) => !v);
   const toggleConfirmPassword = () => setShowConfirmPassword((v) => !v);
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (!allRulesValid) {
       setSubmitError('Please satisfy all password requirements');
       return;
@@ -41,9 +46,23 @@ const ResetPassword = () => {
       setSubmitError('Passwords do not match');
       return;
     }
+    if (!tokenOrCode) {
+      setSubmitError('Reset link is invalid or has expired. Please request a new one.');
+      return;
+    }
     setSubmitError('');
-    alert('Password reset successful! Please login with new credentials.');
-    navigate('/login');
+    setSubmitting(true);
+    try {
+      await auth.resetPassword({ tokenOrCode, newPassword });
+      navigate('/login', {
+        replace: true,
+        state: { resetSuccess: true },
+      });
+    } catch (err) {
+      setSubmitError(err?.message || 'Could not reset password. The link may have expired.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   /* Accessibility: text-size resizer (matches the reference). Uses CSS zoom
@@ -238,9 +257,9 @@ const ResetPassword = () => {
               id="resetBtn"
               className={`uidai-rp-btn ${isButtonEnabled ? 'uidai-rp-btn-enabled' : ''}`}
               onClick={handleReset}
-              disabled={!isButtonEnabled}
+              disabled={!isButtonEnabled || submitting}
             >
-              Reset Password
+              {submitting ? 'Resetting…' : 'Reset Password'}
             </button>
 
             <div className="uidai-rp-footer">

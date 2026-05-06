@@ -15,6 +15,10 @@ export const ENDPOINTS = {
     me: '/api/v3/users/me',
     introspect: '/api/v3/users/introspect',
     refresh: '/api/v3/users/refresh',
+    sendOtp: '/api/v3/users/login/send-otp',
+    verifyOtp: '/api/v3/users/login/verify-otp',
+    forgotPassword: '/api/v3/users/forgot-password',
+    resetPassword: '/api/v3/users/reset-password',
   },
 
   users: {

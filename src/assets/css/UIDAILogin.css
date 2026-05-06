@@ -344,6 +344,63 @@
   color: var(--uidai-text-soft);
 }
 
+/* ─── OTP step ─── */
+.uidai-otp-sent-box {
+  background: #eaf6ee;
+  border: 1px solid #b7dec3;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+  color: #1f5132;
+  line-height: 1.55;
+  margin-bottom: 16px;
+}
+.uidai-otp-sent-box strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #14532d;
+  font-weight: 700;
+}
+.uidai-otp-sent-box span {
+  font-weight: 600;
+  color: var(--uidai-navy);
+}
+
+.uidai-otp-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  gap: 8px;
+}
+.uidai-link-btn {
+  background: none;
+  border: none;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--uidai-navy);
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.uidai-link-btn:hover:not(:disabled) {
+  color: var(--uidai-cyan);
+  border-bottom-color: var(--uidai-cyan);
+}
+.uidai-link-btn:disabled {
+  color: var(--uidai-text-soft);
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+#otp.uidai-input {
+  letter-spacing: 6px;
+  font-size: 18px;
+  text-align: center;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 960px) {
   .uidai-header-main {

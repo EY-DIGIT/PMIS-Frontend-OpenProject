@@ -14,6 +14,7 @@ import HomePage from "./pages/Homepage";
 import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/ResetPassword";
+import ForgotPassword from "./pages/ForgotPassword";
 
 
 import { useSessionManager } from "./api/sessionManager";
@@ -203,6 +204,7 @@ export default function MainApp() {
                         <Routes>
                             {/* Login route — OUTSIDE Layout */}
                             <Route path="/login" element={<UIDAILogin />} />
+                            <Route path="/forgot-password" element={<ForgotPassword />} />
                             <Route path="/reset-password" element={<ResetPassword />} />
                             {/* All other routes — INSIDE Layout */}
                             <Route

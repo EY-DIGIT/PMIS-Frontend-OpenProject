@@ -7,18 +7,14 @@ const TOKEN_KEY = 'auth_token';
 const REFRESH_KEY = 'auth_refresh_token';
 const USER_KEY = 'auth_user';
 
-export async function login({ login, password }) {
-  const res = await api.post(
-    ENDPOINTS.auth.login,
-    { login, password },
-    { auth: false }
-  );
-  console.log('Login response:', res);
+function pickPayload(res) {
+  return res?.data && typeof res.data === 'object' ? res.data : res || {};
+}
 
-  const token =
-    res?.data?.token || res?.data?.accessToken || res?.data?.access_token;
-  const refresh = res?.data?.refreshToken || res?.data?.refresh_token;
-  const user = res?.data?.user || null;
+function persistAuthFromPayload(payload) {
+  const token = payload?.token || payload?.accessToken || payload?.access_token;
+  const refresh = payload?.refreshToken || payload?.refresh_token;
+  const user = payload?.user || null;
 
   if (!token) throw new Error('Login response missing token');
 
@@ -34,10 +30,63 @@ export async function login({ login, password }) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   }
 
-  const expiresAt = readExpiresAt(res?.data);
+  const expiresAt = readExpiresAt(payload);
   if (expiresAt) tokenStore.setExpiresAt(expiresAt);
 
   return { token, refresh, user };
+}
+
+export async function login({ login, password }) {
+  const res = await api.post(
+    ENDPOINTS.auth.login,
+    { login, password },
+    { auth: false }
+  );
+  const payload = pickPayload(res);
+
+  if (payload?.requires_otp || payload?.requiresOtp) {
+    return {
+      requiresOtp: true,
+      ephemeralToken: payload.ephemeral_token || payload.ephemeralToken,
+      channelsAvailable:
+        payload.channels_available || payload.channelsAvailable || {},
+    };
+  }
+
+  return persistAuthFromPayload(payload);
+}
+
+export async function sendOtp({ ephemeralToken, channel }) {
+  return api.post(
+    ENDPOINTS.auth.sendOtp,
+    { ephemeral_token: ephemeralToken, channel },
+    { auth: false }
+  );
+}
+
+export async function verifyOtp({ ephemeralToken, code }) {
+  const res = await api.post(
+    ENDPOINTS.auth.verifyOtp,
+    { ephemeral_token: ephemeralToken, code },
+    { auth: false }
+  );
+  return persistAuthFromPayload(pickPayload(res));
+}
+
+export async function forgotPassword({ loginOrEmail, channel = 'email' }) {
+  return api.post(
+    ENDPOINTS.auth.forgotPassword,
+    { login_or_email: loginOrEmail, channel },
+    { auth: false }
+  );
+}
+
+export async function resetPassword({ tokenOrCode, newPassword }) {
+  return api.post(
+    ENDPOINTS.auth.resetPassword,
+    { token_or_code: tokenOrCode, new_password: newPassword },
+    { auth: false }
+  );
 }
 
 export async function me() {
