@@ -182,8 +182,12 @@ async function postCommentAndAttachmentsAfterCreate(
   if (!text && files.length === 0) return apiData;
   try {
     await postCommentMultipart(buildCommentsPath(id), text, files);
-  } catch {
-    /* swallow — entity is already created */
+  } catch (err) {
+    // The parent entity is already created; the comment-post is a
+    // separate request. Log the failure so it's visible in the
+    // browser console — easier to diagnose than silently dropping.
+    // eslint-disable-next-line no-console
+    console.error("[postCommentAndAttachmentsAfterCreate]", buildCommentsPath(id), err);
   }
   return apiData;
 }
@@ -256,8 +260,11 @@ async function postCommentAndAttachmentsAfterUpdate(
   if (!text && files.length === 0) return;
   try {
     await postCommentMultipart(buildCommentsPath(entityId), text, files);
-  } catch {
-    /* swallow — entity is already updated */
+  } catch (err) {
+    // The parent entity is already updated; the comment-post is a
+    // separate request. Log so failures are visible in DevTools.
+    // eslint-disable-next-line no-console
+    console.error("[postCommentAndAttachmentsAfterUpdate]", buildCommentsPath(entityId), err);
   }
 }
 
