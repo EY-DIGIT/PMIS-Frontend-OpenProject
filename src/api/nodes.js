@@ -1,41 +1,86 @@
 import { api } from './client';
 import { ENDPOINTS } from './endpoint';
-import { toApiDate, toApiNodeStatus, mapTypeUiToApi } from './adapters';
+import { toApiDate, toApiNodeStatus } from './adapters';
 
-function nodeBase(ui) {
+/* Doc 38: create bodies for milestone / activity / task / subtask are
+   minimal — name + description + dates only. Status, dependsOn, actuals,
+   ownerDivision, vendorId, concernedDivision all flow via PATCH after
+   the row exists. */
+function minimalCreateBody(ui) {
+  return {
+    name: ui.name,
+    description: ui.description || '',
+    startDate: toApiDate(ui.startDate),
+    endDate: toApiDate(ui.endDate),
+  };
+}
+
+/* PATCH body shared by activity / task / subtask / milestone. Excludes
+   the type / resourceMode / resource* fields — Doc 38 removed them from
+   every node level. Activity-only fields (ownerDivision, vendorId,
+   concernedDivision) are folded in when opts.activityFields is true. */
+function nodePatchBody(ui, opts = {}) {
   const body = {
     name: ui.name,
     description: ui.description || '',
     startDate: toApiDate(ui.startDate),
     endDate: toApiDate(ui.endDate),
+    actualStartDate: ui.actualStartDate ? toApiDate(ui.actualStartDate) : null,
+    actualEndDate: ui.actualEndDate ? toApiDate(ui.actualEndDate) : null,
     status: toApiNodeStatus(ui.status),
   };
-  // Standardized to `dependsOn` across milestone/activity/task/subtask.
-  if (ui.dependsOn && ui.dependsOn.length) body.dependsOn = ui.dependsOn;
+  if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) body.dependsOn = ui.dependsOn;
+  if (opts.activityFields) {
+    if (ui.ownerDivision !== undefined) body.ownerDivision = ui.ownerDivision || null;
+    if (ui.vendorId !== undefined) body.vendorId = ui.vendorId || null;
+    if (ui.concernedDivision !== undefined) body.concernedDivision = ui.concernedDivision || null;
+  }
   return body;
 }
 
-function resourcePayload(ui) {
-  if (ui.type !== 'Resource Type') return null;
-  if (ui.resourceEntryType === 'count') {
-    const c = ui.resourceCount || {};
-    return { resourceMode: 'count', resource: c };
+/* True if any field that Doc 38's minimal-create excludes is set on the
+   form. Used to decide whether the post-create follow-up PATCH is worth
+   firing. */
+function hasRichFields(ui, includeActivity = false) {
+  if (ui.status && ui.status !== 'Not Completed') return true;
+  if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) return true;
+  if (ui.actualStartDate || ui.actualEndDate) return true;
+  if (includeActivity && (ui.ownerDivision || ui.vendorId || ui.concernedDivision)) return true;
+  return false;
+}
+
+function newIdFrom(res) {
+  if (!res || typeof res !== 'object') return null;
+  return res.id || res.uuid || res.data?.id || res.data?.uuid || null;
+}
+
+/* Fire-and-forget follow-up PATCH after a minimal create. Failures are
+   swallowed — the entity is already created; rich-field persistence is
+   best-effort here. The Promise resolves with the create response so
+   callers can keep using the new entity's id. */
+async function patchAfterCreate(updatePath, ui, opts) {
+  try {
+    await api.patch(updatePath, nodePatchBody(ui, opts));
+  } catch {
+    /* swallow */
   }
-  const d = ui.resourceDetails || {};
-  return { resourceMode: 'details', resource: d };
 }
 
 // ── Milestones ─────────────────────────────────────────────
 export async function createMilestone(projectUuid, ui) {
-  const body = nodeBase(ui);
-  if (ui.vendor) body.vendor = ui.vendor;
-  return api.post(ENDPOINTS.projects.milestoneCreate(projectUuid), body);
+  const created = await api.post(
+    ENDPOINTS.projects.milestoneCreate(projectUuid),
+    minimalCreateBody(ui)
+  );
+  if (hasRichFields(ui)) {
+    const id = newIdFrom(created);
+    if (id) await patchAfterCreate(ENDPOINTS.milestones.update(id), ui);
+  }
+  return created;
 }
 
 export async function updateMilestone(id, ui) {
-  const body = nodeBase(ui);
-  if ('vendor' in ui) body.vendor = ui.vendor || '';
-  return api.patch(ENDPOINTS.milestones.update(id), body);
+  return api.patch(ENDPOINTS.milestones.update(id), nodePatchBody(ui));
 }
 
 export async function removeMilestone(id) {
@@ -43,68 +88,23 @@ export async function removeMilestone(id) {
 }
 
 // ── Activities ─────────────────────────────────────────────
-// Backend split the single create endpoint into 4 type-specific ones.
-// Sub-path and body shape are both driven by ui.type + resourceEntryType.
-function activityEndpointFor(ui) {
-  const t = String(ui?.type || "").toLowerCase();
-  if (t.includes("resource")) {
-    return ui.resourceEntryType === "count" ? "resource/count" : "resource/details";
-  }
-  if (t.includes("transactional")) return "transactional";
-  return "standard";
-}
-
 export async function createActivity(milestoneId, ui) {
-  const endpoint = activityEndpointFor(ui);
-  const base = nodeBase(ui);
-  let body;
-  if (endpoint === "standard") {
-    body = { ...base, type: "standard" };
-  } else if (endpoint === "transactional") {
-    // Server ignores status for transactional; strip it to avoid 422.
-    const { status, ...rest } = base;
-    body = { ...rest, type: "transactional" };
-  } else if (endpoint === "resource/count") {
-    const { status, ...rest } = base;
-    const rc = ui.resourceCount || {};
-    body = {
-      ...rest,
-      type: "resource",
-      resourceMode: "count",
-      resourceCount: parseInt(rc.count, 10) || 1,
-    };
-  } else {
-    const { status, ...rest } = base;
-    const rd = ui.resourceDetails || {};
-    body = {
-      ...rest,
-      type: "resource",
-      resourceMode: "details",
-      resource: {
-        resourceName: rd.resourceName || "",
-        onboardDate: toApiDate(rd.onboardingDate),
-        actualOnboardDate: toApiDate(rd.actualOnboardingDate),
-        offboardDate: toApiDate(rd.offboardingDate),
-        actualOffboardDate: toApiDate(rd.actualOffboardingDate),
-        position: rd.position || "",
-        designation: rd.designation || "",
-        jobRole: rd.jobRole || "",
-        qualification: rd.qualification || "",
-        experienceYears: parseFloat(rd.experience) || 0,
-        typeOfResourceId: rd.resType || "",
-        division: rd.division || "",
-        divisionOther: rd.divisionOther || "",
-      },
-    };
+  const created = await api.post(
+    ENDPOINTS.milestones.activityCreate(milestoneId),
+    minimalCreateBody(ui)
+  );
+  if (hasRichFields(ui, true)) {
+    const id = newIdFrom(created);
+    if (id) await patchAfterCreate(ENDPOINTS.activities.update(id), ui, { activityFields: true });
   }
-  return api.post(ENDPOINTS.milestones.activityCreate(milestoneId, endpoint), body);
+  return created;
 }
 
 export async function updateActivity(id, ui) {
-  const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
-  const rp = resourcePayload(ui);
-  if (rp) Object.assign(body, rp);
-  return api.patch(ENDPOINTS.activities.update(id), body);
+  return api.patch(
+    ENDPOINTS.activities.update(id),
+    nodePatchBody(ui, { activityFields: true })
+  );
 }
 
 export async function removeActivity(id) {
@@ -112,21 +112,20 @@ export async function removeActivity(id) {
 }
 
 // ── Tasks ──────────────────────────────────────────────────
-// Tasks/subtasks no longer accept `type` on create — server inherits
-// it from the parent activity. Resource payload is only valid when
-// the inherited type is `resource`.
 export async function createTask(activityId, ui) {
-  const body = nodeBase(ui);
-  const rp = resourcePayload(ui);
-  if (rp) Object.assign(body, rp);
-  return api.post(ENDPOINTS.activities.taskCreate(activityId), body);
+  const created = await api.post(
+    ENDPOINTS.activities.taskCreate(activityId),
+    minimalCreateBody(ui)
+  );
+  if (hasRichFields(ui)) {
+    const id = newIdFrom(created);
+    if (id) await patchAfterCreate(ENDPOINTS.tasks.update(id), ui);
+  }
+  return created;
 }
 
 export async function updateTask(id, ui) {
-  const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
-  const rp = resourcePayload(ui);
-  if (rp) Object.assign(body, rp);
-  return api.patch(ENDPOINTS.tasks.update(id), body);
+  return api.patch(ENDPOINTS.tasks.update(id), nodePatchBody(ui));
 }
 
 export async function removeTask(id) {
@@ -134,18 +133,20 @@ export async function removeTask(id) {
 }
 
 // ── Subtasks ───────────────────────────────────────────────
-export async function createSubtask(taskId, ui) {
-  const body = nodeBase(ui);
-  const rp = resourcePayload(ui);
-  if (rp) Object.assign(body, rp);
-  return api.post(ENDPOINTS.tasks.subtaskCreate(taskId), body);
+export async function createSubtask(parentId, ui, parentKind = 'task') {
+  const createPath = parentKind === 'subtask'
+    ? ENDPOINTS.subtasks.subtaskCreate(parentId)
+    : ENDPOINTS.tasks.subtaskCreate(parentId);
+  const created = await api.post(createPath, minimalCreateBody(ui));
+  if (hasRichFields(ui)) {
+    const id = newIdFrom(created);
+    if (id) await patchAfterCreate(ENDPOINTS.subtasks.update(id), ui);
+  }
+  return created;
 }
 
 export async function updateSubtask(id, ui) {
-  const body = { ...nodeBase(ui), type: mapTypeUiToApi(ui.type) };
-  const rp = resourcePayload(ui);
-  if (rp) Object.assign(body, rp);
-  return api.patch(ENDPOINTS.subtasks.update(id), body);
+  return api.patch(ENDPOINTS.subtasks.update(id), nodePatchBody(ui));
 }
 
 export async function removeSubtask(id) {
