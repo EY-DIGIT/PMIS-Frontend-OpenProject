@@ -218,6 +218,43 @@ function extractNewEntityId(apiData) {
   return apiData.id || apiData.uuid || apiData.data?.id || apiData.data?.uuid || null;
 }
 
+/* GET /api/v3/{entity}/{id}/comments → list comments on an entity.
+   Returns an array of {id, who, when, text, attachments} objects ready
+   for the CommentsPanel to render. Returns [] on any failure (best-
+   effort load — comments are non-critical). */
+export async function loadCommentsForEntity(kind, entityApiId) {
+  if (!entityApiId) return [];
+  const buildPath =
+    kind === "milestone" ? ENDPOINTS.milestones.comments :
+    kind === "activity" ? ENDPOINTS.activities.comments :
+    kind === "task" ? ENDPOINTS.tasks.comments :
+    kind === "subtask" ? ENDPOINTS.subtasks.comments :
+    null;
+  if (!buildPath) return [];
+  try {
+    const raw = await apiGetOrEmpty(buildPath(entityApiId));
+    const items = extractListElements(raw);
+    return items.map(mapApiCommentToLocal);
+  } catch {
+    return [];
+  }
+}
+
+function mapApiCommentToLocal(c) {
+  const a = c?.author || {};
+  const fullName = [a.firstName, a.lastName].filter(Boolean).join(" ");
+  return {
+    id: c?.id || "",
+    who: fullName || a.login || a.email || "User",
+    when: c?.createdAt || c?.updatedAt || "",
+    text: c?.body || "",
+    attachments: (Array.isArray(c?.attachments) ? c.attachments : []).map((at) => ({
+      name: at?.filename || at?.url || "attachment",
+      url: at?.url || ""
+    }))
+  };
+}
+
 /* Post a comment as multipart/form-data: optional text body + zero or more
    files under the same form field name "files". The backend accepts this
    shape on POST /api/v3/{entity}/{id}/comments — either body or at least

@@ -24,7 +24,8 @@ import {
   loadDivisions,
   loadActivityById,
   loadTaskById,
-  loadSubtaskById
+  loadSubtaskById,
+  loadCommentsForEntity
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
 
@@ -198,6 +199,23 @@ export default function NodeModal({
         setForm(makeDefaultForm(kind, merged, mode, parentNode));
       })
       .catch(() => { /* keep cached node form on failure */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, kind, node && node.apiId]);
+
+  /* Load existing comments + attachments for the node so they appear in
+     the Comments panel when the modal opens. The list adapter sets
+     comments:[] regardless, so without this fetch the panel is always
+     empty even after the user posts a comment. */
+  useEffect(() => {
+    if (!open || mode !== "edit" || !node?.apiId || !getToken()) return;
+    let cancelled = false;
+    loadCommentsForEntity(kind, node.apiId)
+      .then((items) => {
+        if (cancelled) return;
+        setForm((f) => ({ ...f, comments: items || [] }));
+      })
+      .catch(() => { /* swallow — comments are best-effort */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, kind, node && node.apiId]);
