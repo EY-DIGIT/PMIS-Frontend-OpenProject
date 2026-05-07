@@ -1,6 +1,7 @@
 // ============================================================
 // MainApp.jsx  –  Providers + Router + Routes only
 // ============================================================
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
 
 import { ProjectProvider } from "./store/Projectstore";
@@ -32,7 +33,9 @@ import MasterUsers from './pages/master/MasterUsers';
 import { DataProvider } from './data/DataContext';
 import "./styles/global.css";
 
-import Dashboard from "./pages/Dashboard";
+// Dashboard is lazy-loaded so the heavy charts library only ships
+// when the user actually navigates there.
+const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 
 import ProjectsListPage from "./pages/projects/ProjectsListPage";
@@ -221,7 +224,14 @@ export default function MainApp() {
                                         <Breadcrumbs />
                                         <Routes>
                                             <Route path="/" element={<HomePage />} />
-                                            <Route path="/dashboard" element={<Dashboard />} />
+                                            <Route
+                                              path="/dashboard"
+                                              element={
+                                                <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                  <Dashboard />
+                                                </Suspense>
+                                              }
+                                            />
                                             <Route path="/profile" element={<Profile />} />
 
                                             <Route path="/projects" element={<ProjectsListPage />} />

@@ -1,8 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
+  Tooltip, ResponsiveContainer
+} from "recharts";
 import { useProjects as useProjectsList } from "./../store/project/projectsStore";
 import { useData } from "../data/DataContext";
 import { hydrateProjects } from "../store/project/apiSync";
 import "../styles/Dashboard.css";
+
+const STATUS_COLORS = {
+  completed:  "#1a8a3d",
+  ontrack:    "#0aa1c0",
+  delayed:    "#d4440e",
+  notstarted: "#9aa6bd",
+};
+const STATUS_LABELS = {
+  completed:  "Completed",
+  ontrack:    "On Track",
+  delayed:    "Delayed",
+  notstarted: "Not Started",
+};
+const STATUS_ORDER = ["completed", "ontrack", "delayed", "notstarted"];
 
 const VIEW_TABS = [
   { id: "project",  label: "Project View",        icon: "📁" },
@@ -221,6 +239,26 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Charts row: Status Distribution donut + Status Mix stacked bar */}
+      <div className="dash-chart-row">
+        <div className="dash-card">
+          <div className="dash-card-title">
+            Status Distribution
+            <span className="dash-card-sub">{totals.total} item{totals.total === 1 ? "" : "s"}</span>
+          </div>
+          <StatusDonut totals={totals} />
+        </div>
+        <div className="dash-card">
+          <div className="dash-card-title">
+            Status Mix
+            <span className="dash-card-sub">
+              by {view === "project" ? "owner" : view === "vendor" ? "vendor" : "division"}
+            </span>
+          </div>
+          <StatusMixBar view={view} projects={filtered} />
+        </div>
+      </div>
+
       {/* Group breakdown — view-specific */}
       <div className="dash-card">
         <div className="dash-card-title">
@@ -231,6 +269,121 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+function StatusDonut({ totals }) {
+  const data = STATUS_ORDER
+    .map((k) => ({ key: k, name: STATUS_LABELS[k], value: totals[k] || 0 }))
+    .filter((d) => d.value > 0);
+  if (!data.length) {
+    return <div className="dash-empty" style={{ padding: 32 }}>No projects to chart.</div>;
+  }
+  return (
+    <div className="dash-donut-wrap">
+      <div style={{ width: "100%", height: 220 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey="value"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              innerRadius={55}
+              outerRadius={85}
+              paddingAngle={2}
+              stroke="none"
+            >
+              {data.map((d) => (
+                <Cell key={d.key} fill={STATUS_COLORS[d.key]} />
+              ))}
+            </Pie>
+            <Tooltip
+              formatter={(v, name) => [`${v}`, name]}
+              contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <ul className="dash-legend">
+        {data.map((d) => {
+          const pct = totals.total ? Math.round((d.value / totals.total) * 100) : 0;
+          return (
+            <li key={d.key} className="dash-legend-item">
+              <span className="dash-legend-swatch" style={{ background: STATUS_COLORS[d.key] }} />
+              <span className="dash-legend-label">{d.name}</span>
+              <span className="dash-legend-value">{d.value} <small>({pct}%)</small></span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* Stacked bar: one row per group (vendor / division / owner). Bars colored
+   by status. For project-view, group by owner since "by project" would
+   give one bar per project which the design shows as "Status Mix by owner". */
+function StatusMixBar({ view, projects }) {
+  const groups = useMemoGroups(view, projects);
+  const data = Array.from(groups.entries()).map(([key, ps]) => {
+    const counts = { completed: 0, ontrack: 0, delayed: 0, notstarted: 0 };
+    for (const p of ps) counts[statusOf(p)] = (counts[statusOf(p)] || 0) + 1;
+    return {
+      name: prettyKey(view, key),
+      ...counts,
+    };
+  });
+  if (!data.length) {
+    return <div className="dash-empty" style={{ padding: 32 }}>No data to chart.</div>;
+  }
+  return (
+    <div style={{ width: "100%", height: 240 }}>
+      <ResponsiveContainer>
+        <BarChart data={data} layout="vertical" margin={{ top: 5, right: 16, bottom: 5, left: 8 }}>
+          <XAxis type="number" tick={{ fontSize: 11, fill: "#5a6680" }} allowDecimals={false} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            tick={{ fontSize: 11, fill: "#1e2a3a" }}
+            width={100}
+          />
+          <Tooltip
+            cursor={{ fill: "rgba(11,60,136,0.05)" }}
+            contentStyle={{ fontSize: 12, borderRadius: 6 }}
+          />
+          {STATUS_ORDER.map((k) => (
+            <Bar
+              key={k}
+              dataKey={k}
+              stackId="status"
+              name={STATUS_LABELS[k]}
+              fill={STATUS_COLORS[k]}
+            />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function useMemoGroups(view, projects) {
+  return useMemo(() => {
+    if (view === "vendor") return groupByVendor(projects);
+    if (view === "division") return groupByDivision(projects);
+    // project view: group by owner (Division)
+    const m = new Map();
+    for (const p of projects) {
+      const k = (p?.owner || "").toLowerCase() || "(unassigned)";
+      m.set(k, (m.get(k) || []).concat(p));
+    }
+    return m;
+  }, [view, projects]);
+}
+
+function prettyKey(view, key) {
+  if (view === "vendor") return key === "(none)" ? "(unassigned)" : key;
+  return divisionLabel(key);
 }
 
 function DashboardGroupTable({ view, projects }) {

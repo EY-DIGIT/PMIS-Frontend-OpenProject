@@ -302,6 +302,61 @@
   padding: 24px !important;
 }
 
+/* ── Charts row ── */
+.dash-chart-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+@media (max-width: 960px) {
+  .dash-chart-row { grid-template-columns: 1fr; }
+}
+
+/* ── Donut (Status Distribution) ── */
+.dash-donut-wrap {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, auto);
+  gap: 14px;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .dash-donut-wrap { grid-template-columns: 1fr; }
+}
+.dash-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-legend-item {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12.5px;
+  color: #1e2a3a;
+}
+.dash-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.dash-legend-label {
+  color: #5a6680;
+  font-weight: 600;
+}
+.dash-legend-value {
+  font-weight: 700;
+  color: #0b3c88;
+}
+.dash-legend-value small {
+  font-weight: 500;
+  color: #66788f;
+  margin-left: 2px;
+}
+
 /* Status pill */
 .dash-pill {
   display: inline-block;
