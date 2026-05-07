@@ -270,6 +270,27 @@ function mapApiCommentToLocal(c) {
   };
 }
 
+/* Standalone POST to {entity}/{id}/comments — used by the "Post Comment"
+   button in the edit modal so the user can attach a comment without saving
+   the parent entity. Throws if neither text nor files are present (the
+   server requires at least one). */
+export async function postCommentForEntity(kind, entityApiId, text, files) {
+  const buildPath =
+    kind === "milestone" ? ENDPOINTS.milestones.comments :
+    kind === "activity" ? ENDPOINTS.activities.comments :
+    kind === "task" ? ENDPOINTS.tasks.comments :
+    kind === "subtask" ? ENDPOINTS.subtasks.comments :
+    null;
+  if (!buildPath) throw new Error("Unsupported entity kind for comments.");
+  if (!entityApiId) throw new Error("Save the item before adding a comment.");
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  const fileList = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!trimmed && fileList.length === 0) {
+    throw new Error("Type a comment or attach a file before posting.");
+  }
+  return postCommentMultipart(buildPath(entityApiId), trimmed, fileList);
+}
+
 /* Post a comment as multipart/form-data: optional text body + zero or more
    files under the same form field name "files". The backend accepts this
    shape on POST /api/v3/{entity}/{id}/comments — either body or at least

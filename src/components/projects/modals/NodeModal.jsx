@@ -26,7 +26,8 @@ import {
   loadActivityById,
   loadTaskById,
   loadSubtaskById,
-  loadCommentsForEntity
+  loadCommentsForEntity,
+  postCommentForEntity
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
 
@@ -163,6 +164,11 @@ export default function NodeModal({
   const [commentText, setCommentText] = useState("");
   const [commentFiles, setCommentFiles] = useState([]);
   const [attachError, setAttachError] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [postError, setPostError] = useState("");
+  // Bumping this remounts the (uncontrolled) <input type="file"> so its
+  // displayed filename clears after a successful post.
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [resourceTypes, setResourceTypes] = useState([]);
   const [resourceTypesLoading, setResourceTypesLoading] = useState(false);
   const [divisions, setDivisions] = useState([]);
@@ -174,6 +180,9 @@ export default function NodeModal({
       setCommentText("");
       setCommentFiles([]);
       setAttachError("");
+      setPostError("");
+      setPosting(false);
+      setFileInputKey((k) => k + 1);
     }
   }, [open, kind, node, mode, parentNode]);
 
@@ -346,6 +355,38 @@ export default function NodeModal({
     if (body) payload.body = body;
     if (commentFiles.length) payload.files = commentFiles;
     onSave(payload);
+  }
+
+  /* Standalone "Post Comment" — fires the comments API for the current
+     entity directly, without saving the parent node. On success, clears
+     the composer and reloads the comments list so the new entry appears
+     immediately. */
+  async function postCommentNow() {
+    if (posting) return;
+    if (!node?.apiId) {
+      setPostError("Save the item before adding a comment.");
+      return;
+    }
+    const text = commentText.trim();
+    if (!text && commentFiles.length === 0) {
+      setPostError("Type a comment or attach a file first.");
+      return;
+    }
+    setPostError("");
+    setPosting(true);
+    try {
+      await postCommentForEntity(kind, node.apiId, text, commentFiles);
+      setCommentText("");
+      setCommentFiles([]);
+      setAttachError("");
+      setFileInputKey((k) => k + 1);
+      const items = await loadCommentsForEntity(kind, node.apiId);
+      setForm((f) => ({ ...f, comments: items || [] }));
+    } catch (err) {
+      setPostError(err?.message || "Failed to post comment.");
+    } finally {
+      setPosting(false);
+    }
   }
 
   const dis = editable ? false : true;
@@ -656,8 +697,13 @@ export default function NodeModal({
             editable={editable}
             commentText={commentText}
             setCommentText={setCommentText}
+            commentFiles={commentFiles}
             onFileChange={handleFileChange}
+            fileInputKey={fileInputKey}
             attachError={attachError}
+            onPostComment={postCommentNow}
+            posting={posting}
+            postError={postError}
           />
         )}
 
@@ -1070,9 +1116,16 @@ function CommentsPanel({
   editable,
   commentText,
   setCommentText,
+  commentFiles,
   onFileChange,
-  attachError
+  fileInputKey,
+  attachError,
+  onPostComment,
+  posting,
+  postError
 }) {
+  const nothingToPost =
+    !String(commentText || "").trim() && safeArray(commentFiles).length === 0;
   return (
     <div className="uidai-comments">
       <div className="uidai-comments__title">💬 Comments &amp; Attachments</div>
@@ -1090,6 +1143,7 @@ function CommentsPanel({
           <div className="uidai-comments__upload-row">
             <div className="uidai-field">
               <input
+                key={fileInputKey}
                 type="file"
                 multiple
                 accept={ALLOWED_FILE_ACCEPT}
@@ -1101,6 +1155,17 @@ function CommentsPanel({
               </div>
               {attachError && <div className="uidai-attach-error">{attachError}</div>}
             </div>
+          </div>
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              className="uidai-btn"
+              onClick={onPostComment}
+              disabled={posting || nothingToPost}
+            >
+              {posting ? "Posting…" : "Post Comment"}
+            </button>
+            {postError && <div className="uidai-attach-error">{postError}</div>}
           </div>
         </div>
       )}
