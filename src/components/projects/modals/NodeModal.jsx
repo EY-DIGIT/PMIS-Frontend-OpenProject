@@ -23,6 +23,7 @@ import { formatDateDisplay, formatDateTime } from "../../../utils/project/helper
 import {
   loadResourceTypes,
   loadDivisions,
+  loadPriorities,
   loadActivityById,
   loadTaskById,
   loadSubtaskById,
@@ -140,6 +141,7 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     // vendorId / concernedDivision and accepts them on PATCH only.
     ownerDivision: n.ownerDivision || "",
     vendorId: n.vendorId || "",
+    priority: n.priority || "",
     concernedDivision: parseDivisionList(n.concernedDivision),
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
@@ -216,6 +218,8 @@ export default function NodeModal({
   const [resourceTypesLoading, setResourceTypesLoading] = useState(false);
   const [divisions, setDivisions] = useState([]);
   const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [priorities, setPriorities] = useState([]);
+  const [prioritiesLoading, setPrioritiesLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -238,6 +242,7 @@ export default function NodeModal({
     let cancelled = false;
     setResourceTypesLoading(true);
     setDivisionsLoading(true);
+    setPrioritiesLoading(true);
     loadResourceTypes()
       .then((list) => { if (!cancelled) setResourceTypes(list); })
       .catch(() => { if (!cancelled) setResourceTypes([]); })
@@ -246,6 +251,10 @@ export default function NodeModal({
       .then((list) => { if (!cancelled) setDivisions(list); })
       .catch(() => { if (!cancelled) setDivisions([]); })
       .finally(() => { if (!cancelled) setDivisionsLoading(false); });
+    loadPriorities()
+      .then((list) => { if (!cancelled) setPriorities(list); })
+      .catch(() => { if (!cancelled) setPriorities([]); })
+      .finally(() => { if (!cancelled) setPrioritiesLoading(false); });
     return () => { cancelled = true; };
   }, [open, kind]);
 
@@ -723,6 +732,29 @@ export default function NodeModal({
                 {projectVendors.length === 0 && (
                   <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
                     No vendors are associated with this project yet. Add them in Project Details &rarr; Organizations.
+                  </div>
+                )}
+              </div>
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  Priority <span className="uidai-required-project">*</span>
+                </label>
+                <select
+                  className="uidai-select"
+                  value={form.priority}
+                  onChange={(e) => updateField({ priority: e.target.value })}
+                  disabled={dis || prioritiesLoading}
+                >
+                  <option value="">— Select Priority —</option>
+                  {safeArray(priorities).map((p) => (
+                    <option key={p.id || p.code} value={p.code}>
+                      {p.name}{p.description ? ` — ${p.description}` : ""}
+                    </option>
+                  ))}
+                </select>
+                {prioritiesLoading && (
+                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                    Loading priorities…
                   </div>
                 )}
               </div>

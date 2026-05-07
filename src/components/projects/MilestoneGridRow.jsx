@@ -146,6 +146,9 @@ export default function MilestoneGridRow({
       <td className="uidai-msgrid__cell">
         {typeLabel ? <span className="uidai-type-tag">{typeLabel}</span> : null}
       </td>
+      <td className="uidai-msgrid__cell" style={{ textAlign: "center" }}>
+        {kind === "activity" && node.priority ? node.priority : ""}
+      </td>
       {showStatusCol && (
         <td className="uidai-msgrid__cell">
           <span className={`uidai-status-pill ${pillClass}`}>{pillLabel}</span>

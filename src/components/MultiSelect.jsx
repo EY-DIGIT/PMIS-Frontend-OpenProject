@@ -14,6 +14,7 @@ export default function MultiSelect({
   options,
   onChange,
   placeholder = 'Select projects',
+  searchPlaceholder = 'Search project...',
   disabled = false
 }) {
   const [open, setOpen] = useState(false);
@@ -83,7 +84,7 @@ export default function MultiSelect({
           <input
             type="text"
             className="uidai-pmis-ms-search"
-            placeholder="Search project..."
+            placeholder={searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             disabled={disabled}

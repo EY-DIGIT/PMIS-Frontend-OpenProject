@@ -46,6 +46,10 @@ export const ENDPOINTS = {
     list: '/api/v3/resource_types',
   },
 
+  priorities: {
+    list: '/api/v3/priorities',
+  },
+
   projects: {
     list: '/api/v3/projects',
     get: (uuid) => `/api/v3/projects/${enc(uuid)}`,

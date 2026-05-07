@@ -415,6 +415,97 @@
 }
 .uidai-pmis-table tr:hover { background: #f9fcff; }
 
+/* ---------- Project Mapping table (Vendor Details) ---------- */
+.uidai-project-mapping__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.uidai-project-mapping__header h4 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 15px;
+  font-weight: 600;
+}
+.uidai-project-mapping {
+  border-radius: 6px;
+  /* `visible` (not `hidden`) so the Users dropdown panel inside a row can
+     extend beyond the table without being clipped. */
+  overflow: visible;
+  border: 1px solid var(--uidai-pmis-border);
+  background: #fff;
+}
+.uidai-project-mapping table { margin-top: 0; min-width: 760px; }
+.uidai-project-mapping thead th {
+  background: #f1f6fd;
+  color: var(--navy);
+  font-weight: 600;
+  border: none;
+  border-bottom: 1px solid var(--uidai-pmis-border);
+  padding: 10px 12px;
+  text-align: left;
+}
+.uidai-project-mapping tbody td {
+  border: 1px solid var(--uidai-pmis-border);
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+.uidai-project-mapping tbody tr.uidai-pm-project-start td {
+  border-top: 2px solid #cdd9ec;
+}
+.uidai-project-mapping tbody tr:hover { background: #f9fcff; }
+.uidai-project-mapping td.uidai-pm-project-cell {
+  background: #fafcff;
+  font-weight: 600;
+  color: var(--navy);
+}
+.uidai-pm-empty-cell { color: #8c97aa; }
+.uidai-pm-user-list {
+  list-style: disc;
+  margin: 0;
+  padding-left: 18px;
+  color: #1f3a66;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.uidai-pm-user-list li { margin: 0; }
+.uidai-pm-add-row td {
+  background: #fafcff;
+  padding: 8px 12px;
+}
+.uidai-pm-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+}
+.uidai-pm-icon-btn--danger { color: #d32f2f; border-color: #d9b3b3; background: #fff; }
+.uidai-pm-icon-btn--danger:hover { background: #fff5f5; }
+.uidai-pm-icon-btn--muted { color: #6b7280; border-color: #d0d4dc; background: #fff; }
+.uidai-pm-icon-btn--muted:hover { background: #f5f6f8; }
+.uidai-pm-actions { white-space: nowrap; }
+.uidai-pm-action-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0 2px;
+  color: var(--navy);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.uidai-pm-action-link:hover { text-decoration: underline; }
+.uidai-pm-action-link--danger { color: #d32f2f; }
+.uidai-pm-action-sep { color: #6b7280; margin: 0 1px; }
+
 /* 2-line text clamp for long values in list-style tables */
 .uidai-clamp-2 {
   display: -webkit-box;

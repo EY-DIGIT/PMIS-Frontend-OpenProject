@@ -235,6 +235,12 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     dependsOnDisplay: rawDisplay.slice(),
     ownerDivision: a.ownerDivision || "",
     vendorId: a.vendorId || "",
+    /* Server returns priority either as a plain code string ("p2") or
+       sometimes as a {code, name} object — normalize to a code string. */
+    priority:
+      (a.priority && typeof a.priority === "object")
+        ? (a.priority.code || a.priority.name || "")
+        : (a.priority || a.priorityCode || ""),
     concernedDivision: Array.isArray(a.concernedDivision)
       ? a.concernedDivision.slice()
       : (a.concernedDivision ? [a.concernedDivision] : []),

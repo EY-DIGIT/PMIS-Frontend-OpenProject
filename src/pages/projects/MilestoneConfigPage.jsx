@@ -471,6 +471,10 @@ export default function MilestoneConfigPage({ mode }) {
         uiStore.showMessage("Please select a Vendor.");
         return;
       }
+      if (!formData.priority) {
+        uiStore.showMessage("Please select a Priority.");
+        return;
+      }
       const cd = formData.concernedDivision;
       const cdHasValue = Array.isArray(cd)
         ? cd.some((x) => String(x || "").trim())
@@ -1050,7 +1054,7 @@ export default function MilestoneConfigPage({ mode }) {
       </button>
     ) : null;
 
-  const colSpan = showStatusCol ? 9 : 8;
+  const colSpan = showStatusCol ? 10 : 9;
 
   return (
     <div>
@@ -1092,6 +1096,7 @@ export default function MilestoneConfigPage({ mode }) {
                 <th style={{ width: 90 }}>WBS</th>
                 <th>Name</th>
                 <th style={{ width: 130 }}>Type</th>
+                <th style={{ width: 100 }}>Priority</th>
                 {showStatusCol && <th style={{ width: 160 }}>Status</th>}
                 <th style={{ width: 130 }}>Start Date</th>
                 <th style={{ width: 130 }}>End Date</th>

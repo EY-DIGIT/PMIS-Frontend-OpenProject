@@ -403,6 +403,22 @@ export async function loadDivisions() {
     }));
 }
 
+/* ════════════════ Priorities ════════════════ */
+
+export async function loadPriorities() {
+  const raw = await apiGet(ENDPOINTS.priorities.list);
+  return extractListElements(raw)
+    .filter((p) => p && (p.id || p.code))
+    .map((p) => ({
+      id: p.id || "",
+      code: p.code || "",
+      name: p.name || p.code || "",
+      description: p.description || "",
+      position: typeof p.position === "number" ? p.position : 0
+    }))
+    .sort((a, b) => a.position - b.position);
+}
+
 /* ════════════════ Project APIs ════════════════ */
 
 export async function loadProjectById(projectId) {
@@ -602,6 +618,7 @@ export async function createActivityApi(milestoneApiId, formData, project) {
       endDate: toMilestoneIsoEnd(formData.endDate),
       ownerDivision: formData.ownerDivision || null,
       vendorId: formData.vendorId || null,
+      priority: formData.priority || null,
       concernedDivision: serializeConcernedDivision(formData.concernedDivision),
       dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
     }
@@ -618,6 +635,8 @@ function buildActivityPatchBody(project, formData) {
     body.ownerDivision = formData.ownerDivision || null;
   if (formData.vendorId !== undefined)
     body.vendorId = formData.vendorId || null;
+  if (formData.priority !== undefined)
+    body.priority = formData.priority || null;
   if (formData.concernedDivision !== undefined)
     body.concernedDivision = serializeConcernedDivision(formData.concernedDivision);
   return body;
