@@ -66,9 +66,10 @@ export const ENDPOINTS = {
     activities: (id) => `/api/v3/milestones/${enc(id)}/activities`,
     attachments: (id) => `/api/v3/milestones/${enc(id)}/attachments`,
     comments: (id) => `/api/v3/milestones/${enc(id)}/comments`,
-    // endpoint = "standard" | "transactional" | "resource/count" | "resource/details"
-    activityCreate: (milestoneId, endpoint) =>
-      `/api/v3/milestones/${enc(milestoneId)}/activities/${endpoint}/create`,
+    // Doc 38: single unified create endpoint (legacy /standard, /transactional,
+    // /resource/count, /resource/details paths were removed).
+    activityCreate: (milestoneId) =>
+      `/api/v3/milestones/${enc(milestoneId)}/activities/create`,
   },
 
   activities: {

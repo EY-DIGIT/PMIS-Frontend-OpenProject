@@ -17,9 +17,6 @@ import {
   toMilestoneIsoStart,
   toMilestoneIsoEnd,
   mapStatusForApi,
-  activityEndpointFor,
-  activityServerTypePair,
-  buildResourcePayload,
   mapApiProject,
   mapApiMilestoneToNode,
   mapApiActivityToNode,
@@ -432,41 +429,37 @@ export async function loadActivityById(activityApiId) {
   return a && (a.id || a.uuid || a.name) ? mapApiActivityToNode(a) : null;
 }
 
+/* Doc 38: activity-create body is minimal (just name/description/dates).
+   status / dependsOn / actuals / ownerDivision / vendorId / concernedDivision
+   all flow through PATCH after the row exists. */
 export async function createActivityApi(milestoneApiId, formData, project) {
-  const endpoint = activityEndpointFor(formData);
-  const base = buildActivityLikeBase(project, formData);
-
-  let payload;
-  if (endpoint === "standard") {
-    payload = { ...base, status: mapStatusForApi(formData.status || "Not Completed") };
-  } else if (endpoint === "transactional") {
-    payload = { ...base };
-  } else {
-    // resource/count or resource/details
-    payload = { ...base, ...buildResourcePayload(formData) };
-  }
-
   const created = await apiSend(
     "POST",
-    ENDPOINTS.milestones.activityCreate(milestoneApiId, endpoint),
-    payload
+    ENDPOINTS.milestones.activityCreate(milestoneApiId),
+    {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate)
+    }
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.activities.comments, created, formData);
 }
 
+/* Doc 38: PATCH body excludes type/resourceMode/resource (gone from the
+   activity model). Owner/Vendor/Concerned Division are accepted but
+   only sent when present on formData. */
 export async function updateActivityApi(activityServerId, formData, project) {
-  const { type, resourceMode } = activityServerTypePair(formData);
-
   const payload = {
     ...buildActivityLikeBase(project, formData),
-    type,
     status: mapStatusForApi(formData.status || "Not Completed")
   };
-
-  if (type === "resource") {
-    payload.resourceMode = resourceMode;
-    Object.assign(payload, buildResourcePayload(formData));
-  }
+  if (formData.ownerDivision !== undefined)
+    payload.ownerDivision = formData.ownerDivision || null;
+  if (formData.vendorId !== undefined)
+    payload.vendorId = formData.vendorId || null;
+  if (formData.concernedDivision !== undefined)
+    payload.concernedDivision = formData.concernedDivision || null;
 
   const updated = await apiSend(
     "PATCH",
@@ -500,38 +493,28 @@ export async function loadTaskById(taskApiId) {
   return t && (t.id || t.uuid || t.name) ? mapApiTaskToNode(t) : null;
 }
 
-/* Single create endpoint — type is auto-derived server-side from resourceMode.
-   We send resourceMode + resourceCount/resource for Resource Type, else base. */
+/* Doc 38: task create body is minimal. type/resource fields no longer
+   exist on tasks at the API level. */
 export async function createTaskApi(activityApiId, formData, project) {
-  const { type, resourceMode } = activityServerTypePair(formData);
-  const payload = buildActivityLikeBase(project, formData);
-
-  if (type === "resource") {
-    payload.resourceMode = resourceMode;
-    Object.assign(payload, buildResourcePayload(formData));
-  }
-
   const created = await apiSend(
     "POST",
     ENDPOINTS.activities.taskCreate(activityApiId),
-    payload
+    {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate)
+    }
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.tasks.comments, created, formData);
 }
 
-/* Full payload, same shape as activity PATCH. */
+/* Doc 38: PATCH body excludes type/resourceMode/resource. */
 export async function updateTaskApi(taskServerId, formData, project) {
-  const { type, resourceMode } = activityServerTypePair(formData);
-
   const payload = {
     ...buildActivityLikeBase(project, formData),
-    type
+    status: mapStatusForApi(formData.status || "Not Completed")
   };
-
-  if (type === "resource") {
-    payload.resourceMode = resourceMode;
-    Object.assign(payload, buildResourcePayload(formData));
-  }
 
   const updated = await apiSend(
     "PATCH",
@@ -690,14 +673,12 @@ export async function loadSubtaskAndChildren(subtaskApiId) {
    "subtask" we POST to /subtasks/{id}/subtasks/create so a subtask can
    contain another subtask, and so on, infinitely. */
 export async function createSubtaskApi(parentApiId, formData, project, parentKind = "task") {
+  // Doc 38: minimal create body — actuals/dependsOn flow via PATCH.
   const payload = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate),
-    actualStartDate: formData.actualStartDate ? toMilestoneIsoStart(formData.actualStartDate) : null,
-    actualEndDate: formData.actualEndDate ? toMilestoneIsoEnd(formData.actualEndDate) : null,
-    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+    endDate: toMilestoneIsoEnd(formData.endDate)
   };
   const createPath =
     parentKind === "subtask"
@@ -707,19 +688,12 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.subtasks.comments, created, formData);
 }
 
-/* Full payload same as task/activity PATCH. */
+/* Doc 38: PATCH body excludes type/resourceMode/resource. */
 export async function updateSubtaskApi(subtaskServerId, formData, project) {
-  const { type, resourceMode } = activityServerTypePair(formData);
-
   const payload = {
     ...buildActivityLikeBase(project, formData),
-    type
+    status: mapStatusForApi(formData.status || "Not Completed")
   };
-
-  if (type === "resource") {
-    payload.resourceMode = resourceMode;
-    Object.assign(payload, buildResourcePayload(formData));
-  }
 
   const updated = await apiSend(
     "PATCH",
