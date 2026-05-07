@@ -16,11 +16,17 @@ import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
 
+/* IST-aware: backend stores IST midnight as UTC 18:30 of the prior day,
+   so naive "T"-chopping returns yesterday's date. Project to IST then
+   format YYYY-MM-DD. */
 function stripTime(iso) {
   if (!iso) return "";
   const s = String(iso);
-  const idx = s.indexOf("T");
-  return idx > 0 ? s.slice(0, idx) : s;
+  if (!s.includes("T")) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, s.indexOf("T"));
+  const shifted = new Date(d.getTime() + 330 * 60000);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
 }
 
 /* Anchor the date to IST so the timestamp truncates to the same day on

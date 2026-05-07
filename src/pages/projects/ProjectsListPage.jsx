@@ -9,12 +9,17 @@ import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import MilestonePagination from "../../components/projects/MilestonePagination";
 
-/* "2026-04-24T23:59:59" → "2026-04-24" */
+/* IST-aware: backend stores IST midnight as UTC 18:30 of the prior day,
+   so naive "T"-chopping returns yesterday's date. Project to IST then
+   format YYYY-MM-DD. */
 function stripTime(iso) {
   if (!iso) return "";
   const s = String(iso);
-  const idx = s.indexOf("T");
-  return idx > 0 ? s.slice(0, idx) : s;
+  if (!s.includes("T")) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, s.indexOf("T"));
+  const shifted = new Date(d.getTime() + 330 * 60000);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
 }
 
 /* "new" → "NEW", "draft" → "DRAFT", etc. */

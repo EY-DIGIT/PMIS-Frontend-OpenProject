@@ -66,19 +66,28 @@ export function toMilestoneIsoEnd(d) {
   return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
 }
 
-export function toDateInputValue(iso) {
+/* The backend stores IST midnight as a UTC timestamp ending +00:00 — e.g.
+   `2026-05-06T18:30:00+00:00` is 7 May 00:00 IST. Naively chopping at "T"
+   gives "2026-05-06" (the UTC date), one day off the IST date the user
+   actually picked. Below: parse the ISO instant, project to IST by adding
+   330 minutes, then format YYYY-MM-DD from the UTC components. Plain
+   YYYY-MM-DD strings (no offset) round-trip unchanged. */
+const IST_OFFSET_MINUTES = 330;
+function _toIstDate(iso) {
   if (!iso) return "";
   const s = String(iso);
-  const tIdx = s.indexOf("T");
-  return tIdx > 0 ? s.slice(0, tIdx) : s;
+  if (!s.includes("T")) return s; // already YYYY-MM-DD
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, s.indexOf("T"));
+  const shifted = new Date(d.getTime() + IST_OFFSET_MINUTES * 60000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-export function stripTime(iso) {
-  if (!iso) return "";
-  const s = String(iso);
-  const idx = s.indexOf("T");
-  return idx > 0 ? s.slice(0, idx) : s;
-}
+export function toDateInputValue(iso) { return _toIstDate(iso); }
+export function stripTime(iso) { return _toIstDate(iso); }
 
 /* ─── Status mapping ─── */
 export function mapStatusForApi(s) {
