@@ -137,14 +137,17 @@ export function mapApiProject(p) {
 /* ─── API → local milestone node ─── */
 export function mapApiMilestoneToNode(m) {
   const vendors = Array.isArray(m.vendors) ? m.vendors : [];
-  /* Server may return the dependency list under either key; we keep the
-     original raw values as `dependsOnDisplay` for the table and translate
-     them to local UIDs (in `dependsOn`) for the form-picker. */
-  const rawDepends = Array.isArray(m.dependsOn)
+  /* Server returns dependsOn as UUIDs and dependsOnDisplay as the
+     human-readable WBS codes ("M1", "M2"). Older shapes used `depends`
+     under just one key; fall back to that if dependsOnDisplay is missing. */
+  const rawDeps = Array.isArray(m.dependsOn)
     ? m.dependsOn
     : Array.isArray(m.depends)
     ? m.depends
     : [];
+  const rawDisplay = Array.isArray(m.dependsOnDisplay) && m.dependsOnDisplay.length
+    ? m.dependsOnDisplay
+    : rawDeps;
   return {
     uid: generateNodeUid("m"),
     apiId: m.id || "",
@@ -159,10 +162,10 @@ export function mapApiMilestoneToNode(m) {
     endDate: toDateInputValue(m.endDate),
     status: mapStatusFromApi(m.status),
     vendor: vendors.length ? vendors[0].name || "" : "",
-    dependsOn: rawDepends.slice(),
+    dependsOn: rawDeps.slice(),
     /* Snapshot of server display IDs (e.g. "M1", "M2"). The loader keeps
        this stable while it translates `dependsOn` into local UIDs. */
-    dependsOnDisplay: rawDepends.slice(),
+    dependsOnDisplay: rawDisplay.slice(),
     activities: [],
     comments: [],
     attachments: [],
@@ -185,17 +188,20 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     uiType = "Transactional";
   }
 
-  /* Server may return the dependency list under any of these keys; later
-     a tree-wide pass translates these raw values into local UIDs. The
-     original raw values (display IDs like "M1", "A1.2") are also kept on
-     `dependsOnDisplay` so the table can render them directly. */
-  const rawDepends = Array.isArray(a.dependsOn)
+  /* Server returns dependsOn as UUIDs and dependsOnDisplay as the
+     human-readable WBS codes ("M1", "A1.2"). Legacy shapes used a
+     single `depends` / `dependency` key; fall back to that if
+     dependsOnDisplay is missing. */
+  const rawDeps = Array.isArray(a.dependsOn)
     ? a.dependsOn
     : Array.isArray(a.depends)
     ? a.depends
     : Array.isArray(a.dependency)
     ? a.dependency
     : [];
+  const rawDisplay = Array.isArray(a.dependsOnDisplay) && a.dependsOnDisplay.length
+    ? a.dependsOnDisplay
+    : rawDeps;
 
   const node = {
     uid: generateNodeUid(kindLetter),
@@ -216,8 +222,8 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     status: mapStatusFromApi(a.status),
     type: uiType,
     resourceEntryType,
-    dependsOn: rawDepends.slice(),
-    dependsOnDisplay: rawDepends.slice(),
+    dependsOn: rawDeps.slice(),
+    dependsOnDisplay: rawDisplay.slice(),
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0
