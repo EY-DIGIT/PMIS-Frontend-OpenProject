@@ -92,6 +92,9 @@ export function useSessionManager() {
       if (expiredRef.current) return;
       // Bail if we've been logged out by another flow (e.g. manual sign-out).
       if (!tokenStore.get()) return;
+      // No refresh token = nothing this tick can do. Skip so we don't keep
+      // re-firing /refresh after a 401 has already cleared the credential.
+      if (!tokenStore.getRefresh()) return;
 
       const now = Date.now();
       const idleFor = now - readLastActivity();

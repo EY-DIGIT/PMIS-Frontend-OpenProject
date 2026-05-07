@@ -128,6 +128,15 @@ export function refreshAccessToken() {
         headers,
         body: JSON.stringify({ refresh_token: refresh }),
       });
+      if (res.status === 401) {
+        // Server says this refresh credential is dead. Hanging on to it just
+        // guarantees the next tick fires another doomed /refresh.
+        const body = await res.text().catch(() => '');
+        // eslint-disable-next-line no-console
+        console.warn('[auth] /refresh rejected with 401, clearing tokens:', body);
+        tokenStore.clear();
+        return null;
+      }
       if (!res.ok) return null;
       const payload = await res.json().catch(() => null);
       const data = payload?.data ?? payload ?? {};
