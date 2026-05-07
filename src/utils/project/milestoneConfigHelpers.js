@@ -50,20 +50,20 @@ export function clearPersistedOnboardingDraft() {
 }
 
 /* ─── Date conversions ───
-   The user picks YYYY-MM-DD in an IST-rendered <input type="date">. Anchor
-   that date to IST so the resulting ISO timestamp truncates to the same
-   day on the backend (which runs in IST). Sending UTC midnight/end-of-day
-   shifts end-dates forward by one day in IST and is the cause of the
-   "save 6 May, DB stores 7 May" bug. */
+   The user picks YYYY-MM-DD in an IST-rendered <input type="date">. Send
+   the same date with an explicit IST offset — keeping the offset visible
+   in the payload (instead of rolling forward to a UTC `Z` instant) means
+   what the user picked is exactly what shows up on the wire and what the
+   backend stores. */
 const IST_OFFSET = "+05:30";
 export function toMilestoneIsoStart(d) {
   if (!d) return null;
-  return new Date(`${d}T00:00:00${IST_OFFSET}`).toISOString();
+  return `${d}T00:00:00${IST_OFFSET}`;
 }
 
 export function toMilestoneIsoEnd(d) {
   if (!d) return null;
-  return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
+  return `${d}T23:59:59${IST_OFFSET}`;
 }
 
 /* The backend stores IST midnight as a UTC timestamp ending +00:00 — e.g.

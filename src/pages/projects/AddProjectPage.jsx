@@ -64,15 +64,16 @@ function normalizeFormShape(maybeDraft) {
   };
 }
 
-/* IST-anchored so the date truncates to the same day on the backend. */
+/* Send the user's picked date with an explicit IST offset so the payload
+   shows exactly the date they chose (no UTC roll-back). */
 const IST_OFFSET = "+05:30";
 function toIsoStart(d) {
   if (!d) return null;
-  return new Date(`${d}T00:00:00${IST_OFFSET}`).toISOString();
+  return `${d}T00:00:00${IST_OFFSET}`;
 }
 function toIsoEnd(d) {
   if (!d) return null;
-  return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
+  return `${d}T23:59:59${IST_OFFSET}`;
 }
 
 function extractVendors(raw) {

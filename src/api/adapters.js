@@ -1,7 +1,7 @@
 export function toApiDate(ymd) {
   if (!ymd) return null;
   if (typeof ymd === 'string' && ymd.includes('T')) return ymd;
-  return `${ymd}T09:00:00Z`;
+  return `${ymd}T00:00:00+05:30`;
 }
 
 export function fromApiDate(iso) {

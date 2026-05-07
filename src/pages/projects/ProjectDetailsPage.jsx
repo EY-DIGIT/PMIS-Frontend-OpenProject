@@ -29,27 +29,18 @@ function stripTime(iso) {
   return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
 }
 
-/* Anchor the date to IST so the timestamp truncates to the same day on
-   the backend (running in IST). UTC anchoring shifts end-dates forward
-   by one day. */
+/* Send the user's picked date with an explicit IST offset so the payload
+   shows exactly the date they chose (no UTC roll-back). */
 const IST_OFFSET = "+05:30";
 
 function toIsoDate(d) {
   if (!d) return null;
-  try {
-    return new Date(`${d}T23:59:59${IST_OFFSET}`).toISOString();
-  } catch (e) {
-    return null;
-  }
+  return `${d}T23:59:59${IST_OFFSET}`;
 }
 
 function toIsoStartDate(d) {
   if (!d) return null;
-  try {
-    return new Date(`${d}T00:00:00${IST_OFFSET}`).toISOString();
-  } catch (e) {
-    return null;
-  }
+  return `${d}T00:00:00${IST_OFFSET}`;
 }
 
 function vendorName(v) {
