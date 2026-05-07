@@ -42,6 +42,15 @@ export const ENDPOINTS = {
     list: '/api/v3/divisions',
   },
 
+  master: {
+    divisions: {
+      list: '/api/v3/master/divisions',
+      create: '/api/v3/master/divisions/create',
+      byCode: (code) => `/api/v3/master/divisions/${enc(code)}`,
+      restore: (code) => `/api/v3/master/divisions/${enc(code)}/restore`,
+    },
+  },
+
   resourceTypes: {
     list: '/api/v3/resource_types',
   },

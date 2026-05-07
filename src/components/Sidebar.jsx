@@ -42,6 +42,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const masterActive = isUnder("/master");
   const vendorDataActive = isUnder("/master/vendors");
   const userDataActive = isUnder("/master/users");
+  const divisionDataActive = isUnder("/master/divisions");
 
   const addVendorActive = isUnder("/vendors/new");
   const searchVendorActive = isUnder("/vendors") && !addVendorActive;
@@ -132,6 +133,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           >
             <FiUsers size={ICON_SIZE} />
             <span className="pmis-text">User Data</span>
+          </div>
+          <div
+            className={divisionDataActive ? "active" : ""}
+            onClick={() => navigate("/master/divisions")}
+          >
+            <FiGrid size={ICON_SIZE} />
+            <span className="pmis-text">Divisions</span>
           </div>
         </div>
 
