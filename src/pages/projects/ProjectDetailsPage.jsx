@@ -622,7 +622,9 @@ export default function ProjectDetailsPage() {
       }
 
       uiStore.hideLoader();
-      uiStore.showMessage("Project published successfully");
+      uiStore.showMessage("Project published successfully", () =>
+        navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
+      );
     };
 
     if (getToken()) {
