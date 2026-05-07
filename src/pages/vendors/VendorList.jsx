@@ -187,14 +187,14 @@ export default function VendorList() {
           <table className="uidai-pmis-table uidai-pmis-table-compact">
             <thead>
               <tr>
-                <th>Vendor ID</th><th>Vendor Name</th><th>Type</th><th>Status</th>
+                <th>Vendor ID</th><th>Vendor Name</th><th>Status</th>
                 <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={9} style={{ textAlign: 'center', padding: 16 }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 16 }}>
                     Loading vendors...
                   </td>
                 </tr>
@@ -209,7 +209,6 @@ export default function VendorList() {
                       {v.vendorName}
                     </div>
                   </td>
-                  <td>{v.vendorType}</td>
                   <td>
                     <span className={`uidai-pmis-badge ${v.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>
                       {v.status}
@@ -246,7 +245,7 @@ export default function VendorList() {
               ))}
               {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={9}>No matching vendors found.</td>
+                  <td colSpan={8}>No matching vendors found.</td>
                 </tr>
               )}
             </tbody>

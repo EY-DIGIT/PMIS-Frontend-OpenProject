@@ -155,14 +155,6 @@ export default function VendorForm() {
             />
             {errors.name && <div className="uidai-pmis-field-error">{errors.name}</div>}
           </div>
-          <div className="uidai-pmis-field">
-            <label>Vendor Type <span className="uidai-pmis-required">*</span></label>
-            <select value={type} onChange={(e) => setType(e.target.value)}>
-              {VENDOR_TYPES.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </div>
           <div className={errClass('contact')}>
             <label>Contact Person <span className="uidai-pmis-required">*</span></label>
             <input
