@@ -177,7 +177,7 @@ export default function UserList() {
           <table className="uidai-pmis-table uidai-pmis-table-compact">
             <thead>
               <tr>
-                <th>User ID</th><th>Full Name</th><th>Employee ID</th><th>Email</th>
+                <th>User ID</th><th>Full Name</th><th>Username</th><th>Email</th>
                 <th>Role</th><th>Associated Vendor</th><th>Division</th>
                 <th>Project Mapping</th><th>Status</th><th>Action</th>
               </tr>

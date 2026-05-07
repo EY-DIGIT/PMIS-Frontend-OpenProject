@@ -123,7 +123,7 @@ export default function UserForm() {
   const validate = () => {
     const errs = {};
     if (!fullName.trim()) errs.fullName = 'Full Name is required';
-    if (!employeeId.trim()) errs.employeeId = 'Employee ID is required';
+    if (!employeeId.trim()) errs.employeeId = 'Username is required';
     if (!email.trim()) errs.email = 'Email is required';
     else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
       errs.email = 'Enter a valid email (e.g. name@example.com)';
@@ -218,9 +218,9 @@ export default function UserForm() {
             {errors.fullName && <div className="uidai-pmis-field-error">{errors.fullName}</div>}
           </div>
           <div className={errClass('employeeId')}>
-            <label>Employee ID <span className="uidai-pmis-required">*</span></label>
+            <label>Username <span className="uidai-pmis-required">*</span></label>
             <input
-              placeholder="e.g. EMP001"
+              placeholder="e.g. ravikumar"
               value={employeeId}
               onChange={(e) => { setEmployeeId(e.target.value); clearFieldError('employeeId'); }}
             />
@@ -296,7 +296,7 @@ export default function UserForm() {
             {errors.password && <div className="uidai-pmis-field-error">{errors.password}</div>}
           </div>
           <div className={errClass('vendorId')}>
-            <label>Associated Vendor Name <span className="uidai-pmis-required">*</span></label>
+            <label>Organization <span className="uidai-pmis-required">*</span></label>
             <select
               value={vendorId}
               onChange={(e) => { setVendorId(e.target.value); clearFieldError('vendorId'); }}

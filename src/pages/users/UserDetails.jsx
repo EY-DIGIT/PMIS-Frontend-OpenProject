@@ -253,7 +253,7 @@ export default function UserDetails() {
             <input value={fullName} onChange={(e) => setFullName(e.target.value)} disabled={!editing} />
           </div>
           <div className="uidai-pmis-field">
-            <label>Employee ID <span className="uidai-pmis-required">*</span></label>
+            <label>Username <span className="uidai-pmis-required">*</span></label>
             <input value={user.employeeId} disabled />
           </div>
           <div className="uidai-pmis-field">
@@ -267,7 +267,7 @@ export default function UserDetails() {
             </select>
           </div>
           <div className="uidai-pmis-field">
-            <label>Associated Vendor Name <span className="uidai-pmis-required">*</span></label>
+            <label>Organization <span className="uidai-pmis-required">*</span></label>
             <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} disabled={!editing}>
               <option value="" disabled>Select Vendor</option>
               {vendors.map((v) => (
