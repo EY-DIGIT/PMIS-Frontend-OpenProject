@@ -78,6 +78,18 @@ function groupByDivision(projects) {
   return groups;
 }
 
+function projectMatchesDrill(p, view, key) {
+  if (!key) return true;
+  if (view === "vendor") {
+    const vs = Array.isArray(p?.vendors) ? p.vendors : [];
+    if (!vs.length) return key === "(none)";
+    return vs.some((v) => (typeof v === "string" ? v : v?.name) === key);
+  }
+  // division view + project view both group by owner
+  const owner = (p?.owner || "").toString().toLowerCase() || "(unassigned)";
+  return owner === key;
+}
+
 function divisionLabel(code) {
   if (!code) return "—";
   const c = String(code).toLowerCase();
@@ -94,6 +106,12 @@ export default function Dashboard() {
   const [view, setView] = useState("project");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  /* Drill state — null at the top level, or {key} when the user has
+     clicked a vendor / division / owner row to scope the dashboard
+     down to that group's projects. The view tab decides what `key`
+     means: vendor name on vendor view, division code on division
+     view, owner code on project view. */
+  const [drill, setDrill] = useState(null);
 
   useEffect(() => { hydrateProjects(); }, []);
 
@@ -108,9 +126,17 @@ export default function Dashboard() {
   function handleReset() {
     setView("project");
     setSearch("");
+    setDrill(null);
   }
 
-  const filtered = useMemo(() => {
+  /* Switching the view tab discards any active drill — drill keys are
+     view-specific (vendor name vs division code vs owner). */
+  function handleViewChange(next) {
+    setView(next);
+    setDrill(null);
+  }
+
+  const searchFiltered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return projects;
     return projects.filter((p) =>
@@ -119,6 +145,13 @@ export default function Dashboard() {
         .some((s) => String(s).toLowerCase().includes(q))
     );
   }, [projects, search]);
+
+  /* The dataset every chart / table downstream consumes. When drilled,
+     scope to the projects whose group key matches the drill key. */
+  const filtered = useMemo(() => {
+    if (!drill) return searchFiltered;
+    return searchFiltered.filter((p) => projectMatchesDrill(p, view, drill.key));
+  }, [searchFiltered, drill, view]);
 
   const totals = useMemo(() => aggregate(filtered), [filtered]);
 
@@ -157,13 +190,17 @@ export default function Dashboard() {
   }, [view, totals, filtered]);
 
   const breadcrumb = useMemo(() => {
-    const labels = {
+    const top = {
       project: "All Projects",
       vendor: "All Vendors",
       division: "All Divisions/Owners",
-    };
-    return [labels[view] || "All"];
-  }, [view]);
+    }[view] || "All";
+    if (!drill) return [{ label: top, current: true }];
+    return [
+      { label: top, current: false, onClick: () => setDrill(null) },
+      { label: prettyKey(view, drill.key), current: true },
+    ];
+  }, [view, drill]);
 
   return (
     <div className="dashboard-wrap">
@@ -194,7 +231,7 @@ export default function Dashboard() {
             data-view={t.id}
             role="tab"
             aria-selected={view === t.id}
-            onClick={() => setView(t.id)}
+            onClick={() => handleViewChange(t.id)}
           >
             <span className="tab-ico" aria-hidden="true">{t.icon}</span> {t.label}
           </button>
@@ -222,8 +259,17 @@ export default function Dashboard() {
           </button>
         </div>
         <div className="dash-breadcrumb">
-          {breadcrumb.map((label, i) => (
-            <span key={i} className="dash-bc-current">{label}</span>
+          {breadcrumb.map((bc, i) => (
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {i > 0 && <span className="dash-bc-sep">›</span>}
+              {bc.current ? (
+                <span className="dash-bc-current">{bc.label}</span>
+              ) : (
+                <button type="button" className="dash-bc-link" onClick={bc.onClick}>
+                  {bc.label}
+                </button>
+              )}
+            </span>
           ))}
         </div>
       </div>
@@ -275,7 +321,7 @@ export default function Dashboard() {
               : "Owner Comparison"}
             <span className="dash-card-sub">total projects per group</span>
           </div>
-          <GroupComparison view={view} projects={filtered} />
+          <GroupComparison view={view} projects={filtered} drill={drill} onDrill={setDrill} />
         </div>
       </div>
 
@@ -294,7 +340,7 @@ export default function Dashboard() {
           {view === "project" ? "Projects" : view === "vendor" ? "Vendors" : "Divisions / Owners"}
           <span className="dash-card-sub">{filtered.length} item{filtered.length === 1 ? "" : "s"}</span>
         </div>
-        <DashboardGroupTable view={view} projects={filtered} />
+        <DashboardGroupTable view={view} projects={filtered} drill={drill} onDrill={setDrill} />
       </div>
     </div>
   );
@@ -346,7 +392,7 @@ function TopDelaysList({ projects }) {
 }
 
 /* ─── Group Comparison ─── */
-function GroupComparison({ view, projects }) {
+function GroupComparison({ view, projects, drill, onDrill }) {
   const groups = useMemoGroups(view, projects);
   const rows = useMemo(() => {
     const arr = Array.from(groups.entries()).map(([key, ps]) => {
@@ -360,10 +406,18 @@ function GroupComparison({ view, projects }) {
   if (!rows.length) {
     return <div className="dash-empty" style={{ padding: 24 }}>No groups to compare.</div>;
   }
+  // Top-level (no drill) on vendor/division views: each row is clickable
+  // to drill into that group. Project view has only one group key (owner)
+  // so drilling here is the same as the table — keep it clickable too.
+  const clickable = !drill;
   return (
     <div className="dash-groups">
       {rows.map(({ key, name, total, counts }) => (
-        <div key={key} className="dash-group-row">
+        <div
+          key={key}
+          className={`dash-group-row${clickable ? " dash-row-clickable" : ""}`}
+          onClick={clickable ? () => onDrill && onDrill({ key }) : undefined}
+        >
           <div className="dash-group-name" title={name}>{name}</div>
           <div className="dash-group-stack">
             {STATUS_ORDER.map((s) => {
@@ -572,8 +626,9 @@ function prettyKey(view, key) {
   return divisionLabel(key);
 }
 
-function DashboardGroupTable({ view, projects }) {
-  if (view === "project") {
+function DashboardGroupTable({ view, projects, drill, onDrill }) {
+  // Project view OR a drilled-in vendor/division view: show project rows.
+  if (view === "project" || drill) {
     return (
       <table className="dash-table">
         <thead>
@@ -612,7 +667,7 @@ function DashboardGroupTable({ view, projects }) {
           ) : Array.from(groups.entries()).map(([name, ps]) => {
             const a = aggregate(ps);
             return (
-              <tr key={name}>
+              <tr key={name} className="dash-row-clickable" onClick={() => onDrill && onDrill({ key: name })}>
                 <td>{name === "(none)" ? <em style={{ color:"#9aa6bd" }}>(unassigned)</em> : name}</td>
                 <td>{ps.length}</td>
                 <td>{a.completed}</td>
@@ -637,7 +692,7 @@ function DashboardGroupTable({ view, projects }) {
         ) : Array.from(groups.entries()).map(([code, ps]) => {
           const a = aggregate(ps);
           return (
-            <tr key={code}>
+            <tr key={code} className="dash-row-clickable" onClick={() => onDrill && onDrill({ key: code })}>
               <td>{divisionLabel(code)}</td>
               <td>{ps.length}</td>
               <td>{a.completed}</td>

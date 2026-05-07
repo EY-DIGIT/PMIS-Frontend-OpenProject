@@ -508,6 +508,14 @@
   color: #66788f;
 }
 
+/* Clickable group rows (drill-down trigger) */
+.dash-row-clickable {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.dash-row-clickable:hover { background: #eef6fb; }
+.dash-row-clickable:hover td { background: #eef6fb; }
+
 /* Status pill */
 .dash-pill {
   display: inline-block;
