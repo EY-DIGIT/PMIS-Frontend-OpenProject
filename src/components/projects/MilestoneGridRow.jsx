@@ -158,14 +158,24 @@ export default function MilestoneGridRow({
         {formatDateDisplay(node.endDate)}
       </td>
       <td className="uidai-msgrid__cell" style={{textAlign:"center"}}>
-        {kind === "milestone" && node.vendor ? (
-          <span className="uidai-vendor-tag">{node.vendor}</span>
-        ) : (
-          // <span className="uidai-dep-empty">—</span>
-          <>
-          
-          </>
-        )}
+        {(() => {
+          if (kind === "milestone" && node.vendor) {
+            return <span className="uidai-vendor-tag">{node.vendor}</span>;
+          }
+          if (kind === "activity" && node.vendorId) {
+            const list = safeArray(project && project.vendors);
+            const found = list.find(
+              (v) =>
+                v &&
+                (v.id === node.vendorId ||
+                  v.vendorId === node.vendorId ||
+                  v.uuid === node.vendorId)
+            );
+            const name = found ? (found.vendorName || found.name || "") : "";
+            if (name) return <span className="uidai-vendor-tag">{name}</span>;
+          }
+          return null;
+        })()}
       </td>
       <td className="uidai-msgrid__cell" style={{textAlign:"center"}}>
         {deps.length === 0 ? (
