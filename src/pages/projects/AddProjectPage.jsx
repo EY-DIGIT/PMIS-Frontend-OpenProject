@@ -395,7 +395,7 @@ export default function AddProjectPage() {
 
           <div className="uidai-field">
             <label className="uidai-field__label">Status</label>
-            <input className="uidai-input" value="DRAFT" disabled />
+            <input className="uidai-input" value="NEW" disabled />
           </div>
 
           <div className={errClass("owner")}>
