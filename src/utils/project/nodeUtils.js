@@ -241,12 +241,22 @@ export function addAudit(project, action, before, after) {
   });
 }
 
-/* ─────────────── Display maps & deps ─────────────── */
+/* Build a lookup that maps every identifier a node could be referenced
+   by (local uid, server apiId, server-assigned WBS / displayCode) to
+   {id, name, kind}. This way the table can resolve a dependency
+   regardless of whether the value in `dependsOn` has been translated
+   from UUID -> local uid yet. The `id` field on the result is always
+   the WBS/displayCode (e.g. "M1", "A1.2") that gets rendered in the
+   Depends On chip. */
 export function buildDepDisplayMap(project) {
   const map = {};
   function walk(list, kind) {
     safeArray(list).forEach((n) => {
-      map[n.uid] = { id: n.id || "", name: n.name || "", kind };
+      const entry = { id: n.id || n.serverDisplayCode || "", name: n.name || "", kind };
+      if (n.uid) map[n.uid] = entry;
+      if (n.apiId) map[n.apiId] = entry;
+      if (n.serverDisplayCode) map[n.serverDisplayCode] = entry;
+      if (n.id && n.id !== n.uid) map[n.id] = entry;
       if (kind === "milestone") walk(n.activities, "activity");
       else if (kind === "activity") walk(n.tasks, "task");
       else walk(n.subtasks, "subtask");

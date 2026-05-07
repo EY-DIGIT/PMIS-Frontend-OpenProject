@@ -38,15 +38,22 @@ export default function MilestoneGridRow({
       ? (rolled ? "All children completed" : "Completed")
       : "Not Completed";
 
-  /* Prefer the pre-resolved display IDs the loader stashes on the node
-     (M1 / A1.2 / T1.1.3 / …). Fall back to mapping local UIDs through
-     `depMap` so freshly-added (not-yet-saved) deps still render. */
-  const directDisplay = safeArray(node.dependsOnDisplay);
-  const deps = directDisplay.length
-    ? directDisplay.map((displayId) => ({ id: displayId, name: "" }))
-    : safeArray(node.dependsOn)
-        .map((uid) => depMap[uid])
-        .filter(Boolean);
+  /* Render Depends On from the loaded tree's displayCode whenever
+     possible. depMap is now keyed by uid / apiId / displayCode so any
+     identifier the API or the picker happens to leave on dependsOn
+     resolves to the target node's WBS code. Falls back to whatever
+     dependsOnDisplay the API put on the row. */
+  const fromDependsOn = safeArray(node.dependsOn)
+    .map((v) => {
+      const hit = depMap[v];
+      if (hit && hit.id) return { id: hit.id, name: hit.name };
+      // Last resort: if the value itself looks like a display code
+      // ("M1" / "A1.2" / etc.) just render it.
+      return typeof v === "string" && /^[MATS][\d.]*$/.test(v) ? { id: v, name: "" } : null;
+    })
+    .filter(Boolean);
+  const fromDisplay = safeArray(node.dependsOnDisplay).map((id) => ({ id, name: "" }));
+  const deps = fromDependsOn.length ? fromDependsOn : fromDisplay;
 
   const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
 
