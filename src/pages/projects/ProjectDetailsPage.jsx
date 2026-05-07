@@ -707,7 +707,7 @@ export default function ProjectDetailsPage() {
             disabled={editing}
             onClick={() => setDeleteOpen(true)}
           >
-            Remove Project
+            Remove
           </button>
           <button className="uidai-btn uidai-btn--cancel" onClick={() => navigate("/projects")}>
             Back

@@ -1,5 +1,5 @@
 // ─── Sidebar ──────────────────────────────────────────────────
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   FiGrid,
@@ -27,8 +27,38 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const [umOpen, setUmOpen] = useState(false);
 
   // Helper: is the current URL inside a given section?
-  const isActive = (prefix) =>
+  const isUnder = (prefix) =>
     location.pathname === prefix || location.pathname.startsWith(prefix + "/");
+  const isExact = (path) => location.pathname === path;
+
+  // Active flags. "Search" rows share their prefix with the matching "Add"
+  // page (e.g. /projects vs /projects/add) — so we explicitly exclude the
+  // Add path from Search's match.
+  const dashActive = isExact("/dashboard");
+  const addProjectActive = isUnder("/projects/add");
+  const searchProjectActive = isUnder("/projects") && !addProjectActive;
+  const pmActive = addProjectActive || searchProjectActive;
+
+  const masterActive = isUnder("/master");
+  const vendorDataActive = isUnder("/master/vendors");
+  const userDataActive = isUnder("/master/users");
+
+  const addVendorActive = isUnder("/vendors/new");
+  const searchVendorActive = isUnder("/vendors") && !addVendorActive;
+  const vmActive = addVendorActive || searchVendorActive;
+
+  const addUserActive = isUnder("/users/new");
+  const searchUserActive = isUnder("/users") && !addUserActive;
+  const umActive = addUserActive || searchUserActive;
+
+  // Auto-expand the section that matches the current route so the active
+  // child is visible without the user having to click the parent first.
+  useEffect(() => {
+    if (pmActive) setPmOpen(true);
+    if (masterActive) setMdOpen(true);
+    if (vmActive) setVmOpen(true);
+    if (umActive) setUmOpen(true);
+  }, [pmActive, masterActive, vmActive, umActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -38,7 +68,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
       <div className="pmis-menu">
         {/* Dashboard */}
         <a
-          className={location.pathname === "/dashboard" ? "active" : ""}
+          className={dashActive ? "active" : ""}
           onClick={() => navigate("/dashboard")}
         >
           <FiGrid size={ICON_SIZE} />
@@ -47,7 +77,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
 
         {/* Project Management */}
         <a
-          className={isActive("/projects") ? "active" : ""}
+          className={pmActive ? "active" : ""}
           onClick={() => setPmOpen(!pmOpen)}
         >
           <FiFolder size={ICON_SIZE} />
@@ -57,11 +87,17 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${pmOpen ? " open" : ""}`}>
-          <div onClick={() => navigate("/projects/add")}>
+          <div
+            className={addProjectActive ? "active" : ""}
+            onClick={() => navigate("/projects/add")}
+          >
             <FiPlus size={ICON_SIZE} />
             <span className="pmis-text">Add Project</span>
           </div>
-          <div onClick={() => navigate("/projects")}>
+          <div
+            className={searchProjectActive ? "active" : ""}
+            onClick={() => navigate("/projects")}
+          >
             <FiSearch size={ICON_SIZE} />
             <span className="pmis-text">Search Project</span>
           </div>
@@ -69,7 +105,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
 
         {/* Master Data */}
         <a
-          className={isActive("/master") ? "active" : ""}
+          className={masterActive ? "active" : ""}
           onClick={() => {
             const next = !mdOpen;
             setMdOpen(next);
@@ -83,11 +119,17 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${mdOpen ? " open" : ""}`}>
-          <div onClick={() => navigate("/master/vendors")}>
+          <div
+            className={vendorDataActive ? "active" : ""}
+            onClick={() => navigate("/master/vendors")}
+          >
             <FiBriefcase size={ICON_SIZE} />
             <span className="pmis-text">Vendor Data</span>
           </div>
-          <div onClick={() => navigate("/master/users")}>
+          <div
+            className={userDataActive ? "active" : ""}
+            onClick={() => navigate("/master/users")}
+          >
             <FiUsers size={ICON_SIZE} />
             <span className="pmis-text">User Data</span>
           </div>
@@ -95,7 +137,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
 
         {/* Vendor Management */}
         <a
-          className={isActive("/vendors") ? "active" : ""}
+          className={vmActive ? "active" : ""}
           onClick={() => setVmOpen(!vmOpen)}
         >
           <FiBriefcase size={ICON_SIZE} />
@@ -105,11 +147,17 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${vmOpen ? " open" : ""}`}>
-          <div onClick={() => navigate("/vendors/new")}>
+          <div
+            className={addVendorActive ? "active" : ""}
+            onClick={() => navigate("/vendors/new")}
+          >
             <FiPlus size={ICON_SIZE} />
             <span className="pmis-text">Add Vendor</span>
           </div>
-          <div onClick={() => navigate("/vendors")}>
+          <div
+            className={searchVendorActive ? "active" : ""}
+            onClick={() => navigate("/vendors")}
+          >
             <FiSearch size={ICON_SIZE} />
             <span className="pmis-text">Search Vendor</span>
           </div>
@@ -117,7 +165,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
 
         {/* User Management */}
         <a
-          className={isActive("/users") ? "active" : ""}
+          className={umActive ? "active" : ""}
           onClick={() => setUmOpen(!umOpen)}
         >
           <FiUser size={ICON_SIZE} />
@@ -127,11 +175,17 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${umOpen ? " open" : ""}`}>
-          <div onClick={() => navigate("/users/new")}>
+          <div
+            className={addUserActive ? "active" : ""}
+            onClick={() => navigate("/users/new")}
+          >
             <FiPlus size={ICON_SIZE} />
             <span className="pmis-text">Add User</span>
           </div>
-          <div onClick={() => navigate("/users")}>
+          <div
+            className={searchUserActive ? "active" : ""}
+            onClick={() => navigate("/users")}
+          >
             <FiSearch size={ICON_SIZE} />
             <span className="pmis-text">Search User</span>
           </div>

@@ -313,7 +313,8 @@ body {
   background: #eef6fb;
 }
 
-.pmis-menu a.active {
+.pmis-menu a.active,
+.pmis-submenu div.active {
   background: linear-gradient(90deg, var(--navy), var(--cyan));
   color: #fff;
 }
