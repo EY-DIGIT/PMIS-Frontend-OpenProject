@@ -301,7 +301,7 @@ export default function UserForm() {
               value={vendorId}
               onChange={(e) => { setVendorId(e.target.value); clearFieldError('vendorId'); }}
             >
-              <option value="" disabled>Select Vendor</option>
+              <option value="" disabled>Select Organization</option>
               {vendors.map((v) => (
                 <option key={v.vendorId} value={v.vendorId}>{v.vendorName}</option>
               ))}

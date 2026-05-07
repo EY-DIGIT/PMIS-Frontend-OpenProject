@@ -269,7 +269,7 @@ export default function UserDetails() {
           <div className="uidai-pmis-field">
             <label>Organization <span className="uidai-pmis-required">*</span></label>
             <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} disabled={!editing}>
-              <option value="" disabled>Select Vendor</option>
+              <option value="" disabled>Select Organization</option>
               {vendors.map((v) => (
                 <option key={v.vendorId} value={v.vendorId}>{v.vendorName}</option>
               ))}
