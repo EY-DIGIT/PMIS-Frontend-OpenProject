@@ -280,6 +280,8 @@ export default function AddProjectPage() {
     if (!form.endDate) errs.endDate = "Expected End Date is required";
     if (form.startDate && form.endDate && form.endDate < form.startDate)
       errs.endDate = "Expected End Date cannot be earlier than Expected Start Date";
+    if (safeArray(form.vendors).length === 0)
+      errs.vendors = "At least one Associated Vendor is required";
     return errs;
   }
 
@@ -498,7 +500,9 @@ export default function AddProjectPage() {
           </div>
 
           <div className="uidai-field uidai-grid__full">
-            <label className="uidai-field__label">Vendors</label>
+            <label className="uidai-field__label">
+              Vendors <span className="uidai-required-project">*</span>
+            </label>
             <div className="uidai-hint" style={{ marginBottom: 8 }}>
               {vendorsLoading
                 ? "Loading vendors..."
@@ -512,6 +516,9 @@ export default function AddProjectPage() {
               onChange={(next) => update({ vendors: next })}
               label="vendor"
             />
+            {errors.vendors && (
+              <div className="uidai-field-error">{errors.vendors}</div>
+            )}
           </div>
         </div>
         <p style={{ color: "red" }}>{errorCreated}</p>
