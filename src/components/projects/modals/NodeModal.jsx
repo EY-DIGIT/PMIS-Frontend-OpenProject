@@ -74,6 +74,11 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     type: inheritFromParent
       ? parentNode.type
       : n.type || (kind === "milestone" ? "" : "Standard Type"),
+    // Doc 38: activity-only fields. Backend stores them as ownerDivision /
+    // vendorId / concernedDivision and accepts them on PATCH only.
+    ownerDivision: n.ownerDivision || "",
+    vendorId: n.vendorId || "",
+    concernedDivision: n.concernedDivision || "",
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
     resourceEntryType: n.resourceEntryType || "details",
@@ -202,10 +207,15 @@ export default function NodeModal({
   const isAdd = mode === "add";
   const showStatus = !isAdd;
   const showActuals = !isAdd && kind !== "milestone";
-  const showType = kind !== "milestone";
-  // PMIS_Screens design: vendor lives on activities, not milestones.
-  // Backend currently still accepts vendors[] on milestone-create but the
-  // FE no longer surfaces or sends it.
+  // Doc 38: activity / task / subtask no longer have a `type` at the API
+  // level (the four /standard, /transactional, /resource/* variants were
+  // collapsed into a single create endpoint). The Type select is hidden;
+  // ResourceSection is also hidden (kept in form state for backwards
+  // compat with stale data, but never sent).
+  const showType = false;
+  const showResourceSection = false;
+  // Activity-only fields per design + Doc 38 backend support.
+  const showActivityFields = kind === "activity";
   const showVendor = false;
   const hasKids = node ? getChildren(node).length > 0 : false;
   const effActuals = node ? computeEffectiveActuals(node) : { start: "", end: "" };
@@ -483,33 +493,66 @@ export default function NodeModal({
             </div>
           )}
 
-          {showVendor && (
-            <div className="uidai-field uidai-grid__full">
-              <label className="uidai-field__label">
-                Vendor{" "}
-                <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
-                  (associated with this milestone)
-                </span>
-              </label>
-              <select
-                className="uidai-select"
-                value={form.vendor}
-                onChange={(e) => updateField({ vendor: e.target.value })}
-                disabled={dis}
-              >
-                <option value="">— None —</option>
-                {projectVendors.map((v) => {
-                  const name = vendorName(v);
-                  const key = vendorKey(v);
-                  if (!name) return null;
-                  return (
-                    <option key={key} value={name}>
-                      {name}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
+          {showActivityFields && (
+            <>
+              <div className="uidai-field">
+                <label className="uidai-field__label">
+                  Owner Division <span className="uidai-required-project">*</span>
+                </label>
+                <select
+                  className="uidai-select"
+                  value={form.ownerDivision}
+                  onChange={(e) => updateField({ ownerDivision: e.target.value })}
+                  disabled={dis}
+                >
+                  <option value="">Select Owner Division</option>
+                  {safeArray(divisions).map((d) => (
+                    <option key={d.code} value={d.code}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="uidai-field">
+                <label className="uidai-field__label">Vendor</label>
+                <select
+                  className="uidai-select"
+                  value={form.vendorId}
+                  onChange={(e) => updateField({ vendorId: e.target.value })}
+                  disabled={dis}
+                >
+                  <option value="">— None —</option>
+                  {projectVendors.map((v) => {
+                    const id = typeof v === "object" ? (v.id || v.uuid || "") : "";
+                    const name = vendorName(v);
+                    if (!id || !name) return null;
+                    return <option key={id} value={id}>{name}</option>;
+                  })}
+                </select>
+                {projectVendors.length === 0 && (
+                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                    No vendors are associated with this project yet. Add them in Project Details &rarr; Associated Vendors.
+                  </div>
+                )}
+              </div>
+              <div className="uidai-field uidai-grid__full">
+                <label className="uidai-field__label">
+                  Concerned Division{" "}
+                  <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
+                    (the division whose consent is required for this activity)
+                  </span>
+                </label>
+                <select
+                  className="uidai-select"
+                  value={form.concernedDivision}
+                  onChange={(e) => updateField({ concernedDivision: e.target.value })}
+                  disabled={dis}
+                >
+                  <option value="">— None —</option>
+                  {safeArray(divisions).map((d) => (
+                    <option key={d.code} value={d.code}>{d.label}</option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
 
           {showDepsSection && (
@@ -527,7 +570,7 @@ export default function NodeModal({
             </div>
           )}
 
-          {showType && form.type === "Resource Type" && (
+          {showResourceSection && form.type === "Resource Type" && (
             <ResourceSection
               form={form}
               updateField={updateField}

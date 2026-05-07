@@ -430,8 +430,9 @@ export async function loadActivityById(activityApiId) {
 }
 
 /* Doc 38: activity-create body is minimal (just name/description/dates).
-   status / dependsOn / actuals / ownerDivision / vendorId / concernedDivision
-   all flow through PATCH after the row exists. */
+   The richer fields (ownerDivision / vendorId / concernedDivision / status /
+   dependsOn / actuals) are sent via a follow-up PATCH so the user's add-modal
+   inputs persist on first save. */
 export async function createActivityApi(milestoneApiId, formData, project) {
   const created = await apiSend(
     "POST",
@@ -443,28 +444,56 @@ export async function createActivityApi(milestoneApiId, formData, project) {
       endDate: toMilestoneIsoEnd(formData.endDate)
     }
   );
+  const newId = extractNewEntityId(created);
+  if (newId && hasActivityRichFields(formData, project)) {
+    try {
+      await apiSend(
+        "PATCH",
+        ENDPOINTS.activities.update(newId),
+        buildActivityPatchBody(project, formData)
+      );
+    } catch {
+      /* swallow — entity is created; rich-field PATCH is best-effort */
+    }
+  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.activities.comments, created, formData);
 }
 
-/* Doc 38: PATCH body excludes type/resourceMode/resource (gone from the
-   activity model). Owner/Vendor/Concerned Division are accepted but
-   only sent when present on formData. */
-export async function updateActivityApi(activityServerId, formData, project) {
-  const payload = {
+/* Returns true if any of the design-level fields the activity-create
+   endpoint doesn't accept are present on the form. Used to decide whether
+   the follow-up PATCH after create is worth firing. */
+function hasActivityRichFields(formData, project) {
+  if (formData.ownerDivision) return true;
+  if (formData.vendorId) return true;
+  if (formData.concernedDivision) return true;
+  const deps = resolveDepDisplayIds(project, formData.dependsOn);
+  if (Array.isArray(deps) && deps.length) return true;
+  if (formData.actualStartDate) return true;
+  if (formData.actualEndDate) return true;
+  return false;
+}
+
+function buildActivityPatchBody(project, formData) {
+  const body = {
     ...buildActivityLikeBase(project, formData),
     status: mapStatusForApi(formData.status || "Not Completed")
   };
   if (formData.ownerDivision !== undefined)
-    payload.ownerDivision = formData.ownerDivision || null;
+    body.ownerDivision = formData.ownerDivision || null;
   if (formData.vendorId !== undefined)
-    payload.vendorId = formData.vendorId || null;
+    body.vendorId = formData.vendorId || null;
   if (formData.concernedDivision !== undefined)
-    payload.concernedDivision = formData.concernedDivision || null;
+    body.concernedDivision = formData.concernedDivision || null;
+  return body;
+}
 
+/* Doc 38: PATCH body excludes type/resourceMode/resource (gone from the
+   activity model). Owner/Vendor/Concerned Division are accepted. */
+export async function updateActivityApi(activityServerId, formData, project) {
   const updated = await apiSend(
     "PATCH",
     ENDPOINTS.activities.update(activityServerId),
-    payload
+    buildActivityPatchBody(project, formData)
   );
   await postCommentAndAttachmentsAfterUpdate(
     ENDPOINTS.activities.comments,
