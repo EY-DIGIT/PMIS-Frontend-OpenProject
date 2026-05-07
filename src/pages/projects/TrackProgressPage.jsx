@@ -183,13 +183,6 @@ export default function TrackProgressPage() {
             </div>
             <div className="uidai-track-kpi__sub">In progress &amp; within schedule</div>
           </div>
-          <div className="uidai-track-kpi">
-            <div className="uidai-track-kpi__label">Not Started</div>
-            <div className="uidai-track-kpi__value" style={{ color: "#66788f" }}>
-              {totals.notstarted}
-            </div>
-            <div className="uidai-track-kpi__sub">Awaiting kick-off</div>
-          </div>
         </div>
 
         <div className="uidai-track-legend">
@@ -213,13 +206,6 @@ export default function TrackProgressPage() {
               style={{ background: "#fde5d9", border: "1px solid #f5bfa5" }}
             />
             Delayed
-          </span>
-          <span className="uidai-track-legend__item">
-            <span
-              className="uidai-track-legend__swatch"
-              style={{ background: "#f0f2f7", border: "1px solid #d7dde8" }}
-            />
-            Not Started
           </span>
           <span className="uidai-track-legend__item">
             <span
@@ -278,7 +264,12 @@ function TrackRow({ r }) {
   const statusKey = classifyStatus(node);
   const statusText = statusLabelFor(statusKey);
   const actuals = computeEffectiveActuals(node);
-  const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
+  const typeLabel =
+    kind === "milestone" ? "Milestone" :
+    kind === "activity" ? "Activity" :
+    kind === "task" ? "Task" :
+    kind === "subtask" ? "Sub Task" :
+    "";
   const expected =
     node.startDate || node.endDate
       ? `${formatDateDisplay(node.startDate || "-")} → ${formatDateDisplay(node.endDate || "-")}`
