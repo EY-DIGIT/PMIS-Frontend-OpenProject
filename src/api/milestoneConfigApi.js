@@ -367,7 +367,15 @@ export function resolveProjectDependsOn(project) {
           return displayIdToUid[v] ? v : (apiIdToUid[v] ? uidToDisplayId[apiIdToUid[v]] : null);
         })
         .filter(Boolean);
-      n.dependsOnDisplay = display;
+      // Trust the server-provided dependsOnDisplay (already resolved to
+      // WBS codes) when the local recomputation comes up empty — e.g.
+      // during partial / progressive loads where the dependency target
+      // isn't in the indexed tree yet. Avoids the table flashing empty.
+      if (display.length) {
+        n.dependsOnDisplay = display;
+      } else if (!Array.isArray(n.dependsOnDisplay) || n.dependsOnDisplay.length === 0) {
+        n.dependsOnDisplay = [];
+      }
       n.dependsOn = n.dependsOn
         .map((v) => {
           if (uidSet.has(v)) return v;
@@ -376,7 +384,7 @@ export function resolveProjectDependsOn(project) {
         .filter(Boolean);
     } else {
       n.dependsOn = [];
-      n.dependsOnDisplay = [];
+      if (!Array.isArray(n.dependsOnDisplay)) n.dependsOnDisplay = [];
     }
     if (n.activities) n.activities.forEach(translate);
     if (n.tasks) n.tasks.forEach(translate);
