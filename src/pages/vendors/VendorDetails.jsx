@@ -200,14 +200,6 @@ export default function VendorDetails() {
             <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing} />
           </div>
           <div className="uidai-pmis-field">
-            <label>Vendor Type <span className="uidai-pmis-required">*</span></label>
-            <select value={type} onChange={(e) => setType(e.target.value)} disabled={!editing}>
-              {VENDOR_TYPES.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div className="uidai-pmis-field">
             <label>Status <span className="uidai-pmis-required">*</span></label>
             <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={!editing}>
               <option>Active</option>
