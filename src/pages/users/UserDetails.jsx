@@ -28,6 +28,7 @@ export default function UserDetails() {
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [role, setRole] = useState(USER_ROLES[0]);
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
@@ -41,6 +42,7 @@ export default function UserDetails() {
   const seed = (u) => {
     setFullName(u?.fullName || '');
     setEmail(u?.email || '');
+    setPhone(u?.phone || '');
     setRole(u?.role || USER_ROLES[0]);
     setVendorId(u?.vendorId || '');
     setDivision(u?.division || '');
@@ -182,6 +184,7 @@ export default function UserDetails() {
           vendor_id: vendorId,
           division,
           division_other: divisionRequiresOther ? divisionOther.trim() : '',
+          phone_number: phone.trim(),
         });
         setUser(updated);
         seed(updated);
@@ -259,6 +262,28 @@ export default function UserDetails() {
           <div className="uidai-pmis-field">
             <label>Email <span className="uidai-pmis-required">*</span></label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!editing} />
+          </div>
+          <div className="uidai-pmis-field">
+            <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
+            <div className="uidai-pmis-phone-input">
+              <span className="uidai-pmis-phone-prefix" aria-hidden="true">+91</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit mobile number"
+                value={phone}
+                autoComplete="tel-national"
+                disabled={!editing}
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
+                  setPhone(cleaned);
+                }}
+                onKeyPress={(e) => {
+                  if (e.key.length === 1 && !/[0-9]/.test(e.key)) e.preventDefault();
+                }}
+              />
+            </div>
           </div>
           <div className="uidai-pmis-field">
             <label>Role <span className="uidai-pmis-required">*</span></label>

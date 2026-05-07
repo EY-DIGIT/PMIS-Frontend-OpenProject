@@ -48,6 +48,7 @@ function fromApi(u) {
     vendorName,
     division: u.division || '',
     divisionOther: u.division_other || u.divisionOther || '',
+    phone: u.phoneNumber || u.phone_number || u.phone || '',
     projectMapping,
     projectIds,
     status: u.active === false || u.status === 'inactive' ? 'Inactive' : 'Active',
