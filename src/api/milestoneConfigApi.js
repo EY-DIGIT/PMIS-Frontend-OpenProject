@@ -306,6 +306,31 @@ export async function loadProjectTree(projectId) {
   if (!project) return null;
   const milestones = Array.isArray(data.milestones) ? data.milestones : [];
   project.milestones = milestones.map(mapApiMilestoneTreeToNode);
+
+  /* Workaround: the tree endpoint omits `dependsOn` and `dependsOnDisplay`
+     on the milestone level (activities have them, milestones don't). Fetch
+     the per-milestone list separately and merge those two fields back in
+     so the Depends On column has data to render. */
+  try {
+    const flatRaw = await apiGetOrEmpty(ENDPOINTS.projects.milestones(projectId));
+    const flat = extractListElements(flatRaw);
+    if (flat.length) {
+      const byId = new Map();
+      for (const m of flat) {
+        if (m && m.id) byId.set(m.id, m);
+      }
+      for (const node of project.milestones) {
+        const src = node && node.apiId ? byId.get(node.apiId) : null;
+        if (!src) continue;
+        if (Array.isArray(src.dependsOn)) node.dependsOn = src.dependsOn.slice();
+        if (Array.isArray(src.dependsOnDisplay) && src.dependsOnDisplay.length) {
+          node.dependsOnDisplay = src.dependsOnDisplay.slice();
+        }
+      }
+    }
+  } catch {
+    /* swallow — best-effort augmentation */
+  }
   return project;
 }
 
