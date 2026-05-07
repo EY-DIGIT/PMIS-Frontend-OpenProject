@@ -55,7 +55,12 @@ export default function MilestoneGridRow({
   const fromDisplay = safeArray(node.dependsOnDisplay).map((id) => ({ id, name: "" }));
   const deps = fromDependsOn.length ? fromDependsOn : fromDisplay;
 
-  const typeLabel = kind === "milestone" ? "Milestone" : node.type || "";
+  const typeLabel =
+    kind === "milestone" ? "Milestone" :
+    kind === "activity" ? "Activity" :
+    kind === "task" ? "Task" :
+    kind === "subtask" ? "Sub Task" :
+    "";
 
   let addChildBtn = null;
   if (canMod) {
