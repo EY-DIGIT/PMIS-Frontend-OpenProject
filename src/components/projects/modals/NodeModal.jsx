@@ -690,7 +690,7 @@ export default function NodeModal({
                 </select>
                 {projectVendors.length === 0 && (
                   <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                    No vendors are associated with this project yet. Add them in Project Details &rarr; Associated Vendors.
+                    No vendors are associated with this project yet. Add them in Project Details &rarr; Organizations.
                   </div>
                 )}
               </div>

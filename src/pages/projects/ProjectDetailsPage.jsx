@@ -863,7 +863,7 @@ export default function ProjectDetailsPage() {
         </div>
 
         <div style={{ marginTop: 18 }}>
-          <h4 style={{ color: "#173e77", marginBottom: 8 }}>Associated Vendors</h4>
+          <h4 style={{ color: "#173e77", marginBottom: 8 }}>Organizations</h4>
           <ChipControl
             value={form.vendors}
             options={vendorOptions}

@@ -131,7 +131,7 @@ export default function UserForm() {
     else if (!/^\d{10}$/.test(mobile.trim()))
       errs.mobile = 'Enter a valid 10-digit mobile number';
     if (!password) errs.password = 'Temporary Password is required';
-    if (!vendorId) errs.vendorId = 'Please select an associated vendor';
+    if (!vendorId) errs.vendorId = 'Please select an Organization';
     if (!division) errs.division = 'Please select a division';
     if (divisionRequiresOther && !divisionOther.trim()) errs.divisionOther = 'Please specify the division';
     if (!Array.isArray(permissions) || permissions.length === 0)

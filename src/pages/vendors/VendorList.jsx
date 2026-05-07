@@ -116,19 +116,6 @@ export default function VendorList() {
             />
           </div>
           <div className="uidai-pmis-field">
-            <label>Type</label>
-            <select
-              className="uidai-pmis-filter-select"
-              value={filters.vendorType}
-              onChange={(e) => updateFilter('vendorType', e.target.value)}
-            >
-              <option value="">All</option>
-              {typeOptions.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-          <div className="uidai-pmis-field">
             <label>Status</label>
             <select
               className="uidai-pmis-filter-select"

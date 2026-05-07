@@ -498,7 +498,7 @@ export default function AddProjectPage() {
           </div>
 
           <div className="uidai-field uidai-grid__full">
-            <label className="uidai-field__label">Associated Vendors</label>
+            <label className="uidai-field__label">Organizations</label>
             <div className="uidai-hint" style={{ marginBottom: 8 }}>
               {vendorsLoading
                 ? "Loading vendors..."

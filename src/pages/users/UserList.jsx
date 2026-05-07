@@ -132,10 +132,10 @@ export default function UserList() {
             </select>
           </div>
           <div className="uidai-pmis-field">
-            <label>Associated Vendor</label>
+            <label>Organization</label>
             <input
               className="uidai-pmis-filter-input"
-              placeholder="Search associated vendor"
+              placeholder="Search Organization"
               value={filters.vendorName}
               onChange={(e) => updateFilter('vendorName', e.target.value)}
             />
@@ -178,7 +178,7 @@ export default function UserList() {
             <thead>
               <tr>
                 <th>User ID</th><th>Full Name</th><th>Username</th><th>Email</th>
-                <th>Role</th><th>Associated Vendor</th><th>Division</th>
+                <th>Role</th><th>Organization</th><th>Division</th>
                 <th>Project Mapping</th><th>Status</th><th>Action</th>
               </tr>
             </thead>

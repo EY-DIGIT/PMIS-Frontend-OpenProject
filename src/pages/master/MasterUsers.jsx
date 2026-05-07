@@ -21,7 +21,7 @@ export default function MasterUsers() {
             <thead>
               <tr>
                 <th>User ID</th><th>Full Name</th><th>Username</th><th>Email</th>
-                <th>Role</th><th>Associated Vendor</th><th>Division</th>
+                <th>Role</th><th>Organization</th><th>Division</th>
                 <th>Project Mapping</th><th>Status</th>
               </tr>
             </thead>
