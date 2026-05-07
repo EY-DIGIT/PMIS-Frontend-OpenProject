@@ -75,9 +75,9 @@ function PageTitle() {
         if (segments[1] === "vendors") title = "Vendor Data";
         else if (segments[1] === "users") title = "User Data";
         else title = "Master Data";
-    } else if (segments[0] === "dashboard") {
-        title = "Dashboard";
-    } else if (segments[0] === "profile") {
+    } else if (segments[0] === "dashboard" || segments[0] === "profile") {
+        // These pages render their own in-page header; leave the
+        // route-driven page title empty so the heading isn't doubled.
         title = "";
     }
 
