@@ -62,6 +62,12 @@ export default function MilestoneGridRow({
     kind === "subtask" ? "Sub Task" :
     "";
 
+  // Tasks and Sub Tasks only appear once the project is published —
+  // their + buttons are hidden entirely until then. Activities under a
+  // milestone stay always-visible because they're added during onboarding.
+  const isProjectPublished = project && project.status === "PUBLISHED";
+  const showTaskAdds = isOnboarding || isProjectPublished;
+
   let addChildBtn = null;
   if (canMod) {
     if (kind === "milestone") {
@@ -77,7 +83,7 @@ export default function MilestoneGridRow({
           + Activity
         </button>
       );
-    } else if (kind === "activity" && !isOnboarding) {
+    } else if (kind === "activity" && !isOnboarding && showTaskAdds) {
       addChildBtn = (
         <button
           type="button"
@@ -90,7 +96,7 @@ export default function MilestoneGridRow({
           + Task
         </button>
       );
-    } else if ((kind === "task" || kind === "subtask") && !isOnboarding) {
+    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && showTaskAdds) {
       addChildBtn = (
         <button
           type="button"
