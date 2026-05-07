@@ -27,7 +27,8 @@ import {
   loadTaskById,
   loadSubtaskById,
   loadCommentsForEntity,
-  postCommentForEntity
+  postCommentForEntity,
+  downloadAttachment
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
 
@@ -78,6 +79,43 @@ export function parseDivisionList(v) {
     return v.split(",").map((s) => s.trim()).filter(Boolean);
   }
   return [];
+}
+
+/* Dirty detection. Comments are loaded asynchronously and re-set on the
+   form when the user posts a new one — they're not user-edited fields, so
+   the comparison ignores them. The Comments composer (commentText /
+   commentFiles) lives in its own state, never touches `form`, so it
+   doesn't affect dirtiness either — that's deliberate, the user posts
+   comments via the dedicated Post Comment button. */
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b || typeof a !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (!deepEqual(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+function isFormChanged(cur, base) {
+  if (!cur || !base) return false;
+  const keys = new Set([...Object.keys(cur), ...Object.keys(base)]);
+  for (const k of keys) {
+    if (k === "comments") continue;
+    if (!deepEqual(cur[k], base[k])) return true;
+  }
+  return false;
 }
 
 function makeDefaultForm(kind, node, mode, parentNode) {
@@ -161,6 +199,11 @@ export default function NodeModal({
   const parentTypeIsResource = parentNode?.type === "Resource Type";
 
   const [form, setForm] = useState(() => makeDefaultForm(kind, node, mode, parentNode));
+  // Snapshot of the form taken whenever it is (re)initialized from the
+  // node — open, async record fetch, divisions normalization. Compared
+  // against `form` to decide whether the Save button should be enabled
+  // in edit mode. Set to null until the first initialization runs.
+  const [baseline, setBaseline] = useState(null);
   const [commentText, setCommentText] = useState("");
   const [commentFiles, setCommentFiles] = useState([]);
   const [attachError, setAttachError] = useState("");
@@ -176,7 +219,9 @@ export default function NodeModal({
 
   useEffect(() => {
     if (open) {
-      setForm(makeDefaultForm(kind, node, mode, parentNode));
+      const initial = makeDefaultForm(kind, node, mode, parentNode);
+      setForm(initial);
+      setBaseline(initial);
       setCommentText("");
       setCommentFiles([]);
       setAttachError("");
@@ -215,13 +260,16 @@ export default function NodeModal({
       if (code) lookup.set(code.toLowerCase(), code);
       if (d.label) lookup.set(String(d.label).toLowerCase(), code);
     });
-    setForm((f) => {
-      const cur = safeArray(f.concernedDivision);
-      if (cur.length === 0) return f;
+    function normalize(prev) {
+      if (!prev) return prev;
+      const cur = safeArray(prev.concernedDivision);
+      if (cur.length === 0) return prev;
       const next = cur.map((v) => lookup.get(String(v).toLowerCase()) || v);
       const changed = next.some((v, i) => v !== cur[i]);
-      return changed ? { ...f, concernedDivision: next } : f;
-    });
+      return changed ? { ...prev, concernedDivision: next } : prev;
+    }
+    setForm((f) => normalize(f));
+    setBaseline((b) => normalize(b));
   }, [divisions]);
 
   /* Edit mode: list endpoints return summary rows that omit the nested
@@ -249,7 +297,9 @@ export default function NodeModal({
           dependsOn: safeArray(node.dependsOn),
           dependsOnDisplay: safeArray(node.dependsOnDisplay)
         };
-        setForm(makeDefaultForm(kind, merged, mode, parentNode));
+        const next = makeDefaultForm(kind, merged, mode, parentNode);
+        setForm(next);
+        setBaseline(next);
       })
       .catch(() => { /* keep cached node form on failure */ });
     return () => { cancelled = true; };
@@ -390,6 +440,12 @@ export default function NodeModal({
   }
 
   const dis = editable ? false : true;
+  // Edit mode: disable Save until the user actually edits a non-comment
+  // field. Add mode: leave Save enabled (the user is creating something
+  // from scratch). Comment text + file uploads route through the Post
+  // Comment button now, so they don't count as field changes.
+  const editDirty = !isAdd && baseline ? isFormChanged(form, baseline) : false;
+  const disableSave = !isAdd && !editDirty;
   const projectVendors = safeArray(project.vendors);
   const title = !editable
     ? `View ${TITLE_MAP[kind] || ""} (Baseline — read-only)`
@@ -709,7 +765,12 @@ export default function NodeModal({
 
         <div className="uidai-modal__actions">
           {editable && (
-            <button type="button" className="uidai-btn" onClick={save}>
+            <button
+              type="button"
+              className="uidai-btn"
+              onClick={save}
+              disabled={disableSave}
+            >
               Save
             </button>
           )}
@@ -1181,11 +1242,38 @@ function CommentsPanel({
               <div>{item.text}</div>
               {safeArray(item.attachments).length > 0 && (
                 <div className="uidai-comment-item__attachments">
-                  {item.attachments.map((f, j) => (
-                    <span key={j} className="uidai-attachment-chip">
-                      📎 {typeof f === "string" ? f : f.name}
-                    </span>
-                  ))}
+                  {item.attachments.map((f, j) => {
+                    const isObj = f && typeof f === "object";
+                    const name = isObj ? (f.name || "attachment") : String(f || "attachment");
+                    const fileUrl = isObj ? (f.url || "") : "";
+                    if (!fileUrl) {
+                      return (
+                        <span key={j} className="uidai-attachment-chip">
+                          📎 {name}
+                        </span>
+                      );
+                    }
+                    return (
+                      <button
+                        key={j}
+                        type="button"
+                        className="uidai-attachment-chip"
+                        onClick={async () => {
+                          try {
+                            await downloadAttachment(fileUrl, name);
+                          } catch (err) {
+                            // eslint-disable-next-line no-console
+                            console.error("[downloadAttachment]", fileUrl, err);
+                            window.alert(err?.message || "Failed to download attachment.");
+                          }
+                        }}
+                        style={{ cursor: "pointer", font: "inherit" }}
+                        title={`Download ${name}`}
+                      >
+                        📎 {name}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

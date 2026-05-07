@@ -270,6 +270,35 @@ function mapApiCommentToLocal(c) {
   };
 }
 
+/* Authorized download of a comment attachment. The server returns
+   {filename, url} per attachment in the comments payload (see
+   mapApiCommentToLocal). The URL requires the bearer token, so a plain
+   <a href download> won't work — we fetch via authorizedFetch, build a
+   blob, and trigger a download client-side. */
+export async function downloadAttachment(rawUrl, filename) {
+  if (!rawUrl) throw new Error("Attachment URL missing.");
+  requireToken();
+  const res = await authorizedFetch(rawUrl, {
+    method: "GET",
+    headers: { accept: "*/*" }
+  });
+  if (res.status === 401) throwAuth();
+  if (!res.ok) await throwHttp(res);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename || "attachment";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    // Defer revoke so the browser has time to start the download.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
+
 /* Standalone POST to {entity}/{id}/comments — used by the "Post Comment"
    button in the edit modal so the user can attach a comment without saving
    the parent entity. Throws if neither text nor files are present (the
