@@ -280,7 +280,7 @@ export default function NodeModal({
      ran over the cached tree, so we keep the CACHED node's `dependsOn`
      (already translated to local UIDs) when seeding the form. */
   useEffect(() => {
-    if (!open || mode !== "edit" || !node?.apiId || !getToken()) return;
+    if (!open || mode === "add" || !node?.apiId || !getToken()) return;
     if (kind === "milestone") return;
     const fetcher =
       kind === "activity" ? loadActivityById :
@@ -298,7 +298,15 @@ export default function NodeModal({
           dependsOnDisplay: safeArray(node.dependsOnDisplay)
         };
         const next = makeDefaultForm(kind, merged, mode, parentNode);
-        setForm(next);
+        // The comments effect runs in parallel and may have already
+        // populated form.comments — preserve it so the panel doesn't
+        // flicker empty if the full-record GET resolves second.
+        setForm((prev) => ({
+          ...next,
+          comments: safeArray(prev && prev.comments).length
+            ? prev.comments
+            : next.comments
+        }));
         setBaseline(next);
       })
       .catch(() => { /* keep cached node form on failure */ });
@@ -307,11 +315,10 @@ export default function NodeModal({
   }, [open, mode, kind, node && node.apiId]);
 
   /* Load existing comments + attachments for the node so they appear in
-     the Comments panel when the modal opens. The list adapter sets
-     comments:[] regardless, so without this fetch the panel is always
-     empty even after the user posts a comment. */
+     the Comments panel when the modal opens — for both view and edit
+     modes (only skipped on add, since the entity doesn't exist yet). */
   useEffect(() => {
-    if (!open || mode !== "edit" || !node?.apiId || !getToken()) return;
+    if (!open || mode === "add" || !node?.apiId || !getToken()) return;
     let cancelled = false;
     loadCommentsForEntity(kind, node.apiId)
       .then((items) => {
