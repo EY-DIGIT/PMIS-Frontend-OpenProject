@@ -700,7 +700,7 @@ export default function ProjectDetailsPage() {
               navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
             }
           >
-            Go to Milestones Configuration
+            Configure
           </button>
           <button
             className="uidai-btn uidai-btn--delete"
