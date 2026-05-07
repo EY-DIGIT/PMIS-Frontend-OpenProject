@@ -215,8 +215,26 @@ export default function VendorDetails() {
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!editing} />
           </div>
           <div className="uidai-pmis-field">
-            <label>Phone <span className="uidai-pmis-required">*</span></label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} disabled={!editing} />
+            <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
+            <div className="uidai-pmis-phone-input">
+              <span className="uidai-pmis-phone-prefix" aria-hidden="true">+91</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit mobile number"
+                value={phone}
+                autoComplete="tel-national"
+                disabled={!editing}
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
+                  setPhone(cleaned);
+                }}
+                onKeyPress={(e) => {
+                  if (e.key.length === 1 && !/[0-9]/.test(e.key)) e.preventDefault();
+                }}
+              />
+            </div>
           </div>
           <div className="uidai-pmis-field">
             <label>Project Mapping <span className="uidai-pmis-required">*</span></label>
