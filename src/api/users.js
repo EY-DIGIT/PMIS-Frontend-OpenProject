@@ -78,6 +78,7 @@ export async function update(id, {
   vendor_id,
   division,
   division_other,
+  phone_number,
 }) {
   const body = {};
   if (email !== undefined) body.email = email;
@@ -88,6 +89,7 @@ export async function update(id, {
   if (vendor_id !== undefined) body.vendor_id = vendor_id;
   if (division !== undefined) body.division = division;
   if (division_other !== undefined) body.division_other = division_other;
+  if (phone_number !== undefined) body.phone_number = phone_number;
   const res = await api.patch(ENDPOINTS.users.update(id), body);
   return fromApi(unwrapOne(res));
 }
