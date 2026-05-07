@@ -462,6 +462,25 @@ export default function MilestoneConfigPage({ mode }) {
       return;
     }
 
+    if (kind === "activity") {
+      if (!formData.ownerDivision) {
+        uiStore.showMessage("Please select Owner Division.");
+        return;
+      }
+      if (!formData.vendorId) {
+        uiStore.showMessage("Please select a Vendor.");
+        return;
+      }
+      const cd = formData.concernedDivision;
+      const cdHasValue = Array.isArray(cd)
+        ? cd.some((x) => String(x || "").trim())
+        : Boolean(cd);
+      if (!cdHasValue) {
+        uiStore.showMessage("Please select at least one Concerned Division.");
+        return;
+      }
+    }
+
     if (bounds && bounds.start && bounds.end) {
       if (formData.startDate < bounds.start || formData.startDate > bounds.end) {
         uiStore.showMessage(

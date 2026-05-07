@@ -2,16 +2,23 @@ import { api } from './client';
 import { ENDPOINTS } from './endpoint';
 import { toApiDate, toApiNodeStatus } from './adapters';
 
-/* Concerned Division wire format: a single-element array whose element is
-   the comma-joined list of division codes — e.g. ["TMD1, TMD2"]. The UI
-   keeps an array of codes; we join + wrap on send. Empty → null. */
+/* Concerned Division wire format: an array with one element per division
+   code — e.g. ["tmd1", "tmd2"]. The UI already keeps an array of codes;
+   we just trim and drop empties. Empty → null. Strings are split on
+   commas so legacy comma-joined values still serialize correctly. */
 function serializeConcernedDivision(v) {
-  if (Array.isArray(v)) {
-    const cleaned = v.map((x) => String(x || '').trim()).filter(Boolean);
-    return cleaned.length ? [cleaned.join(', ')] : null;
-  }
-  const s = (v == null ? '' : String(v)).trim();
-  return s ? [s] : null;
+  const out = [];
+  const push = (x) => {
+    String(x == null ? '' : x)
+      .split(',')
+      .forEach((s) => {
+        const t = s.trim();
+        if (t) out.push(t);
+      });
+  };
+  if (Array.isArray(v)) v.forEach(push);
+  else push(v);
+  return out.length ? out : null;
 }
 function hasConcernedDivision(v) {
   return Array.isArray(v) ? v.some((x) => String(x || '').trim()) : Boolean(v);

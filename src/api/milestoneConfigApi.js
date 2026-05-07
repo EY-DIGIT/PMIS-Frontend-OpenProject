@@ -28,16 +28,23 @@ import {
 
 const LIST_QS = "?offset=1&pageSize=20&includeDeleted=false";
 
-/* Concerned Division wire format: a single-element array whose element is
-   the comma-joined list of division codes — e.g. ["TMD1, TMD2"]. The UI
-   keeps an array of codes; we join + wrap on send. Empty → null. */
+/* Concerned Division wire format: an array with one element per division
+   code — e.g. ["tmd1", "tmd2"]. The UI already keeps an array of codes;
+   we just trim and drop empties. Empty → null. Strings are split on
+   commas so legacy comma-joined values still serialize correctly. */
 function serializeConcernedDivision(v) {
-  if (Array.isArray(v)) {
-    const cleaned = v.map((x) => String(x || "").trim()).filter(Boolean);
-    return cleaned.length ? [cleaned.join(", ")] : null;
-  }
-  const s = (v == null ? "" : String(v)).trim();
-  return s ? [s] : null;
+  const out = [];
+  const push = (x) => {
+    String(x == null ? "" : x)
+      .split(",")
+      .forEach((s) => {
+        const t = s.trim();
+        if (t) out.push(t);
+      });
+  };
+  if (Array.isArray(v)) v.forEach(push);
+  else push(v);
+  return out.length ? out : null;
 }
 function hasConcernedDivision(v) {
   return Array.isArray(v) ? v.some((x) => String(x || "").trim()) : Boolean(v);
@@ -528,9 +535,9 @@ export function resolveProjectDependsOn(project) {
 }
 
 /* Doc 38: milestone-create body is minimal (name + description + dates).
-   status and dependsOn flow via PATCH after the row exists. Fire a
-   follow-up PATCH only when the user actually entered a non-default
-   status or any dependencies on the form. */
+   We deliberately do NOT fire a follow-up PATCH on add — status defaults
+   to "Not Completed" and any dependencies entered on the add form will
+   be persisted later via an explicit edit. */
 export async function createMilestoneApi(project, formData) {
   const created = await apiSend(
     "POST",
@@ -539,24 +546,10 @@ export async function createMilestoneApi(project, formData) {
       name: formData.name.trim(),
       description: (formData.description || "").trim(),
       startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate)
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
     }
   );
-  const newId = extractNewEntityId(created);
-  const status = mapStatusForApi(formData.status || "Not Completed");
-  const deps = resolveDepDisplayIds(project, formData.dependsOn);
-  if (newId && (status !== "not_completed" || deps.length)) {
-    try {
-      await apiSend(
-        "PATCH",
-        ENDPOINTS.milestones.update(newId),
-        buildMilestonePayload(project, formData)
-      );
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[createMilestoneApi: post-create PATCH]", err);
-    }
-  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);
 }
 
@@ -595,10 +588,9 @@ export async function loadActivityById(activityApiId) {
   return a && (a.id || a.uuid || a.name) ? mapApiActivityToNode(a) : null;
 }
 
-/* Doc 38: activity-create body is minimal (just name/description/dates).
-   The richer fields (ownerDivision / vendorId / concernedDivision / status /
-   dependsOn / actuals) are sent via a follow-up PATCH so the user's add-modal
-   inputs persist on first save. */
+/* Activity create body now carries the design-level fields (ownerDivision /
+   vendorId / concernedDivision / dependsOn) so a single POST persists them
+   on first save — no follow-up PATCH on add. */
 export async function createActivityApi(milestoneApiId, formData, project) {
   const created = await apiSend(
     "POST",
@@ -607,36 +599,14 @@ export async function createActivityApi(milestoneApiId, formData, project) {
       name: formData.name.trim(),
       description: (formData.description || "").trim(),
       startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate)
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      ownerDivision: formData.ownerDivision || null,
+      vendorId: formData.vendorId || null,
+      concernedDivision: serializeConcernedDivision(formData.concernedDivision),
+      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
     }
   );
-  const newId = extractNewEntityId(created);
-  if (newId && hasActivityRichFields(formData, project)) {
-    try {
-      await apiSend(
-        "PATCH",
-        ENDPOINTS.activities.update(newId),
-        buildActivityPatchBody(project, formData)
-      );
-    } catch {
-      /* swallow — entity is created; rich-field PATCH is best-effort */
-    }
-  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.activities.comments, created, formData);
-}
-
-/* Returns true if any of the design-level fields the activity-create
-   endpoint doesn't accept are present on the form. Used to decide whether
-   the follow-up PATCH after create is worth firing. */
-function hasActivityRichFields(formData, project) {
-  if (formData.ownerDivision) return true;
-  if (formData.vendorId) return true;
-  if (hasConcernedDivision(formData.concernedDivision)) return true;
-  const deps = resolveDepDisplayIds(project, formData.dependsOn);
-  if (Array.isArray(deps) && deps.length) return true;
-  if (formData.actualStartDate) return true;
-  if (formData.actualEndDate) return true;
-  return false;
 }
 
 function buildActivityPatchBody(project, formData) {
@@ -688,10 +658,8 @@ export async function loadTaskById(taskApiId) {
   return t && (t.id || t.uuid || t.name) ? mapApiTaskToNode(t) : null;
 }
 
-/* Doc 38: task create body is minimal. type/resource fields no longer
-   exist on tasks at the API level. dependsOn / actuals flow via a
-   follow-up PATCH so the add-modal Depends On selections persist on
-   first save. */
+/* Task create body now carries dependsOn so a single POST persists the
+   add-modal Depends On selections — no follow-up PATCH on add. */
 export async function createTaskApi(activityApiId, formData, project) {
   const created = await apiSend(
     "POST",
@@ -700,26 +668,10 @@ export async function createTaskApi(activityApiId, formData, project) {
       name: formData.name.trim(),
       description: (formData.description || "").trim(),
       startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate)
+      endDate: toMilestoneIsoEnd(formData.endDate),
+      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
     }
   );
-  const newId = extractNewEntityId(created);
-  const deps = resolveDepDisplayIds(project, formData.dependsOn);
-  if (newId && (deps.length || formData.actualStartDate || formData.actualEndDate)) {
-    try {
-      await apiSend(
-        "PATCH",
-        ENDPOINTS.tasks.update(newId),
-        {
-          ...buildActivityLikeBase(project, formData),
-          status: mapStatusForApi(formData.status || "Not Completed")
-        }
-      );
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[createTaskApi: post-create PATCH]", err);
-    }
-  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.tasks.comments, created, formData);
 }
 
@@ -879,43 +831,25 @@ export async function loadSubtaskAndChildren(subtaskApiId) {
   return { node, children };
 }
 
-/* Create payload is deliberately minimal — only name, description, dates,
-   and dependency list. Type/resource fields are NOT accepted by the
-   create endpoint (only by PATCH).
+/* Subtask create body now carries dependsOn so a single POST persists
+   the add-modal Depends On selections — no follow-up PATCH on add.
    Mirrors the rest of the hierarchy (project→milestone, milestone→
    activity, activity→task, task→subtask). When `parentKind` is
    "subtask" we POST to /subtasks/{id}/subtasks/create so a subtask can
    contain another subtask, and so on, infinitely. */
 export async function createSubtaskApi(parentApiId, formData, project, parentKind = "task") {
-  // Doc 38: minimal create body — actuals/dependsOn flow via PATCH.
   const payload = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
-    endDate: toMilestoneIsoEnd(formData.endDate)
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
   const createPath =
     parentKind === "subtask"
       ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
       : ENDPOINTS.tasks.subtaskCreate(parentApiId);
   const created = await apiSend("POST", createPath, payload);
-  const newId = extractNewEntityId(created);
-  const deps = resolveDepDisplayIds(project, formData.dependsOn);
-  if (newId && (deps.length || formData.actualStartDate || formData.actualEndDate)) {
-    try {
-      await apiSend(
-        "PATCH",
-        ENDPOINTS.subtasks.update(newId),
-        {
-          ...buildActivityLikeBase(project, formData),
-          status: mapStatusForApi(formData.status || "Not Completed")
-        }
-      );
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[createSubtaskApi: post-create PATCH]", err);
-    }
-  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.subtasks.comments, created, formData);
 }
 

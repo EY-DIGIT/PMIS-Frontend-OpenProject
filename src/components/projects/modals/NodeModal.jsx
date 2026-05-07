@@ -671,14 +671,16 @@ export default function NodeModal({
                 </select>
               </div>
               <div className="uidai-field">
-                <label className="uidai-field__label">Vendor</label>
+                <label className="uidai-field__label">
+                  Vendor <span className="uidai-required-project">*</span>
+                </label>
                 <select
                   className="uidai-select"
                   value={form.vendorId}
                   onChange={(e) => updateField({ vendorId: e.target.value })}
                   disabled={dis}
                 >
-                  <option value="">— None —</option>
+                  <option value="">— Select Vendor —</option>
                   {projectVendors.map((v) => {
                     const id = typeof v === "object" ? (v.id || v.uuid || "") : "";
                     const name = vendorName(v);
@@ -694,7 +696,7 @@ export default function NodeModal({
               </div>
               <div className="uidai-field uidai-grid__full">
                 <label className="uidai-field__label">
-                  Concerned Division{" "}
+                  Concerned Division <span className="uidai-required-project">*</span>{" "}
                   <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
                     (the divisions whose consent is required for this activity)
                   </span>

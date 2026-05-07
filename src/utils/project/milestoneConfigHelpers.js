@@ -233,6 +233,11 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     resourceEntryType,
     dependsOn: rawDeps.slice(),
     dependsOnDisplay: rawDisplay.slice(),
+    ownerDivision: a.ownerDivision || "",
+    vendorId: a.vendorId || "",
+    concernedDivision: Array.isArray(a.concernedDivision)
+      ? a.concernedDivision.slice()
+      : (a.concernedDivision ? [a.concernedDivision] : []),
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0
