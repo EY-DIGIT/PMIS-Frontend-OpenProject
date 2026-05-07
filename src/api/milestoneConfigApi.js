@@ -425,12 +425,36 @@ export function resolveProjectDependsOn(project) {
   if (Array.isArray(project.milestones)) project.milestones.forEach(translate);
 }
 
+/* Doc 38: milestone-create body is minimal (name + description + dates).
+   status and dependsOn flow via PATCH after the row exists. Fire a
+   follow-up PATCH only when the user actually entered a non-default
+   status or any dependencies on the form. */
 export async function createMilestoneApi(project, formData) {
   const created = await apiSend(
     "POST",
     ENDPOINTS.projects.milestoneCreate(project.projectId),
-    buildMilestonePayload(project, formData)
+    {
+      name: formData.name.trim(),
+      description: (formData.description || "").trim(),
+      startDate: toMilestoneIsoStart(formData.startDate),
+      endDate: toMilestoneIsoEnd(formData.endDate)
+    }
   );
+  const newId = extractNewEntityId(created);
+  const status = mapStatusForApi(formData.status || "Not Completed");
+  const deps = resolveDepDisplayIds(project, formData.dependsOn);
+  if (newId && (status !== "not_completed" || deps.length)) {
+    try {
+      await apiSend(
+        "PATCH",
+        ENDPOINTS.milestones.update(newId),
+        buildMilestonePayload(project, formData)
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[createMilestoneApi: post-create PATCH]", err);
+    }
+  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);
 }
 
