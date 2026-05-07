@@ -291,7 +291,7 @@ export default function NodeModal({
     : getParentDateBounds(project, nodeUid);
 
   const isOnboarding = !project.projectId;
-  const showDepsSection = !isOnboarding && !isAdd && (kind === "milestone" || kind === "activity");
+  const showDepsSection = !isOnboarding;
 
   function updateField(patch) {
     setForm((f) => ({ ...f, ...patch }));

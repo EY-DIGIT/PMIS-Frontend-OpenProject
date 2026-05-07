@@ -639,7 +639,9 @@ export async function loadTaskById(taskApiId) {
 }
 
 /* Doc 38: task create body is minimal. type/resource fields no longer
-   exist on tasks at the API level. */
+   exist on tasks at the API level. dependsOn / actuals flow via a
+   follow-up PATCH so the add-modal Depends On selections persist on
+   first save. */
 export async function createTaskApi(activityApiId, formData, project) {
   const created = await apiSend(
     "POST",
@@ -651,6 +653,23 @@ export async function createTaskApi(activityApiId, formData, project) {
       endDate: toMilestoneIsoEnd(formData.endDate)
     }
   );
+  const newId = extractNewEntityId(created);
+  const deps = resolveDepDisplayIds(project, formData.dependsOn);
+  if (newId && (deps.length || formData.actualStartDate || formData.actualEndDate)) {
+    try {
+      await apiSend(
+        "PATCH",
+        ENDPOINTS.tasks.update(newId),
+        {
+          ...buildActivityLikeBase(project, formData),
+          status: mapStatusForApi(formData.status || "Not Completed")
+        }
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[createTaskApi: post-create PATCH]", err);
+    }
+  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.tasks.comments, created, formData);
 }
 
@@ -830,6 +849,23 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
       ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
       : ENDPOINTS.tasks.subtaskCreate(parentApiId);
   const created = await apiSend("POST", createPath, payload);
+  const newId = extractNewEntityId(created);
+  const deps = resolveDepDisplayIds(project, formData.dependsOn);
+  if (newId && (deps.length || formData.actualStartDate || formData.actualEndDate)) {
+    try {
+      await apiSend(
+        "PATCH",
+        ENDPOINTS.subtasks.update(newId),
+        {
+          ...buildActivityLikeBase(project, formData),
+          status: mapStatusForApi(formData.status || "Not Completed")
+        }
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[createSubtaskApi: post-create PATCH]", err);
+    }
+  }
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.subtasks.comments, created, formData);
 }
 
