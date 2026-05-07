@@ -28,6 +28,21 @@ import {
 
 const LIST_QS = "?offset=1&pageSize=20&includeDeleted=false";
 
+/* Concerned Division wire format: a single-element array whose element is
+   the comma-joined list of division codes — e.g. ["TMD1, TMD2"]. The UI
+   keeps an array of codes; we join + wrap on send. Empty → null. */
+function serializeConcernedDivision(v) {
+  if (Array.isArray(v)) {
+    const cleaned = v.map((x) => String(x || "").trim()).filter(Boolean);
+    return cleaned.length ? [cleaned.join(", ")] : null;
+  }
+  const s = (v == null ? "" : String(v)).trim();
+  return s ? [s] : null;
+}
+function hasConcernedDivision(v) {
+  return Array.isArray(v) ? v.some((x) => String(x || "").trim()) : Boolean(v);
+}
+
 function throwAuth() {
   logout();
   const err = new Error("Session expired. Please sign in again.");
@@ -566,7 +581,7 @@ export async function createActivityApi(milestoneApiId, formData, project) {
 function hasActivityRichFields(formData, project) {
   if (formData.ownerDivision) return true;
   if (formData.vendorId) return true;
-  if (formData.concernedDivision) return true;
+  if (hasConcernedDivision(formData.concernedDivision)) return true;
   const deps = resolveDepDisplayIds(project, formData.dependsOn);
   if (Array.isArray(deps) && deps.length) return true;
   if (formData.actualStartDate) return true;
@@ -584,7 +599,7 @@ function buildActivityPatchBody(project, formData) {
   if (formData.vendorId !== undefined)
     body.vendorId = formData.vendorId || null;
   if (formData.concernedDivision !== undefined)
-    body.concernedDivision = formData.concernedDivision || null;
+    body.concernedDivision = serializeConcernedDivision(formData.concernedDivision);
   return body;
 }
 

@@ -2,6 +2,21 @@ import { api } from './client';
 import { ENDPOINTS } from './endpoint';
 import { toApiDate, toApiNodeStatus } from './adapters';
 
+/* Concerned Division wire format: a single-element array whose element is
+   the comma-joined list of division codes — e.g. ["TMD1, TMD2"]. The UI
+   keeps an array of codes; we join + wrap on send. Empty → null. */
+function serializeConcernedDivision(v) {
+  if (Array.isArray(v)) {
+    const cleaned = v.map((x) => String(x || '').trim()).filter(Boolean);
+    return cleaned.length ? [cleaned.join(', ')] : null;
+  }
+  const s = (v == null ? '' : String(v)).trim();
+  return s ? [s] : null;
+}
+function hasConcernedDivision(v) {
+  return Array.isArray(v) ? v.some((x) => String(x || '').trim()) : Boolean(v);
+}
+
 /* Doc 38: create bodies for milestone / activity / task / subtask are
    minimal — name + description + dates only. Status, dependsOn, actuals,
    ownerDivision, vendorId, concernedDivision all flow via PATCH after
@@ -33,7 +48,7 @@ function nodePatchBody(ui, opts = {}) {
   if (opts.activityFields) {
     if (ui.ownerDivision !== undefined) body.ownerDivision = ui.ownerDivision || null;
     if (ui.vendorId !== undefined) body.vendorId = ui.vendorId || null;
-    if (ui.concernedDivision !== undefined) body.concernedDivision = ui.concernedDivision || null;
+    if (ui.concernedDivision !== undefined) body.concernedDivision = serializeConcernedDivision(ui.concernedDivision);
   }
   return body;
 }
@@ -45,7 +60,7 @@ function hasRichFields(ui, includeActivity = false) {
   if (ui.status && ui.status !== 'Not Completed') return true;
   if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) return true;
   if (ui.actualStartDate || ui.actualEndDate) return true;
-  if (includeActivity && (ui.ownerDivision || ui.vendorId || ui.concernedDivision)) return true;
+  if (includeActivity && (ui.ownerDivision || ui.vendorId || hasConcernedDivision(ui.concernedDivision))) return true;
   return false;
 }
 

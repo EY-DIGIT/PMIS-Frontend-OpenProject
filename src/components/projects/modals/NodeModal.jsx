@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import DependencyPicker from "../DependencyPicker";
+import ChipControl from "../ChipControl";
 import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
@@ -57,6 +58,27 @@ function vendorKey(v) {
   return "";
 }
 
+/* Concerned Division UI value is an array of division codes. Wire format
+   is `["TMD1, TMD2"]` — a single-element array whose element is the
+   comma-joined list. Accept either shape (plus a bare string from older
+   records) and flatten to an array of trimmed codes. */
+export function parseDivisionList(v) {
+  if (Array.isArray(v)) {
+    const out = [];
+    v.forEach((x) => {
+      String(x || "").split(",").forEach((s) => {
+        const t = s.trim();
+        if (t) out.push(t);
+      });
+    });
+    return out;
+  }
+  if (typeof v === "string" && v.trim()) {
+    return v.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 function makeDefaultForm(kind, node, mode, parentNode) {
   const n = node || {};
   const inheritFromParent =
@@ -79,7 +101,7 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     // vendorId / concernedDivision and accepts them on PATCH only.
     ownerDivision: n.ownerDivision || "",
     vendorId: n.vendorId || "",
-    concernedDivision: n.concernedDivision || "",
+    concernedDivision: parseDivisionList(n.concernedDivision),
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
     resourceEntryType: n.resourceEntryType || "details",
@@ -171,6 +193,28 @@ export default function NodeModal({
     return () => { cancelled = true; };
   }, [open, kind]);
 
+  /* Older records may have stored Concerned Division as labels ("TMD1") instead
+     of codes ("tmd1"). Once the divisions list arrives, rewrite any label-form
+     values in the form to their canonical code so we always send the code. */
+  useEffect(() => {
+    const list = safeArray(divisions);
+    if (list.length === 0) return;
+    const lookup = new Map();
+    list.forEach((d) => {
+      if (!d) return;
+      const code = String(d.code || "");
+      if (code) lookup.set(code.toLowerCase(), code);
+      if (d.label) lookup.set(String(d.label).toLowerCase(), code);
+    });
+    setForm((f) => {
+      const cur = safeArray(f.concernedDivision);
+      if (cur.length === 0) return f;
+      const next = cur.map((v) => lookup.get(String(v).toLowerCase()) || v);
+      const changed = next.some((v, i) => v !== cur[i]);
+      return changed ? { ...f, concernedDivision: next } : f;
+    });
+  }, [divisions]);
+
   /* Edit mode: list endpoints return summary rows that omit the nested
      `resource` object — fetch the full single record so the form prefills
      correctly (especially for Resource Type activities/tasks/subtasks).
@@ -247,7 +291,7 @@ export default function NodeModal({
     : getParentDateBounds(project, nodeUid);
 
   const isOnboarding = !project.projectId;
-  const showDepsSection = !isOnboarding && (kind === "milestone" || kind === "activity");
+  const showDepsSection = !isOnboarding && !isAdd && (kind === "milestone" || kind === "activity");
 
   function updateField(patch) {
     setForm((f) => ({ ...f, ...patch }));
@@ -555,20 +599,23 @@ export default function NodeModal({
                 <label className="uidai-field__label">
                   Concerned Division{" "}
                   <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
-                    (the division whose consent is required for this activity)
+                    (the divisions whose consent is required for this activity)
                   </span>
                 </label>
-                <select
-                  className="uidai-select"
-                  value={form.concernedDivision}
-                  onChange={(e) => updateField({ concernedDivision: e.target.value })}
+                <ChipControl
+                  value={safeArray(form.concernedDivision)}
+                  options={
+                    safeArray(divisions).length
+                      ? safeArray(divisions).map((d) => ({ uid: d.code, name: d.label }))
+                      : DIVISION_OPTIONS.map((o) => ({
+                          uid: String(o).toLowerCase(),
+                          name: o
+                        }))
+                  }
+                  onChange={(next) => updateField({ concernedDivision: next })}
+                  label="division"
                   disabled={dis}
-                >
-                  <option value="">— None —</option>
-                  {safeArray(divisions).map((d) => (
-                    <option key={d.code} value={d.code}>{d.label}</option>
-                  ))}
-                </select>
+                />
               </div>
             </>
           )}
@@ -603,7 +650,7 @@ export default function NodeModal({
           )}
         </div>
 
-        {project.projectId && (
+        {project.projectId && !isAdd && (
           <CommentsPanel
             comments={form.comments}
             editable={editable}
