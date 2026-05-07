@@ -7,6 +7,7 @@ import * as usersApi from '../../api/users';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
+import MilestonePagination from '../../components/projects/MilestonePagination';
 
 export default function UserList() {
   const { users, setUsers, refresh } = useData();
@@ -87,6 +88,22 @@ export default function UserList() {
       exact(u.status, filters.status)
     );
   });
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const total = filtered.length;
+  const effectivePageSize = pageSize > 0 ? pageSize : Math.max(total, 1);
+  const totalPages = total === 0 ? 1 : Math.ceil(total / effectivePageSize);
+  const currentPage = Math.max(1, Math.min(page, totalPages));
+  const pagedUsers = useMemo(() => {
+    if (pageSize <= 0) return filtered;
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
+  // Filters/search changing the result set may move the active page out of
+  // range — snap back to page 1 so users always see results immediately.
+  useEffect(() => { setPage(1); }, [search, filters]);
 
   return (
     <>
@@ -190,7 +207,7 @@ export default function UserList() {
                   </td>
                 </tr>
               )}
-              {!loading && filtered.map((u) => (
+              {!loading && pagedUsers.map((u) => (
                 <tr key={u.userId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/users/${u.userId}`)}>
                     {u.userCode || u.userId}
@@ -244,6 +261,18 @@ export default function UserList() {
             </tbody>
           </table>
         </div>
+
+        {!loading && total > 0 && (
+          <MilestonePagination
+            total={total}
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onGoto={(p) => setPage(Math.max(1, Math.min(p, totalPages)))}
+            onSize={(s) => { setPageSize(s); setPage(1); }}
+            itemLabel="user"
+          />
+        )}
       </div>
     </>
   );

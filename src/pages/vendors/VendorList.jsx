@@ -6,6 +6,7 @@ import { tokenStore } from '../../api/client';
 import * as vendorsApi from '../../api/vendors';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import FilterShell from '../../components/FilterShell';
+import MilestonePagination from '../../components/projects/MilestonePagination';
 
 export default function VendorList() {
   const { vendors, setVendors, refresh } = useData();
@@ -90,6 +91,22 @@ export default function VendorList() {
       contains(renderMappingText(v.projectMapping), filters.mapping)
     );
   });
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const total = filtered.length;
+  const effectivePageSize = pageSize > 0 ? pageSize : Math.max(total, 1);
+  const totalPages = total === 0 ? 1 : Math.ceil(total / effectivePageSize);
+  const currentPage = Math.max(1, Math.min(page, totalPages));
+  const pagedVendors = useMemo(() => {
+    if (pageSize <= 0) return filtered;
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
+  // Filters/search changing the result set may move the active page out of
+  // range — snap back to page 1 so users always see results immediately.
+  useEffect(() => { setPage(1); }, [search, filters]);
 
   return (
     <>
@@ -186,7 +203,7 @@ export default function VendorList() {
                   </td>
                 </tr>
               )}
-              {!loading && filtered.map((v) => (
+              {!loading && pagedVendors.map((v) => (
                 <tr key={v.vendorId}>
                   <td className="uidai-pmis-link" onClick={() => navigate(`/vendors/${v.vendorId}`)}>
                     {v.vendorCode || v.vendorId}
@@ -238,6 +255,18 @@ export default function VendorList() {
             </tbody>
           </table>
         </div>
+
+        {!loading && total > 0 && (
+          <MilestonePagination
+            total={total}
+            page={currentPage}
+            totalPages={totalPages}
+            pageSize={pageSize}
+            onGoto={(p) => setPage(Math.max(1, Math.min(p, totalPages)))}
+            onSize={(s) => { setPageSize(s); setPage(1); }}
+            itemLabel="vendor"
+          />
+        )}
       </div>
     </>
   );
