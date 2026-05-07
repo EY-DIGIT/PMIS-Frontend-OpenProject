@@ -216,6 +216,7 @@ export default function NodeModal({
   const [resourceTypesLoading, setResourceTypesLoading] = useState(false);
   const [divisions, setDivisions] = useState([]);
   const [divisionsLoading, setDivisionsLoading] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -228,6 +229,7 @@ export default function NodeModal({
       setPostError("");
       setPosting(false);
       setFileInputKey((k) => k + 1);
+      setFullscreen(false);
     }
   }, [open, kind, node, mode, parentNode]);
 
@@ -461,27 +463,50 @@ export default function NodeModal({
     ? "This item is part of the published baseline and cannot be edited within a version."
     : hintFor(kind);
 
+  const boxStyle = fullscreen
+    ? {
+        position: "relative",
+        width: "100vw",
+        maxWidth: "100vw",
+        height: "100vh",
+        maxHeight: "100vh",
+        margin: 0,
+        borderRadius: 0,
+        overflowY: "auto"
+      }
+    : { position: "relative" };
+
+  const iconBtnStyle = {
+    position: "absolute",
+    width: 28,
+    height: 28,
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    color: "#666",
+    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center"
+  };
+
   return (
     <div className="uidai-modal">
-      <div className="uidai-modal__box uidai-modal__box--wide" style={{ position: "relative" }}>
+      <div className="uidai-modal__box uidai-modal__box--wide" style={boxStyle}>
+        <button
+          type="button"
+          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+          title={fullscreen ? "Exit full screen" : "Full screen"}
+          onClick={() => setFullscreen((v) => !v)}
+          style={{ ...iconBtnStyle, top: 8, right: 44, fontSize: 16, lineHeight: 1 }}
+        >
+          {fullscreen ? "🗗" : "⛶"}
+        </button>
         <button
           type="button"
           aria-label="Close"
           onClick={onCancel}
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 10,
-            width: 28,
-            height: 28,
-            border: "none",
-            background: "transparent",
-            fontSize: 22,
-            lineHeight: 1,
-            cursor: "pointer",
-            color: "#666",
-            padding: 0
-          }}
+          style={{ ...iconBtnStyle, top: 8, right: 10, fontSize: 22, lineHeight: 1 }}
         >
           ×
         </button>
