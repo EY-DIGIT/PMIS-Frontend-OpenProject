@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE_NAME="pmis-frontend"
+CONTAINER_NAME="pmis-frontend"
+VERSION_FILE=".image_version"
+ENV_FILE=".env"
+
+HOST_PORT="3000"
+CONTAINER_PORT="3000"
+
+echo "---------------------------------------"
+echo " PMIS FRONTEND DOCKER DEPLOYMENT (DEV)"
+echo "---------------------------------------"
+
+# check docker
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker not installed"
+  exit 1
+fi
+
+# check docker compose
+if ! docker compose version >/dev/null 2>&1; then
+  echo "ERROR: docker compose not installed"
+  exit 1
+fi
+
+# check required files
+if [ ! -f "package.json" ]; then
+  echo "ERROR: package.json not found"
+  exit 1
+fi
+
+if [ ! -f "Dockerfile" ]; then
+  echo "ERROR: Dockerfile not found"
+  exit 1
+fi
+
+if [ ! -f "docker-compose.yml" ]; then
+  echo "ERROR: docker-compose.yml not found"
+  exit 1
+fi
+
+# docker hub login
+echo ""
+read -rp "Docker Hub Username: " DOCKER_USERNAME
+read -rsp "Docker Hub Password / Access Token: " DOCKER_PASSWORD
+echo ""
+
+echo ""
+echo "Logging in to Docker Hub..."
+echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+# version increment
+if [ -f "$VERSION_FILE" ]; then
+  CURRENT_VERSION=$(cat "$VERSION_FILE")
+  if ! [[ "$CURRENT_VERSION" =~ ^[0-9]+$ ]]; then
+    CURRENT_VERSION=0
+  fi
+else
+  CURRENT_VERSION=0
+fi
+
+NEW_VERSION=$((CURRENT_VERSION+1))
+echo "$NEW_VERSION" > "$VERSION_FILE"
+
+TAG="v${NEW_VERSION}"
+
+FULL_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:${TAG}"
+LATEST_IMAGE="${DOCKER_USERNAME}/${IMAGE_NAME}:latest"
+
+echo ""
+echo "Building docker image..."
+echo "IMAGE = $FULL_IMAGE"
+
+docker build -t "$FULL_IMAGE" .
+
+docker tag "$FULL_IMAGE" "$LATEST_IMAGE"
+
+echo ""
+echo "Pushing image to docker hub..."
+
+docker push "$FULL_IMAGE"
+docker push "$LATEST_IMAGE"
+
+# create env file for compose
+echo ""
+echo "Creating .env file for compose..."
+
+cat <<EOF > $ENV_FILE
+DOCKER_USERNAME=$DOCKER_USERNAME
+VERSION=$TAG
+EOF
+
+echo ""
+echo "Stopping old container..."
+
+docker compose down 2>/dev/null || true
+
+echo ""
+echo "Starting new container using docker compose..."
+
+docker compose up -d
+
+echo ""
+echo "---------------------------------------"
+echo " DEPLOYMENT SUCCESS"
+echo "---------------------------------------"
+
+echo "Image pushed:"
+echo "$FULL_IMAGE"
+
+echo ""
+echo "Application running on:"
+echo "http://SERVER-IP:$HOST_PORT"
+
+echo ""
