@@ -688,9 +688,9 @@ export async function createTaskApi(activityApiId, formData, project) {
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
-    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+    priority: formData.priority || null
   };
-  if (formData.priority !== undefined) body.priority = formData.priority || null;
   const created = await apiSend(
     "POST",
     ENDPOINTS.activities.taskCreate(activityApiId),
@@ -868,9 +868,9 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
-    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+    priority: formData.priority || null
   };
-  if (formData.priority !== undefined) payload.priority = formData.priority || null;
   const createPath =
     parentKind === "subtask"
       ? ENDPOINTS.subtasks.subtaskCreate(parentApiId)
