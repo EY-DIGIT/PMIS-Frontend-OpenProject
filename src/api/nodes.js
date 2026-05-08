@@ -52,6 +52,7 @@ function nodePatchBody(ui, opts = {}) {
     status: toApiNodeStatus(ui.status),
   };
   if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) body.dependsOn = ui.dependsOn;
+  if (ui.priority !== undefined) body.priority = ui.priority || null;
   if (opts.activityFields) {
     if (ui.ownerDivision !== undefined) body.ownerDivision = ui.ownerDivision || null;
     if (ui.vendorId !== undefined) body.vendorId = ui.vendorId || null;
@@ -67,6 +68,7 @@ function hasRichFields(ui, includeActivity = false) {
   if (ui.status && ui.status !== 'Not Completed') return true;
   if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) return true;
   if (ui.actualStartDate || ui.actualEndDate) return true;
+  if (ui.priority) return true;
   if (includeActivity && (ui.ownerDivision || ui.vendorId || hasConcernedDivision(ui.concernedDivision))) return true;
   return false;
 }
