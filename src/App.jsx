@@ -30,6 +30,8 @@ import UserDetails from './pages/users/UserDetails';
 import MasterOverview from './pages/master/MasterOverview';
 import MasterVendors from './pages/master/MasterVendors';
 import MasterUsers from './pages/master/MasterUsers';
+import MasterDivisions from './pages/master/MasterDivisions';
+import MasterDivisionForm from './pages/master/MasterDivisionForm';
 import { DataProvider } from './data/DataContext';
 import "./styles/global.css";
 
@@ -77,6 +79,7 @@ function PageTitle() {
     } else if (segments[0] === "master") {
         if (segments[1] === "vendors") title = "Vendor Data";
         else if (segments[1] === "users") title = "User Data";
+        else if (segments[1] === "divisions") title = "Division Data";
         else title = "Master Data";
     } else if (segments[0] === "dashboard" || segments[0] === "profile") {
         // These pages render their own in-page header; leave the
@@ -107,6 +110,7 @@ function Breadcrumbs() {
         track: "Track Progress",
         vendors: "Vendors",
         users: "Users",
+        divisions: "Divisions",
         master: "Master Data",
         new: "New",
         dashboard: "Dashboard"
@@ -270,6 +274,9 @@ export default function MainApp() {
                                             <Route path="master" element={<MasterOverview />} />
                                             <Route path="master/vendors" element={<MasterVendors />} />
                                             <Route path="master/users" element={<MasterUsers />} />
+                                            <Route path="master/divisions" element={<MasterDivisions />} />
+                                            <Route path="master/divisions/new" element={<MasterDivisionForm />} />
+                                            <Route path="master/divisions/:code" element={<MasterDivisionForm />} />
                                         </Routes>
                                     </Layout>
                                     </RequireAuth>
