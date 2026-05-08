@@ -565,7 +565,8 @@ export async function createMilestoneApi(project, formData) {
       description: (formData.description || "").trim(),
       startDate: toMilestoneIsoStart(formData.startDate),
       endDate: toMilestoneIsoEnd(formData.endDate),
-      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+      dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+      priority: formData.priority || null
     }
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);
