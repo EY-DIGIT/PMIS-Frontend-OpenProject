@@ -44,6 +44,7 @@ function fromApi(u) {
     employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',
     role: u.admin ? 'Admin' : (u.role || 'Viewer'),
+    orgRole: u.orgRole || u.org_role || '',
     vendorId,
     vendorName,
     division: u.division || '',

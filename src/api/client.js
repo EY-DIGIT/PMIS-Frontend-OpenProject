@@ -18,6 +18,15 @@ const LEGACY_TOKEN_KEY = 'auth_token';
 const LEGACY_REFRESH_KEY = 'auth_refresh_token';
 const LEGACY_USER_KEY = 'auth_user';
 
+// Fire a same-tab signal whenever the persisted user object changes so the
+// permissions module (and any other listener) can react without us
+// importing it here — that import would create a cycle through auth.js.
+function emitUserChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pmis:user-changed'));
+  }
+}
+
 export const tokenStore = {
   get: () =>
     sessionStorage.getItem(TOKEN_KEY) ||
@@ -41,6 +50,7 @@ export const tokenStore = {
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(LEGACY_REFRESH_KEY);
     localStorage.removeItem(LEGACY_USER_KEY);
+    emitUserChanged();
   },
   getRefresh: () =>
     sessionStorage.getItem(REFRESH_KEY) ||
@@ -64,6 +74,7 @@ export const tokenStore = {
     sessionStorage.setItem(USER_KEY, v);
     localStorage.setItem(USER_KEY, v);
     localStorage.setItem(LEGACY_USER_KEY, v);
+    emitUserChanged();
   },
   getExpiresAt: () => {
     const v =

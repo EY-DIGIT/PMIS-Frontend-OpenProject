@@ -5,10 +5,13 @@ import { tokenStore } from '../../api/client';
 import * as divisionsApi from '../../api/divisions';
 import { normalizeText } from '../../utils/helpers';
 import MilestonePagination from '../../components/projects/MilestonePagination';
+import { useCan } from '../../auth/permissions';
 
 export default function MasterDivisions() {
   const navigate = useNavigate();
   const location = useLocation();
+  const canCreateDivision = useCan('createDivision');
+  const canDeleteDivision = useCan('deleteDivision');
   const [divisions, setDivisions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -85,15 +88,17 @@ export default function MasterDivisions() {
             onChange={(e) => setSearch(e.target.value)}
           />
           <button className="uidai-pmis-btn uidai-pmis-btn-small">Search</button>
-          <div style={{ marginLeft: 'auto' }}>
-            <button
-              type="button"
-              className="uidai-pmis-btn"
-              onClick={() => navigate('/master/divisions/new')}
-            >
-              + Add Division
-            </button>
-          </div>
+          {canCreateDivision && (
+            <div style={{ marginLeft: 'auto' }}>
+              <button
+                type="button"
+                className="uidai-pmis-btn"
+                onClick={() => navigate('/master/divisions/new')}
+              >
+                + Add Division
+              </button>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -149,27 +154,31 @@ export default function MasterDivisions() {
                     </span>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      title={d.isBuiltin ? 'Built-in divisions cannot be deleted' : 'Delete division'}
-                      aria-label="Delete division"
-                      disabled={d.isBuiltin || deletingCode === d.code}
-                      onClick={() => handleDelete(d)}
-                      style={{
-                        border: '1px solid #d32f2f',
-                        background: '#fff',
-                        color: '#d32f2f',
-                        borderRadius: 4,
-                        padding: '4px 8px',
-                        cursor: d.isBuiltin || deletingCode === d.code ? 'not-allowed' : 'pointer',
-                        opacity: d.isBuiltin || deletingCode === d.code ? 0.45 : 1,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <FaTrashAlt aria-hidden="true" />
-                    </button>
+                    {canDeleteDivision ? (
+                      <button
+                        type="button"
+                        title={d.isBuiltin ? 'Built-in divisions cannot be deleted' : 'Delete division'}
+                        aria-label="Delete division"
+                        disabled={d.isBuiltin || deletingCode === d.code}
+                        onClick={() => handleDelete(d)}
+                        style={{
+                          border: '1px solid #d32f2f',
+                          background: '#fff',
+                          color: '#d32f2f',
+                          borderRadius: 4,
+                          padding: '4px 8px',
+                          cursor: d.isBuiltin || deletingCode === d.code ? 'not-allowed' : 'pointer',
+                          opacity: d.isBuiltin || deletingCode === d.code ? 0.45 : 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <FaTrashAlt aria-hidden="true" />
+                      </button>
+                    ) : (
+                      <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}

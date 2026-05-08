@@ -49,10 +49,35 @@ import * as nodesApi from "../../api/nodes";
 import { tokenStore } from "../../api/client";
 import { getToken } from "../../api/auth";
 import { hydrateProjects } from "../../store/project/apiSync";
+import { useCan } from "../../auth/permissions";
 
 export default function MilestoneConfigPage({ mode }) {
   const { projectId } = useParams();
   const navigate = useNavigate();
+
+  // Per-action permissions. Milestones + activities are super_admin/admin
+  // only; tasks + subtasks are open to org_admin / project_admin /
+  // project_member as well. Used to gate the Add/Edit/Delete buttons in
+  // both the page header and the per-row grid.
+  const perms = {
+    createMilestone: useCan('createMilestone'),
+    editMilestone: useCan('editMilestone'),
+    deleteMilestone: useCan('deleteMilestone'),
+    createActivity: useCan('createActivity'),
+    editActivity: useCan('editActivity'),
+    deleteActivity: useCan('deleteActivity'),
+    createTask: useCan('createTask'),
+    editTask: useCan('editTask'),
+    deleteTask: useCan('deleteTask'),
+    createSubtask: useCan('createSubtask'),
+    editSubtask: useCan('editSubtask'),
+    deleteSubtask: useCan('deleteSubtask'),
+  };
+  const hasAnyEditPerm =
+    perms.editMilestone || perms.editActivity ||
+    perms.editTask || perms.editSubtask ||
+    perms.createMilestone || perms.createActivity ||
+    perms.createTask || perms.createSubtask;
 
   useProjects();
   const draft = useDraft();
@@ -468,7 +493,7 @@ export default function MilestoneConfigPage({ mode }) {
         return;
       }
       if (!formData.vendorId) {
-        uiStore.showMessage("Please select a Vendor.");
+        uiStore.showMessage("Please select an Organization.");
         return;
       }
       if (!formData.priority) {
@@ -1029,9 +1054,11 @@ export default function MilestoneConfigPage({ mode }) {
     </>
   ) : (
     <>
-      <button type="button" className="uidai-btn" onClick={toggleEdit}>
-        {editingConfig ? "Save" : "Edit"}
-      </button>
+      {hasAnyEditPerm && (
+        <button type="button" className="uidai-btn" onClick={toggleEdit}>
+          {editingConfig ? "Save" : "Edit"}
+        </button>
+      )}
       <button
         type="button"
         className="uidai-btn uidai-btn--cancel"
@@ -1044,7 +1071,7 @@ export default function MilestoneConfigPage({ mode }) {
 
   const expandAllLabel = allRowsExpanded() ? "Collapse All" : "Expand All";
   const addMilestoneBtn =
-    canMod ? (
+    canMod && perms.createMilestone ? (
       <button
         type="button"
         className="uidai-btn uidai-btn--small"
@@ -1100,7 +1127,7 @@ export default function MilestoneConfigPage({ mode }) {
                 {showStatusCol && <th style={{ width: 160 }}>Status</th>}
                 <th style={{ width: 130 }}>Start Date</th>
                 <th style={{ width: 130 }}>End Date</th>
-                <th style={{ width: 120 }}>Vendor</th>
+                <th style={{ width: 120 }}>Organization</th>
                 <th style={{ width: 160 }}>Depends On</th>
                 <th style={{ width: 220 }}>Actions</th>
               </tr>
@@ -1124,6 +1151,7 @@ export default function MilestoneConfigPage({ mode }) {
                     project={project}
                     depMap={depMap}
                     canMod={canMod}
+                    perms={perms}
                     showStatusCol={showStatusCol}
                     isOnboarding={isOnboarding}
                     onToggle={toggleRow}

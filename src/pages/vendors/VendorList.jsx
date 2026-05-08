@@ -7,6 +7,7 @@ import * as vendorsApi from '../../api/vendors';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import FilterShell from '../../components/FilterShell';
 import MilestonePagination from '../../components/projects/MilestonePagination';
+import { useCan } from '../../auth/permissions';
 
 export default function VendorList() {
   const { vendors, setVendors, refresh } = useData();
@@ -14,6 +15,7 @@ export default function VendorList() {
   const location = useLocation();
   const [deletingId, setDeletingId] = useState('');
   const [loading, setLoading] = useState(false);
+  const canDeleteVendor = useCan('deleteVendor');
 
   // Directly hit the list endpoint on every mount/navigation. No token guard
   // here — if the token is missing, the request still fires (and surfaces as
@@ -38,7 +40,7 @@ export default function VendorList() {
   }, [location.pathname, location.key]);
 
   async function handleDelete(v) {
-    const ok = window.confirm(`Delete vendor "${v.vendorName}"?`);
+    const ok = window.confirm(`Delete organization "${v.vendorName}"?`);
     if (!ok) return;
     if (tokenStore.get()) {
       try {
@@ -46,7 +48,7 @@ export default function VendorList() {
         await vendorsApi.remove(v.vendorId);
         await refresh();
       } catch (err) {
-        window.alert(err?.message || 'Failed to delete vendor');
+        window.alert(err?.message || 'Failed to delete organization');
       } finally {
         setDeletingId('');
       }
@@ -114,7 +116,7 @@ export default function VendorList() {
         <div className="uidai-pmis-search-row">
           <input
             className="uidai-pmis-search-input"
-            placeholder="Search vendors..."
+            placeholder="Search organizations..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -123,11 +125,11 @@ export default function VendorList() {
 
         <FilterShell>
           <div className="uidai-pmis-field">
-            <label>Vendor Name</label>
+            <label>Organization Name</label>
             <input
               className="uidai-pmis-filter-input"
               type="text"
-              placeholder="Search vendor name"
+              placeholder="Search organization name"
               value={filters.vendorName}
               onChange={(e) => updateFilter('vendorName', e.target.value)}
             />
@@ -191,7 +193,7 @@ export default function VendorList() {
           <table className="uidai-pmis-table uidai-pmis-table-compact">
             <thead>
               <tr>
-                <th>Vendor ID</th><th>Vendor Name</th><th>Status</th>
+                <th>Organization ID</th><th>Organization Name</th><th>Status</th>
                 <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th><th>Action</th>
               </tr>
             </thead>
@@ -199,7 +201,7 @@ export default function VendorList() {
               {loading && (
                 <tr className="uidai-pmis-no-results">
                   <td colSpan={8} style={{ textAlign: 'center', padding: 16 }}>
-                    Loading vendors...
+                    Loading organizations...
                   </td>
                 </tr>
               )}
@@ -223,33 +225,37 @@ export default function VendorList() {
                   <td>{v.phone}</td>
                   <td>{renderMappingText(v.projectMapping)}</td>
                   <td>
-                    <button
-                      type="button"
-                      title="Delete vendor"
-                      aria-label="Delete vendor"
-                      disabled={deletingId === v.vendorId}
-                      onClick={() => handleDelete(v)}
-                      style={{
-                        border: '1px solid #d32f2f',
-                        background: '#fff',
-                        color: '#d32f2f',
-                        borderRadius: 4,
-                        padding: '4px 8px',
-                        cursor: deletingId === v.vendorId ? 'not-allowed' : 'pointer',
-                        opacity: deletingId === v.vendorId ? 0.6 : 1,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <FaTrashAlt />
-                    </button>
+                    {canDeleteVendor ? (
+                      <button
+                        type="button"
+                        title="Delete organization"
+                        aria-label="Delete organization"
+                        disabled={deletingId === v.vendorId}
+                        onClick={() => handleDelete(v)}
+                        style={{
+                          border: '1px solid #d32f2f',
+                          background: '#fff',
+                          color: '#d32f2f',
+                          borderRadius: 4,
+                          padding: '4px 8px',
+                          cursor: deletingId === v.vendorId ? 'not-allowed' : 'pointer',
+                          opacity: deletingId === v.vendorId ? 0.6 : 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <FaTrashAlt />
+                      </button>
+                    ) : (
+                      <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
               {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8}>No matching vendors found.</td>
+                  <td colSpan={8}>No matching organizations found.</td>
                 </tr>
               )}
             </tbody>
@@ -264,7 +270,7 @@ export default function VendorList() {
             pageSize={pageSize}
             onGoto={(p) => setPage(Math.max(1, Math.min(p, totalPages)))}
             onSize={(s) => { setPageSize(s); setPage(1); }}
-            itemLabel="vendor"
+            itemLabel="organization"
           />
         )}
       </div>

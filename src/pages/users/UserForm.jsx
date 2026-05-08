@@ -5,15 +5,42 @@ import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
 import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
+import * as vendorsApi from '../../api/vendors';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { uiStore } from '../../store/project/uiStore';
+import { useCan } from '../../auth/permissions';
 
-const PROJECT_ROLE_LABELS = ['Project Admin', 'Project Member'];
+// Role-dropdown options keyed by the permission flag that must be true
+// for the option to appear. Filtered at render time against the current
+// user's role.
+const ORG_ROLE_OPTIONS = [
+  { value: 'super_admin', label: 'Super Admin', requires: 'createSuperAdmin' },
+  { value: 'admin', label: 'PMIS Admin', requires: 'createAdmin' },
+  { value: 'org_admin', label: 'Org Admin', requires: 'createOrgAdmin' },
+  { value: 'project_admin', label: 'Project Admin', requires: 'createProjectAdmin' },
+  { value: 'project_member', label: 'Project Member', requires: 'createProjectMember' },
+];
 
 export default function UserForm() {
   const { vendors, refresh, setUsers, users } = useData();
   const navigate = useNavigate();
+  const canCreateUser = useCan('createUser');
+  const canCreateSuperAdmin = useCan('createSuperAdmin');
+  const canCreateAdmin = useCan('createAdmin');
+  const canCreateOrgAdmin = useCan('createOrgAdmin');
+  const canCreateProjectAdmin = useCan('createProjectAdmin');
+  const canCreateProjectMember = useCan('createProjectMember');
+  const orgRoleFlags = {
+    createSuperAdmin: canCreateSuperAdmin,
+    createAdmin: canCreateAdmin,
+    createOrgAdmin: canCreateOrgAdmin,
+    createProjectAdmin: canCreateProjectAdmin,
+    createProjectMember: canCreateProjectMember,
+  };
+  const allowedOrgRoles = ORG_ROLE_OPTIONS.filter(
+    (o) => orgRoleFlags[o.requires]
+  );
 
   const [fullName, setFullName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
@@ -25,17 +52,17 @@ export default function UserForm() {
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
   const [orgRole, setOrgRole] = useState('');
-  // Multi-select Project Mapping. The picker drives the table below: each
-  // chosen project gets its own row with default Admin + Member role
-  // sub-rows, and removing a project drops its row.
+  // Multi-select Project Mapping. Always visible regardless of role.
   const [mapping, setMapping] = useState([]);
-  // Detailed per-project role/user assignments. Indexed by projectId so the
-  // mapping picker can sync without losing existing role/user picks.
-  // Shape: [{ projectId, roles: [{ role, userIds: [] }, ...] }]
-  const [assignments, setAssignments] = useState([]);
   const [projectList, setProjectList] = useState([]);
   const [divisionList, setDivisionList] = useState([]);
-  const [roleList, setRoleList] = useState([]);
+  // Fresh vendor object fetched on demand. The vendors LIST endpoint
+  // sometimes drops the `projects[]` array (server-side pagination /
+  // partial payload), so when org_admin / project_admin needs vendor-
+  // scoped projects we fall back to a one-off GET on /vendors/:id.
+  // Keyed by vendorId so re-selecting the same org doesn't re-fetch.
+  const [vendorDetailById, setVendorDetailById] = useState({});
+  const [vendorDetailLoading, setVendorDetailLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   // Per-field errors keyed by field name. Populated on submit, cleared as
@@ -83,33 +110,6 @@ export default function UserForm() {
     (async () => {
       try {
         const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.roles.list}?offset=1&pageSize=50`,
-          { method: 'GET', headers: { accept: 'application/json' } }
-        );
-        if (!res.ok) return;
-        const raw = await res.json().catch(() => ({}));
-        const elements =
-          raw?.data?._embedded?.elements ??
-          raw?._embedded?.elements ??
-          raw?.data ??
-          [];
-        const roles = (Array.isArray(elements) ? elements : [])
-          .filter((r) => r && r.name)
-          .map((r) => ({ id: r.id, name: r.name }));
-        if (!cancelled) setRoleList(roles);
-      } catch {
-        if (!cancelled) setRoleList([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!tokenStore.get()) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authorizedFetch(
           `${API_BASE}${ENDPOINTS.divisions.list}`,
           { method: 'GET', headers: { accept: 'application/json' } }
         );
@@ -131,15 +131,71 @@ export default function UserForm() {
     return () => { cancelled = true; };
   }, []);
 
+  const vendorFromList = vendors.find((v) => v.vendorId === vendorId);
+  const vendorFromDetail = vendorId ? vendorDetailById[vendorId] : null;
+  // Prefer the freshly-fetched vendor (full payload, has projects[]) and
+  // fall back to whatever the LIST gave us so the form renders something
+  // immediately while the GET is still in flight.
+  const selectedVendor = vendorFromDetail || vendorFromList;
+
+  // When the user picks an Organization (and the role needs to be scoped
+  // to its projects), make sure we have the vendor's full payload — the
+  // LIST endpoint occasionally returns vendors without their projects[]
+  // array, which is why org-scoped project mapping was sometimes empty.
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    if (!vendorId) return;
+    const restrictToVendor =
+      orgRole === 'org_admin' || orgRole === 'project_admin';
+    if (!restrictToVendor) return;
+    // Already have a full payload (with projects[]) cached → skip the GET.
+    const cached = vendorDetailById[vendorId];
+    if (cached && Array.isArray(cached.projects)) return;
+    let cancelled = false;
+    setVendorDetailLoading(true);
+    (async () => {
+      try {
+        const v = await vendorsApi.get(vendorId);
+        if (!cancelled && v) {
+          setVendorDetailById((prev) => ({ ...prev, [vendorId]: v }));
+        }
+      } catch {
+        /* swallow — fall back to whatever vendors LIST gave us */
+      } finally {
+        if (!cancelled) setVendorDetailLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorId, orgRole]);
+
+  // Project mapping must respect role + organization:
+  //   - org_admin / project_admin → only the selected organization's projects
+  //   - everyone else → all projects (legacy behavior, used for fallback)
+  // Falls back to demoData when there's no token, to keep the no-auth dev
+  // path working.
   const projectOptions = useMemo(() => {
     if (!tokenStore.get()) {
       return PROJECT_OPTIONS.map((name) => ({ label: name, value: name }));
+    }
+    const restrictToVendor =
+      orgRole === 'org_admin' || orgRole === 'project_admin';
+    if (restrictToVendor && selectedVendor) {
+      const vendorProjects = Array.isArray(selectedVendor.projects)
+        ? selectedVendor.projects
+        : [];
+      return vendorProjects
+        .map((p) => ({
+          label: p.name || p.projectCode || p.id || p.uuid,
+          value: p.id || p.uuid,
+        }))
+        .filter((o) => o.value);
     }
     return projectList.map((p) => ({
       label: p.name || p.projectCode || p.id,
       value: p.id || p.uuid,
     }));
-  }, [projectList]);
+  }, [projectList, orgRole, selectedVendor]);
 
   const projectNameById = useMemo(() => {
     const map = {};
@@ -147,42 +203,25 @@ export default function UserForm() {
       const id = p.id || p.uuid;
       if (id) map[id] = p.name || p.projectCode || id;
     });
+    // Vendor-scoped projects may not appear in the global projectList
+    // (different page sizes, role-filtered endpoints, etc.) — make sure
+    // labels still resolve when we restrict to the vendor's projects.
+    if (selectedVendor && Array.isArray(selectedVendor.projects)) {
+      selectedVendor.projects.forEach((p) => {
+        const id = p.id || p.uuid;
+        if (id && !map[id]) map[id] = p.name || p.projectCode || id;
+      });
+    }
     return map;
-  }, [projectList]);
+  }, [projectList, selectedVendor]);
 
-  // Keep `assignments` in sync with the Project Mapping picker: every
-  // selected project gets a row with an empty role (user picks one role
-  // from the fetched master via single-select). Existing picks are
-  // preserved across re-renders by indexing on projectId.
-  // Shape: [{ projectId, role: string }]
+  // Clear stale picks when the org/role context changes — switching
+  // organization or role can shrink the available project options, and
+  // keeping ids that no longer belong to the new context would silently
+  // ship invalid mappings to the API.
   useEffect(() => {
-    setAssignments((prev) => {
-      const byId = new Map(prev.map((a) => [a.projectId, a]));
-      return mapping.map((pid) =>
-        byId.get(pid) || { projectId: pid, role: '' }
-      );
-    });
-  }, [mapping]);
-
-  // Same data the User Search page uses.
-  const userOptions = useMemo(
-    () =>
-      (users || []).map((u) => {
-        const username = u.employeeId || u.login || '';
-        const fn = u.fullName || '';
-        const label = username
-          ? (fn ? `${username} (${fn})` : username)
-          : (fn || u.email || u.userId);
-        return { label, value: u.userId };
-      }),
-    [users]
-  );
-
-  function setRoleForProject(pIdx, nextRole) {
-    setAssignments((prev) =>
-      prev.map((a, i) => (i === pIdx ? { ...a, role: nextRole } : a))
-    );
-  }
+    setMapping([]);
+  }, [vendorId, orgRole]);
 
   const divisionOptions = useMemo(() => {
     if (!tokenStore.get() || divisionList.length === 0) {
@@ -197,8 +236,6 @@ export default function UserForm() {
     (selectedDivision.requiresOther ||
       String(selectedDivision.label || '').toLowerCase() === 'others' ||
       String(selectedDivision.code || '').toLowerCase() === 'others');
-
-  const selectedVendor = vendors.find((v) => v.vendorId === vendorId);
 
   /* Collect ALL field errors at once so every invalid input is highlighted
      simultaneously and the popup lists every missing/invalid field. */
@@ -239,19 +276,9 @@ export default function UserForm() {
     try {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
-        // Project mapping is only meaningful when "Project Admin" is the
-        // selected org role. For other org roles (or when nothing is
-        // selected) we don't ship the project mapping fields at all.
-        const includeMapping = orgRole === 'project_admin';
-        const projectIds = includeMapping
-          ? assignments.map((a) => a.projectId).filter(Boolean)
-          : [];
-        const flatAssignments = includeMapping
-          ? assignments.map((a) => ({
-              projectId: a.projectId || '',
-              role: a.role || ''
-            }))
-          : [];
+        // Project mapping is universal — same payload shape for every role.
+        // No per-project role attached anymore.
+        const projectIds = mapping.filter(Boolean);
         await usersApi.create({
           login: employeeId.trim(),
           email: email.trim(),
@@ -264,8 +291,8 @@ export default function UserForm() {
           division_other: divisionRequiresOther ? divisionOther.trim() : '',
           orgRole: orgRole || null,
           project_ids: projectIds,
-          projectAssignments: includeMapping ? assignments : [],
-          assignments: flatAssignments,
+          projectAssignments: projectIds.map((projectId) => ({ projectId })),
+          assignments: [],
         });
         await refresh();
       } else {
@@ -280,7 +307,7 @@ export default function UserForm() {
             vendorName: selectedVendor?.vendorName || '',
             division,
             orgRole: orgRole || null,
-            projectAssignments: orgRole === 'project_admin' ? assignments : [],
+            projectAssignments: mapping.map((projectId) => ({ projectId })),
             status: 'Active',
           },
         ]);
@@ -395,8 +422,6 @@ export default function UserForm() {
             <select
               value={vendorId}
               onChange={(e) => {
-                // The vendor-fetch effect re-seeds assignments from the
-                // newly-selected organization's project list automatically.
                 setVendorId(e.target.value);
                 clearFieldError('vendorId');
               }}
@@ -450,85 +475,52 @@ export default function UserForm() {
               onChange={(e) => setOrgRole(e.target.value)}
             >
               <option value="">— Select —</option>
-              <option value="project_admin">Project Admin</option>
-              <option value="org_admin">Org Admin</option>
-              <option value="pmis_admin">PMIS Admin</option>
+              {allowedOrgRoles.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
         </div>
 
-        {orgRole === 'project_admin' && (
-          <>
-            <div className="uidai-pmis-grid-4" style={{ marginTop: 18 }}>
-              <div className="uidai-pmis-field uidai-pmis-full">
-                <label>Project Mapping</label>
-                <MultiSelect
-                  name="userProjectMapping"
-                  value={mapping}
-                  options={projectOptions}
-                  onChange={setMapping}
-                />
-              </div>
-            </div>
-
-            {assignments.length > 0 && (
-              <div style={{ marginTop: 18 }}>
-                <div className="uidai-project-mapping__header">
-                  <h4>Project Mapping</h4>
-                </div>
-                <div className="uidai-pmis-table-wrap uidai-project-mapping">
-                  <table className="uidai-pmis-table uidai-pmis-table-compact">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '50%' }}>Project Name</th>
-                        <th>Role</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {assignments.map((a, pIdx) => {
-                        const projectLabel =
-                          projectNameById[a.projectId] ||
-                          (a.projectId ? a.projectId : '');
-                        const role = a.role || '';
-                        return (
-                          <tr key={pIdx} className="uidai-pm-project-start">
-                            <td className="uidai-pm-project-cell">
-                              <span>
-                                {projectLabel || (
-                                  <span className="uidai-pm-empty-cell">—</span>
-                                )}
-                              </span>
-                            </td>
-                            <td>
-                              <select
-                                className="uidai-pmis-filter-select"
-                                value={role}
-                                onChange={(e) => setRoleForProject(pIdx, e.target.value)}
-                              >
-                                <option value="">— Select Role —</option>
-                                {roleList.map((r) => (
-                                  <option key={r.id} value={r.name}>
-                                    {r.name}
-                                  </option>
-                                ))}
-                                {role && !roleList.some((r) => r.name === role) && (
-                                  <option value={role}>{role}</option>
-                                )}
-                              </select>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+        <div className="uidai-pmis-grid-4" style={{ marginTop: 18 }}>
+          <div className="uidai-pmis-field uidai-pmis-full">
+            <label>Project Mapping</label>
+            {(orgRole === 'org_admin' || orgRole === 'project_admin') && !vendorId && (
+              <div className="uidai-hint" style={{ marginBottom: 6 }}>
+                Select an Organization first to see its assigned projects.
               </div>
             )}
-          </>
-        )}
+            {(orgRole === 'org_admin' || orgRole === 'project_admin') && vendorId && vendorDetailLoading && projectOptions.length === 0 && (
+              <div className="uidai-hint" style={{ marginBottom: 6 }}>
+                Loading the organization's projects...
+              </div>
+            )}
+            {(orgRole === 'org_admin' || orgRole === 'project_admin') && vendorId && !vendorDetailLoading && projectOptions.length === 0 && (
+              <div className="uidai-hint" style={{ marginBottom: 6 }}>
+                No projects are assigned to the selected organization.
+              </div>
+            )}
+            <MultiSelect
+              name="userProjectMapping"
+              value={mapping}
+              options={projectOptions}
+              onChange={setMapping}
+            />
+          </div>
+        </div>
         {error && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{error}</div>}
+        {!canCreateUser && (
+          <div className="uidai-error-msg" style={{ marginTop: 8 }}>
+            You do not have permission to create users.
+          </div>
+        )}
         <div className="uidai-pmis-action-row">
-          <button className="uidai-pmis-btn" onClick={handleAdd} disabled={submitting}>
+          <button
+            className="uidai-pmis-btn"
+            onClick={handleAdd}
+            disabled={submitting || !canCreateUser}
+            title={!canCreateUser ? 'Insufficient permissions' : undefined}
+          >
             {submitting ? 'Adding…' : 'Add'}
           </button>
           <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>Cancel</button>

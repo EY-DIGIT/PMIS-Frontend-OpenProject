@@ -14,6 +14,7 @@ export default function MilestoneGridRow({
   project,
   depMap,
   canMod,
+  perms = {},
   showStatusCol,
   isOnboarding,
   onToggle,
@@ -22,6 +23,14 @@ export default function MilestoneGridRow({
   onDelete,
   onTrack
 }) {
+  // Per-action role gates. When `perms` isn't supplied (older callers)
+  // every action is treated as allowed so existing behavior is preserved.
+  const allowAdd = (k) =>
+    perms[`create${k.charAt(0).toUpperCase()}${k.slice(1)}`] !== false;
+  const allowEdit = (k) =>
+    perms[`edit${k.charAt(0).toUpperCase()}${k.slice(1)}`] !== false;
+  const allowDelete = (k) =>
+    perms[`delete${k.charAt(0).toUpperCase()}${k.slice(1)}`] !== false;
   const { node, kind, depth, hasKids, isExpanded } = r;
   const indent = 10 + depth * 28;
 
@@ -70,7 +79,7 @@ export default function MilestoneGridRow({
 
   let addChildBtn = null;
   if (canMod) {
-    if (kind === "milestone") {
+    if (kind === "milestone" && allowAdd("activity")) {
       addChildBtn = (
         <button
           type="button"
@@ -83,7 +92,7 @@ export default function MilestoneGridRow({
           + Activity
         </button>
       );
-    } else if (kind === "activity" && !isOnboarding && showTaskAdds) {
+    } else if (kind === "activity" && !isOnboarding && showTaskAdds && allowAdd("task")) {
       addChildBtn = (
         <button
           type="button"
@@ -96,7 +105,7 @@ export default function MilestoneGridRow({
           + Task
         </button>
       );
-    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && showTaskAdds) {
+    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && showTaskAdds && allowAdd("subtask")) {
       addChildBtn = (
         <button
           type="button"
@@ -204,21 +213,25 @@ export default function MilestoneGridRow({
             Track
           </button>
         )}
-        <button
-          type="button"
-          className="uidai-msgrid__btn-text"
-          onClick={() => onEdit(kind, "edit", parentUidForEdit, node.uid)}
-        >
-          Edit
-        </button>
-        <button
-          type="button"
-          className="uidai-msgrid__btn-text uidai-msgrid__btn-text--danger"
-          disabled={!canMod}
-          onClick={() => onDelete(kind, node.uid)}
-        >
-          Delete
-        </button>
+        {allowEdit(kind) && (
+          <button
+            type="button"
+            className="uidai-msgrid__btn-text"
+            onClick={() => onEdit(kind, "edit", parentUidForEdit, node.uid)}
+          >
+            Edit
+          </button>
+        )}
+        {allowDelete(kind) && (
+          <button
+            type="button"
+            className="uidai-msgrid__btn-text uidai-msgrid__btn-text--danger"
+            disabled={!canMod}
+            onClick={() => onDelete(kind, node.uid)}
+          >
+            Delete
+          </button>
+        )}
       </td>
     </tr>
   );

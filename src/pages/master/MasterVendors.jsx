@@ -13,14 +13,14 @@ export default function MasterVendors() {
   return (
     <>
       <p className="uidai-pmis-subtitle">
-        Vendor master records currently stored in the system.
+        Organization master records currently stored in the system.
       </p>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-table-wrap">
           <table className="uidai-pmis-table uidai-pmis-table-compact">
             <thead>
               <tr>
-                <th>Vendor ID</th><th>Vendor Name</th><th>Type</th><th>Status</th>
+                <th>Organization ID</th><th>Organization Name</th><th>Status</th>
                 <th>Contact Person</th><th>Email</th><th>Phone</th>
                 <th>Project Mapping</th>
               </tr>
@@ -28,8 +28,8 @@ export default function MasterVendors() {
             <tbody>
               {loading && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8} style={{ textAlign: 'center', padding: 16 }}>
-                    Loading vendors...
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 16 }}>
+                    Loading organizations...
                   </td>
                 </tr>
               )}
@@ -37,7 +37,6 @@ export default function MasterVendors() {
                 <tr key={v.vendorId}>
                   <td>{v.vendorCode || v.vendorId}</td>
                   <td>{v.vendorName}</td>
-                  <td>{v.vendorType}</td>
                   <td>
                     <span className={`uidai-pmis-badge ${v.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>
                       {v.status}
@@ -51,7 +50,7 @@ export default function MasterVendors() {
               ))}
               {!loading && vendors.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8}>No data found.</td>
+                  <td colSpan={7}>No data found.</td>
                 </tr>
               )}
             </tbody>

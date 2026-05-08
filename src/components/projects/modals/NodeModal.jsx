@@ -758,7 +758,7 @@ export default function NodeModal({
               </div>
               <div className="uidai-field">
                 <label className="uidai-field__label">
-                  Vendor <span className="uidai-required-project">*</span>
+                  Organization <span className="uidai-required-project">*</span>
                 </label>
                 <select
                   className="uidai-select"
@@ -766,7 +766,7 @@ export default function NodeModal({
                   onChange={(e) => updateField({ vendorId: e.target.value })}
                   disabled={dis}
                 >
-                  <option value="">— Select Vendor —</option>
+                  <option value="">— Select Organization —</option>
                   {projectVendors.map((v) => {
                     const id = typeof v === "object" ? (v.id || v.uuid || "") : "";
                     const name = vendorName(v);
@@ -776,7 +776,7 @@ export default function NodeModal({
                 </select>
                 {projectVendors.length === 0 && (
                   <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                    No vendors are associated with this project yet. Add them in Project Details &rarr; Organizations.
+                    No organizations are associated with this project yet. Add them in Project Details &rarr; Organizations.
                   </div>
                 )}
               </div>

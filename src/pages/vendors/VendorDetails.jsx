@@ -8,6 +8,7 @@ import * as vendorsApi from '../../api/vendors';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
+import { useCan } from '../../auth/permissions';
 
 const ROLE_LABELS = ['Project Admin', 'Project Member'];
 
@@ -15,6 +16,9 @@ export default function VendorDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { vendors, users, refresh } = useData();
+  // Edit gating — only super_admin / admin can mutate organization records
+  // (per role spec). For everyone else this page is read-only.
+  const canEditVendor = useCan('editVendor');
   const fallback = vendors.find((x) => x.vendorId === id) || null;
 
   const [vendor, setVendor] = useState(fallback);
@@ -297,7 +301,7 @@ export default function VendorDetails() {
   if (loading && !vendor) {
     return (
       <>
-        <div className="uidai-pmis-title">Vendor Details</div>
+        <div className="uidai-pmis-title">Organization Details</div>
         <div className="uidai-pmis-card">
           <p className="uidai-pmis-subtitle">Loading...</p>
         </div>
@@ -308,9 +312,9 @@ export default function VendorDetails() {
   if (!vendor) {
     return (
       <>
-        <div className="uidai-pmis-title">Vendor Details</div>
+        <div className="uidai-pmis-title">Organization Details</div>
         <div className="uidai-pmis-card">
-          <p className="uidai-pmis-subtitle">{loadError || 'Vendor not found.'}</p>
+          <p className="uidai-pmis-subtitle">{loadError || 'Organization not found.'}</p>
           <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/vendors')}>Back</button>
         </div>
       </>
@@ -319,30 +323,32 @@ export default function VendorDetails() {
 
   return (
     <>
-      <div className="uidai-pmis-title">Vendor Details</div>
+      <div className="uidai-pmis-title">Organization Details</div>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-card-actions">
-          <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
-            <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
-            <span className="uidai-pmis-btn-text">
-              {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
-            </span>
-          </button>
+          {canEditVendor && (
+            <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
+              <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
+              <span className="uidai-pmis-btn-text">
+                {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
+              </span>
+            </button>
+          )}
           {editing ? (
             <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={handleCancelEdit} disabled={saving}>Cancel</button>
           ) : (
             <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/vendors')}>Back</button>
           )}
         </div>
-        <h3>Vendor Information</h3>
+        <h3>Organization Information</h3>
         <br />
         <div className="uidai-pmis-grid-4">
           <div className="uidai-pmis-field">
-            <label>Vendor ID <span className="uidai-pmis-required">*</span></label>
+            <label>Organization ID <span className="uidai-pmis-required">*</span></label>
             <input value={vendor.vendorCode || vendor.vendorId} disabled />
           </div>
           <div className="uidai-pmis-field">
-            <label>Vendor Name <span className="uidai-pmis-required">*</span></label>
+            <label>Organization Name <span className="uidai-pmis-required">*</span></label>
             <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing} />
           </div>
           <div className="uidai-pmis-field">

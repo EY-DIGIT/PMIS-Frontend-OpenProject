@@ -8,6 +8,7 @@ import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/help
 import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
 import MilestonePagination from '../../components/projects/MilestonePagination';
+import { useCan } from '../../auth/permissions';
 
 export default function UserList() {
   const { users, setUsers, refresh } = useData();
@@ -15,6 +16,8 @@ export default function UserList() {
   const location = useLocation();
   const [deletingId, setDeletingId] = useState('');
   const [loading, setLoading] = useState(false);
+  const canDeleteUser = useCan('deleteUser');
+  const canCreateUser = useCan('createUser');
 
   // Directly hit the list endpoint on every mount/navigation. No token guard
   // here — if the token is missing, the request still fires (and surfaces as
@@ -229,27 +232,31 @@ export default function UserList() {
                     </span>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      title="Delete user"
-                      aria-label="Delete user"
-                      disabled={deletingId === u.userId}
-                      onClick={() => handleDelete(u)}
-                      style={{
-                        border: '1px solid #d32f2f',
-                        background: '#fff',
-                        color: '#d32f2f',
-                        borderRadius: 4,
-                        padding: '4px 8px',
-                        cursor: deletingId === u.userId ? 'not-allowed' : 'pointer',
-                        opacity: deletingId === u.userId ? 0.6 : 1,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <FaTrashAlt />
-                    </button>
+                    {canDeleteUser ? (
+                      <button
+                        type="button"
+                        title="Delete user"
+                        aria-label="Delete user"
+                        disabled={deletingId === u.userId}
+                        onClick={() => handleDelete(u)}
+                        style={{
+                          border: '1px solid #d32f2f',
+                          background: '#fff',
+                          color: '#d32f2f',
+                          borderRadius: 4,
+                          padding: '4px 8px',
+                          cursor: deletingId === u.userId ? 'not-allowed' : 'pointer',
+                          opacity: deletingId === u.userId ? 0.6 : 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <FaTrashAlt />
+                      </button>
+                    ) : (
+                      <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -24,7 +24,7 @@ const STATUS_ORDER = ["completed", "ontrack", "delayed", "notstarted"];
 
 const VIEW_TABS = [
   { id: "project",  label: "Project View",        icon: "📁" },
-  { id: "vendor",   label: "Vendor wise View",    icon: "🏢" },
+  { id: "vendor",   label: "Organization wise View",    icon: "🏢" },
   { id: "division", label: "Division/Owner wise View", icon: "👥" },
 ];
 
@@ -170,7 +170,7 @@ export default function Dashboard() {
       const vendorCount = groups.size - (groups.has("(none)") ? 1 : 0);
       const orphans = (groups.get("(none)") || []).length;
       return [
-        { id: "vendors",  cls: "k-total",      label: "Vendors",        value: vendorCount, foot: "with assigned projects" },
+        { id: "vendors",  cls: "k-total",      label: "Organizations",  value: vendorCount, foot: "with assigned projects" },
         { id: "projects", cls: "k-extra",      label: "Total Projects", value: totals.total },
         { id: "orphans",  cls: "k-notstarted", label: "Unassigned",     value: orphans, foot: "no vendor mapped" },
         { id: "completed",cls: "k-completed",  label: "Completed",      value: totals.completed },
@@ -192,7 +192,7 @@ export default function Dashboard() {
   const breadcrumb = useMemo(() => {
     const top = {
       project: "All Projects",
-      vendor: "All Vendors",
+      vendor: "All Organizations",
       division: "All Divisions/Owners",
     }[view] || "All";
     if (!drill) return [{ label: top, current: true }];
@@ -316,7 +316,7 @@ export default function Dashboard() {
         </div>
         <div className="dash-card">
           <div className="dash-card-title">
-            {view === "vendor" ? "Vendor Comparison"
+            {view === "vendor" ? "Organization Comparison"
               : view === "division" ? "Division Comparison"
               : "Owner Comparison"}
             <span className="dash-card-sub">total projects per group</span>
@@ -337,7 +337,7 @@ export default function Dashboard() {
       {/* Group breakdown — view-specific */}
       <div className="dash-card">
         <div className="dash-card-title">
-          {view === "project" ? "Projects" : view === "vendor" ? "Vendors" : "Divisions / Owners"}
+          {view === "project" ? "Projects" : view === "vendor" ? "Organizations" : "Divisions / Owners"}
           <span className="dash-card-sub">{filtered.length} item{filtered.length === 1 ? "" : "s"}</span>
         </div>
         <DashboardGroupTable view={view} projects={filtered} drill={drill} onDrill={setDrill} />
@@ -659,7 +659,7 @@ function DashboardGroupTable({ view, projects, drill, onDrill }) {
     return (
       <table className="dash-table">
         <thead>
-          <tr><th>Vendor</th><th>Projects</th><th>Completed</th><th>Delayed</th></tr>
+          <tr><th>Organization</th><th>Projects</th><th>Completed</th><th>Delayed</th></tr>
         </thead>
         <tbody>
           {groups.size === 0 ? (

@@ -20,6 +20,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 
 
 import { useSessionManager } from "./api/sessionManager";
+import { useCan } from "./auth/permissions";
 
 import VendorList from './pages/vendors/VendorList';
 import VendorForm from './pages/vendors/VendorForm';
@@ -73,11 +74,11 @@ function PageTitle() {
         else if (segments[2] === "track") title = "Track Progress";
         else title = "Project Details";
     } else if (segments[0] === "vendors") {
-        title = "Vendor Management";
+        title = "Organization Management";
     } else if (segments[0] === "users") {
         title = "User Management";
     } else if (segments[0] === "master") {
-        if (segments[1] === "vendors") title = "Vendor Data";
+        if (segments[1] === "vendors") title = "Organization Data";
         else if (segments[1] === "users") title = "User Data";
         else if (segments[1] === "divisions") title = "Division Data";
         else title = "Master Data";
@@ -108,7 +109,7 @@ function Breadcrumbs() {
         add: "Add Project",
         config: "Milestone Configuration",
         track: "Track Progress",
-        vendors: "Vendors",
+        vendors: "Organizations",
         users: "Users",
         divisions: "Divisions",
         master: "Master Data",
@@ -122,7 +123,7 @@ function Breadcrumbs() {
        "Home › Users › New". */
     const NEW_ROUTE_OVERRIDES = {
         "/users/new": { to: "/users/new", label: "New User" },
-        "/vendors/new": { to: "/vendors/new", label: "New Vendor" }
+        "/vendors/new": { to: "/vendors/new", label: "New Organization" }
     };
     const newRouteOverride = NEW_ROUTE_OVERRIDES[pathname];
 
@@ -206,6 +207,21 @@ function RequireAuth({ children }) {
     );
 }
 
+/* Gate a route by a single permission flag from src/config/roles.json.
+   Renders the child when allowed; otherwise shows a small "no access"
+   panel so users get an explanation instead of a silent redirect. */
+function RequirePermission({ action, children }) {
+    const allowed = useCan(action);
+    if (allowed) return children;
+    return (
+        <div style={{ padding: 32, textAlign: 'center', color: '#5a6680' }}>
+            <h2 style={{ marginBottom: 8, color: '#173e77' }}>Access denied</h2>
+            <p>Your role does not have permission to view this page.</p>
+            <Link to="/" style={{ color: '#173e77' }}>Go to Home</Link>
+        </div>
+    );
+}
+
 export default function MainApp() {
     return (
 
@@ -238,45 +254,45 @@ export default function MainApp() {
                                             />
                                             <Route path="/profile" element={<Profile />} />
 
-                                            <Route path="/projects" element={<ProjectsListPage />} />
+                                            <Route path="/projects" element={<RequirePermission action="viewProjects"><ProjectsListPage /></RequirePermission>} />
 
                                             {/* Onboarding — step 1 = details, step 2 = milestone config (draft) */}
-                                            <Route path="/projects/add" element={<AddProjectPage />} />
+                                            <Route path="/projects/add" element={<RequirePermission action="createProject"><AddProjectPage /></RequirePermission>} />
                                             <Route
                                                 path="/projects/add/config"
-                                                element={<MilestoneConfigPage mode="onboarding" />}
+                                                element={<RequirePermission action="createProject"><MilestoneConfigPage mode="onboarding" /></RequirePermission>}
                                             />
 
                                             {/* Existing project — details / config / track */}
-                                            <Route path="/projects/:projectId" element={<ProjectDetailsPage />} />
+                                            <Route path="/projects/:projectId" element={<RequirePermission action="viewProjects"><ProjectDetailsPage /></RequirePermission>} />
                                             <Route
                                                 path="/projects/:projectId/config"
-                                                element={<MilestoneConfigPage mode="update" />}
+                                                element={<RequirePermission action="viewProjects"><MilestoneConfigPage mode="update" /></RequirePermission>}
                                             />
-                                            <Route path="/projects/:projectId/track" element={<TrackProgressPage />} />
+                                            <Route path="/projects/:projectId/track" element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>} />
                                             <Route
                                                 path="/projects/:projectId/track/:nodeUid"
-                                                element={<TrackProgressPage />}
+                                                element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>}
                                             />
 
 
                                             {/* Vendors */}
-                                            <Route path="vendors" element={<VendorList />} />
-                                            <Route path="vendors/new" element={<VendorForm />} />
-                                            <Route path="vendors/:id" element={<VendorDetails />} />
+                                            <Route path="vendors" element={<RequirePermission action="viewVendors"><VendorList /></RequirePermission>} />
+                                            <Route path="vendors/new" element={<RequirePermission action="createVendor"><VendorForm /></RequirePermission>} />
+                                            <Route path="vendors/:id" element={<RequirePermission action="viewVendors"><VendorDetails /></RequirePermission>} />
 
                                             {/* Users */}
-                                            <Route path="users" element={<UserList />} />
-                                            <Route path="users/new" element={<UserForm />} />
-                                            <Route path="users/:id" element={<UserDetails />} />
+                                            <Route path="users" element={<RequirePermission action="viewUsers"><UserList /></RequirePermission>} />
+                                            <Route path="users/new" element={<RequirePermission action="createUser"><UserForm /></RequirePermission>} />
+                                            <Route path="users/:id" element={<RequirePermission action="viewUsers"><UserDetails /></RequirePermission>} />
 
                                             {/* Master Data */}
-                                            <Route path="master" element={<MasterOverview />} />
-                                            <Route path="master/vendors" element={<MasterVendors />} />
-                                            <Route path="master/users" element={<MasterUsers />} />
-                                            <Route path="master/divisions" element={<MasterDivisions />} />
-                                            <Route path="master/divisions/new" element={<MasterDivisionForm />} />
-                                            <Route path="master/divisions/:code" element={<MasterDivisionForm />} />
+                                            <Route path="master" element={<RequirePermission action="viewMasterData"><MasterOverview /></RequirePermission>} />
+                                            <Route path="master/vendors" element={<RequirePermission action="viewMasterData"><MasterVendors /></RequirePermission>} />
+                                            <Route path="master/users" element={<RequirePermission action="viewMasterData"><MasterUsers /></RequirePermission>} />
+                                            <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
+                                            <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
+                                            <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
                                         </Routes>
                                     </Layout>
                                     </RequireAuth>

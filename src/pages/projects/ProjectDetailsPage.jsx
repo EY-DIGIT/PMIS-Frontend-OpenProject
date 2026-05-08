@@ -15,6 +15,7 @@ import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
+import { useCan } from "../../auth/permissions";
 
 /* IST-aware: backend stores IST midnight as UTC 18:30 of the prior day,
    so naive "T"-chopping returns yesterday's date. Project to IST then
@@ -146,6 +147,10 @@ export default function ProjectDetailsPage() {
   const realProject = useProject(projectId);
 
   const [editing, setEditing] = useState(false);
+  // Edit gate — per role spec, only super_admin / admin can edit project
+  // detail; everyone else sees the page in read-only mode.
+  const canEditProject = useCan('editProject');
+  const canDeleteProject = useCan('deleteProject');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -683,10 +688,12 @@ export default function ProjectDetailsPage() {
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
-          <button className="uidai-btn" onClick={toggleEdit}>
-            {editing ? "Save" : "Edit"}
-          </button>
-          {project.status !== "PUBLISHED" && (
+          {canEditProject && (
+            <button className="uidai-btn" onClick={toggleEdit}>
+              {editing ? "Save" : "Edit"}
+            </button>
+          )}
+          {canEditProject && project.status !== "PUBLISHED" && (
             <button
               className="uidai-btn"
               disabled={editing}
@@ -704,13 +711,15 @@ export default function ProjectDetailsPage() {
           >
             Configure
           </button>
-          <button
-            className="uidai-btn uidai-btn--delete"
-            disabled={editing}
-            onClick={() => setDeleteOpen(true)}
-          >
-            Remove
-          </button>
+          {canDeleteProject && (
+            <button
+              className="uidai-btn uidai-btn--delete"
+              disabled={editing}
+              onClick={() => setDeleteOpen(true)}
+            >
+              Remove
+            </button>
+          )}
           <button className="uidai-btn uidai-btn--cancel" onClick={() => navigate("/projects")}>
             Back
           </button>

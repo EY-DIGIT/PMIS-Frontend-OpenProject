@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '../../data/DataContext';
-import MultiSelect from '../../components/MultiSelect';
 import CharTextarea from '../../components/CharTextarea';
-import { USER_ROLES, DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
+import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
-
-const PROJECT_ROLE_LABELS = ['Project Admin', 'Project Member'];
+import { getRoleMeta } from '../../auth/permissions';
 
 function splitName(n) {
   const parts = (n || '').trim().split(/\s+/);
@@ -31,16 +29,16 @@ export default function UserDetails() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [role, setRole] = useState(USER_ROLES[0]);
+  // orgRole reflects whatever was chosen on the Add User page (e.g.
+  // "org_admin", "project_admin"). Read-only on this page.
+  const [orgRole, setOrgRole] = useState('');
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
   const [status, setStatus] = useState('Active');
-  // Project assignments — same shape as Vendor Details so the table layout
-  // mirrors that page. Each project carries an array of role rows; the
-  // Users column for this user always reflects the current user being
-  // viewed (since the page is "this user's" mappings).
-  // Shape: [{ projectId, roles: [{ role }, ...] }]
+  // Project assignments — one row per project. No per-project role,
+  // no per-project user picks; just the project the user is mapped to.
+  // Shape: [{ projectId }]
   const [assignments, setAssignments] = useState([]);
 
   const [projectList, setProjectList] = useState([]);
@@ -50,38 +48,15 @@ export default function UserDetails() {
     setFullName(u?.fullName || '');
     setEmail(u?.email || '');
     setPhone(u?.phone || '');
-    setRole(u?.role || USER_ROLES[0]);
+    setOrgRole(u?.orgRole || '');
     setVendorId(u?.vendorId || '');
     setDivision(u?.division || '');
     setDivisionOther(u?.divisionOther || '');
     setStatus(u?.status || 'Active');
-    // Seed assignments — accept the new shape ({roles:[{role, userIds}]}),
-    // the flat per-row shape ({role, userIds}), or just project IDs. Fall
-    // back to one default project entry with both Admin + Member rows.
-    const normalize = (a) => {
-      if (Array.isArray(a?.roles) && a.roles.length) {
-        return {
-          projectId: a.projectId || '',
-          roles: a.roles.map((r) => ({
-            role: r?.role || PROJECT_ROLE_LABELS[0],
-            userIds: Array.isArray(r?.userIds) ? r.userIds : []
-          }))
-        };
-      }
-      if (a && (a.role || Array.isArray(a.userIds))) {
-        return {
-          projectId: a.projectId || '',
-          roles: [{
-            role: a.role || PROJECT_ROLE_LABELS[0],
-            userIds: Array.isArray(a.userIds) ? a.userIds : []
-          }]
-        };
-      }
-      return {
-        projectId: a?.projectId || '',
-        roles: PROJECT_ROLE_LABELS.map((label) => ({ role: label, userIds: [] }))
-      };
-    };
+    // Seed assignments — accept legacy shapes (with roles[]/userIds) and
+    // collapse to just { projectId }. Per-project role and per-project
+    // user picks have both been removed from this page.
+    const normalize = (a) => ({ projectId: a?.projectId || '' });
     if (Array.isArray(u?.projectAssignments) && u.projectAssignments.length) {
       setAssignments(u.projectAssignments.map(normalize));
     } else if (Array.isArray(u?.projectIds) && u.projectIds.length) {
@@ -95,37 +70,11 @@ export default function UserDetails() {
     setAssignments((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
   }
   function addAssignmentRow() {
-    setAssignments((prev) => [
-      ...prev,
-      {
-        projectId: '',
-        roles: PROJECT_ROLE_LABELS.map((label) => ({ role: label, userIds: [] }))
-      }
-    ]);
+    setAssignments((prev) => [...prev, { projectId: '' }]);
   }
-  function updateRole(projectIdx, roleIdx, patch) {
-    setAssignments((prev) =>
-      prev.map((a, i) => {
-        if (i !== projectIdx) return a;
-        const roles = (a.roles || []).map((r, j) =>
-          j === roleIdx ? { ...r, ...patch } : r
-        );
-        return { ...a, roles };
-      })
-    );
-  }
-  function deleteRoleRow(projectIdx, roleIdx) {
-    if (!window.confirm('Delete this role row?')) return;
-    setAssignments((prev) => {
-      const next = prev
-        .map((a, i) => {
-          if (i !== projectIdx) return a;
-          const roles = (a.roles || []).filter((_, j) => j !== roleIdx);
-          return { ...a, roles };
-        })
-        .filter((a) => Array.isArray(a.roles) && a.roles.length);
-      return next;
-    });
+  function deleteAssignmentRow(idx) {
+    if (!window.confirm('Delete this project mapping?')) return;
+    setAssignments((prev) => prev.filter((_, i) => i !== idx));
   }
 
   useEffect(() => {
@@ -231,21 +180,6 @@ export default function UserDetails() {
     return map;
   }, [projectList]);
 
-  // Same data source the User Search page uses, so the picker shows the
-  // exact same list (with username + full name in the label).
-  const userOptions = useMemo(
-    () =>
-      (users || []).map((u) => {
-        const username = u.employeeId || u.login || '';
-        const fullName = u.fullName || '';
-        const label = username
-          ? (fullName ? `${username} (${fullName})` : username)
-          : (fullName || u.email || u.userId);
-        return { label, value: u.userId };
-      }),
-    [users]
-  );
-
   const divisionOptions = useMemo(() => {
     if (!tokenStore.get() || divisionList.length === 0) {
       return DIVISION_OPTIONS.map((d) => ({ code: d, label: d, requiresOther: false }));
@@ -277,20 +211,13 @@ export default function UserDetails() {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
         const projectIds = assignments.map((a) => a.projectId).filter(Boolean);
-        // Mirror Vendor Details: also send a flat list of {projectId, role,
-        // userIds} so the backend can index per-role user picks directly.
-        const flatAssignments = assignments.flatMap((a) =>
-          (a.roles || []).map((r) => ({
-            projectId: a.projectId || '',
-            role: r.role || '',
-            userIds: Array.isArray(r.userIds) ? r.userIds : []
-          }))
-        );
+        // Per-project role + per-project users both removed — emit a flat
+        // list of { projectId } only.
+        const flatAssignments = projectIds.map((projectId) => ({ projectId }));
         const updated = await usersApi.update(id, {
           email: email.trim(),
           firstName,
           lastName,
-          admin: role === 'Admin',
           status: status === 'Inactive' ? 'inactive' : 'active',
           vendor_id: vendorId,
           division,
@@ -400,10 +327,11 @@ export default function UserDetails() {
             </div>
           </div>
           <div className="uidai-pmis-field">
-            <label>Role <span className="uidai-pmis-required">*</span></label>
-            <select value={role} onChange={(e) => setRole(e.target.value)} disabled={!editing}>
-              {USER_ROLES.map((r) => <option key={r}>{r}</option>)}
-            </select>
+            <label>Role</label>
+            <input
+              value={getRoleMeta(orgRole)?.label || orgRole || '—'}
+              disabled
+            />
           </div>
           <div className="uidai-pmis-field">
             <label>Organization <span className="uidai-pmis-required">*</span></label>
@@ -460,16 +388,14 @@ export default function UserDetails() {
             <table className="uidai-pmis-table uidai-pmis-table-compact">
               <thead>
                 <tr>
-                  <th style={{ width: '30%' }}>Project Name</th>
-                  <th style={{ width: '20%' }}>Roles</th>
-                  <th>Users</th>
+                  <th>Project Name</th>
                   <th style={{ width: 140 }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {assignments.length === 0 && (
                   <tr className="uidai-pmis-no-results">
-                    <td colSpan={4}>
+                    <td colSpan={2}>
                       No projects mapped yet{editing ? '. Click Add to add one.' : '.'}
                     </td>
                   </tr>
@@ -478,75 +404,37 @@ export default function UserDetails() {
                   const projectLabel =
                     projectNameById[a.projectId] ||
                     (a.projectId ? a.projectId : '');
-                  const roles = Array.isArray(a.roles) && a.roles.length
-                    ? a.roles
-                    : [{ role: PROJECT_ROLE_LABELS[0], userIds: [] }];
-                  return roles.map((r, rIdx) => (
-                    <tr
-                      key={`${pIdx}-${rIdx}`}
-                      className={rIdx === 0 ? 'uidai-pm-project-start' : ''}
-                    >
-                      {rIdx === 0 && (
-                        <td
-                          rowSpan={roles.length}
-                          className="uidai-pm-project-cell"
-                        >
-                          {editing ? (
-                            <select
-                              className="uidai-pmis-filter-select"
-                              value={a.projectId}
-                              onChange={(e) =>
-                                updateAssignment(pIdx, { projectId: e.target.value })
-                              }
-                            >
-                              <option value="">— Select Project —</option>
-                              {projectOptions
-                                .filter(
-                                  (p) =>
-                                    p.value === a.projectId ||
-                                    !assignments.some(
-                                      (other, i) =>
-                                        i !== pIdx && other.projectId === p.value
-                                    )
-                                )
-                                .map((p) => (
-                                  <option key={p.value} value={p.value}>
-                                    {p.label}
-                                  </option>
-                                ))}
-                            </select>
-                          ) : (
-                            <span>
-                              {projectLabel || <span className="uidai-pm-empty-cell">—</span>}
-                            </span>
-                          )}
-                        </td>
-                      )}
-                      <td>
-                        <span>{r.role || '—'}</span>
-                      </td>
-                      <td>
+                  return (
+                    <tr key={pIdx} className="uidai-pm-project-start">
+                      <td className="uidai-pm-project-cell">
                         {editing ? (
-                          <MultiSelect
-                            name={`user-assign-${pIdx}-${rIdx}`}
-                            placeholder="Select User"
-                            searchPlaceholder="Search user..."
-                            value={r.userIds || []}
-                            options={userOptions}
-                            onChange={(next) =>
-                              updateRole(pIdx, rIdx, { userIds: next })
+                          <select
+                            className="uidai-pmis-filter-select"
+                            value={a.projectId}
+                            onChange={(e) =>
+                              updateAssignment(pIdx, { projectId: e.target.value })
                             }
-                          />
-                        ) : (r.userIds || []).length === 0 ? (
-                          <span className="uidai-pm-empty-cell">—</span>
+                          >
+                            <option value="">— Select Project —</option>
+                            {projectOptions
+                              .filter(
+                                (p) =>
+                                  p.value === a.projectId ||
+                                  !assignments.some(
+                                    (other, i) =>
+                                      i !== pIdx && other.projectId === p.value
+                                  )
+                              )
+                              .map((p) => (
+                                <option key={p.value} value={p.value}>
+                                  {p.label}
+                                </option>
+                              ))}
+                          </select>
                         ) : (
-                          <ul className="uidai-pm-user-list">
-                            {(r.userIds || []).map((uid) => (
-                              <li key={uid}>
-                                {userOptions.find((u) => u.value === uid)?.label || uid}
-                              </li>
-                            ))}
-                          </ul>
+                          <span>
+                            {projectLabel || <span className="uidai-pm-empty-cell">—</span>}
+                          </span>
                         )}
                       </td>
                       <td className="uidai-pm-actions">
@@ -554,7 +442,7 @@ export default function UserDetails() {
                           <button
                             type="button"
                             className="uidai-pm-action-link uidai-pm-action-link--danger"
-                            onClick={() => deleteRoleRow(pIdx, rIdx)}
+                            onClick={() => deleteAssignmentRow(pIdx)}
                           >
                             Delete
                           </button>
@@ -563,11 +451,11 @@ export default function UserDetails() {
                         )}
                       </td>
                     </tr>
-                  ));
+                  );
                 })}
                 {editing && (
                   <tr className="uidai-pm-add-row">
-                    <td colSpan={4}>
+                    <td colSpan={2}>
                       <button
                         type="button"
                         className="uidai-pmis-btn uidai-pmis-btn-small"

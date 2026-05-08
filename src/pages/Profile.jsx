@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as auth from "../api/auth";
 import * as usersApi from "../api/users";
+import { getRoleMeta } from "../auth/permissions";
 import "../styles/Profile.css";
 
-const ROLE_OPTIONS = ["Admin", "Manager", "Viewer"];
 const DIVISION_OPTIONS = [
   { code: "tmd1", label: "TMD1" },
   { code: "tmd2", label: "TMD2" },
@@ -47,7 +47,6 @@ export default function Profile() {
     fullName: "",
     email: "",
     phoneNumber: "",
-    role: "Admin",
     division: "tmd1",
     divisionOther: "",
   });
@@ -58,7 +57,6 @@ export default function Profile() {
       fullName: fn,
       email: u?.email || "",
       phoneNumber: u?.phoneNumber || "",
-      role: u?.admin ? "Admin" : "Viewer",
       division: (u?.division || "").toLowerCase() || "tmd1",
       divisionOther: u?.divisionOther || "",
     });
@@ -84,7 +82,11 @@ export default function Profile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const role = user?.admin ? "Administrator" : user?.role || "Viewer";
+  // Role shown on this page = whatever orgRole the backend returned on
+  // login / verifyOtp / me. Same source the User Details page uses, so
+  // the two screens stay in sync.
+  const orgRoleKey = user?.orgRole || "";
+  const role = getRoleMeta(orgRoleKey)?.label || orgRoleKey || "—";
   const heroDivision = useMemo(() => {
     const d = (user?.division || "").toLowerCase();
     const m = DIVISION_OPTIONS.find((x) => x.code === d);
@@ -328,17 +330,13 @@ export default function Profile() {
               <div className="uidai-prof-row">
                 <div className="uidai-prof-row-lbl">Role</div>
                 <div className="uidai-prof-row-val">
-                  <select
+                  <input
                     className="uidai-prof-control uidai-prof-locked"
-                    value={form.role}
-                    onChange={(e) => update({ role: e.target.value })}
+                    value={role}
                     disabled
+                    readOnly
                     title="Role is set by an admin"
-                  >
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r}>{r}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
               <div className="uidai-prof-row">

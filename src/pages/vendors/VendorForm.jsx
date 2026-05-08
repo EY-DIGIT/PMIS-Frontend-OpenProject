@@ -8,10 +8,12 @@ import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { useData } from '../../data/DataContext';
 import { uiStore } from '../../store/project/uiStore';
+import { useCan } from '../../auth/permissions';
 
 export default function VendorForm() {
   const navigate = useNavigate();
   const { refresh, setVendors, vendors } = useData();
+  const canCreateVendor = useCan('createVendor');
 
   const [name, setName] = useState('');
   const [type, setType] = useState(VENDOR_TYPES[0]);
@@ -73,7 +75,7 @@ export default function VendorForm() {
      once, return them as { name: 'msg', email: 'msg', ... }. */
   const validate = () => {
     const errs = {};
-    if (!name.trim()) errs.name = 'Vendor Name is required';
+    if (!name.trim()) errs.name = 'Organization Name is required';
     if (!contact.trim()) errs.contact = 'Contact Person is required';
     else if (!/^[A-Za-z][A-Za-z\s\-'.]*$/.test(contact.trim()))
       errs.contact = "Only letters, spaces, hyphens, apostrophes and full stops allowed";
@@ -83,8 +85,6 @@ export default function VendorForm() {
     if (!phone.trim()) errs.phone = 'Mobile Number is required';
     else if (!/^\d{10}$/.test(phone.trim()))
       errs.phone = 'Enter a valid 10-digit mobile number';
-    if (!Array.isArray(mapping) || mapping.length === 0)
-      errs.mapping = 'At least one Project Mapping is required';
     return errs;
   };
 
@@ -99,7 +99,7 @@ export default function VendorForm() {
     }
     setError('');
     setSubmitting(true);
-    uiStore.showLoader('Adding vendor...');
+    uiStore.showLoader('Adding organization...');
     try {
       if (tokenStore.get()) {
         await vendorsApi.create({
@@ -129,10 +129,10 @@ export default function VendorForm() {
         ]);
       }
       uiStore.hideLoader();
-      uiStore.showMessage('Vendor added successfully', () => navigate('/vendors'));
+      uiStore.showMessage('Organization added successfully', () => navigate('/vendors'));
     } catch (err) {
       uiStore.hideLoader();
-      const errMsg = err?.message || 'Failed to add vendor';
+      const errMsg = err?.message || 'Failed to add organization';
       setError(errMsg);
       uiStore.showError(errMsg);
     } finally {
@@ -143,11 +143,11 @@ export default function VendorForm() {
   return (
     <>
       <div className="uidai-pmis-card">
-        <h3>Add Vendor</h3>
+        <h3>Add Organization</h3>
         <br />
         <div className="uidai-pmis-grid-4">
           <div className={errClass('name')}>
-            <label>Vendor Name <span className="uidai-pmis-required">*</span></label>
+            <label>Organization Name <span className="uidai-pmis-required">*</span></label>
             <input
               placeholder="e.g. Apex Solutions"
               value={name}
@@ -210,7 +210,7 @@ export default function VendorForm() {
             {errors.phone && <div className="uidai-pmis-field-error">{errors.phone}</div>}
           </div>
           <div className={errClass('mapping')}>
-            <label>Project Mapping <span className="uidai-pmis-required">*</span></label>
+            <label>Project Mapping</label>
             <MultiSelect
               name="vendorProjectMapping"
               value={mapping}
@@ -220,13 +220,23 @@ export default function VendorForm() {
             {errors.mapping && <div className="uidai-pmis-field-error">{errors.mapping}</div>}
           </div>
           <div className="uidai-pmis-field uidai-pmis-full">
-            <label>Vendor Description</label>
+            <label>Organization Description</label>
             <CharTextarea value={description} onChange={setDescription} />
           </div>
         </div>
         {error && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{error}</div>}
+        {!canCreateVendor && (
+          <div className="uidai-error-msg" style={{ marginTop: 8 }}>
+            You do not have permission to create organizations.
+          </div>
+        )}
         <div className="uidai-pmis-action-row">
-          <button className="uidai-pmis-btn" onClick={handleAdd} disabled={submitting}>
+          <button
+            className="uidai-pmis-btn"
+            onClick={handleAdd}
+            disabled={submitting || !canCreateVendor}
+            title={!canCreateVendor ? 'Insufficient permissions' : undefined}
+          >
             {submitting ? 'Adding…' : 'Add'}
           </button>
           <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/')}>
