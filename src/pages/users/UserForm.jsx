@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { FaEye, FaEyeSlash } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
-import AssignRoleField from '../../components/AssignRoleField';
 import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { uiStore } from '../../store/project/uiStore';
+
+const PROJECT_ROLE_LABELS = ['Project Admin', 'Project Member'];
 
 export default function UserForm() {
   const { vendors, refresh, setUsers, users } = useData();
@@ -23,10 +24,18 @@ export default function UserForm() {
   const [vendorId, setVendorId] = useState('');
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
+  const [orgRole, setOrgRole] = useState('');
+  // Multi-select Project Mapping. The picker drives the table below: each
+  // chosen project gets its own row with default Admin + Member role
+  // sub-rows, and removing a project drops its row.
   const [mapping, setMapping] = useState([]);
-  const [permissions, setPermissions] = useState([]);
+  // Detailed per-project role/user assignments. Indexed by projectId so the
+  // mapping picker can sync without losing existing role/user picks.
+  // Shape: [{ projectId, roles: [{ role, userIds: [] }, ...] }]
+  const [assignments, setAssignments] = useState([]);
   const [projectList, setProjectList] = useState([]);
   const [divisionList, setDivisionList] = useState([]);
+  const [roleList, setRoleList] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   // Per-field errors keyed by field name. Populated on submit, cleared as
@@ -67,6 +76,34 @@ export default function UserForm() {
     return () => { cancelled = true; };
   }, []);
 
+
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${API_BASE}${ENDPOINTS.roles.list}?offset=1&pageSize=50`,
+          { method: 'GET', headers: { accept: 'application/json' } }
+        );
+        if (!res.ok) return;
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          raw?.data ??
+          [];
+        const roles = (Array.isArray(elements) ? elements : [])
+          .filter((r) => r && r.name)
+          .map((r) => ({ id: r.id, name: r.name }));
+        if (!cancelled) setRoleList(roles);
+      } catch {
+        if (!cancelled) setRoleList([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     if (!tokenStore.get()) return;
     let cancelled = false;
@@ -95,12 +132,57 @@ export default function UserForm() {
   }, []);
 
   const projectOptions = useMemo(() => {
-    if (!tokenStore.get()) return PROJECT_OPTIONS;
+    if (!tokenStore.get()) {
+      return PROJECT_OPTIONS.map((name) => ({ label: name, value: name }));
+    }
     return projectList.map((p) => ({
       label: p.name || p.projectCode || p.id,
       value: p.id || p.uuid,
     }));
   }, [projectList]);
+
+  const projectNameById = useMemo(() => {
+    const map = {};
+    projectList.forEach((p) => {
+      const id = p.id || p.uuid;
+      if (id) map[id] = p.name || p.projectCode || id;
+    });
+    return map;
+  }, [projectList]);
+
+  // Keep `assignments` in sync with the Project Mapping picker: every
+  // selected project gets a row with an empty role (user picks one role
+  // from the fetched master via single-select). Existing picks are
+  // preserved across re-renders by indexing on projectId.
+  // Shape: [{ projectId, role: string }]
+  useEffect(() => {
+    setAssignments((prev) => {
+      const byId = new Map(prev.map((a) => [a.projectId, a]));
+      return mapping.map((pid) =>
+        byId.get(pid) || { projectId: pid, role: '' }
+      );
+    });
+  }, [mapping]);
+
+  // Same data the User Search page uses.
+  const userOptions = useMemo(
+    () =>
+      (users || []).map((u) => {
+        const username = u.employeeId || u.login || '';
+        const fn = u.fullName || '';
+        const label = username
+          ? (fn ? `${username} (${fn})` : username)
+          : (fn || u.email || u.userId);
+        return { label, value: u.userId };
+      }),
+    [users]
+  );
+
+  function setRoleForProject(pIdx, nextRole) {
+    setAssignments((prev) =>
+      prev.map((a, i) => (i === pIdx ? { ...a, role: nextRole } : a))
+    );
+  }
 
   const divisionOptions = useMemo(() => {
     if (!tokenStore.get() || divisionList.length === 0) {
@@ -134,8 +216,6 @@ export default function UserForm() {
     if (!vendorId) errs.vendorId = 'Please select an Organization';
     if (!division) errs.division = 'Please select a division';
     if (divisionRequiresOther && !divisionOther.trim()) errs.divisionOther = 'Please specify the division';
-    if (!Array.isArray(permissions) || permissions.length === 0)
-      errs.permissions = 'Please assign at least one role/permission';
     return errs;
   };
 
@@ -159,6 +239,19 @@ export default function UserForm() {
     try {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
+        // Project mapping is only meaningful when "Project Admin" is the
+        // selected org role. For other org roles (or when nothing is
+        // selected) we don't ship the project mapping fields at all.
+        const includeMapping = orgRole === 'project_admin';
+        const projectIds = includeMapping
+          ? assignments.map((a) => a.projectId).filter(Boolean)
+          : [];
+        const flatAssignments = includeMapping
+          ? assignments.map((a) => ({
+              projectId: a.projectId || '',
+              role: a.role || ''
+            }))
+          : [];
         await usersApi.create({
           login: employeeId.trim(),
           email: email.trim(),
@@ -169,8 +262,10 @@ export default function UserForm() {
           vendor_id: vendorId,
           division,
           division_other: divisionRequiresOther ? divisionOther.trim() : '',
-          project_ids: Array.isArray(mapping) ? mapping : [],
-          permissions: Array.isArray(permissions) ? permissions : [],
+          orgRole: orgRole || null,
+          project_ids: projectIds,
+          projectAssignments: includeMapping ? assignments : [],
+          assignments: flatAssignments,
         });
         await refresh();
       } else {
@@ -184,8 +279,8 @@ export default function UserForm() {
             mobile: mobile.trim(),
             vendorName: selectedVendor?.vendorName || '',
             division,
-            projectMapping: mapping,
-            permissions,
+            orgRole: orgRole || null,
+            projectAssignments: orgRole === 'project_admin' ? assignments : [],
             status: 'Active',
           },
         ]);
@@ -299,7 +394,12 @@ export default function UserForm() {
             <label>Organization <span className="uidai-pmis-required">*</span></label>
             <select
               value={vendorId}
-              onChange={(e) => { setVendorId(e.target.value); clearFieldError('vendorId'); }}
+              onChange={(e) => {
+                // The vendor-fetch effect re-seeds assignments from the
+                // newly-selected organization's project list automatically.
+                setVendorId(e.target.value);
+                clearFieldError('vendorId');
+              }}
             >
               <option value="" disabled>Select Organization</option>
               {vendors.map((v) => (
@@ -344,24 +444,88 @@ export default function UserForm() {
             </div>
           )}
           <div className="uidai-pmis-field">
-            <label>Project Mapping</label>
-            <MultiSelect
-              name="userProjectMapping"
-              value={mapping}
-              options={projectOptions}
-              onChange={setMapping}
-            />
-          </div>
-          <div className={`${errClass('permissions')} uidai-pmis-full`}>
-            <label>Role &amp; Permissions <span className="uidai-pmis-required">*</span></label>
-            <AssignRoleField
-              value={permissions}
-              onChange={(next) => { setPermissions(next); clearFieldError('permissions'); }}
-              editable
-            />
-            {errors.permissions && <div className="uidai-pmis-field-error">{errors.permissions}</div>}
+            <label>Role</label>
+            <select
+              value={orgRole}
+              onChange={(e) => setOrgRole(e.target.value)}
+            >
+              <option value="">— Select —</option>
+              <option value="project_admin">Project Admin</option>
+              <option value="org_admin">Org Admin</option>
+              <option value="pmis_admin">PMIS Admin</option>
+            </select>
           </div>
         </div>
+
+        {orgRole === 'project_admin' && (
+          <>
+            <div className="uidai-pmis-grid-4" style={{ marginTop: 18 }}>
+              <div className="uidai-pmis-field uidai-pmis-full">
+                <label>Project Mapping</label>
+                <MultiSelect
+                  name="userProjectMapping"
+                  value={mapping}
+                  options={projectOptions}
+                  onChange={setMapping}
+                />
+              </div>
+            </div>
+
+            {assignments.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div className="uidai-project-mapping__header">
+                  <h4>Project Mapping</h4>
+                </div>
+                <div className="uidai-pmis-table-wrap uidai-project-mapping">
+                  <table className="uidai-pmis-table uidai-pmis-table-compact">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '50%' }}>Project Name</th>
+                        <th>Role</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignments.map((a, pIdx) => {
+                        const projectLabel =
+                          projectNameById[a.projectId] ||
+                          (a.projectId ? a.projectId : '');
+                        const role = a.role || '';
+                        return (
+                          <tr key={pIdx} className="uidai-pm-project-start">
+                            <td className="uidai-pm-project-cell">
+                              <span>
+                                {projectLabel || (
+                                  <span className="uidai-pm-empty-cell">—</span>
+                                )}
+                              </span>
+                            </td>
+                            <td>
+                              <select
+                                className="uidai-pmis-filter-select"
+                                value={role}
+                                onChange={(e) => setRoleForProject(pIdx, e.target.value)}
+                              >
+                                <option value="">— Select Role —</option>
+                                {roleList.map((r) => (
+                                  <option key={r.id} value={r.name}>
+                                    {r.name}
+                                  </option>
+                                ))}
+                                {role && !roleList.some((r) => r.name === role) && (
+                                  <option value={role}>{role}</option>
+                                )}
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
         {error && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{error}</div>}
         <div className="uidai-pmis-action-row">
           <button className="uidai-pmis-btn" onClick={handleAdd} disabled={submitting}>

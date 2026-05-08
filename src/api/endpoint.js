@@ -50,6 +50,10 @@ export const ENDPOINTS = {
     list: '/api/v3/priorities',
   },
 
+  roles: {
+    list: '/api/v3/master/roles',
+  },
+
   projects: {
     list: '/api/v3/projects',
     get: (uuid) => `/api/v3/projects/${enc(uuid)}`,

@@ -51,6 +51,7 @@ function fromApi(u) {
     phone: u.phoneNumber || u.phone_number || u.phone || '',
     projectMapping,
     projectIds,
+    projectAssignments: Array.isArray(u.projectAssignments) ? u.projectAssignments : [],
     status: u.active === false || u.status === 'inactive' ? 'Inactive' : 'Active',
   };
 }
@@ -80,6 +81,9 @@ export async function update(id, {
   division,
   division_other,
   phone_number,
+  projectMapping,
+  projectAssignments,
+  assignments,
 }) {
   const body = {};
   if (email !== undefined) body.email = email;
@@ -91,6 +95,9 @@ export async function update(id, {
   if (division !== undefined) body.division = division;
   if (division_other !== undefined) body.division_other = division_other;
   if (phone_number !== undefined) body.phone_number = phone_number;
+  if (projectMapping !== undefined) body.projectMapping = projectMapping;
+  if (projectAssignments !== undefined) body.projectAssignments = projectAssignments;
+  if (assignments !== undefined) body.assignments = assignments;
   const res = await api.patch(ENDPOINTS.users.update(id), body);
   return fromApi(unwrapOne(res));
 }
