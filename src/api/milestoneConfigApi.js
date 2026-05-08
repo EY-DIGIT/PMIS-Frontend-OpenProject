@@ -174,7 +174,7 @@ function buildActivityLikeBase(project, formData) {
 function buildMilestonePayload(project, formData) {
   // PMIS_Screens design: vendor lives on activities, not milestones.
   // The API still accepts vendors[] here but the FE no longer sends it.
-  return {
+  const body = {
     name: formData.name.trim(),
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
@@ -184,6 +184,8 @@ function buildMilestonePayload(project, formData) {
        task, subtask) so the server contract is uniform. */
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
+  if (formData.priority !== undefined) body.priority = formData.priority || null;
+  return body;
 }
 
 /* After a successful create, post the typed Comments-&-Attachments inputs
@@ -563,7 +565,8 @@ export async function createMilestoneApi(project, formData) {
       description: (formData.description || "").trim(),
       startDate: toMilestoneIsoStart(formData.startDate),
       endDate: toMilestoneIsoEnd(formData.endDate),
-      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+      dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+      priority: formData.priority || null
     }
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);
@@ -677,19 +680,21 @@ export async function loadTaskById(taskApiId) {
   return t && (t.id || t.uuid || t.name) ? mapApiTaskToNode(t) : null;
 }
 
-/* Task create body now carries dependsOn so a single POST persists the
-   add-modal Depends On selections — no follow-up PATCH on add. */
+/* Task create body now carries dependsOn + priority so a single POST
+   persists the add-modal selections — no follow-up PATCH on add. */
 export async function createTaskApi(activityApiId, formData, project) {
+  const body = {
+    name: formData.name.trim(),
+    description: (formData.description || "").trim(),
+    startDate: toMilestoneIsoStart(formData.startDate),
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+    priority: formData.priority || null
+  };
   const created = await apiSend(
     "POST",
     ENDPOINTS.activities.taskCreate(activityApiId),
-    {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
-    }
+    body
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.tasks.comments, created, formData);
 }
@@ -700,6 +705,7 @@ export async function updateTaskApi(taskServerId, formData, project) {
     ...buildActivityLikeBase(project, formData),
     status: mapStatusForApi(formData.status || "Not Completed")
   };
+  if (formData.priority !== undefined) payload.priority = formData.priority || null;
 
   const updated = await apiSend(
     "PATCH",
@@ -862,7 +868,8 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
     description: (formData.description || "").trim(),
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
-    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
+    priority: formData.priority || null
   };
   const createPath =
     parentKind === "subtask"
@@ -878,6 +885,7 @@ export async function updateSubtaskApi(subtaskServerId, formData, project) {
     ...buildActivityLikeBase(project, formData),
     status: mapStatusForApi(formData.status || "Not Completed")
   };
+  if (formData.priority !== undefined) payload.priority = formData.priority || null;
 
   const updated = await apiSend(
     "PATCH",

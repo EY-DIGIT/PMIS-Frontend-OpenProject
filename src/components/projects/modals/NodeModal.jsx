@@ -242,7 +242,6 @@ export default function NodeModal({
     let cancelled = false;
     setResourceTypesLoading(true);
     setDivisionsLoading(true);
-    setPrioritiesLoading(true);
     loadResourceTypes()
       .then((list) => { if (!cancelled) setResourceTypes(list); })
       .catch(() => { if (!cancelled) setResourceTypes([]); })
@@ -251,12 +250,21 @@ export default function NodeModal({
       .then((list) => { if (!cancelled) setDivisions(list); })
       .catch(() => { if (!cancelled) setDivisions([]); })
       .finally(() => { if (!cancelled) setDivisionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, kind]);
+
+  /* Priorities load fires for every kind (milestone / activity / task /
+     subtask) — the priority field is shown across the board. */
+  useEffect(() => {
+    if (!open || !getToken()) return;
+    let cancelled = false;
+    setPrioritiesLoading(true);
     loadPriorities()
       .then((list) => { if (!cancelled) setPriorities(list); })
       .catch(() => { if (!cancelled) setPriorities([]); })
       .finally(() => { if (!cancelled) setPrioritiesLoading(false); });
     return () => { cancelled = true; };
-  }, [open, kind]);
+  }, [open]);
 
   /* Older records may have stored Concerned Division as labels ("TMD1") instead
      of codes ("tmd1"). Once the divisions list arrives, rewrite any label-form
@@ -735,29 +743,6 @@ export default function NodeModal({
                   </div>
                 )}
               </div>
-              <div className="uidai-field">
-                <label className="uidai-field__label">
-                  Priority <span className="uidai-required-project">*</span>
-                </label>
-                <select
-                  className="uidai-select"
-                  value={form.priority}
-                  onChange={(e) => updateField({ priority: e.target.value })}
-                  disabled={dis || prioritiesLoading}
-                >
-                  <option value="">— Select Priority —</option>
-                  {safeArray(priorities).map((p) => (
-                    <option key={p.id || p.code} value={p.code}>
-                      {p.name}{p.description ? ` — ${p.description}` : ""}
-                    </option>
-                  ))}
-                </select>
-                {prioritiesLoading && (
-                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                    Loading priorities…
-                  </div>
-                )}
-              </div>
               <div className="uidai-field uidai-grid__full">
                 <label className="uidai-field__label">
                   Concerned Division <span className="uidai-required-project">*</span>{" "}
@@ -782,6 +767,32 @@ export default function NodeModal({
               </div>
             </>
           )}
+
+          {/* Priority field is shown for all kinds (milestone / activity /
+              task / subtask) — backend accepts `priority` on every level. */}
+          <div className="uidai-field">
+            <label className="uidai-field__label">
+              Priority <span className="uidai-required-project">*</span>
+            </label>
+            <select
+              className="uidai-select"
+              value={form.priority}
+              onChange={(e) => updateField({ priority: e.target.value })}
+              disabled={dis || prioritiesLoading}
+            >
+              <option value="">— Select Priority —</option>
+              {safeArray(priorities).map((p) => (
+                <option key={p.id || p.code} value={p.code}>
+                  {p.name}{p.description ? ` — ${p.description}` : ""}
+                </option>
+              ))}
+            </select>
+            {prioritiesLoading && (
+              <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                Loading priorities…
+              </div>
+            )}
+          </div>
 
           {showDepsSection && (
             <div className="uidai-field uidai-grid__full">

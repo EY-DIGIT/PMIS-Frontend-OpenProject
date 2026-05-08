@@ -175,6 +175,12 @@ export function mapApiMilestoneToNode(m) {
     /* Snapshot of server display IDs (e.g. "M1", "M2"). The loader keeps
        this stable while it translates `dependsOn` into local UIDs. */
     dependsOnDisplay: rawDisplay.slice(),
+    /* Backend may return priority as plain code or {code,name} object —
+       normalize to a code string. Same convention as activity/task/subtask. */
+    priority:
+      (m.priority && typeof m.priority === "object")
+        ? (m.priority.code || m.priority.name || "")
+        : (m.priority || m.priorityCode || ""),
     activities: [],
     comments: [],
     attachments: [],
