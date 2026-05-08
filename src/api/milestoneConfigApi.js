@@ -689,7 +689,8 @@ export async function createTaskApi(activityApiId, formData, project) {
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
-    priority: formData.priority || null
+    priority: formData.priority || null,
+    assignedTo: formData.assignedTo || null
   };
   const created = await apiSend(
     "POST",
@@ -706,6 +707,7 @@ export async function updateTaskApi(taskServerId, formData, project) {
     status: mapStatusForApi(formData.status || "Not Completed")
   };
   if (formData.priority !== undefined) payload.priority = formData.priority || null;
+  if (formData.assignedTo !== undefined) payload.assignedTo = formData.assignedTo || null;
 
   const updated = await apiSend(
     "PATCH",
@@ -869,7 +871,8 @@ export async function createSubtaskApi(parentApiId, formData, project, parentKin
     startDate: toMilestoneIsoStart(formData.startDate),
     endDate: toMilestoneIsoEnd(formData.endDate),
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
-    priority: formData.priority || null
+    priority: formData.priority || null,
+    assignedTo: formData.assignedTo || null
   };
   const createPath =
     parentKind === "subtask"
@@ -886,6 +889,7 @@ export async function updateSubtaskApi(subtaskServerId, formData, project) {
     status: mapStatusForApi(formData.status || "Not Completed")
   };
   if (formData.priority !== undefined) payload.priority = formData.priority || null;
+  if (formData.assignedTo !== undefined) payload.assignedTo = formData.assignedTo || null;
 
   const updated = await apiSend(
     "PATCH",

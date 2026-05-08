@@ -53,6 +53,7 @@ function nodePatchBody(ui, opts = {}) {
   };
   if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) body.dependsOn = ui.dependsOn;
   if (ui.priority !== undefined) body.priority = ui.priority || null;
+  if (opts.taskOrSubtask && ui.assignedTo !== undefined) body.assignedTo = ui.assignedTo || null;
   if (opts.activityFields) {
     if (ui.ownerDivision !== undefined) body.ownerDivision = ui.ownerDivision || null;
     if (ui.vendorId !== undefined) body.vendorId = ui.vendorId || null;
@@ -69,6 +70,7 @@ function hasRichFields(ui, includeActivity = false) {
   if (Array.isArray(ui.dependsOn) && ui.dependsOn.length) return true;
   if (ui.actualStartDate || ui.actualEndDate) return true;
   if (ui.priority) return true;
+  if (ui.assignedTo) return true;
   if (includeActivity && (ui.ownerDivision || ui.vendorId || hasConcernedDivision(ui.concernedDivision))) return true;
   return false;
 }
@@ -143,13 +145,13 @@ export async function createTask(activityId, ui) {
   );
   if (hasRichFields(ui)) {
     const id = newIdFrom(created);
-    if (id) await patchAfterCreate(ENDPOINTS.tasks.update(id), ui);
+    if (id) await patchAfterCreate(ENDPOINTS.tasks.update(id), ui, { taskOrSubtask: true });
   }
   return created;
 }
 
 export async function updateTask(id, ui) {
-  return api.patch(ENDPOINTS.tasks.update(id), nodePatchBody(ui));
+  return api.patch(ENDPOINTS.tasks.update(id), nodePatchBody(ui, { taskOrSubtask: true }));
 }
 
 export async function removeTask(id) {
@@ -164,13 +166,13 @@ export async function createSubtask(parentId, ui, parentKind = 'task') {
   const created = await api.post(createPath, minimalCreateBody(ui));
   if (hasRichFields(ui)) {
     const id = newIdFrom(created);
-    if (id) await patchAfterCreate(ENDPOINTS.subtasks.update(id), ui);
+    if (id) await patchAfterCreate(ENDPOINTS.subtasks.update(id), ui, { taskOrSubtask: true });
   }
   return created;
 }
 
 export async function updateSubtask(id, ui) {
-  return api.patch(ENDPOINTS.subtasks.update(id), nodePatchBody(ui));
+  return api.patch(ENDPOINTS.subtasks.update(id), nodePatchBody(ui, { taskOrSubtask: true }));
 }
 
 export async function removeSubtask(id) {
