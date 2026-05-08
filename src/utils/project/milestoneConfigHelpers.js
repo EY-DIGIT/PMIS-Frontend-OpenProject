@@ -247,6 +247,9 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
       (a.priority && typeof a.priority === "object")
         ? (a.priority.code || a.priority.name || "")
         : (a.priority || a.priorityCode || ""),
+    /* Task/Subtask only — assigned user id. Activity has its own vendor
+       and doesn't carry assignedTo. */
+    assignedTo: a.assignedTo || a.assigneeId || "",
     concernedDivision: Array.isArray(a.concernedDivision)
       ? a.concernedDivision.slice()
       : (a.concernedDivision ? [a.concernedDivision] : []),

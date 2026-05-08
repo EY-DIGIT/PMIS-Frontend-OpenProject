@@ -32,6 +32,7 @@ import {
   downloadAttachment
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
+import { useData } from "../../../data/DataContext";
 
 const TITLE_MAP = {
   milestone: "Milestone",
@@ -142,6 +143,10 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     ownerDivision: n.ownerDivision || "",
     vendorId: n.vendorId || "",
     priority: n.priority || "",
+    /* Task / Subtask only — id of the user this item is assigned to.
+       Picked from the dropdown of users belonging to the parent
+       activity's vendor. Activity / Milestone don't carry this. */
+    assignedTo: n.assignedTo || "",
     concernedDivision: parseDivisionList(n.concernedDivision),
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
@@ -199,6 +204,35 @@ export default function NodeModal({
     return loc ? loc.node : null;
   }, [open, parentUid, project]);
   const parentTypeIsResource = parentNode?.type === "Resource Type";
+
+  /* For Task / Subtask: walk the project tree from this node (or its
+     parent in add mode) up to the enclosing Activity. Used to scope
+     the "Assigned To" user picker to that activity's vendor's users. */
+  const enclosingActivity = useMemo(() => {
+    if (!open || !project) return null;
+    if (kind !== "task" && kind !== "subtask") return null;
+    const targetUid =
+      mode === "edit" && nodeUid ? nodeUid : parentUid;
+    if (!targetUid) return null;
+    const loc = locateNode(project, targetUid);
+    if (!loc) return null;
+    if (loc.kind === "activity") return loc.node;
+    for (const step of (loc.chain || [])) {
+      if (step && step.kind === "activity") return step.node;
+    }
+    return null;
+  }, [open, project, kind, mode, nodeUid, parentUid]);
+
+  /* All users belonging to the enclosing activity's vendor — populates
+     the Assigned To dropdown. Falls back to [] when the activity has
+     no vendor or no users match. */
+  const { users } = useData();
+  const assignableUsers = useMemo(() => {
+    if (kind !== "task" && kind !== "subtask") return [];
+    const vendorId = enclosingActivity?.vendorId || "";
+    if (!vendorId) return [];
+    return safeArray(users).filter((u) => u && u.vendorId === vendorId);
+  }, [kind, enclosingActivity, users]);
 
   const [form, setForm] = useState(() => makeDefaultForm(kind, node, mode, parentNode));
   // Snapshot of the form taken whenever it is (re)initialized from the
@@ -364,6 +398,9 @@ export default function NodeModal({
   // Activity-only fields per design + Doc 38 backend support.
   const showActivityFields = kind === "activity";
   const showVendor = false;
+  // Task / Subtask carry an "Assigned To" user picked from the parent
+  // activity's vendor's user pool. Milestone / Activity don't.
+  const showAssignedTo = kind === "task" || kind === "subtask";
   const hasKids = node ? getChildren(node).length > 0 : false;
   const effActuals = node ? computeEffectiveActuals(node) : { start: "", end: "" };
 
@@ -793,6 +830,37 @@ export default function NodeModal({
               </div>
             )}
           </div>
+
+          {/* Assigned To — only on Task / Subtask. Lists users belonging
+              to the parent activity's vendor. */}
+          {showAssignedTo && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">Assigned To</label>
+              <select
+                className="uidai-select"
+                value={form.assignedTo}
+                onChange={(e) => updateField({ assignedTo: e.target.value })}
+                disabled={dis || !enclosingActivity?.vendorId}
+              >
+                <option value="">— Unassigned —</option>
+                {assignableUsers.map((u) => (
+                  <option key={u.userId} value={u.userId}>
+                    {u.fullName || u.email || u.userCode || u.userId}
+                  </option>
+                ))}
+              </select>
+              {!enclosingActivity?.vendorId && (
+                <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                  The parent activity has no vendor assigned yet — pick a vendor on the activity first to enable this list.
+                </div>
+              )}
+              {enclosingActivity?.vendorId && assignableUsers.length === 0 && (
+                <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                  No users are mapped to this activity's vendor yet.
+                </div>
+              )}
+            </div>
+          )}
 
           {showDepsSection && (
             <div className="uidai-field uidai-grid__full">
