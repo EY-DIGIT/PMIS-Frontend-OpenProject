@@ -7,6 +7,7 @@ import * as usersApi from '../../api/users';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
+import MultiSelect from '../../components/MultiSelect';
 import MilestonePagination from '../../components/projects/MilestonePagination';
 import { useCan } from '../../auth/permissions';
 
@@ -62,7 +63,8 @@ export default function UserList() {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
     fullName: '', email: '', role: '', vendorName: '',
-    division: '', mapping: '', status: ''
+    // Project Mapping is now a multi-select (array). Empty = "no filter".
+    division: '', mapping: [], status: ''
   });
 
   function updateFilter(key, value) {
@@ -71,6 +73,19 @@ export default function UserList() {
 
   const roleOptions = useMemo(() => uniqueSorted(users.map((u) => u.role)), [users]);
   const statusOptions = useMemo(() => uniqueSorted(users.map((u) => u.status)), [users]);
+  // Distinct organization names from the loaded users — feeds the
+  // Organization filter dropdown.
+  const vendorOptions = useMemo(
+    () => uniqueSorted(users.map((u) => u.vendorName).filter(Boolean)),
+    [users]
+  );
+  // Distinct project names — feeds the Project Mapping multi-select.
+  const projectOptions = useMemo(() => {
+    const names = users.flatMap((u) =>
+      Array.isArray(u.projectMapping) ? u.projectMapping : []
+    );
+    return uniqueSorted(names).map((n) => ({ label: n, value: n }));
+  }, [users]);
 
   const filtered = users.filter((u) => {
     const q = normalizeText(search);
@@ -80,14 +95,21 @@ export default function UserList() {
     ].join(' ').toLowerCase();
     const contains = (field, val) => !val || normalizeText(field).includes(normalizeText(val));
     const exact = (field, val) => !val || normalizeText(field) === normalizeText(val);
+    // Multi-select intersection: pass when no filter is set, or when the
+    // user is mapped to at least one of the selected projects.
+    const hasAnyMapping = (mappings, picked) => {
+      if (!Array.isArray(picked) || picked.length === 0) return true;
+      const set = new Set((Array.isArray(mappings) ? mappings : []).map(normalizeText));
+      return picked.some((p) => set.has(normalizeText(p)));
+    };
     return (
       (!q || combined.includes(q)) &&
       contains(u.fullName, filters.fullName) &&
       contains(u.email, filters.email) &&
       exact(u.role, filters.role) &&
-      contains(u.vendorName, filters.vendorName) &&
+      exact(u.vendorName, filters.vendorName) &&
       exact(u.division, filters.division) &&
-      contains(renderMappingText(u.projectMapping), filters.mapping) &&
+      hasAnyMapping(u.projectMapping, filters.mapping) &&
       exact(u.status, filters.status)
     );
   });
@@ -153,12 +175,14 @@ export default function UserList() {
           </div>
           <div className="uidai-pmis-field">
             <label>Organization</label>
-            <input
-              className="uidai-pmis-filter-input"
-              placeholder="Search Organization"
+            <select
+              className="uidai-pmis-filter-select"
               value={filters.vendorName}
               onChange={(e) => updateFilter('vendorName', e.target.value)}
-            />
+            >
+              <option value="">All</option>
+              {vendorOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
           </div>
           <div className="uidai-pmis-field">
             <label>Division</label>
@@ -173,11 +197,13 @@ export default function UserList() {
           </div>
           <div className="uidai-pmis-field">
             <label>Project Mapping</label>
-            <input
-              className="uidai-pmis-filter-input"
-              placeholder="Search project mapping"
+            <MultiSelect
+              name="userListMappingFilter"
               value={filters.mapping}
-              onChange={(e) => updateFilter('mapping', e.target.value)}
+              options={projectOptions}
+              onChange={(next) => updateFilter('mapping', next)}
+              placeholder="All projects"
+              searchPlaceholder="Search project..."
             />
           </div>
           <div className="uidai-pmis-field">

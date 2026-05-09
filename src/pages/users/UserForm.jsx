@@ -23,8 +23,27 @@ const ORG_ROLE_OPTIONS = [
 ];
 
 export default function UserForm() {
-  const { vendors, refresh, setUsers, users } = useData();
+  const { vendors, setVendors, refresh, setUsers, users } = useData();
   const navigate = useNavigate();
+  // Vendors come from DataContext, but its initial refresh runs once at app
+  // mount — if the token wasn't set yet (pre-login), the Organization
+  // dropdown stays empty on the first visit here. Re-fetch on mount so the
+  // list is always populated, mirroring what UserList does for users.
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    if (Array.isArray(vendors) && vendors.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await vendorsApi.list();
+        if (!cancelled && Array.isArray(list)) setVendors(list);
+      } catch {
+        /* swallow — dropdown will simply remain empty */
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const canCreateUser = useCan('createUser');
   const canCreateSuperAdmin = useCan('createSuperAdmin');
   const canCreateAdmin = useCan('createAdmin');

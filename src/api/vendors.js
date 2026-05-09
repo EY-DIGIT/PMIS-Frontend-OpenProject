@@ -80,7 +80,11 @@ export async function update(id, {
   email,
   contact_person,
   phone_number,
-  projectMapping,
+  // Flat list built by VendorDetails — one entry per (project, role, users)
+  // tuple. Sent as `user_assignments`; this single field also covers the
+  // project-mapping concern (every project that should be linked appears
+  // at least once here), so a separate `project_ids` is no longer sent.
+  assignments,
 }) {
   const body = {};
   if (name !== undefined) body.name = name;
@@ -89,8 +93,14 @@ export async function update(id, {
   if (email !== undefined) body.email = email;
   if (contact_person !== undefined) body.contact_person = contact_person;
   if (phone_number !== undefined) body.phone_number = phone_number;
-  if (projectMapping !== undefined) {
-    body.project_ids = Array.isArray(projectMapping) ? projectMapping : [];
+  if (Array.isArray(assignments)) {
+    body.user_assignments = assignments
+      .filter((a) => a && a.projectId)
+      .map((a) => ({
+        project_id: a.projectId,
+        role: a.role || '',
+        user_ids: Array.isArray(a.userIds) ? a.userIds : [],
+      }));
   }
   const res = await api.patch(ENDPOINTS.vendors.update(id), body);
   return fromApi(unwrapOne(res));

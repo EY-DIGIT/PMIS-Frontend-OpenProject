@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '../../data/DataContext';
 import MultiSelect from '../../components/MultiSelect';
 import CharTextarea from '../../components/CharTextarea';
@@ -15,6 +15,11 @@ const ROLE_LABELS = ['Project Admin', 'Project Member'];
 export default function VendorDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Page-to-page deep links (e.g. ProjectDetails → "Edit Organization") pass
+  // their origin in `location.state.from`, so Back returns to the caller
+  // instead of the generic vendor list.
+  const backTarget = location.state?.from || '/vendors';
   const { vendors, users, refresh } = useData();
   // Edit gating — only super_admin / admin can mutate organization records
   // (per role spec). For everyone else this page is read-only.
@@ -315,7 +320,7 @@ export default function VendorDetails() {
         <div className="uidai-pmis-title">Organization Details</div>
         <div className="uidai-pmis-card">
           <p className="uidai-pmis-subtitle">{loadError || 'Organization not found.'}</p>
-          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/vendors')}>Back</button>
+          <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate(backTarget)}>Back</button>
         </div>
       </>
     );
@@ -337,7 +342,7 @@ export default function VendorDetails() {
           {editing ? (
             <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={handleCancelEdit} disabled={saving}>Cancel</button>
           ) : (
-            <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate('/vendors')}>Back</button>
+            <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => navigate(backTarget)}>Back</button>
           )}
         </div>
         <h3>Organization Information</h3>

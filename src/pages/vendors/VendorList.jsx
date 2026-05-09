@@ -6,6 +6,7 @@ import { tokenStore } from '../../api/client';
 import * as vendorsApi from '../../api/vendors';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
 import FilterShell from '../../components/FilterShell';
+import MultiSelect from '../../components/MultiSelect';
 import MilestonePagination from '../../components/projects/MilestonePagination';
 import { useCan } from '../../auth/permissions';
 
@@ -65,7 +66,9 @@ export default function VendorList() {
     contact: '',
     email: '',
     phone: '',
-    mapping: ''
+    // Project Mapping is now a multi-select — array of project names selected
+    // by the user. Empty array means "no filter".
+    mapping: []
   });
 
   function updateFilter(key, value) {
@@ -74,6 +77,20 @@ export default function VendorList() {
 
   const typeOptions = useMemo(() => uniqueSorted(vendors.map((v) => v.vendorType)), [vendors]);
   const statusOptions = useMemo(() => uniqueSorted(vendors.map((v) => v.status)), [vendors]);
+  // Distinct organization names — feeds the Organization Name filter
+  // dropdown so the user picks from existing names rather than free-typing.
+  const vendorNameOptions = useMemo(
+    () => uniqueSorted(vendors.map((v) => v.vendorName).filter(Boolean)),
+    [vendors]
+  );
+  // Distinct project names from the loaded vendors — feeds the Project
+  // Mapping multi-select. Sorted for a stable dropdown order.
+  const projectOptions = useMemo(() => {
+    const names = vendors.flatMap((v) =>
+      Array.isArray(v.projectMapping) ? v.projectMapping : []
+    );
+    return uniqueSorted(names).map((n) => ({ label: n, value: n }));
+  }, [vendors]);
 
   const filtered = vendors.filter((v) => {
     const q = normalizeText(search);
@@ -82,15 +99,22 @@ export default function VendorList() {
     ].join(' ').toLowerCase();
     const contains = (field, value) => !value || normalizeText(field).includes(normalizeText(value));
     const exact = (field, value) => !value || normalizeText(field) === normalizeText(value);
+    // Multi-select intersection: pass when no filter is set, or when the
+    // vendor has at least one of the selected project mappings.
+    const hasAnyMapping = (mappings, picked) => {
+      if (!Array.isArray(picked) || picked.length === 0) return true;
+      const set = new Set((Array.isArray(mappings) ? mappings : []).map(normalizeText));
+      return picked.some((p) => set.has(normalizeText(p)));
+    };
     return (
       (!q || combined.includes(q)) &&
-      contains(v.vendorName, filters.vendorName) &&
+      exact(v.vendorName, filters.vendorName) &&
       exact(v.vendorType, filters.vendorType) &&
       exact(v.status, filters.status) &&
       contains(v.contact, filters.contact) &&
       contains(v.email, filters.email) &&
       contains(v.phone, filters.phone) &&
-      contains(renderMappingText(v.projectMapping), filters.mapping)
+      hasAnyMapping(v.projectMapping, filters.mapping)
     );
   });
 
@@ -126,13 +150,14 @@ export default function VendorList() {
         <FilterShell>
           <div className="uidai-pmis-field">
             <label>Organization Name</label>
-            <input
-              className="uidai-pmis-filter-input"
-              type="text"
-              placeholder="Search organization name"
+            <select
+              className="uidai-pmis-filter-select"
               value={filters.vendorName}
               onChange={(e) => updateFilter('vendorName', e.target.value)}
-            />
+            >
+              <option value="">All</option>
+              {vendorNameOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
           </div>
           <div className="uidai-pmis-field">
             <label>Status</label>
@@ -179,12 +204,13 @@ export default function VendorList() {
           </div>
           <div className="uidai-pmis-field uidai-pmis-full">
             <label>Project Mapping</label>
-            <input
-              className="uidai-pmis-filter-input"
-              type="text"
-              placeholder="Search project mapping"
+            <MultiSelect
+              name="vendorListMappingFilter"
               value={filters.mapping}
-              onChange={(e) => updateFilter('mapping', e.target.value)}
+              options={projectOptions}
+              onChange={(next) => updateFilter('mapping', next)}
+              placeholder="All projects"
+              searchPlaceholder="Search project..."
             />
           </div>
         </FilterShell>

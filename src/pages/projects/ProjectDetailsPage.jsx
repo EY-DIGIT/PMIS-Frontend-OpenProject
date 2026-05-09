@@ -688,6 +688,30 @@ export default function ProjectDetailsPage() {
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
+          {(() => {
+            // First linked organization — kept simple since the action is
+            // a quick jump, not a multi-org picker.
+            const firstVendor = safeArray(form.vendors)[0];
+            const orgId = firstVendor
+              ? (projectVendorIndex[firstVendor]?.id ||
+                 vendorMasterIndex[firstVendor]?.id ||
+                 "")
+              : "";
+            if (!orgId) return null;
+            return (
+              <button
+                className="uidai-btn"
+                disabled={editing}
+                onClick={() =>
+                  navigate(`/vendors/${orgId}`, {
+                    state: { from: `/projects/${project.projectId}` },
+                  })
+                }
+              >
+                Edit Organization
+              </button>
+            );
+          })()}
           {canEditProject && (
             <button className="uidai-btn" onClick={toggleEdit}>
               {editing ? "Save" : "Edit"}

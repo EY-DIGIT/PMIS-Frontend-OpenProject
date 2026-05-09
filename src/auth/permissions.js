@@ -7,9 +7,16 @@ const listeners = new Set();
 // Read the active role from the user object the backend returned on
 // login / verify-otp / refresh. Falls back to the configured default
 // when nobody is logged in.
+//
+// The role lives on different keys depending on which endpoint produced
+// the user object — login may emit `org_role` (snake_case) or `role`,
+// while the users-list endpoint normalizes to `orgRole`. Without this
+// fallback, an org_admin logging in with snake_case `org_role` was
+// silently bucketed into `defaultRole` (super_admin) and saw admin-only
+// UI like "Add User" in the sidebar.
 function readRoleFromStore() {
   const user = tokenStore.getUser();
-  const role = user?.orgRole;
+  const role = user?.orgRole || user?.org_role || user?.role;
   if (role && rolesConfig.roles[role]) return role;
   return rolesConfig.defaultRole || 'project_member';
 }
