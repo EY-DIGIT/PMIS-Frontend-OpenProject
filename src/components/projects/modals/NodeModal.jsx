@@ -20,6 +20,7 @@ import {
   safeArray
 } from "../../../utils/project/nodeUtils";
 import { formatDateDisplay, formatDateTime } from "../../../utils/project/helpers";
+import { useCan } from "../../../auth/permissions";
 import {
   loadResourceTypes,
   loadDivisions,
@@ -190,6 +191,9 @@ export default function NodeModal({
   onCancel,
   onSave
 }) {
+  // Project Members can't see or edit Priority — per spec the field is
+  // hidden, not just disabled. Other roles get the usual control.
+  const canEditPriority = useCan('editPriority');
   const node = useMemo(() => {
     if (!open || !nodeUid || !project) return null;
     const loc = locateNode(project, nodeUid);
@@ -806,30 +810,33 @@ export default function NodeModal({
           )}
 
           {/* Priority field is shown for all kinds (milestone / activity /
-              task / subtask) — backend accepts `priority` on every level. */}
-          <div className="uidai-field">
-            <label className="uidai-field__label">
-              Priority <span className="uidai-required-project">*</span>
-            </label>
-            <select
-              className="uidai-select"
-              value={form.priority}
-              onChange={(e) => updateField({ priority: e.target.value })}
-              disabled={dis || prioritiesLoading}
-            >
-              <option value="">— Select Priority —</option>
-              {safeArray(priorities).map((p) => (
-                <option key={p.id || p.code} value={p.code}>
-                  {p.name}{p.description ? ` — ${p.description}` : ""}
-                </option>
-              ))}
-            </select>
-            {prioritiesLoading && (
-              <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                Loading priorities…
-              </div>
-            )}
-          </div>
+              task / subtask) — backend accepts `priority` on every level.
+              Hidden entirely for Project Members per role spec. */}
+          {canEditPriority && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">
+                Priority <span className="uidai-required-project">*</span>
+              </label>
+              <select
+                className="uidai-select"
+                value={form.priority}
+                onChange={(e) => updateField({ priority: e.target.value })}
+                disabled={dis || prioritiesLoading}
+              >
+                <option value="">— Select Priority —</option>
+                {safeArray(priorities).map((p) => (
+                  <option key={p.id || p.code} value={p.code}>
+                    {p.name}{p.description ? ` — ${p.description}` : ""}
+                  </option>
+                ))}
+              </select>
+              {prioritiesLoading && (
+                <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                  Loading priorities…
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Assigned To — only on Task / Subtask. Lists users belonging
               to the parent activity's vendor. */}

@@ -22,6 +22,7 @@
         "createSubtask": true,
         "editSubtask": true,
         "deleteSubtask": true,
+        "editPriority": true,
         "viewUsers": true,
         "createUser": true,
         "editUser": true,
@@ -44,7 +45,7 @@
     },
     "admin": {
       "label": "PMIS Admin",
-      "description": "Almost full control. Manages all users except Super Admin and PMIS Admin; manages all organizations, projects, tasks/subtasks and Master Data.",
+      "description": "Almost full control. Manages all users except Super Admin and PMIS Admin; manages all organizations, projects, tasks/subtasks. Master Data is view-only.",
       "permissions": {
         "viewDashboard": true,
         "viewProjects": true,
@@ -64,6 +65,7 @@
         "createSubtask": true,
         "editSubtask": true,
         "deleteSubtask": true,
+        "editPriority": true,
         "viewUsers": true,
         "createUser": true,
         "editUser": true,
@@ -79,14 +81,14 @@
         "deleteVendor": true,
         "viewMasterData": true,
         "viewDivisions": true,
-        "createDivision": true,
-        "editDivision": true,
-        "deleteDivision": true
+        "createDivision": false,
+        "editDivision": false,
+        "deleteDivision": false
       }
     },
     "org_admin": {
       "label": "Organization Admin",
-      "description": "Works only on own organization. Cannot create users; can activate/deactivate own-org users and change Project Admin / Project Member roles. Manages own org's projects and assignments. Can create/edit/delete tasks and subtasks. No Master Data access.",
+      "description": "Works only on own organization. Cannot create users; can activate/deactivate own-org users and swap Project Admin ↔ Project Member roles. Manages own org's projects and assignments. Can create/edit/delete tasks and subtasks. Master Data view-only (own org).",
       "permissions": {
         "viewDashboard": true,
         "viewProjects": true,
@@ -106,6 +108,7 @@
         "createSubtask": true,
         "editSubtask": true,
         "deleteSubtask": true,
+        "editPriority": true,
         "viewUsers": true,
         "createUser": false,
         "editUser": true,
@@ -119,8 +122,8 @@
         "createVendor": false,
         "editVendor": true,
         "deleteVendor": false,
-        "viewMasterData": false,
-        "viewDivisions": false,
+        "viewMasterData": true,
+        "viewDivisions": true,
         "createDivision": false,
         "editDivision": false,
         "deleteDivision": false
@@ -128,7 +131,7 @@
     },
     "project_admin": {
       "label": "Project Admin",
-      "description": "Manages projects assigned to them. Cannot create users; can activate/deactivate own-org users and change Project Admin / Project Member roles. Can create/edit/delete tasks and subtasks.",
+      "description": "Manages projects assigned to them. Cannot create users; can activate/deactivate own-org users (limited fields). Cannot assign roles. Can create/edit/delete tasks and subtasks.",
       "permissions": {
         "viewDashboard": true,
         "viewProjects": true,
@@ -148,6 +151,7 @@
         "createSubtask": true,
         "editSubtask": true,
         "deleteSubtask": true,
+        "editPriority": true,
         "viewUsers": true,
         "createUser": false,
         "editUser": true,
@@ -170,7 +174,7 @@
     },
     "project_member": {
       "label": "Project Member",
-      "description": "Works only on projects assigned to them. Can add/edit/delete tasks and subtasks on those projects.",
+      "description": "Works only on projects assigned to them. Can add/edit/delete tasks and subtasks on those projects. Priority field is hidden — cannot edit. Cannot view other users.",
       "permissions": {
         "viewDashboard": true,
         "viewProjects": true,
@@ -190,6 +194,7 @@
         "createSubtask": true,
         "editSubtask": true,
         "deleteSubtask": true,
+        "editPriority": false,
         "viewUsers": false,
         "createUser": false,
         "editUser": false,
