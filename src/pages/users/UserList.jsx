@@ -9,7 +9,7 @@ import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
 import MultiSelect from '../../components/MultiSelect';
 import MilestonePagination from '../../components/projects/MilestonePagination';
-import { useCan } from '../../auth/permissions';
+import { useCan, getRoleMeta } from '../../auth/permissions';
 
 export default function UserList() {
   const { users, setUsers, refresh } = useData();
@@ -71,7 +71,17 @@ export default function UserList() {
     setFilters((f) => ({ ...f, [key]: value }));
   }
 
-  const roleOptions = useMemo(() => uniqueSorted(users.map((u) => u.role)), [users]);
+  // Role column is driven by `orgRole` (the role key, e.g. `project_admin`)
+  // not the legacy `role` field. Options carry the key as `value` and the
+  // human label (from rolesConfig) as `label`.
+  const roleOptions = useMemo(
+    () =>
+      uniqueSorted(users.map((u) => u.orgRole).filter(Boolean)).map((key) => ({
+        value: key,
+        label: getRoleMeta(key)?.label || key,
+      })),
+    [users]
+  );
   const statusOptions = useMemo(() => uniqueSorted(users.map((u) => u.status)), [users]);
   // Distinct organization names from the loaded users — feeds the
   // Organization filter dropdown.
@@ -90,7 +100,7 @@ export default function UserList() {
   const filtered = users.filter((u) => {
     const q = normalizeText(search);
     const combined = [
-      u.fullName, u.employeeId, u.email, u.role, u.vendorName,
+      u.fullName, u.employeeId, u.email, u.orgRole, u.vendorName,
       u.division, renderMappingText(u.projectMapping), u.status
     ].join(' ').toLowerCase();
     const contains = (field, val) => !val || normalizeText(field).includes(normalizeText(val));
@@ -106,7 +116,7 @@ export default function UserList() {
       (!q || combined.includes(q)) &&
       contains(u.fullName, filters.fullName) &&
       contains(u.email, filters.email) &&
-      exact(u.role, filters.role) &&
+      exact(u.orgRole, filters.role) &&
       exact(u.vendorName, filters.vendorName) &&
       exact(u.division, filters.division) &&
       hasAnyMapping(u.projectMapping, filters.mapping) &&
@@ -170,7 +180,7 @@ export default function UserList() {
               onChange={(e) => updateFilter('role', e.target.value)}
             >
               <option value="">All</option>
-              {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+              {roleOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </div>
           <div className="uidai-pmis-field">
@@ -248,7 +258,7 @@ export default function UserList() {
                   </td>
                   <td>{u.employeeId}</td>
                   <td>{u.email}</td>
-                  <td>{u.role}</td>
+                  <td>{getRoleMeta(u.orgRole)?.label || u.orgRole || '—'}</td>
                   <td>{u.vendorName}</td>
                   <td>{u.division}</td>
                   <td>{renderMappingText(u.projectMapping)}</td>

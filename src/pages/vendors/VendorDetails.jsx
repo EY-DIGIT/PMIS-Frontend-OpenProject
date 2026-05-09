@@ -8,7 +8,7 @@ import * as vendorsApi from '../../api/vendors';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
-import { useCan } from '../../auth/permissions';
+import { useCan, useCurrentRole } from '../../auth/permissions';
 
 const ROLE_LABELS = ['Project Admin', 'Project Member'];
 
@@ -34,6 +34,12 @@ export default function VendorDetails() {
   // Edit gating — only super_admin / admin can mutate organization records
   // (per role spec). For everyone else this page is read-only.
   const canEditVendor = useCan('editVendor');
+  const currentRole = useCurrentRole();
+  // Org Admins can edit organization records — but only their own — and
+  // even within their own org, Name and Status remain read-only. The
+  // `nameStatusEditable` boolean is computed inline below where `editing`
+  // is in scope.
+  const isOrgAdmin = currentRole === 'org_admin';
   const fallback = vendors.find((x) => x.vendorId === id) || null;
 
   const [vendor, setVendor] = useState(fallback);
@@ -367,11 +373,11 @@ export default function VendorDetails() {
           </div>
           <div className="uidai-pmis-field">
             <label>Organization Name <span className="uidai-pmis-required">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing} />
+            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing || isOrgAdmin} />
           </div>
           <div className="uidai-pmis-field">
             <label>Status <span className="uidai-pmis-required">*</span></label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={!editing}>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={!editing || isOrgAdmin}>
               <option>Active</option>
               <option>Inactive</option>
             </select>
@@ -488,16 +494,34 @@ export default function VendorDetails() {
                         </td>
                         <td>
                           {editing ? (
-                            <MultiSelect
-                              name={`assign-${pIdx}-${rIdx}`}
-                              placeholder="Select User"
-                              searchPlaceholder="Search user..."
-                              value={r.userIds || []}
-                              options={userOptions}
-                              onChange={(next) =>
-                                updateRole(pIdx, rIdx, { userIds: next })
-                              }
-                            />
+                            (() => {
+                              // A user mapped to this project under another
+                              // role (e.g. picked as Project Admin) shouldn't
+                              // be selectable again as Project Member for the
+                              // same project.
+                              const usedByOtherRoles = new Set();
+                              (a.roles || []).forEach((other, i) => {
+                                if (i === rIdx) return;
+                                (other.userIds || []).forEach((uid) =>
+                                  usedByOtherRoles.add(uid)
+                                );
+                              });
+                              const availableOptions = userOptions.filter(
+                                (u) => !usedByOtherRoles.has(u.value)
+                              );
+                              return (
+                                <MultiSelect
+                                  name={`assign-${pIdx}-${rIdx}`}
+                                  placeholder="Select User"
+                                  searchPlaceholder="Search user..."
+                                  value={r.userIds || []}
+                                  options={availableOptions}
+                                  onChange={(next) =>
+                                    updateRole(pIdx, rIdx, { userIds: next })
+                                  }
+                                />
+                              );
+                            })()
                           ) : (r.userIds || []).length === 0 ? (
                             <span className="uidai-pm-empty-cell">—</span>
                           ) : (

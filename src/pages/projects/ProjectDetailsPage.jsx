@@ -15,7 +15,7 @@ import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
-import { useCan } from "../../auth/permissions";
+import { useCan, useCurrentRole } from "../../auth/permissions";
 
 /* IST-aware: backend stores IST midnight as UTC 18:30 of the prior day,
    so naive "T"-chopping returns yesterday's date. Project to IST then
@@ -150,6 +150,7 @@ export default function ProjectDetailsPage() {
   // Edit gate — per role spec, only super_admin / admin can edit project
   // detail; everyone else sees the page in read-only mode.
   const canEditProject = useCan('editProject');
+  const currentRole = useCurrentRole();
   // Publish is restricted to super_admin / admin even though org_admin
   // and project_admin can edit. Gated by its own permission flag rather
   // than piggy-backing on editProject.
@@ -693,26 +694,38 @@ export default function ProjectDetailsPage() {
       <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
           {(() => {
-            // First linked organization — kept simple since the action is
-            // a quick jump, not a multi-org picker.
+            // "Manage Users" routes per role:
+            //   - org_admin → straight to their own organization edit page
+            //     (they only manage their own org, never browse the list)
+            //   - super/PMIS admin → for now, jump to the first linked org's
+            //     edit page (TODO: change to /vendors with the project's
+            //     orgs preselected once VendorList supports a multi-select
+            //     filter via location state)
+            const userRole = currentRole;
+            const own =
+              tokenStore.getUser()?.vendor_id ||
+              tokenStore.getUser()?.vendorId ||
+              "";
             const firstVendor = safeArray(form.vendors)[0];
-            const orgId = firstVendor
+            const firstVendorId = firstVendor
               ? (projectVendorIndex[firstVendor]?.id ||
                  vendorMasterIndex[firstVendor]?.id ||
                  "")
               : "";
-            if (!orgId) return null;
+            const targetOrgId =
+              userRole === "org_admin" ? own || firstVendorId : firstVendorId;
+            if (!targetOrgId) return null;
             return (
               <button
                 className="uidai-btn"
                 disabled={editing}
                 onClick={() =>
-                  navigate(`/vendors/${orgId}`, {
+                  navigate(`/vendors/${targetOrgId}`, {
                     state: { from: `/projects/${project.projectId}` },
                   })
                 }
               >
-                Edit Organization
+                Manage Users
               </button>
             );
           })()}
@@ -907,7 +920,7 @@ export default function ProjectDetailsPage() {
             value={form.vendors}
             options={vendorOptions}
             onChange={(next) => setForm((f) => ({ ...f, vendors: next }))}
-            label="vendor"
+            label="organization"
             disabled={!editing}
           />
         </div>

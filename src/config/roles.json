@@ -86,7 +86,7 @@
     },
     "org_admin": {
       "label": "Organization Admin",
-      "description": "Works only on own organization. Cannot create users; can activate/deactivate own-org users and change Project Admin / Project Member roles. Manages own org's projects and assignments. Can create/edit tasks and subtasks.",
+      "description": "Works only on own organization. Cannot create users; can activate/deactivate own-org users and change Project Admin / Project Member roles. Manages own org's projects and assignments. Can create/edit/delete tasks and subtasks. No Master Data access.",
       "permissions": {
         "viewDashboard": true,
         "viewProjects": true,
@@ -102,10 +102,10 @@
         "deleteActivity": false,
         "createTask": true,
         "editTask": true,
-        "deleteTask": false,
+        "deleteTask": true,
         "createSubtask": true,
         "editSubtask": true,
-        "deleteSubtask": false,
+        "deleteSubtask": true,
         "viewUsers": true,
         "createUser": false,
         "editUser": true,
@@ -119,8 +119,8 @@
         "createVendor": false,
         "editVendor": true,
         "deleteVendor": false,
-        "viewMasterData": true,
-        "viewDivisions": true,
+        "viewMasterData": false,
+        "viewDivisions": false,
         "createDivision": false,
         "editDivision": false,
         "deleteDivision": false

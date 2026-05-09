@@ -281,7 +281,7 @@ export default function AddProjectPage() {
     if (form.startDate && form.endDate && form.endDate < form.startDate)
       errs.endDate = "Expected End Date cannot be earlier than Expected Start Date";
     if (safeArray(form.vendors).length === 0)
-      errs.vendors = "At least one Associated Vendor is required";
+      errs.vendors = "At least one associated Organization is required";
     return errs;
   }
 
@@ -501,20 +501,20 @@ export default function AddProjectPage() {
 
           <div className="uidai-field uidai-grid__full">
             <label className="uidai-field__label">
-              Vendors <span className="uidai-required-project">*</span>
+              Organizations <span className="uidai-required-project">*</span>
             </label>
             <div className="uidai-hint" style={{ marginBottom: 8 }}>
               {vendorsLoading
-                ? "Loading vendors..."
+                ? "Loading organizations..."
                 : vendorsError
-                  ? `Could not load vendors (${vendorsError}). Showing fallback list.`
-                  : "Select vendors for this project"}
+                  ? `Could not load organizations (${vendorsError}). Showing fallback list.`
+                  : "Select organizations for this project"}
             </div>
             <ChipControl
               value={safeArray(form.vendors)}
               options={vendorOptions}
               onChange={(next) => update({ vendors: next })}
-              label="vendor"
+              label="organization"
             />
             {errors.vendors && (
               <div className="uidai-field-error">{errors.vendors}</div>
