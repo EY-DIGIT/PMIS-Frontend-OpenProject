@@ -150,6 +150,10 @@ export default function ProjectDetailsPage() {
   // Edit gate — per role spec, only super_admin / admin can edit project
   // detail; everyone else sees the page in read-only mode.
   const canEditProject = useCan('editProject');
+  // Publish is restricted to super_admin / admin even though org_admin
+  // and project_admin can edit. Gated by its own permission flag rather
+  // than piggy-backing on editProject.
+  const canPublishProject = useCan('publishProject');
   const canDeleteProject = useCan('deleteProject');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
@@ -717,7 +721,7 @@ export default function ProjectDetailsPage() {
               {editing ? "Save" : "Edit"}
             </button>
           )}
-          {canEditProject && project.status !== "PUBLISHED" && (
+          {canPublishProject && project.status !== "PUBLISHED" && (
             <button
               className="uidai-btn"
               disabled={editing}
