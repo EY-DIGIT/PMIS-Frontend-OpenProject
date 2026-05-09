@@ -12,6 +12,16 @@ import { useCan } from '../../auth/permissions';
 
 const ROLE_LABELS = ['Project Admin', 'Project Member'];
 
+// Backend stores role as a snake_case key (`project_admin`/`project_member`)
+// while the table renders the human label. Convert at the boundary so the
+// PATCH payload matches the API contract.
+function roleLabelToKey(label) {
+  const s = String(label || '').trim().toLowerCase();
+  if (s === 'project admin' || s === 'project_admin') return 'project_admin';
+  if (s === 'project member' || s === 'project_member') return 'project_member';
+  return s.replace(/\s+/g, '_');
+}
+
 export default function VendorDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -159,24 +169,27 @@ export default function VendorDetails() {
   }, []);
 
   useEffect(() => {
+    // Paint immediately from whatever the shared context already has so the
+    // dropdown isn't blank while we re-fetch — this matters on the first
+    // visit after login, when DataContext's initial refresh may have run
+    // without a token and left `users` empty.
+    if (Array.isArray(users) && users.length) setUserList(users);
     if (!tokenStore.get()) return;
-    // Prefer the shared list already loaded by the User Search page so the
-    // dropdown shows exactly the same data the user sees there.
-    if (Array.isArray(users) && users.length) {
-      setUserList(users);
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
         const list = await usersApi.list({ pageSize: 200 });
-        if (!cancelled) setUserList(Array.isArray(list) ? list : []);
+        if (!cancelled && Array.isArray(list)) setUserList(list);
       } catch {
-        if (!cancelled) setUserList([]);
+        // Keep whatever was painted from context; failing here shouldn't
+        // erase a usable list.
       }
     })();
     return () => { cancelled = true; };
-  }, [users]);
+    // Intentionally not depending on `users` — we always refetch on mount
+    // and don't want context churn to wipe an in-flight result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const projectOptions = useMemo(() => {
     if (!tokenStore.get()) {
@@ -270,7 +283,7 @@ export default function VendorDetails() {
         const flatAssignments = assignments.flatMap((a) =>
           (a.roles || []).map((r) => ({
             projectId: a.projectId || '',
-            role: r.role || '',
+            role: roleLabelToKey(r.role),
             userIds: Array.isArray(r.userIds) ? r.userIds : []
           }))
         );

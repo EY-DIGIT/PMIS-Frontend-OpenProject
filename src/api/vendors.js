@@ -18,8 +18,70 @@ function unwrapOne(res) {
   return res;
 }
 
+// Project Mapping rows in VendorDetails carry user-facing labels
+// ("Project Admin" / "Project Member") but the backend expects the
+// role keys ("project_admin" / "project_member"). Normalize at the
+// edge instead of at the UI so the display stays human-readable.
+function toRoleKey(role) {
+  if (!role) return '';
+  const s = String(role).trim().toLowerCase();
+  if (s === 'project admin' || s === 'project_admin') return 'project_admin';
+  if (s === 'project member' || s === 'project_member') return 'project_member';
+  return s.replace(/\s+/g, '_');
+}
+
+// Inverse of toRoleKey — used when seeding the form from the GET
+// response. Backend payloads in this codebase have shipped both styles
+// over time, so accept either and always return the human label.
+function fromRoleKey(role) {
+  if (!role) return '';
+  const s = String(role).trim().toLowerCase();
+  if (s === 'project_admin' || s === 'project admin') return 'Project Admin';
+  if (s === 'project_member' || s === 'project member') return 'Project Member';
+  return role;
+}
+
 function fromApi(v) {
   const projects = Array.isArray(v.projects) ? v.projects : [];
+  // Backend returns role/user assignments as a flat list — one row per
+  // (project, role). VendorDetails works with a nested shape:
+  //   [{ projectId, roles: [{ role, userIds }] }]
+  // Group here so the page can seed the table directly.
+  const flatAssignments = Array.isArray(v.user_assignments)
+    ? v.user_assignments
+    : Array.isArray(v.userAssignments)
+      ? v.userAssignments
+      : [];
+  const grouped = new Map();
+  flatAssignments.forEach((ua) => {
+    const pid = ua?.project_id || ua?.projectId || '';
+    if (!pid) return;
+    if (!grouped.has(pid)) grouped.set(pid, { projectId: pid, roles: [] });
+    grouped.get(pid).roles.push({
+      role: fromRoleKey(ua.role),
+      userIds: Array.isArray(ua.user_ids)
+        ? ua.user_ids
+        : Array.isArray(ua.userIds)
+          ? ua.userIds
+          : [],
+    });
+  });
+  // Projects that exist on the vendor but have no assignment rows yet —
+  // surface them with empty default Admin/Member rows so the user can
+  // fill them in without first re-adding the project mapping.
+  projects.forEach((p) => {
+    const pid = p?.id || p?.uuid;
+    if (!pid || grouped.has(pid)) return;
+    grouped.set(pid, {
+      projectId: pid,
+      roles: [
+        { role: 'Project Admin', userIds: [] },
+        { role: 'Project Member', userIds: [] },
+      ],
+    });
+  });
+  const projectAssignments = Array.from(grouped.values());
+
   return {
     vendorId: v.id || v.uuid || '',
     vendorCode: v.vendorCode || v.vendor_code || '',
@@ -33,6 +95,7 @@ function fromApi(v) {
     projectMapping: projects.map((p) => p.name).filter(Boolean),
     projectIds: projects.map((p) => p.id || p.uuid).filter(Boolean),
     projects,
+    projectAssignments,
     createdAt: v.createdAt || '',
     updatedAt: v.updatedAt || '',
     startDate: (v.startDate || '').slice(0, 10),
@@ -81,9 +144,9 @@ export async function update(id, {
   contact_person,
   phone_number,
   // Flat list built by VendorDetails — one entry per (project, role, users)
-  // tuple. Sent as `user_assignments`; this single field also covers the
-  // project-mapping concern (every project that should be linked appears
-  // at least once here), so a separate `project_ids` is no longer sent.
+  // tuple. Drives both `project_ids` (distinct project UUIDs) and
+  // `user_assignments` in the outgoing payload, matching the backend
+  // contract for PATCH /vendors/:id.
   assignments,
 }) {
   const body = {};
@@ -94,13 +157,25 @@ export async function update(id, {
   if (contact_person !== undefined) body.contact_person = contact_person;
   if (phone_number !== undefined) body.phone_number = phone_number;
   if (Array.isArray(assignments)) {
-    body.user_assignments = assignments
+    const userAssignments = assignments
       .filter((a) => a && a.projectId)
       .map((a) => ({
         project_id: a.projectId,
-        role: a.role || '',
+        role: toRoleKey(a.role),
         user_ids: Array.isArray(a.userIds) ? a.userIds : [],
       }));
+    // Distinct project UUIDs — same set as `user_assignments[].project_id`
+    // but flattened to satisfy the `project_ids` array the backend expects
+    // on the same payload.
+    const seen = new Set();
+    body.project_ids = userAssignments.reduce((acc, a) => {
+      if (!seen.has(a.project_id)) {
+        seen.add(a.project_id);
+        acc.push(a.project_id);
+      }
+      return acc;
+    }, []);
+    body.user_assignments = userAssignments;
   }
   const res = await api.patch(ENDPOINTS.vendors.update(id), body);
   return fromApi(unwrapOne(res));
