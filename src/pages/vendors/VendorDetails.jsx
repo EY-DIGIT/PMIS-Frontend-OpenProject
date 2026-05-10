@@ -384,11 +384,10 @@ export default function VendorDetails() {
   return (
     <>
       <div className="uidai-pmis-title">Organization Details</div>
-      <div className="uidai-pmis-card">
-        <div className="uidai-pmis-card-actions">
+      <div className="uidai-pmis-card" style={{paddingTop:"50px"}}>
+        <div className="uidai-pmis-card-actions" >
           {canEditVendor && (
-            <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
-              <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
+            <button className="uidai-pmis-btn"  onClick={handleEditToggle} disabled={saving}>
               <span className="uidai-pmis-btn-text">
                 {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
               </span>
@@ -611,6 +610,7 @@ export default function VendorDetails() {
         </div>
         {saveError && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{saveError}</div>}
         {loadError && !saveError && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{loadError}</div>}
+        <div style={{ paddingBottom: 32 }} />
       </div>
     </>
   );
