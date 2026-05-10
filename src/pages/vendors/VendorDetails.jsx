@@ -201,22 +201,44 @@ export default function VendorDetails() {
     if (!tokenStore.get()) {
       return PROJECT_OPTIONS.map((name) => ({ label: name, value: name }));
     }
-    return projectList.map((p) => ({
-      label: p.name || p.projectCode || p.id,
-      value: p.id || p.uuid,
-    }));
-  }, [projectList]);
+    const seen = new Set();
+    const out = [];
+    projectList.forEach((p) => {
+      const value = p.id || p.uuid;
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push({ label: p.name || p.projectCode || value, value });
+    });
+    // Include projects already on this vendor — covers Project Admins
+    // whose global /projects list omits projects they aren't a member
+    // of, so the current selection still renders by name in the dropdown.
+    (Array.isArray(vendor?.projects) ? vendor.projects : []).forEach((p) => {
+      const value = p?.id || p?.uuid;
+      if (!value || seen.has(value)) return;
+      seen.add(value);
+      out.push({ label: p.name || p.projectCode || value, value });
+    });
+    return out;
+  }, [projectList, vendor]);
 
   // Quick lookup so the table can render a project's friendly name from its
-  // stored UUID without a second pass through projectOptions.
+  // stored UUID without a second pass through projectOptions. Merge in the
+  // vendor's own `projects` array — the global /projects list is filtered
+  // by the caller's access (Project Admin only sees their assigned ones),
+  // so projects on this vendor that the admin isn't a member of would
+  // otherwise fall through to the raw UUID.
   const projectNameById = useMemo(() => {
     const map = {};
     projectList.forEach((p) => {
       const id = p.id || p.uuid;
       if (id) map[id] = p.name || p.projectCode || id;
     });
+    (Array.isArray(vendor?.projects) ? vendor.projects : []).forEach((p) => {
+      const id = p?.id || p?.uuid;
+      if (id && !map[id]) map[id] = p.name || p.projectCode || id;
+    });
     return map;
-  }, [projectList]);
+  }, [projectList, vendor]);
 
   const userOptions = useMemo(
     () =>
