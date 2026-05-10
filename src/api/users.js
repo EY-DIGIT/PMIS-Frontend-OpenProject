@@ -72,6 +72,11 @@ export async function create(body) {
   return fromApi(unwrapOne(res));
 }
 
+// PATCH /api/v3/users/{id} — backend contract:
+//   { email, firstName, lastName, admin, status, vendor_id,
+//     division, division_other, phone_number, project_ids: [uuid, ...] }
+// Per-project roles + per-project user picks have been removed from the
+// User Details page, so we emit a flat `project_ids` array.
 export async function update(id, {
   email,
   firstName,
@@ -82,9 +87,7 @@ export async function update(id, {
   division,
   division_other,
   phone_number,
-  projectMapping,
-  projectAssignments,
-  assignments,
+  project_ids,
 }) {
   const body = {};
   if (email !== undefined) body.email = email;
@@ -96,9 +99,9 @@ export async function update(id, {
   if (division !== undefined) body.division = division;
   if (division_other !== undefined) body.division_other = division_other;
   if (phone_number !== undefined) body.phone_number = phone_number;
-  if (projectMapping !== undefined) body.projectMapping = projectMapping;
-  if (projectAssignments !== undefined) body.projectAssignments = projectAssignments;
-  if (assignments !== undefined) body.assignments = assignments;
+  if (project_ids !== undefined) {
+    body.project_ids = Array.isArray(project_ids) ? project_ids : [];
+  }
   const res = await api.patch(ENDPOINTS.users.update(id), body);
   return fromApi(unwrapOne(res));
 }

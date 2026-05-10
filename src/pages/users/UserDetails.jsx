@@ -211,9 +211,6 @@ export default function UserDetails() {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
         const projectIds = assignments.map((a) => a.projectId).filter(Boolean);
-        // Per-project role + per-project users both removed — emit a flat
-        // list of { projectId } only.
-        const flatAssignments = projectIds.map((projectId) => ({ projectId }));
         const updated = await usersApi.update(id, {
           email: email.trim(),
           firstName,
@@ -221,11 +218,9 @@ export default function UserDetails() {
           status: status === 'Inactive' ? 'inactive' : 'active',
           vendor_id: vendorId,
           division,
-          division_other: divisionRequiresOther ? divisionOther.trim() : '',
+          division_other: divisionRequiresOther ? divisionOther.trim() : null,
           phone_number: phone.trim(),
-          projectMapping: projectIds,
-          projectAssignments: assignments,
-          assignments: flatAssignments,
+          project_ids: projectIds,
         });
         setUser(updated);
         seed(updated);
