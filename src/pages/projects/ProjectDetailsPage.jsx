@@ -206,6 +206,11 @@ export default function ProjectDetailsPage() {
 
         if (cancelled) return;
         if (res.status === 401) return;
+        // The vendor master is only used to populate the edit-mode
+        // organization dropdown. Project Members lack the backend's
+        // vendors:read scope and cannot edit anyway, so swallow 403 to
+        // avoid a spurious "Insufficient permissions" popup on open.
+        if (res.status === 403) return;
         if (!res.ok) {
           const msg = await readErrorMessage(res);
           uiStore.showError(msg);

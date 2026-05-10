@@ -213,7 +213,7 @@ export default function MilestoneGridRow({
             Track
           </button>
         )}
-        {allowEdit(kind) && (
+        {allowEdit(kind) ? (
           <button
             type="button"
             className="uidai-msgrid__btn-text"
@@ -221,6 +221,16 @@ export default function MilestoneGridRow({
           >
             Edit
           </button>
+        ) : (
+          !isOnboarding && (
+            <button
+              type="button"
+              className="uidai-msgrid__btn-text"
+              onClick={() => onEdit(kind, "view", parentUidForEdit, node.uid)}
+            >
+              View
+            </button>
+          )
         )}
         {allowDelete(kind) && (
           <button

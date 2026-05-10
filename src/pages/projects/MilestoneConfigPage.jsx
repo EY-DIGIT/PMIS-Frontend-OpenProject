@@ -1190,7 +1190,7 @@ export default function MilestoneConfigPage({ mode }) {
           project={project}
           parentUid={modalCtx.parentUid}
           nodeUid={modalCtx.nodeUid}
-          editable={canMod}
+          editable={modalCtx.mode === "view" ? false : canMod}
           onCancel={closeNodeModal}
           onSave={saveNodeFromModal}
           onError={(m) => uiStore.showMessage(m)}

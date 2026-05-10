@@ -204,7 +204,7 @@
         "createOrgAdmin": false,
         "createProjectAdmin": false,
         "createProjectMember": false,
-        "viewVendors": true,
+        "viewVendors": false,
         "createVendor": false,
         "editVendor": false,
         "deleteVendor": false,

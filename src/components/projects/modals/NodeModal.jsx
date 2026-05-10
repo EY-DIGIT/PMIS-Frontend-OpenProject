@@ -216,7 +216,7 @@ export default function NodeModal({
     if (!open || !project) return null;
     if (kind !== "task" && kind !== "subtask") return null;
     const targetUid =
-      mode === "edit" && nodeUid ? nodeUid : parentUid;
+      (mode === "edit" || mode === "view") && nodeUid ? nodeUid : parentUid;
     if (!targetUid) return null;
     const loc = locateNode(project, targetUid);
     if (!loc) return null;
