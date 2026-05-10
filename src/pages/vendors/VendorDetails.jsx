@@ -90,36 +90,33 @@ export default function VendorDetails() {
     setMapping(Array.isArray(v?.projectIds) && v.projectIds.length
       ? v.projectIds
       : Array.isArray(v?.projectMapping) ? v.projectMapping : []);
-    // Seed the assignment table — one project entry per row, each carrying
-    // multiple role rows (Admin + Member by default). Backwards-compat:
-    // legacy {admins, members} arrays and the older single-role shape are
-    // both promoted into the {roles:[{role, userIds}]} structure.
+    // Seed the assignment table — every project always renders exactly two
+    // role rows in a fixed order: Project Admin then Project Member. Legacy
+    // payloads (single-role shape, {admins, members}, or arbitrary `roles`
+    // arrays from older saves) get folded into those two static rows by
+    // matching role keys; unknown role labels are dropped.
     const normalize = (a) => {
-      if (Array.isArray(a?.roles) && a.roles.length) {
-        return {
-          projectId: a.projectId || '',
-          roles: a.roles.map((r) => ({
-            role: r?.role || ROLE_LABELS[0],
-            userIds: Array.isArray(r?.userIds) ? r.userIds : []
-          }))
-        };
+      const userIdsByKey = { project_admin: [], project_member: [] };
+      if (Array.isArray(a?.roles)) {
+        a.roles.forEach((r) => {
+          const key = roleLabelToKey(r?.role);
+          if (key in userIdsByKey && Array.isArray(r?.userIds)) {
+            userIdsByKey[key] = r.userIds;
+          }
+        });
+      } else if (a && typeof a === 'object' && (a.role || Array.isArray(a.userIds))) {
+        const key = roleLabelToKey(a.role);
+        if (key in userIdsByKey && Array.isArray(a.userIds)) {
+          userIdsByKey[key] = a.userIds;
+        }
       }
-      // Legacy single-role shape: { projectId, role, userIds }
-      if (a && typeof a === 'object' && (a.role || Array.isArray(a.userIds))) {
-        return {
-          projectId: a.projectId || '',
-          roles: [
-            { role: a.role || ROLE_LABELS[0], userIds: Array.isArray(a.userIds) ? a.userIds : [] }
-          ]
-        };
-      }
-      const admins = Array.isArray(a?.admins) ? a.admins : [];
-      const members = Array.isArray(a?.members) ? a.members : [];
+      if (Array.isArray(a?.admins)) userIdsByKey.project_admin = a.admins;
+      if (Array.isArray(a?.members)) userIdsByKey.project_member = a.members;
       return {
         projectId: a?.projectId || '',
         roles: [
-          { role: ROLE_LABELS[0], userIds: admins },
-          { role: ROLE_LABELS[1], userIds: members }
+          { role: ROLE_LABELS[0], userIds: userIdsByKey.project_admin },
+          { role: ROLE_LABELS[1], userIds: userIdsByKey.project_member }
         ]
       };
     };
@@ -297,19 +294,11 @@ export default function VendorDetails() {
       })
     );
   }
-  function deleteRoleRow(projectIdx, roleIdx) {
-    if (!window.confirm('Delete this role row?')) return;
-    setAssignments((prev) => {
-      const next = prev
-        .map((a, i) => {
-          if (i !== projectIdx) return a;
-          const roles = (a.roles || []).filter((_, j) => j !== roleIdx);
-          return { ...a, roles };
-        })
-        // Drop projects that have no role rows left.
-        .filter((a) => Array.isArray(a.roles) && a.roles.length);
-      return next;
-    });
+  // Roles are static (Project Admin + Project Member) so per-role deletion
+  // doesn't apply — Delete removes the entire project mapping.
+  function deleteProjectMapping(projectIdx) {
+    if (!window.confirm('Remove this project mapping?')) return;
+    setAssignments((prev) => prev.filter((_, i) => i !== projectIdx));
   }
 
   const handleEditToggle = async () => {
@@ -537,7 +526,7 @@ export default function VendorDetails() {
                           </td>
                         )}
                         <td>
-                          <span>{r.role || '—'}</span>
+                          <span>{ROLE_LABELS[rIdx] || r.role || '—'}</span>
                         </td>
                         <td>
                           {editing && (!isProjectAdmin || roleLabelToKey(r.role) === 'project_member') ? (
@@ -581,19 +570,24 @@ export default function VendorDetails() {
                             </ul>
                           )}
                         </td>
-                        <td className="uidai-pm-actions">
-                          {editing && !mappingStructureLocked ? (
-                            <button
-                              type="button"
-                              className="uidai-pm-action-link uidai-pm-action-link--danger"
-                              onClick={() => deleteRoleRow(pIdx, rIdx)}
-                            >
-                              Delete
-                            </button>
-                          ) : (
-                            <span className="uidai-pm-empty-cell">—</span>
-                          )}
-                        </td>
+                        {rIdx === 0 && (
+                          <td
+                            rowSpan={roles.length}
+                            className="uidai-pm-actions"
+                          >
+                            {editing && !mappingStructureLocked ? (
+                              <button
+                                type="button"
+                                className="uidai-pm-action-link uidai-pm-action-link--danger"
+                                onClick={() => deleteProjectMapping(pIdx)}
+                              >
+                                Delete
+                              </button>
+                            ) : (
+                              <span className="uidai-pm-empty-cell">—</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   });
