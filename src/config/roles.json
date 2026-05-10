@@ -90,7 +90,7 @@
       "label": "Organization Admin",
       "description": "Works only on own organization. Cannot create users; can activate/deactivate own-org users and swap Project Admin ↔ Project Member roles. Manages own org's projects and assignments. Can create/edit/delete tasks and subtasks. Master Data view-only (own org).",
       "permissions": {
-        "viewDashboard": true,
+        "viewDashboard": false,
         "viewProjects": true,
         "createProject": false,
         "editProject": true,
@@ -133,7 +133,7 @@
       "label": "Project Admin",
       "description": "Manages projects assigned to them. Cannot create users; can activate/deactivate own-org users (limited fields). Cannot assign roles. Can create/edit/delete tasks and subtasks.",
       "permissions": {
-        "viewDashboard": true,
+        "viewDashboard": false,
         "viewProjects": true,
         "createProject": false,
         "editProject": true,
@@ -176,7 +176,7 @@
       "label": "Project Member",
       "description": "Works only on projects assigned to them. Can add/edit/delete tasks and subtasks on those projects. Priority field is hidden — cannot edit. Cannot view other users.",
       "permissions": {
-        "viewDashboard": true,
+        "viewDashboard": false,
         "viewProjects": true,
         "createProject": false,
         "editProject": false,

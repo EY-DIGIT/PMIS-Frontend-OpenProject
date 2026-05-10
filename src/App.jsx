@@ -247,9 +247,11 @@ export default function MainApp() {
                                             <Route
                                               path="/dashboard"
                                               element={
-                                                <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                  <Dashboard />
-                                                </Suspense>
+                                                <RequirePermission action="viewDashboard">
+                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                    <Dashboard />
+                                                  </Suspense>
+                                                </RequirePermission>
                                               }
                                             />
                                             <Route path="/profile" element={<Profile />} />
