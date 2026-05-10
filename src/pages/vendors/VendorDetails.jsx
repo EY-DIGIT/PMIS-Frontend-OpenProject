@@ -190,27 +190,33 @@ export default function VendorDetails() {
   }, []);
 
   useEffect(() => {
-    // Paint immediately from whatever the shared context already has so the
-    // dropdown isn't blank while we re-fetch — this matters on the first
-    // visit after login, when DataContext's initial refresh may have run
-    // without a token and left `users` empty.
-    if (Array.isArray(users) && users.length) setUserList(users);
     if (!tokenStore.get()) return;
     let cancelled = false;
     (async () => {
       try {
         const list = await usersApi.list({ pageSize: 200 });
-        if (!cancelled && Array.isArray(list)) setUserList(list);
+        // Only adopt a non-empty response — a transient empty payload
+        // (auth blip, backend hiccup) shouldn't wipe a list the
+        // context-sync effect below has already painted.
+        if (!cancelled && Array.isArray(list) && list.length) setUserList(list);
       } catch {
         // Keep whatever was painted from context; failing here shouldn't
         // erase a usable list.
       }
     })();
     return () => { cancelled = true; };
-    // Intentionally not depending on `users` — we always refetch on mount
-    // and don't want context churn to wipe an in-flight result.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Paint from the shared context whenever it updates and our own list
+  // is still empty. Covers the race where this page mounts before
+  // DataContext's first fetch resolves (first visit after login), and
+  // the recovery case where the page-level fetch above failed or
+  // returned empty.
+  useEffect(() => {
+    if (Array.isArray(users) && users.length && userList.length === 0) {
+      setUserList(users);
+    }
+  }, [users, userList.length]);
 
   const projectOptions = useMemo(() => {
     if (!tokenStore.get()) {
