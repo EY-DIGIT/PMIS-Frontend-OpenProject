@@ -701,7 +701,9 @@ export default function ProjectDetailsPage() {
             //     edit page (TODO: change to /vendors with the project's
             //     orgs preselected once VendorList supports a multi-select
             //     filter via location state)
+            //   - project_member → hidden; members never manage users.
             const userRole = currentRole;
+            if (userRole === "project_member") return null;
             const own =
               tokenStore.getUser()?.vendor_id ||
               tokenStore.getUser()?.vendorId ||
