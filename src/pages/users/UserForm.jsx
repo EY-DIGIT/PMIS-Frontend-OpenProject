@@ -270,6 +270,7 @@ export default function UserForm() {
       errs.mobile = 'Enter a valid 10-digit mobile number';
     if (!password) errs.password = 'Temporary Password is required';
     if (!vendorId) errs.vendorId = 'Please select an Organization';
+    if (!orgRole) errs.orgRole = 'Please select a Role';
     if (!division) errs.division = 'Please select a division';
     if (divisionRequiresOther && !divisionOther.trim()) errs.divisionOther = 'Please specify the division';
     return errs;
@@ -487,17 +488,18 @@ export default function UserForm() {
               {errors.divisionOther && <div className="uidai-pmis-field-error">{errors.divisionOther}</div>}
             </div>
           )}
-          <div className="uidai-pmis-field">
-            <label>Role</label>
+          <div className={errClass('orgRole')}>
+            <label>Role <span className="uidai-pmis-required">*</span></label>
             <select
               value={orgRole}
-              onChange={(e) => setOrgRole(e.target.value)}
+              onChange={(e) => { setOrgRole(e.target.value); clearFieldError('orgRole'); }}
             >
-              <option value="">— Select —</option>
+              <option value="" disabled>— Select —</option>
               {allowedOrgRoles.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            {errors.orgRole && <div className="uidai-pmis-field-error">{errors.orgRole}</div>}
           </div>
         </div>
 
