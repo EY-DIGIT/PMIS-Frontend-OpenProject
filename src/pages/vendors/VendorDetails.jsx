@@ -330,7 +330,7 @@ export default function VendorDetails() {
             userIds: Array.isArray(r.userIds) ? r.userIds : []
           }))
         );
-        const updated = await vendorsApi.update(id, {
+        await vendorsApi.update(id, {
           name: name.trim(),
           description: description.trim(),
           active: status === 'Active',
@@ -341,8 +341,12 @@ export default function VendorDetails() {
           projectAssignments: assignments,
           assignments: flatAssignments
         });
-        setVendor(updated);
-        seed(updated);
+        // Re-fetch via GET /vendors/:id so the page reflects the
+        // server's authoritative state after save (and so the GET
+        // request shows up in the network log).
+        const fresh = await vendorsApi.get(id);
+        setVendor(fresh);
+        seed(fresh);
         await refresh();
       }
       setEditing(false);
