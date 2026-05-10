@@ -26,6 +26,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canViewProjects = useCan("viewProjects");
   const canCreateProject = useCan("createProject");
   const canViewMasterData = useCan("viewMasterData");
+  const canViewDivisions = useCan("viewDivisions");
   const canViewVendors = useCan("viewVendors");
   const canCreateVendor = useCan("createVendor");
   const canViewUsers = useCan("viewUsers");
@@ -164,13 +165,15 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <FiUsers size={ICON_SIZE} />
                 <span className="pmis-text">User Data</span>
               </div>
-              <div
-                className={divisionDataActive ? "active" : ""}
-                onClick={() => navigate("/master/divisions")}
-              >
-                <FiGrid size={ICON_SIZE} />
-                <span className="pmis-text">Divisions</span>
-              </div>
+              {canViewDivisions && (
+                <div
+                  className={divisionDataActive ? "active" : ""}
+                  onClick={() => navigate("/master/divisions")}
+                >
+                  <FiGrid size={ICON_SIZE} />
+                  <span className="pmis-text">Divisions</span>
+                </div>
+              )}
             </div>
           </>
         )}
