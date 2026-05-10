@@ -6,7 +6,19 @@ import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
-import { getRoleMeta } from '../../auth/permissions';
+import { getRoleMeta, useCurrentRole } from '../../auth/permissions';
+import rolesConfig from '../../config/roles.json';
+
+// Edit is allowed only when the logged-in user's role is strictly higher
+// in the hierarchy than the target user's role. super_admin → admin →
+// org_admin → project_admin → project_member.
+function canEditTargetRole(currentRole, targetRole) {
+  const h = rolesConfig.hierarchy || [];
+  const ci = h.indexOf(currentRole);
+  const ti = h.indexOf(targetRole);
+  if (ci < 0 || ti < 0) return false;
+  return ci < ti;
+}
 
 function splitName(n) {
   const parts = (n || '').trim().split(/\s+/);
@@ -24,6 +36,7 @@ export default function UserDetails() {
   const me = tokenStore.getUser();
   const myId = me?.id || me?.uuid || me?.userId || '';
   const isSelf = !!(myId && id && String(myId) === String(id));
+  const currentRole = useCurrentRole();
 
   const [user, setUser] = useState(fallback);
   const [loading, setLoading] = useState(false);
@@ -274,7 +287,7 @@ export default function UserDetails() {
       <div className="uidai-pmis-title">User Details</div>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-card-actions">
-          {!isSelf && (
+          {!isSelf && canEditTargetRole(currentRole, orgRole) && (
             <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
               <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
               <span className="uidai-pmis-btn-text">
