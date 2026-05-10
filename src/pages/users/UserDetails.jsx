@@ -19,6 +19,12 @@ export default function UserDetails() {
   const { vendors, users, refresh } = useData();
   const fallback = users.find((x) => x.userId === id) || null;
 
+  // A user must not edit their own record from this screen — the Profile
+  // page is the only place that allows self-edit.
+  const me = tokenStore.getUser();
+  const myId = me?.id || me?.uuid || me?.userId || '';
+  const isSelf = !!(myId && id && String(myId) === String(id));
+
   const [user, setUser] = useState(fallback);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -268,12 +274,14 @@ export default function UserDetails() {
       <div className="uidai-pmis-title">User Details</div>
       <div className="uidai-pmis-card">
         <div className="uidai-pmis-card-actions">
-          <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
-            <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
-            <span className="uidai-pmis-btn-text">
-              {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
-            </span>
-          </button>
+          {!isSelf && (
+            <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
+              <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
+              <span className="uidai-pmis-btn-text">
+                {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
+              </span>
+            </button>
+          )}
           {editing ? (
             <button className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={handleCancelEdit} disabled={saving}>Cancel</button>
           ) : (
