@@ -145,7 +145,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               }}
             >
               <FiDatabase size={ICON_SIZE} />
-              <span className="pmis-text">Master Management Data</span>
+              <span className="pmis-text">Master Data Management</span>
               <span className="pmis-submenu-arrow">
                 <Chevron open={mdOpen} />
               </span>
