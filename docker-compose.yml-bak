@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  pmis-frontend:
+    image: ${DOCKER_USERNAME}/pmis-frontend:${VERSION}
+    container_name: pmis-frontend
+    ports:
+      - "3000:80"       # Nginx inside serves on 80; host keeps port 3000
+    restart: unless-stopped
