@@ -27,6 +27,15 @@ function emitUserChanged() {
   }
 }
 
+// Session-reset is fired on both login and logout so every client-side
+// cache (DataContext, projectsStore, draftStore, uiStore, apiSync) can
+// drop User A's data before User B sees it. Imported by auth.js / sessionManager.
+export function notifySessionReset() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pmis:session-reset'));
+  }
+}
+
 export const tokenStore = {
   get: () =>
     sessionStorage.getItem(TOKEN_KEY) ||
@@ -191,6 +200,13 @@ function mergeHeadersWithToken(initHeaders, token) {
   delete headers.authorization;
   if (token) headers.Authorization = `Bearer ${token}`;
   if (!headers.Accept && !headers.accept) headers.Accept = 'application/json';
+  // Defeat browser/proxy caching of authenticated responses so a fresh
+  // login never sees the previous user's cached payload. Server-side
+  // Cache-Control is still recommended; this is the client-side guard.
+  if (!headers['Cache-Control'] && !headers['cache-control']) {
+    headers['Cache-Control'] = 'no-cache';
+  }
+  if (!headers.Pragma && !headers.pragma) headers.Pragma = 'no-cache';
   return headers;
 }
 
@@ -201,14 +217,22 @@ function mergeHeadersWithToken(initHeaders, token) {
 export async function authorizedFetch(input, init = {}) {
   const url = buildUrl(input);
   const token = tokenStore.get();
-  const firstInit = { ...init, headers: mergeHeadersWithToken(init.headers, token) };
+  const firstInit = {
+    cache: 'no-store',
+    ...init,
+    headers: mergeHeadersWithToken(init.headers, token),
+  };
 
   let res = await fetch(url, firstInit);
 
   if (res.status === 401 && tokenStore.getRefresh()) {
     const newToken = await refreshAccessToken();
     if (newToken) {
-      const retryInit = { ...init, headers: mergeHeadersWithToken(init.headers, newToken) };
+      const retryInit = {
+        cache: 'no-store',
+        ...init,
+        headers: mergeHeadersWithToken(init.headers, newToken),
+      };
       res = await fetch(url, retryInit);
     }
   }
@@ -224,7 +248,13 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
   }
 
   const buildHeaders = (token) => {
-    const h = { Accept: 'application/json' };
+    const h = {
+      Accept: 'application/json',
+      // Match authorizedFetch — defeat browser/proxy caching so a freshly
+      // logged-in User B never sees a 200-from-cache that belongs to User A.
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    };
     if (body !== undefined) h['Content-Type'] = 'application/json';
     if (auth && token) h.Authorization = `Bearer ${token}`;
     return h;
@@ -234,6 +264,7 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
     method,
     headers: buildHeaders(token),
     body: body === undefined ? undefined : JSON.stringify(body),
+    cache: 'no-store',
     signal,
   });
 

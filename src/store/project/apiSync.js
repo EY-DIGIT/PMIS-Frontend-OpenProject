@@ -5,6 +5,16 @@ import { normalizeProject } from '../../utils/project/nodeUtils';
 
 let hydratedOnce = false;
 
+/* On login/logout, reset the once-only flag so the next call to
+   hydrateProjects() actually fires a fetch under the new identity.
+   Without this, the flag stays `true` for the life of the page and
+   User B sees an empty (or User A's) projects list with no re-fetch. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('pmis:session-reset', () => {
+    hydratedOnce = false;
+  });
+}
+
 export async function hydrateProjects({ force = false } = {}) {
   if (hydratedOnce && !force) return;
   if (!tokenStore.get()) return;

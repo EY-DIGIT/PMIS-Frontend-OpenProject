@@ -1,4 +1,4 @@
-import { api, tokenStore, refreshAccessToken, authorizedFetch, readExpiresAt } from './client';
+import { api, tokenStore, refreshAccessToken, authorizedFetch, readExpiresAt, notifySessionReset } from './client';
 import { ENDPOINTS } from './endpoint';
 
 export { refreshAccessToken, authorizedFetch };
@@ -32,6 +32,11 @@ function persistAuthFromPayload(payload) {
 
   const expiresAt = readExpiresAt(payload);
   if (expiresAt) tokenStore.setExpiresAt(expiresAt);
+
+  // Drop every client-side cache from the previous session before the
+  // app starts fetching with the new token. Listeners (DataProvider,
+  // projectsStore, draftStore, uiStore, apiSync) clear their state.
+  notifySessionReset();
 
   return { token, refresh, user };
 }
@@ -109,6 +114,9 @@ export async function logout() {
     localStorage.removeItem('pmis_last_refresh_at');
     sessionStorage.removeItem('uidai_loggedIn');
     sessionStorage.removeItem('uidai_user');
+    // Drop every client-side cache so User B can't inherit User A's
+    // vendors/users/projects/drafts on the next login in this tab.
+    notifySessionReset();
   }
 }
 

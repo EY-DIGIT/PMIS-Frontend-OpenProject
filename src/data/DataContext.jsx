@@ -37,6 +37,21 @@ export function DataProvider({ children }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // On both login and logout, drop the cached vendors/users so a freshly
+  // authenticated User B never sees User A's data, then re-fetch under
+  // the new identity. The refresh()'s own token guard means a logout
+  // event simply leaves the arrays empty.
+  useEffect(() => {
+    function onReset() {
+      setVendors([]);
+      setUsers([]);
+      setError(null);
+      refresh();
+    }
+    window.addEventListener('pmis:session-reset', onReset);
+    return () => window.removeEventListener('pmis:session-reset', onReset);
+  }, [refresh]);
+
   return (
     <DataContext.Provider value={{ vendors, setVendors, users, setUsers, loading, error, refresh }}>
       {children}

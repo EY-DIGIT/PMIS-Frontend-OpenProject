@@ -41,6 +41,15 @@ export const draftStore = {
   subscribe
 };
 
+/* Drop any in-progress onboarding draft on login/logout — a draft
+   started by User A must not be visible to User B in the same tab. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('pmis:session-reset', () => {
+    draft = null;
+    emit();
+  });
+}
+
 export function useDraft() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

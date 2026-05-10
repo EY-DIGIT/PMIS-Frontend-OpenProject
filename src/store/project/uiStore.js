@@ -130,6 +130,28 @@ export const uiStore = {
   subscribe
 };
 
+/* Close any open modal / hide any active loader on login/logout so
+   User B doesn't land on a screen carrying a stale "Saving…" spinner
+   or an error message from User A's last action. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('pmis:session-reset', () => {
+    if (state.loaderHideTimer) {
+      clearTimeout(state.loaderHideTimer);
+    }
+    state = {
+      messageOpen: false,
+      messageText: '',
+      messageIsError: false,
+      messageOnOk: null,
+      loaderOpen: false,
+      loaderText: '',
+      loaderShownAt: 0,
+      loaderHideTimer: null,
+    };
+    emit();
+  });
+}
+
 export function useUiState() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

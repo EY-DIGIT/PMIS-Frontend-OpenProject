@@ -76,6 +76,16 @@ export const projectsStore = {
   subscribe
 };
 
+/* On login/logout, drop the cached project list so the next load fires
+   fresh under the new identity. Without this, User B inherits User A's
+   projects until something explicitly replaces the array. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('pmis:session-reset', () => {
+    projects = [];
+    emit();
+  });
+}
+
 /* ─────────────── Hooks ─────────────── */
 export function useProjects() {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
