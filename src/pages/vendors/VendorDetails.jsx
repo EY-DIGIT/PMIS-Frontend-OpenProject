@@ -36,10 +36,25 @@ export default function VendorDetails() {
   const canEditVendor = useCan('editVendor');
   const currentRole = useCurrentRole();
   // Org Admins can edit organization records — but only their own — and
-  // even within their own org, Name and Status remain read-only. The
-  // `nameStatusEditable` boolean is computed inline below where `editing`
-  // is in scope.
+  // even within their own org, Name / Status / Description / Type remain
+  // read-only. They may only update Contact Person, Email, Mobile Number,
+  // and the Project Mapping table.
+  //
+  // Project Admins reach this page (canEditVendor is true for them) but
+  // are limited to managing Project Members on the Project Mapping table —
+  // every organization-level field and the Project Admin role rows stay
+  // read-only for them.
   const isOrgAdmin = currentRole === 'org_admin';
+  const isProjectAdmin = currentRole === 'project_admin';
+  // Name / Status / Description are organization-level fields neither role
+  // is allowed to change.
+  const orgFieldsLocked = isOrgAdmin || isProjectAdmin;
+  // Contact / Email / Mobile are open to Org Admins but not Project Admins.
+  const contactFieldsLocked = isProjectAdmin;
+  // Project Mapping structural edits (project selection, adding new project
+  // rows, editing the Project Admin role row, deleting role rows) are
+  // off-limits to Project Admins — they only modify Project Member users.
+  const mappingStructureLocked = isProjectAdmin;
   const fallback = vendors.find((x) => x.vendorId === id) || null;
 
   const [vendor, setVendor] = useState(fallback);
@@ -395,22 +410,22 @@ export default function VendorDetails() {
           </div>
           <div className="uidai-pmis-field">
             <label>Organization Name <span className="uidai-pmis-required">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing || isOrgAdmin} />
+            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!editing || orgFieldsLocked} />
           </div>
           <div className="uidai-pmis-field">
             <label>Status <span className="uidai-pmis-required">*</span></label>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={!editing || isOrgAdmin}>
+            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={!editing || orgFieldsLocked}>
               <option>Active</option>
               <option>Inactive</option>
             </select>
           </div>
           <div className="uidai-pmis-field">
             <label>Contact Person <span className="uidai-pmis-required">*</span></label>
-            <input value={contact} onChange={(e) => setContact(e.target.value)} disabled={!editing} />
+            <input value={contact} onChange={(e) => setContact(e.target.value)} disabled={!editing || contactFieldsLocked} />
           </div>
           <div className="uidai-pmis-field">
             <label>Email <span className="uidai-pmis-required">*</span></label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!editing} />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={!editing || contactFieldsLocked} />
           </div>
           <div className="uidai-pmis-field">
             <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
@@ -423,7 +438,7 @@ export default function VendorDetails() {
                 placeholder="10-digit mobile number"
                 value={phone}
                 autoComplete="tel-national"
-                disabled={!editing}
+                disabled={!editing || contactFieldsLocked}
                 onChange={(e) => {
                   const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
                   setPhone(cleaned);
@@ -436,7 +451,7 @@ export default function VendorDetails() {
           </div>
           <div className="uidai-pmis-field uidai-pmis-full">
             <label>Description</label>
-            <CharTextarea value={description} onChange={setDescription} disabled={!editing} />
+            <CharTextarea value={description} onChange={setDescription} disabled={!editing || orgFieldsLocked} />
           </div>
         </div>
 
@@ -480,7 +495,7 @@ export default function VendorDetails() {
                             rowSpan={roles.length}
                             className="uidai-pm-project-cell"
                           >
-                            {editing ? (
+                            {editing && !mappingStructureLocked ? (
                               <select
                                 className="uidai-pmis-filter-select"
                                 value={a.projectId}
@@ -515,7 +530,7 @@ export default function VendorDetails() {
                           <span>{r.role || '—'}</span>
                         </td>
                         <td>
-                          {editing ? (
+                          {editing && (!isProjectAdmin || roleLabelToKey(r.role) === 'project_member') ? (
                             (() => {
                               // A user mapped to this project under another
                               // role (e.g. picked as Project Admin) shouldn't
@@ -557,7 +572,7 @@ export default function VendorDetails() {
                           )}
                         </td>
                         <td className="uidai-pm-actions">
-                          {editing ? (
+                          {editing && !mappingStructureLocked ? (
                             <button
                               type="button"
                               className="uidai-pm-action-link uidai-pm-action-link--danger"
@@ -573,7 +588,7 @@ export default function VendorDetails() {
                     );
                   });
                 })}
-                {editing && (
+                {editing && !mappingStructureLocked && (
                   <tr className="uidai-pm-add-row">
                     <td colSpan={4}>
                       <button
