@@ -46,6 +46,7 @@ import AddProjectPage from "./pages/projects/AddProjectPage";
 import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
 import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
+import AuditLogsPage from "./pages/projects/AuditLogsPage";
 import { useProjects as useProjectsList } from "./store/project/projectsStore";
 import { useData } from './data/DataContext';
 import * as usersApi from './api/users';
@@ -76,6 +77,7 @@ function PageTitle() {
         else if (segments[1] === "add") title = "Project Management";
         else if (segments[2] === "config") title = "Milestone Configuration";
         else if (segments[2] === "track") title = "Track Progress";
+        else if (segments[2] === "audit-logs") title = "Audit Logs";
         else title = "Project Details";
     } else if (segments[0] === "vendors") {
         title = "Organization Management";
@@ -113,6 +115,7 @@ function Breadcrumbs() {
         add: "Add Project",
         config: "Milestone Configuration",
         track: "Track Progress",
+        "audit-logs": "Audit Logs",
         vendors: "Organizations",
         users: "Users",
         divisions: "Divisions",
@@ -353,6 +356,10 @@ export default function MainApp() {
                                             <Route
                                                 path="/projects/:projectId/track/:nodeUid"
                                                 element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>}
+                                            />
+                                            <Route
+                                                path="/projects/:projectId/audit-logs"
+                                                element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
                                             />
 
 

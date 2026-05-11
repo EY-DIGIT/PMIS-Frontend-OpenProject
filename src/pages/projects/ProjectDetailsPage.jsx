@@ -2,7 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
-import { VENDOR_MASTER } from "../../utils/project/constants";
+import {
+  VENDOR_MASTER,
+  ALLOWED_FILE_ACCEPT,
+  ALLOWED_FILE_EXTENSIONS,
+  MAX_ATTACHMENT_BYTES,
+  getFileExtension
+} from "../../utils/project/constants";
 import { safeArray, deepClone } from "../../utils/project/helpers";
 import {
   addAudit,
@@ -103,8 +109,21 @@ function mapApiProject(p) {
     parentId: p.parentId || null,
     milestones: [],
     auditLogs: [],
-    resources: []
+    resources: [],
+    // Backend returns uploaded project files under `attachments` —
+    // {id, filename, url, mimeType, sizeBytes, uploadedAt, ...}. Older
+    // payloads may still ship `documents`, so accept either.
+    documents: Array.isArray(p.attachments)
+      ? p.attachments
+      : (Array.isArray(p.documents) ? p.documents : [])
   };
+}
+
+function formatBytes(n) {
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function mergeIntoStore(mapped) {
@@ -126,7 +145,8 @@ function mergeIntoStore(mapped) {
           actualStartDate: mapped.actualStartDate,
           actualEndDate: mapped.actualEndDate,
           vendors: mapped.vendors,
-          parentId: mapped.parentId
+          parentId: mapped.parentId,
+          documents: mapped.documents
         });
         if (projectsStore.refresh) projectsStore.refresh();
         return true;
@@ -156,9 +176,19 @@ export default function ProjectDetailsPage() {
   // than piggy-backing on editProject.
   const canPublishProject = useCan('publishProject');
   const canDeleteProject = useCan('deleteProject');
+  const canManageDocuments = useCan('manageProjectDocuments');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+
+  // Edit-mode document state. Files upload immediately on pick via
+  // POST /projects/{id}/attachments, so we don't stage them — only
+  // track validation errors and the input key (used to reset the
+  // native file input after a successful upload).
+  const [docError, setDocError] = useState("");
+  const [docInputKey, setDocInputKey] = useState(0);
+  const [docUploading, setDocUploading] = useState(false);
 
   const [apiProject, setApiProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(false);
@@ -360,6 +390,9 @@ export default function ProjectDetailsPage() {
       actualEndDate: project.actualEndDate || "",
       vendors: vendorsToNames(project.vendors)
     });
+    // Reseeding the form means the project just changed — clear any
+    // residual pick-error state.
+    setDocError("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     project && project.projectId,
@@ -589,6 +622,7 @@ export default function ProjectDetailsPage() {
 
       uiStore.hideLoader();
       setEditing(false);
+      setDocError("");
       uiStore.showMessage("Project details saved");
     };
 
@@ -659,6 +693,107 @@ export default function ProjectDetailsPage() {
     }
   }
 
+  // ── Document-field helpers ─────────────────────────────────────
+  // Mirrors the validation rules from AddProjectPage so edit-mode
+  // uploads honor the same MIME / size limits.
+  function validateNewDocs(files) {
+    const bad = files.filter(
+      (f) => !ALLOWED_FILE_EXTENSIONS.includes(getFileExtension(f.name))
+    );
+    if (bad.length) {
+      setDocError(`Unsupported file type: ${bad.map((f) => f.name).join(", ")}`);
+      return false;
+    }
+    const oversize = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (oversize.length) {
+      const names = oversize
+        .map((f) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
+        .join(", ");
+      setDocError(`File too large (max 25 MB): ${names}`);
+      return false;
+    }
+    setDocError("");
+    return true;
+  }
+
+  // File picker change → upload all picked files in a single multipart
+  // POST /api/v3/projects/{id}/attachments call with the `files` field
+  // repeated once per file (matches the backend curl). On success,
+  // silent-refresh the project so the freshly uploaded rows appear
+  // with their server-assigned IDs/URLs.
+  async function handleNewDocsChange(e) {
+    const picked = Array.from(e.target.files || []);
+    if (!picked.length) return;
+    if (!validateNewDocs(picked)) {
+      e.target.value = "";
+      return;
+    }
+    if (!project?.projectId) {
+      setDocError("Project must be saved before attaching documents.");
+      e.target.value = "";
+      return;
+    }
+
+    setDocUploading(true);
+    try {
+      const fd = new FormData();
+      picked.forEach((file) => fd.append("files", file, file.name));
+      const res = await authorizedFetch(
+        `${API_BASE}${ENDPOINTS.projects.attachments(project.projectId)}`,
+        {
+          method: "POST",
+          headers: { accept: "application/json" },
+          body: fd
+        }
+      );
+      if (res.status === 401) {
+        logout();
+        uiStore.showError("Session expired. Please sign in again.");
+        navigate("/login");
+        return;
+      }
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        throw new Error(msg || "Failed to upload document(s)");
+      }
+      await fetchProjectDetail({ silent: true });
+      setDocInputKey((k) => k + 1);
+    } catch (err) {
+      setDocError(err?.message || "Failed to upload document(s)");
+    } finally {
+      setDocUploading(false);
+      e.target.value = "";
+    }
+  }
+
+  // Stream the attachment via authorizedFetch so the Authorization
+  // header is included for protected file URLs, then save it via a
+  // blob URL. Falls back to opening the raw URL in a new tab if the
+  // server can't be reached with credentials (e.g. CORS).
+  async function downloadAttachment(att) {
+    const url = att && (att.url || att.href);
+    const filename = (att && (att.filename || att.name)) || "attachment";
+    if (!url) return;
+    try {
+      const res = await authorizedFetch(url, {
+        method: "GET",
+        headers: { accept: att?.mimeType || "*/*" }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   function confirmDelete() {
     setDeleteOpen(false);
     uiStore.showLoader("Removing project...");
@@ -696,7 +831,27 @@ export default function ProjectDetailsPage() {
 
   return (
     <div>
-      <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
+      <div className="uidai-page-header" style={{ justifyContent: "space-between" }}>
+        <div className="uidai-page-header__actions">
+          {canManageDocuments && (
+            <button
+              className="uidai-btn"
+              disabled={editing}
+              onClick={() => setDocumentsOpen(true)}
+            >
+              View Documents
+            </button>
+          )}
+          <button
+            className="uidai-btn"
+            disabled={editing}
+            onClick={() =>
+              navigate(`/projects/${encodeURIComponent(project.projectId)}/audit-logs`)
+            }
+          >
+            Audit Log
+          </button>
+        </div>
         <div className="uidai-page-header__actions">
           {(() => {
             // "Manage Users" routes per role:
@@ -921,15 +1076,105 @@ export default function ProjectDetailsPage() {
           </div>
         </div>
 
-        <div style={{ marginTop: 18 }}>
-          <h4 style={{ color: "#173e77", marginBottom: 8 }}>Organizations</h4>
-          <ChipControl
-            value={form.vendors}
-            options={vendorOptions}
-            onChange={(next) => setForm((f) => ({ ...f, vendors: next }))}
-            label="organization"
-            disabled={!editing}
-          />
+        <div style={{ marginTop: 18 }} className="uidai-grid">
+          <div>
+            <h4 style={{ color: "#173e77", marginBottom: 8 }}>Organizations</h4>
+            <ChipControl
+              value={form.vendors}
+              options={vendorOptions}
+              onChange={(next) => setForm((f) => ({ ...f, vendors: next }))}
+              label="organization"
+              disabled={!editing}
+            />
+          </div>
+          {canManageDocuments && (
+            <div>
+              <h4 style={{ color: "#173e77", marginBottom: 8 }}>Documents</h4>
+              {editing && (
+                <>
+                  <input
+                    key={docInputKey}
+                    type="file"
+                    multiple
+                    accept={ALLOWED_FILE_ACCEPT}
+                    onChange={handleNewDocsChange}
+                    disabled={docUploading}
+                  />
+                  <div className="uidai-attach-hint" style={{ marginTop: 4 }}>
+                    {docUploading
+                      ? "Uploading…"
+                      : "Optional. Files upload immediately on pick. Maximum size: 25 MB per file. Allowed types: Documents (pdf, docx, xlsx, txt, csv), Images (jpg, png, heic), Videos (mp4, webm, mov)."}
+                  </div>
+                  {docError && <div className="uidai-attach-error">{docError}</div>}
+                </>
+              )}
+              {(() => {
+                const docs = safeArray(project.documents);
+                if (docs.length === 0) {
+                  return (
+                    <div className="uidai-hint" style={{ marginTop: editing ? 8 : 0 }}>
+                      No documents added.
+                    </div>
+                  );
+                }
+                return (
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      padding: 0,
+                      margin: editing ? "8px 0 0 0" : 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4
+                    }}
+                  >
+                    {docs.map((d, idx) => {
+                      const isObj = d && typeof d === "object";
+                      const name = isObj
+                        ? (d.filename || d.name || d.fileName || `Document ${idx + 1}`)
+                        : String(d);
+                      const url = isObj ? (d.url || d.href || "") : "";
+                      const sizeLabel = isObj ? formatBytes(d.sizeBytes) : "";
+                      const rowKey = isObj ? (d.id || `${name}-${idx}`) : `${name}-${idx}`;
+                      return (
+                        <li
+                          key={rowKey}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            padding: "4px 8px",
+                            background: "#f5f5f5",
+                            borderRadius: 4
+                          }}
+                        >
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {name}
+                            {sizeLabel && (
+                              <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
+                                ({sizeLabel})
+                              </span>
+                            )}
+                          </span>
+                          {url && (
+                            <button
+                              type="button"
+                              className="uidai-btn"
+                              style={{ padding: "2px 8px", fontSize: 12 }}
+                              onClick={() => downloadAttachment(d)}
+                            >
+                              Download
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                );
+              })()}
+            </div>
+          )}
         </div>
       </div>
 
@@ -945,6 +1190,109 @@ export default function ProjectDetailsPage() {
         onCancel={() => setDeleteOpen(false)}
         onConfirm={confirmDelete}
       />
+
+      {documentsOpen && (
+        <div className="uidai-modal">
+          <div className="uidai-modal__box" style={{ position: "relative" }}>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setDocumentsOpen(false)}
+              style={{
+                position: "absolute",
+                top: 8,
+                right: 10,
+                width: 28,
+                height: 28,
+                border: "none",
+                background: "transparent",
+                fontSize: 22,
+                lineHeight: 1,
+                cursor: "pointer",
+                color: "#666",
+                padding: 0
+              }}
+            >
+              ×
+            </button>
+            <h3 className="uidai-modal__title">Project Documents</h3>
+            {(() => {
+              const docs = safeArray(project.documents);
+              if (docs.length === 0) {
+                return (
+                  <div className="uidai-hint" style={{ marginTop: 8 }}>
+                    No documents have been added to this project.
+                  </div>
+                );
+              }
+              return (
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: "12px 0 0 0",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6
+                  }}
+                >
+                  {docs.map((d, idx) => {
+                    const isObj = d && typeof d === "object";
+                    const name = isObj
+                      ? (d.filename || d.name || d.fileName || `Document ${idx + 1}`)
+                      : String(d);
+                    const url = isObj ? (d.url || d.href || "") : "";
+                    const sizeLabel = isObj ? formatBytes(d.sizeBytes) : "";
+                    const rowKey = isObj ? (d.id || `${name}-${idx}`) : `${name}-${idx}`;
+                    return (
+                      <li
+                        key={rowKey}
+                        style={{
+                          padding: "6px 10px",
+                          background: "#f5f5f5",
+                          borderRadius: 4,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 8
+                        }}
+                      >
+                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {name}
+                          {sizeLabel && (
+                            <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
+                              ({sizeLabel})
+                            </span>
+                          )}
+                        </span>
+                        {url && (
+                          <button
+                            type="button"
+                            className="uidai-btn"
+                            style={{ padding: "2px 10px", fontSize: 12 }}
+                            onClick={() => downloadAttachment(d)}
+                          >
+                            Download
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+            <div className="uidai-modal__actions">
+              <button
+                type="button"
+                className="uidai-btn uidai-btn--cancel"
+                onClick={() => setDocumentsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,12 +2,19 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
-import { VENDOR_MASTER } from "../../utils/project/constants";
+import {
+  VENDOR_MASTER,
+  ALLOWED_FILE_ACCEPT,
+  ALLOWED_FILE_EXTENSIONS,
+  MAX_ATTACHMENT_BYTES,
+  getFileExtension
+} from "../../utils/project/constants";
 import { safeArray } from "../../utils/project/helpers";
 import ChipControl from "../../components/projects/ChipControl";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { API_BASE, authorizedFetch } from "../../api/client";
+import { useCan } from "../../auth/permissions";
 
 function makeEmpty() {
   return {
@@ -21,7 +28,8 @@ function makeEmpty() {
     auditLogs: [],
     milestones: [],
     vendors: [],
-    resources: []
+    resources: [],
+    documents: []
   };
 }
 
@@ -60,7 +68,8 @@ function normalizeFormShape(maybeDraft) {
     vendors: normalizeVendorNames(maybeDraft.vendors),
     milestones: safeArray(maybeDraft.milestones),
     auditLogs: safeArray(maybeDraft.auditLogs),
-    resources: safeArray(maybeDraft.resources)
+    resources: safeArray(maybeDraft.resources),
+    documents: safeArray(maybeDraft.documents)
   };
 }
 
@@ -105,6 +114,7 @@ function extractDivisions(raw) {
 export default function AddProjectPage() {
   const navigate = useNavigate();
   const existingDraft = useDraft();
+  const canManageDocuments = useCan("manageProjectDocuments");
 
   // Always initialize with a fully-shaped object — prevents blank-page crashes
   // when a partial/stale draft arrives (e.g. restored from localStorage with
@@ -126,6 +136,10 @@ export default function AddProjectPage() {
   const [divisionsLoading, setDivisionsLoading] = useState(false);
   const [divisionsError, setDivisionsError] = useState("");
   const [errorCreated, setErrorCreated] = useState("");
+  const [docError, setDocError] = useState("");
+  // Bumping this remounts the (uncontrolled) <input type="file"> so the
+  // browser's "no file chosen" label resets after files are removed.
+  const [docInputKey, setDocInputKey] = useState(0);
   /* Per-field errors keyed by field name. Populated on submit, cleared as
      the user edits each field. */
   const [errors, setErrors] = useState({});
@@ -243,6 +257,59 @@ export default function AddProjectPage() {
     setForm((f) => ({ ...f, ...patch }));
   }
 
+  function validateDocs(files) {
+    const bad = files.filter(
+      (f) => !ALLOWED_FILE_EXTENSIONS.includes(getFileExtension(f.name))
+    );
+    if (bad.length) {
+      setDocError(
+        `Unsupported file type: ${bad.map((f) => f.name).join(", ")}`
+      );
+      return false;
+    }
+    const oversize = files.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (oversize.length) {
+      const names = oversize
+        .map((f) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
+        .join(", ");
+      setDocError(`File too large (max 25 MB): ${names}`);
+      return false;
+    }
+    setDocError("");
+    return true;
+  }
+
+  function handleDocumentsChange(e) {
+    const picked = Array.from(e.target.files || []);
+    if (!picked.length) return;
+    const merged = [...safeArray(form.documents), ...picked];
+    if (!validateDocs(merged)) {
+      e.target.value = "";
+      return;
+    }
+    update({ documents: merged });
+    // Reset native input so the same file can be re-picked after removal.
+    e.target.value = "";
+  }
+
+  function removeDocument(idx) {
+    const next = safeArray(form.documents).filter((_, i) => i !== idx);
+    update({ documents: next });
+    setDocError("");
+    setDocInputKey((k) => k + 1);
+  }
+
+  // Open the picked file in a new tab via a blob URL. Browsers render
+  // PDFs/images/videos/text inline and prompt download for office formats.
+  // Revoke the URL after a minute so memory is reclaimed but the new tab
+  // has time to load it.
+  function viewDocument(file) {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    window.open(url, "_blank", "noopener,noreferrer");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
   const selectedDivision = divisionOptions.find((d) => d.code === form.owner);
   const ownerRequiresOther =
     !!selectedDivision &&
@@ -250,22 +317,36 @@ export default function AddProjectPage() {
       String(selectedDivision.label || "").toLowerCase() === "others" ||
       String(selectedDivision.code || "").toLowerCase() === "others");
 
+  // Build the multipart payload the create endpoint expects. Field names
+  // mirror the backend's camelCase contract; picked documents are
+  // attached under the `files` key (repeated, one entry per file). The
+  // Content-Type header is intentionally NOT set on the request so the
+  // browser writes the correct multipart boundary itself.
   function buildPayload() {
     const selectedNames = safeArray(form.vendors);
     const vendorIds = selectedNames.map((n) => vendorNameToId[n]).filter(Boolean);
 
-    return {
-      name: (form.projectName || "").trim(),
-      description: (form.description || "").trim(),
-      active: true,
-      status_explanation: "",
-      status: "new",
-      owner: (form.owner || "").trim(),
-      ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
-      vendor_ids: vendorIds,
-      startDate: toIsoStart(form.startDate),
-      endDate: toIsoEnd(form.endDate)
-    };
+    const fd = new FormData();
+    fd.append("name", (form.projectName || "").trim());
+    fd.append("description", (form.description || "").trim());
+    fd.append("status", "");
+    fd.append("statusExplanation", "");
+    fd.append("owner", (form.owner || "").trim());
+    fd.append("ownerOther", ownerRequiresOther ? (form.ownerOther || "").trim() : "");
+    fd.append("startDate", toIsoStart(form.startDate) || "");
+    fd.append("endDate", toIsoEnd(form.endDate) || "");
+    fd.append("parentId", "");
+    // Backend expects `vendorIds` as a single form field whose value is
+    // a JSON-encoded array string (not repeated entries). Empty list →
+    // empty string, matching the curl's `vendorIds=""` shape.
+    fd.append(
+      "vendorIds",
+      vendorIds.length ? JSON.stringify(vendorIds) : ""
+    );
+    safeArray(form.documents).forEach((file) => {
+      fd.append("files", file, file.name);
+    });
+    return fd;
   }
 
   /* Collect ALL field errors at once so every invalid input is highlighted
@@ -309,11 +390,8 @@ export default function AddProjectPage() {
     try {
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.create}`, {
         method: "POST",
-        headers: {
-          accept: "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(buildPayload())
+        headers: { accept: "application/json" },
+        body: buildPayload()
       });
 
       if (res.status === 401) {
@@ -499,7 +577,7 @@ export default function AddProjectPage() {
             )}
           </div>
 
-          <div className="uidai-field uidai-grid__full">
+          <div className="uidai-field">
             <label className="uidai-field__label">
               Organizations <span className="uidai-required-project">*</span>
             </label>
@@ -520,6 +598,77 @@ export default function AddProjectPage() {
               <div className="uidai-field-error">{errors.vendors}</div>
             )}
           </div>
+
+          {canManageDocuments && (
+          <div className="uidai-field">
+            <label className="uidai-field__label">Documents</label>
+             <div className="uidai-hint" style={{ marginBottom: 8 }}>Select Document</div>
+            <input
+              key={docInputKey}
+              type="file"
+              multiple
+              accept={ALLOWED_FILE_ACCEPT}
+              onChange={handleDocumentsChange}
+            />
+            <div className="uidai-attach-hint">
+              Optional. Maximum file size: 25 MB per file. Multiple files allowed.
+              Allowed types: Documents (pdf, docx, xlsx, txt, csv), Images (jpg, png, heic), Videos (mp4, webm, mov).
+            </div>
+            {docError && <div className="uidai-attach-error">{docError}</div>}
+            {safeArray(form.documents).length > 0 && (
+              <ul
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  marginTop: 8,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4
+                }}
+              >
+                {safeArray(form.documents).map((f, idx) => (
+                  <li
+                    key={`${f.name}-${idx}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: "4px 8px",
+                      background: "#f5f5f5",
+                      borderRadius: 4
+                    }}
+                  >
+                    <span>
+                      {f.name}{" "}
+                      <span style={{ color: "#666", fontSize: 12 }}>
+                        ({(f.size / 1024).toFixed(1)} KB)
+                      </span>
+                    </span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="uidai-btn"
+                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        onClick={() => viewDocument(f)}
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        className="uidai-btn uidai-btn--cancel"
+                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        onClick={() => removeDocument(idx)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          )}
         </div>
         <p style={{ color: "red" }}>{errorCreated}</p>
         <div style={{ marginTop: 18, display: "flex", flexWrap: "wrap", gap: 10 }}>

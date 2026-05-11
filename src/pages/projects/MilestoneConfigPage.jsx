@@ -705,6 +705,20 @@ export default function MilestoneConfigPage({ mode }) {
               newNode.resourceDetails = formData.resourceDetails;
             else newNode.resourceCount = formData.resourceCount;
           }
+          // Activity-only fields needed for the grid to render vendor name /
+          // priority immediately, before loadMilestonesFromApi rehydrates.
+          if (kind === "activity") {
+            newNode.vendorId = formData.vendorId || "";
+            newNode.ownerDivision = formData.ownerDivision || "";
+            newNode.concernedDivision = Array.isArray(formData.concernedDivision)
+              ? formData.concernedDivision.slice()
+              : (formData.concernedDivision ? [formData.concernedDivision] : []);
+            newNode.priority = formData.priority || "";
+          } else {
+            // Task / Subtask carry assignedTo instead of vendorId.
+            newNode.assignedTo = formData.assignedTo || "";
+            newNode.priority = formData.priority || "";
+          }
         } else {
           newNode.vendor = formData.vendor;
         }
@@ -778,6 +792,19 @@ export default function MilestoneConfigPage({ mode }) {
             if (formData.resourceEntryType === "details")
               node.resourceDetails = formData.resourceDetails;
             else node.resourceCount = formData.resourceCount;
+          }
+          // Mirror the activity-only fields on edit so the grid reflects the
+          // change without waiting for the tree refetch.
+          if (kind === "activity") {
+            node.vendorId = formData.vendorId || "";
+            node.ownerDivision = formData.ownerDivision || "";
+            node.concernedDivision = Array.isArray(formData.concernedDivision)
+              ? formData.concernedDivision.slice()
+              : (formData.concernedDivision ? [formData.concernedDivision] : []);
+            node.priority = formData.priority || "";
+          } else {
+            node.assignedTo = formData.assignedTo || "";
+            node.priority = formData.priority || "";
           }
         } else {
           node.vendor = formData.vendor;

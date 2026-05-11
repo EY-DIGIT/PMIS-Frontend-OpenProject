@@ -36,6 +36,7 @@ export const ENDPOINTS = {
     create: '/api/v3/vendors/create',
     update: (id) => `/api/v3/vendors/${enc(id)}`,
     remove: (id) => `/api/v3/vendors/${enc(id)}`,
+    users: (id) => `/api/v3/vendors/${enc(id)}/users`,
   },
 
   divisions: {
@@ -75,6 +76,8 @@ export const ENDPOINTS = {
     close: (uuid) => `/api/v3/projects/${enc(uuid)}/close`,
     milestones: (uuid) => `/api/v3/projects/${enc(uuid)}/milestones`,
     milestoneCreate: (uuid) => `/api/v3/projects/${enc(uuid)}/milestones/create`,
+    auditLogs: (uuid) => `/api/v3/projects/${enc(uuid)}/audit-logs`,
+    attachments: (uuid) => `/api/v3/projects/${enc(uuid)}/attachments`,
   },
 
   milestones: {

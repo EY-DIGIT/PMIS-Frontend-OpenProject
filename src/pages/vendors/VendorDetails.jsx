@@ -5,7 +5,6 @@ import MultiSelect from '../../components/MultiSelect';
 import CharTextarea from '../../components/CharTextarea';
 import { VENDOR_TYPES, PROJECT_OPTIONS } from '../../data/demoData';
 import * as vendorsApi from '../../api/vendors';
-import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { useCan, useCurrentRole } from '../../auth/permissions';
@@ -30,7 +29,7 @@ export default function VendorDetails() {
   // their origin in `location.state.from`, so Back returns to the caller
   // instead of the generic vendor list.
   const backTarget = location.state?.from || '/vendors';
-  const { vendors, users, refresh } = useData();
+  const { vendors, refresh } = useData();
   // Edit gating — only super_admin / admin can mutate organization records
   // (per role spec). For everyone else this page is read-only.
   const canEditVendor = useCan('editVendor');
@@ -186,34 +185,24 @@ export default function VendorDetails() {
     return () => { cancelled = true; };
   }, []);
 
+  // Vendor-scoped users feed the Project Mapping table's user dropdown,
+  // so the dropdown only shows users who belong to THIS organization. The
+  // global /users list (and its DataContext fallback) is intentionally
+  // not used here — it would surface users from other vendors.
   useEffect(() => {
+    if (!id) return;
     if (!tokenStore.get()) return;
     let cancelled = false;
     (async () => {
       try {
-        const list = await usersApi.list({ pageSize: 200 });
-        // Only adopt a non-empty response — a transient empty payload
-        // (auth blip, backend hiccup) shouldn't wipe a list the
-        // context-sync effect below has already painted.
-        if (!cancelled && Array.isArray(list) && list.length) setUserList(list);
+        const list = await vendorsApi.listUsers(id, { pageSize: 20 });
+        if (!cancelled && Array.isArray(list)) setUserList(list);
       } catch {
-        // Keep whatever was painted from context; failing here shouldn't
-        // erase a usable list.
+        if (!cancelled) setUserList([]);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
-
-  // Paint from the shared context whenever it updates and our own list
-  // is still empty. Covers the race where this page mounts before
-  // DataContext's first fetch resolves (first visit after login), and
-  // the recovery case where the page-level fetch above failed or
-  // returned empty.
-  useEffect(() => {
-    if (Array.isArray(users) && users.length && userList.length === 0) {
-      setUserList(users);
-    }
-  }, [users, userList.length]);
+  }, [id]);
 
   const projectOptions = useMemo(() => {
     if (!tokenStore.get()) {

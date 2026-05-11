@@ -1,5 +1,6 @@
 import { api } from './client';
 import { ENDPOINTS } from './endpoint';
+import { fromApi as userFromApi } from './users';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
@@ -208,4 +209,14 @@ export async function update(id, {
 
 export async function remove(id) {
   return api.del(ENDPOINTS.vendors.remove(id));
+}
+
+// GET /api/v3/vendors/{id}/users — vendor-scoped user list. Returned in the
+// same envelope as /users (paginated _embedded.elements), so reuse the user
+// normalizer for shape parity with the global list.
+export async function listUsers(id, { offset = 1, pageSize = 20, status } = {}) {
+  const res = await api.get(ENDPOINTS.vendors.users(id), {
+    query: { offset, pageSize, status },
+  });
+  return unwrap(res).map(userFromApi);
 }

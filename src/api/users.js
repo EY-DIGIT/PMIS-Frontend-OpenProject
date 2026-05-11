@@ -18,7 +18,7 @@ function unwrapOne(res) {
   return res;
 }
 
-function fromApi(u) {
+export function fromApi(u) {
   const firstName = u.firstName || u.first_name || '';
   const lastName = u.lastName || u.last_name || '';
   const vendorObj = u.vendor && typeof u.vendor === 'object' ? u.vendor : null;
