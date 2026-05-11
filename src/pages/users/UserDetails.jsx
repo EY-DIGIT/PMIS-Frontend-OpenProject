@@ -285,11 +285,11 @@ export default function UserDetails() {
   return (
     <>
       <div className="uidai-pmis-title">User Details</div>
-      <div className="uidai-pmis-card">
+      <div className="uidai-pmis-card" style={{paddingTop:"50px"}}>
         <div className="uidai-pmis-card-actions">
           {!isSelf && canEditTargetRole(currentRole, orgRole) && (
             <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
-              <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '}
+              {/* <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '} */}
               <span className="uidai-pmis-btn-text">
                 {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
               </span>
