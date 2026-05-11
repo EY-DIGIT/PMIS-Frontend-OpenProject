@@ -39,7 +39,8 @@ import {
   createSubtaskApi,
   updateSubtaskApi,
   deleteSubtaskApi,
-  resolveProjectDependsOn
+  resolveProjectDependsOn,
+  loadPriorities
 } from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
 import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
@@ -95,6 +96,26 @@ export default function MilestoneConfigPage({ mode }) {
   const [apiProjectLocal, setApiProjectLocal] = useState(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
+
+  // Priority master — fetched once so the grid can render the friendly
+  // label ("High", "Medium", …) instead of the raw `p1` / `p2` code the
+  // node payload carries.
+  const [priorities, setPriorities] = useState([]);
+  useEffect(() => {
+    if (!getToken()) return;
+    let cancelled = false;
+    loadPriorities()
+      .then((list) => { if (!cancelled) setPriorities(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setPriorities([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const priorityLabelByCode = useMemo(() => {
+    const map = {};
+    (priorities || []).forEach((p) => {
+      if (p && p.code) map[p.code] = p.name || p.code;
+    });
+    return map;
+  }, [priorities]);
 
   const [restoring, setRestoring] = useState(() => {
     if (!isOnboarding) return false;
@@ -1181,6 +1202,7 @@ export default function MilestoneConfigPage({ mode }) {
                     perms={perms}
                     showStatusCol={showStatusCol}
                     isOnboarding={isOnboarding}
+                    priorityLabels={priorityLabelByCode}
                     onToggle={toggleRow}
                     onAddChild={openNodeModal}
                     onEdit={openNodeModal}

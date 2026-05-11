@@ -17,6 +17,7 @@ export default function MilestoneGridRow({
   perms = {},
   showStatusCol,
   isOnboarding,
+  priorityLabels = {},
   onToggle,
   onAddChild,
   onEdit,
@@ -156,7 +157,18 @@ export default function MilestoneGridRow({
         {typeLabel ? <span className="uidai-type-tag">{typeLabel}</span> : null}
       </td>
       <td className="uidai-msgrid__cell" style={{ textAlign: "center" }}>
-        {node.priority || ""}
+        {(() => {
+          // Backend returns priority either as a code string ("p1") or
+          // an object like {code, name}. Resolve to the friendly label
+          // from the priorities master if we have one, otherwise fall
+          // back to the upper-cased code so it at least reads as "P1".
+          const raw = node.priority;
+          if (!raw) return "";
+          const code = typeof raw === "object" ? (raw.code || raw.name || "") : String(raw);
+          if (!code) return "";
+          if (typeof raw === "object" && raw.name) return raw.name;
+          return priorityLabels[code] || code.toUpperCase();
+        })()}
       </td>
       {showStatusCol && (
         <td className="uidai-msgrid__cell">

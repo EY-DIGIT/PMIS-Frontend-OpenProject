@@ -549,6 +549,52 @@ export default function ProjectDetailsPage() {
     return true;
   }
 
+  // Lazy-load the project discussion feed (comments + their
+  // attachments) when the View Documents modal opens. Must live
+  // ABOVE the early returns below — calling hooks conditionally
+  // would otherwise change the hook order between renders.
+  useEffect(() => {
+    if (!documentsOpen) return;
+    if (!project?.projectId) return;
+    if (feedLoading) return;
+    if (feedEntries.length > 0) return;
+    const token = getToken();
+    if (!token) return;
+    let cancelled = false;
+    setFeedLoading(true);
+    setFeedError("");
+    (async () => {
+      try {
+        const url = `${API_BASE}${ENDPOINTS.projects.discussionFeed(project.projectId)}?offset=1&pageSize=50`;
+        const res = await authorizedFetch(url, {
+          method: "GET",
+          headers: { accept: "application/json" }
+        });
+        if (res.status === 401) {
+          logout();
+          navigate("/login");
+          return;
+        }
+        if (!res.ok) {
+          const msg = await readErrorMessage(res);
+          throw new Error(msg);
+        }
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          [];
+        if (!cancelled) setFeedEntries(Array.isArray(elements) ? elements : []);
+      } catch (err) {
+        if (!cancelled) setFeedError(err?.message || "Failed to load comments");
+      } finally {
+        if (!cancelled) setFeedLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentsOpen, project && project.projectId]);
+
   if (!project) {
     if (projectLoading) {
       return (
@@ -772,52 +818,6 @@ export default function ProjectDetailsPage() {
       e.target.value = "";
     }
   }
-
-  // Lazy-load the project discussion feed (comments + their
-  // attachments) when the View Documents modal opens. Cached after
-  // the first open; close-and-reopen does not re-fetch unless we
-  // explicitly clear feedEntries.
-  useEffect(() => {
-    if (!documentsOpen) return;
-    if (!project?.projectId) return;
-    if (feedLoading) return;
-    if (feedEntries.length > 0) return;
-    const token = getToken();
-    if (!token) return;
-    let cancelled = false;
-    setFeedLoading(true);
-    setFeedError("");
-    (async () => {
-      try {
-        const url = `${API_BASE}${ENDPOINTS.projects.discussionFeed(project.projectId)}?offset=1&pageSize=50`;
-        const res = await authorizedFetch(url, {
-          method: "GET",
-          headers: { accept: "application/json" }
-        });
-        if (res.status === 401) {
-          logout();
-          navigate("/login");
-          return;
-        }
-        if (!res.ok) {
-          const msg = await readErrorMessage(res);
-          throw new Error(msg);
-        }
-        const raw = await res.json().catch(() => ({}));
-        const elements =
-          raw?.data?._embedded?.elements ??
-          raw?._embedded?.elements ??
-          [];
-        if (!cancelled) setFeedEntries(Array.isArray(elements) ? elements : []);
-      } catch (err) {
-        if (!cancelled) setFeedError(err?.message || "Failed to load comments");
-      } finally {
-        if (!cancelled) setFeedLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentsOpen, project && project.projectId]);
 
   // Stream the attachment via authorizedFetch so the Authorization
   // header is included for protected file URLs, then save it via a
