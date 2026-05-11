@@ -304,6 +304,21 @@ export default function NodeModal({
     return () => { cancelled = true; };
   }, [open]);
 
+  /* On Create (add mode), preselect the last entry from the priorities
+     dropdown so the user isn't forced to pick one for typical low-urgency
+     items. Only fires when the field is still empty — once the user picks
+     a different value (or the form is seeded from an existing node) we
+     leave it alone. */
+  useEffect(() => {
+    if (mode !== "add") return;
+    const list = safeArray(priorities);
+    if (list.length === 0) return;
+    if (form.priority) return;
+    const last = list[list.length - 1];
+    const code = last?.code;
+    if (code) setForm((f) => (f.priority ? f : { ...f, priority: code }));
+  }, [mode, priorities, form.priority]);
+
   /* Older records may have stored Concerned Division as labels ("TMD1") instead
      of codes ("tmd1"). Once the divisions list arrives, rewrite any label-form
      values in the form to their canonical code so we always send the code. */
