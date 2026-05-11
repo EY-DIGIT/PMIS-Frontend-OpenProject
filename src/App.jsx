@@ -47,6 +47,7 @@ import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
 import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import { useProjects as useProjectsList } from "./store/project/projectsStore";
+import { useData } from './data/DataContext';
 
 import "./styles/Project.css"
 import "./styles/project/global.css"
@@ -99,6 +100,7 @@ function PageTitle() {
 function Breadcrumbs() {
     const { pathname } = useLocation();
     const projects = useProjectsList();
+    const { users } = useData();
     const segments = pathname.split("/").filter(Boolean);
     if (segments.length === 0) return null; // hide on Dashboard
 
@@ -137,6 +139,17 @@ function Breadcrumbs() {
         ? (projects.find((p) => p.projectId === projectIdSeg)?.projectCode || "")
         : "";
 
+    /* Under /users/:id segments[1] is the user's id — swap to userCode if
+       we have it cached, so the breadcrumb reads "Users › E12345" instead
+       of the raw UUID. */
+    const userIdSeg =
+        segments[0] === "users" && segments[1] && segments[1] !== "new"
+            ? decodeURIComponent(segments[1])
+            : null;
+    const userCode = userIdSeg
+        ? (users.find((u) => u.userId === userIdSeg)?.userCode || "")
+        : "";
+
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so
        the breadcrumb stops at "Track Progress". */
@@ -168,9 +181,12 @@ function Breadcrumbs() {
                 const to = "/" + visibleSegments.slice(0, i + 1).join("/");
                 const isLast = i === visibleSegments.length - 1;
                 const isProjectIdSeg = projectIdSeg && i === 1 && visibleSegments[0] === "projects";
+                const isUserIdSeg = userIdSeg && i === 1 && visibleSegments[0] === "users";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
-                    : (LABELS[seg] || decodeURIComponent(seg));
+                    : isUserIdSeg && userCode
+                        ? userCode
+                        : (LABELS[seg] || decodeURIComponent(seg));
                 return (
                     <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#999" }}>›</span>
