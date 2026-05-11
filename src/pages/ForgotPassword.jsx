@@ -110,7 +110,7 @@ const ForgotPassword = () => {
 
       <main className="uidai-main" id="mainContent">
         <div className="uidai-overlay">
-          <div className="uidai-card">
+          <div className="uidai-card-loginfix">
             <div className="uidai-card-head">
               <img src={aadhaarLogo} alt="Aadhaar" />
               <h1>UIDAI PMIS Reset Password Link</h1>
