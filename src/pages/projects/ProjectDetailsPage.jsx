@@ -1268,75 +1268,8 @@ export default function ProjectDetailsPage() {
             >
               ×
             </button>
-            <h3 className="uidai-modal__title">Project Documents</h3>
-            {(() => {
-              const docs = safeArray(project.documents);
-              if (docs.length === 0) {
-                return (
-                  <div className="uidai-hint" style={{ marginTop: 8 }}>
-                    No documents have been added to this project.
-                  </div>
-                );
-              }
-              return (
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: "12px 0 0 0",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6
-                  }}
-                >
-                  {docs.map((d, idx) => {
-                    const isObj = d && typeof d === "object";
-                    const name = isObj
-                      ? (d.filename || d.name || d.fileName || `Document ${idx + 1}`)
-                      : String(d);
-                    const url = isObj ? (d.url || d.href || "") : "";
-                    const sizeLabel = isObj ? formatBytes(d.sizeBytes) : "";
-                    const rowKey = isObj ? (d.id || `${name}-${idx}`) : `${name}-${idx}`;
-                    return (
-                      <li
-                        key={rowKey}
-                        style={{
-                          padding: "6px 10px",
-                          background: "#f5f5f5",
-                          borderRadius: 4,
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 8
-                        }}
-                      >
-                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {name}
-                          {sizeLabel && (
-                            <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
-                              ({sizeLabel})
-                            </span>
-                          )}
-                        </span>
-                        {url && (
-                          <button
-                            type="button"
-                            className="uidai-btn"
-                            style={{ padding: "2px 10px", fontSize: 12 }}
-                            onClick={() => downloadAttachment(d)}
-                          >
-                            Download
-                          </button>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              );
-            })()}
-
-            <h3 className="uidai-modal__title" style={{ marginTop: 24 }}>
-              Comments
+            <h3 className="uidai-modal__title">
+              Project Documents and Comments
             </h3>
             {feedLoading && (
               <div className="uidai-hint" style={{ marginTop: 8 }}>
