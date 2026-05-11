@@ -53,6 +53,13 @@ function fromApi(v) {
       ? v.userAssignments
       : [];
   const grouped = new Map();
+  // Backend now embeds the user records that each assignment row references
+  // under `user_assignments[].users[]`. Capture them here so the Project
+  // Mapping table can render "login (First Last)" right away, instead of
+  // showing the raw UUID until the global /users list resolves (and for
+  // Project Admins, whose /users list won't include users from other
+  // organizations at all).
+  const embeddedUsersById = new Map();
   flatAssignments.forEach((ua) => {
     const pid = ua?.project_id || ua?.projectId || '';
     if (!pid) return;
@@ -65,7 +72,24 @@ function fromApi(v) {
           ? ua.userIds
           : [],
     });
+    if (Array.isArray(ua?.users)) {
+      ua.users.forEach((u) => {
+        const uid = u?.id || u?.uuid;
+        if (!uid || embeddedUsersById.has(uid)) return;
+        const firstName = u.firstName || u.first_name || '';
+        const lastName = u.lastName || u.last_name || '';
+        embeddedUsersById.set(uid, {
+          userId: uid,
+          userCode: u.userCode || u.user_code || '',
+          fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
+          employeeId: u.employeeId || u.employee_id || u.login || '',
+          login: u.login || '',
+          email: u.email || '',
+        });
+      });
+    }
   });
+  const assignmentUsers = Array.from(embeddedUsersById.values());
   // Projects that exist on the vendor but have no assignment rows yet —
   // surface them with empty default Admin/Member rows so the user can
   // fill them in without first re-adding the project mapping.
@@ -96,6 +120,7 @@ function fromApi(v) {
     projectIds: projects.map((p) => p.id || p.uuid).filter(Boolean),
     projects,
     projectAssignments,
+    assignmentUsers,
     createdAt: v.createdAt || '',
     updatedAt: v.updatedAt || '',
     startDate: (v.startDate || '').slice(0, 10),

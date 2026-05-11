@@ -258,18 +258,26 @@ export default function VendorDetails() {
     return map;
   }, [projectList, vendor]);
 
-  const userOptions = useMemo(
-    () =>
-      userList.map((u) => {
-        const username = u.employeeId || u.login || '';
-        const fullName = u.fullName || '';
-        const label = username
-          ? (fullName ? `${username} (${fullName})` : username)
-          : (fullName || u.email || u.userId);
-        return { label, value: u.userId };
-      }),
-    [userList]
-  );
+  // Merge the global users list with users embedded in the vendor's own
+  // user_assignments[].users[]. The embedded set guarantees the Project
+  // Mapping table can resolve "login (First Last)" for every currently
+  // assigned user, even when the global /users list hasn't loaded yet
+  // or doesn't include them (Project Admin role).
+  const userOptions = useMemo(() => {
+    const byId = new Map();
+    const addUser = (u) => {
+      if (!u?.userId || byId.has(u.userId)) return;
+      const username = u.employeeId || u.login || '';
+      const fullName = u.fullName || '';
+      const label = username
+        ? (fullName ? `${username} (${fullName})` : username)
+        : (fullName || u.email || u.userId);
+      byId.set(u.userId, { label, value: u.userId });
+    };
+    userList.forEach(addUser);
+    (Array.isArray(vendor?.assignmentUsers) ? vendor.assignmentUsers : []).forEach(addUser);
+    return Array.from(byId.values());
+  }, [userList, vendor]);
 
   function updateAssignment(idx, patch) {
     setAssignments((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));

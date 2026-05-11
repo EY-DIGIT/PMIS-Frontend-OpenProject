@@ -59,8 +59,29 @@ export function DataProvider({ children }) {
   );
 }
 
+// Safe defaults so a transient render where the Provider isn't yet
+// reachable (e.g. the post-login navigation, or a Fast-Refresh edge
+// where this module re-evaluates and the existing tree briefly sees
+// a fresh DataContext) degrades to empty data instead of crashing
+// the whole page. Real consumers get the live values once the
+// Provider re-attaches on the next render.
+const EMPTY_CTX = {
+  vendors: [],
+  users: [],
+  loading: false,
+  error: null,
+  refresh: () => {},
+  setVendors: () => {},
+  setUsers: () => {},
+};
+
 export function useData() {
   const ctx = useContext(DataContext);
-  if (!ctx) throw new Error('useData must be used within DataProvider');
+  if (!ctx) {
+    if (typeof console !== 'undefined') {
+      console.warn('useData() called outside DataProvider — returning empty defaults.');
+    }
+    return EMPTY_CTX;
+  }
   return ctx;
 }

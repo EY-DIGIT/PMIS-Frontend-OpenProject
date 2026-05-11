@@ -49,6 +49,7 @@ import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import { useProjects as useProjectsList } from "./store/project/projectsStore";
 import { useData } from './data/DataContext';
 import * as usersApi from './api/users';
+import * as vendorsApi from './api/vendors';
 import { tokenStore } from './api/client';
 
 import "./styles/Project.css"
@@ -102,7 +103,7 @@ function PageTitle() {
 function Breadcrumbs() {
     const { pathname } = useLocation();
     const projects = useProjectsList();
-    const { users } = useData();
+    const { users, vendors } = useData();
     const segments = pathname.split("/").filter(Boolean);
 
     /* Static segment → pretty label. Dynamic params (IDs, UIDs) fall
@@ -173,6 +174,39 @@ function Breadcrumbs() {
     }, [userIdSeg, cachedUserCode]);
     const userCode = cachedUserCode || fetchedUserCode;
 
+    /* Under /vendors/:id segments[1] is the vendor's id — swap to
+       vendorCode if we have it cached, so the breadcrumb reads
+       "Organizations › ORG001" instead of the raw UUID. */
+    const vendorIdSeg =
+        segments[0] === "vendors" && segments[1] && segments[1] !== "new"
+            ? decodeURIComponent(segments[1])
+            : null;
+    const cachedVendorCode = vendorIdSeg
+        ? ((vendors || []).find((v) => v.vendorId === vendorIdSeg)?.vendorCode || "")
+        : "";
+
+    // Same hard-refresh fallback as users — fetch the single vendor
+    // directly so the breadcrumb resolves vendorCode even when the
+    // DataContext cache hasn't populated yet.
+    const [fetchedVendorCode, setFetchedVendorCode] = useState("");
+    useEffect(() => {
+        if (!vendorIdSeg || cachedVendorCode || !tokenStore.get()) {
+            setFetchedVendorCode("");
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const v = await vendorsApi.get(vendorIdSeg);
+                if (!cancelled) setFetchedVendorCode(v?.vendorCode || "");
+            } catch {
+                if (!cancelled) setFetchedVendorCode("");
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [vendorIdSeg, cachedVendorCode]);
+    const vendorCode = cachedVendorCode || fetchedVendorCode;
+
     if (segments.length === 0) return null; // hide on Dashboard
 
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
@@ -207,11 +241,14 @@ function Breadcrumbs() {
                 const isLast = i === visibleSegments.length - 1;
                 const isProjectIdSeg = projectIdSeg && i === 1 && visibleSegments[0] === "projects";
                 const isUserIdSeg = userIdSeg && i === 1 && visibleSegments[0] === "users";
+                const isVendorIdSeg = vendorIdSeg && i === 1 && visibleSegments[0] === "vendors";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
                     : isUserIdSeg && userCode
                         ? userCode
-                        : (LABELS[seg] || decodeURIComponent(seg));
+                        : isVendorIdSeg && vendorCode
+                            ? vendorCode
+                            : (LABELS[seg] || decodeURIComponent(seg));
                 return (
                     <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#999" }}>›</span>
