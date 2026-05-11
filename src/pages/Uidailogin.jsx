@@ -232,7 +232,14 @@ const UIDAILogin = () => {
             </div>
 
             {step === 'creds' && (
-              <>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (isStep1Disabled || submitting) return;
+                  handleSendOtp();
+                }}
+                noValidate
+              >
                 <div className="uidai-field">
                   <label className="uidai-label uidai-required">Username</label>
                   <input
@@ -298,18 +305,25 @@ const UIDAILogin = () => {
                 )}
 
                 <button
+                  type="submit"
                   className="uidai-btn-primary"
                   id="sendOtpBtn"
                   disabled={isStep1Disabled || submitting}
-                  onClick={handleSendOtp}
                 >
                   {submitting ? 'Please wait…' : 'Send OTP'}
                 </button>
-              </>
+              </form>
             )}
 
             {step === 'otp' && (
-              <>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (isOtpDisabled || submitting) return;
+                  handleVerifyOtp();
+                }}
+                noValidate
+              >
                 <div className="uidai-otp-sent-box">
                   <strong>✓ OTP sent successfully</strong>
                   {channelMobile && (
@@ -338,10 +352,10 @@ const UIDAILogin = () => {
                 </div>
 
                 <button
+                  type="submit"
                   className="uidai-btn-primary"
                   id="loginBtn"
                   disabled={isOtpDisabled || submitting}
-                  onClick={handleVerifyOtp}
                 >
                   {submitting ? 'Signing In…' : 'Sign In'}
                 </button>
@@ -364,7 +378,7 @@ const UIDAILogin = () => {
                     {resendIn > 0 ? `Resend OTP in ${resendIn}s` : 'Resend OTP'}
                   </button>
                 </div>
-              </>
+              </form>
             )}
 
             <div className="uidai-links">
