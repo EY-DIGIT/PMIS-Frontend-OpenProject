@@ -1339,6 +1339,33 @@ function CommentsPanel({
 }) {
   const nothingToPost =
     !String(commentText || "").trim() && safeArray(commentFiles).length === 0;
+  // Top-level filter for the comment history. "all" (default) shows
+  // everything; "week" narrows to the last 7 days; "month" reveals a
+  // second row of 12 calendar-month radios (Jan…Dec) and filters by
+  // month-of-year regardless of year so the user can pick any month.
+  const [commentFilter, setCommentFilter] = useState("all");
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const total = comments.length;
+  const MONTH_NAMES_SHORT = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+  ];
+  const visibleComments = (() => {
+    if (commentFilter === "all") return comments;
+    if (commentFilter === "week") {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      return comments.filter((c) => {
+        const t = c?.when ? new Date(c.when).getTime() : NaN;
+        return Number.isFinite(t) && t >= cutoff;
+      });
+    }
+    // commentFilter === "month"
+    return comments.filter((c) => {
+      const t = c?.when ? new Date(c.when) : null;
+      if (!t || Number.isNaN(t.getTime())) return false;
+      return t.getMonth() === selectedMonth;
+    });
+  })();
   return (
     <div className="uidai-comments">
       <div className="uidai-comments__title">💬 Comments &amp; Attachments</div>
@@ -1382,11 +1409,52 @@ function CommentsPanel({
           </div>
         </div>
       )}
+      {total > 0 && (
+        <div
+          style={{
+            width:"100px",
+            marginLeft: "auto",
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 8,
+            fontSize: 13
+          }}
+        >
+          <label htmlFor="uidai-comments-filter" style={{ fontWeight: 500 }}>Filter:</label>
+          <select
+            id="uidai-comments-filter"
+            className="uidai-select"
+            value={commentFilter}
+            onChange={(e) => setCommentFilter(e.target.value)}
+          >
+            <option value="all">All</option>
+            {/* <option value="week">This Week</option> */}
+            <option value="month">Month</option>
+          </select>
+          {commentFilter === "month" && (
+            <select
+              id="uidai-comments-filter-month"
+              className="uidai-select"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+            >
+              {MONTH_NAMES_SHORT.map((m, idx) => (
+                <option key={m} value={idx}>{m}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       <div className="uidai-comments__list">
-        {comments.length === 0 ? (
+        {total === 0 ? (
           <div className="uidai-hint">No comments or attachments yet</div>
+        ) : visibleComments.length === 0 ? (
+          <div className="uidai-hint">No comments in the selected range.</div>
         ) : (
-          comments.map((item, i) => (
+          visibleComments.map((item, i) => (
             <div key={i} className="uidai-comment-item">
               <div className="uidai-comment-item__meta">
                 {item.who || "User"} · {formatDateTime(item.when)}
