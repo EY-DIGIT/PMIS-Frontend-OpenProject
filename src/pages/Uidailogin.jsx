@@ -170,10 +170,47 @@ const UIDAILogin = () => {
   const channelMobile = channels?.sms || channels?.mobile || channels?.phone;
   const channelEmail = channels?.email;
 
+  // Floating header: collapse the a11y (text-size) strip once the user
+  // scrolls past a small threshold so only the brand bar stays pinned
+  // at the top. Mirrors the PMIS Project Management reference behavior.
+  // Hysteresis: hide above 28px, reveal back below 4px — avoids jitter
+  // when scroll position oscillates near the boundary.
+  const [a11yCollapsed, setA11yCollapsed] = useState(false);
+  useEffect(() => {
+    const HIDE_AT = 28;
+    const SHOW_AT = 4;
+    const overlay = document.querySelector('.uidai-overlay');
+    let ticking = false;
+    let hidden = false;
+    const update = () => {
+      const top = Math.max(overlay?.scrollTop || 0, window.scrollY || 0);
+      if (!hidden && top > HIDE_AT) {
+        hidden = true;
+        setA11yCollapsed(true);
+      } else if (hidden && top < SHOW_AT) {
+        hidden = false;
+        setA11yCollapsed(false);
+      }
+      ticking = false;
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(update);
+        ticking = true;
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    if (overlay) overlay.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (overlay) overlay.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
   return (
     <div className="uidai-login-page">
       <header className="uidai-site-header" role="banner">
-        <div className="uidai-a11y-strip">
+        <div className={`uidai-a11y-strip${a11yCollapsed ? ' collapsed' : ''}`}>
           <span className="uidai-a11y-label" aria-hidden="true">Text Size:</span>
           <div className="uidai-font-resizer" role="group" aria-label="Adjust text size">
             <button

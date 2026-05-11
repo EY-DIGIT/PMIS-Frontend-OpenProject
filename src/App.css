@@ -47,6 +47,9 @@ body {
   width: 100%;
   background: #fff;
   border-bottom: 3px solid var(--navy);
+  position: sticky;
+  top: 0;
+  z-index: 50;
 }
 
 .header-accessibility-strip {
@@ -60,6 +63,20 @@ body {
   min-height: 28px;
   font-size: 13px;
   color: #1e2a3a;
+  /* Smooth collapse when the user scrolls past the threshold — same
+     hide-on-scroll pattern as the PMIS Project Management reference. */
+  max-height: 40px;
+  overflow: hidden;
+  transition: max-height .28s ease, opacity .22s ease, padding .28s ease, border-bottom-width .28s ease;
+}
+.header-accessibility-strip.collapsed {
+  max-height: 0;
+  min-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  pointer-events: none;
 }
 
 .a11y-label {

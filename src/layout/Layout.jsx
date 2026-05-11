@@ -2,7 +2,7 @@
 // Layout.jsx  –  Shell: Header, Navbar, Sidebar, Footer
 //                Routes ke liye children prop use hoga
 // ============================================================
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiMenu, FiHome, FiUser } from "react-icons/fi";
 
@@ -44,12 +44,49 @@ export default function Layout({ children }) {
     document.documentElement.style.fontSize = FONT_SIZES[mode] || "";
   };
 
+  // Floating header: collapse the a11y (text-size) strip once the user
+  // scrolls past a small threshold so only the brand bar stays pinned
+  // at the top. Same hide-on-scroll pattern as the PMIS Project
+  // Management reference. Hysteresis: hide above 28px, reveal below
+  // 4px — avoids jitter when scroll oscillates near the boundary.
+  const [a11yCollapsed, setA11yCollapsed] = useState(false);
+  useEffect(() => {
+    const HIDE_AT = 28;
+    const SHOW_AT = 4;
+    const content = document.querySelector('.pmis-content');
+    let ticking = false;
+    let hidden = false;
+    const update = () => {
+      const top = Math.max(content?.scrollTop || 0, window.scrollY || 0);
+      if (!hidden && top > HIDE_AT) {
+        hidden = true;
+        setA11yCollapsed(true);
+      } else if (hidden && top < SHOW_AT) {
+        hidden = false;
+        setA11yCollapsed(false);
+      }
+      ticking = false;
+    };
+    const onScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(update);
+        ticking = true;
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    if (content) content.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (content) content.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
   return (
     <div className="pmis-wrap" onClick={() => setProfileOpen(false)}>
 
       {/* ── Header ── */}
       <header className="site-header" role="banner">
-        <div className="header-accessibility-strip">
+        <div className={`header-accessibility-strip${a11yCollapsed ? ' collapsed' : ''}`}>
           <span className="a11y-label" aria-hidden="true">Text Size:</span>
           <div className="font-resizer" role="group" aria-label="Adjust text size">
             <button

@@ -43,7 +43,8 @@
   width: 100%;
   background: #fff;
   box-shadow: 0 2px 8px rgba(11, 60, 136, .08);
-  position: relative;
+  position: sticky;
+  top: 0;
   z-index: 50;
 }
 .uidai-site-header::after {
@@ -64,6 +65,20 @@
   min-height: 28px;
   font-size: 13px;
   color: var(--uidai-text);
+  /* Smooth collapse when the user scrolls past the threshold — same
+     hide-on-scroll pattern as the PMIS Project Management screen. */
+  max-height: 40px;
+  overflow: hidden;
+  transition: max-height .28s ease, opacity .22s ease, padding .28s ease, border-bottom-width .28s ease;
+}
+.uidai-a11y-strip.collapsed {
+  max-height: 0;
+  min-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-bottom-width: 0;
+  pointer-events: none;
 }
 .uidai-a11y-label {
   font-weight: 600;
