@@ -118,4 +118,15 @@ export const ENDPOINTS = {
     attachments: (id) => `/api/v3/subtasks/${enc(id)}/attachments`,
     comments: (id) => `/api/v3/subtasks/${enc(id)}/comments`,
   },
+
+  // Admin-only dashboard endpoints. Live on the monolith starting 2026-05-09.
+  // See app/api/v3/dashboard/schemas.py for canonical response shapes.
+  dashboard: {
+    summary: '/api/v3/dashboard/summary',
+    projects: '/api/v3/dashboard/projects',
+    project: (uuid) => `/api/v3/dashboard/projects/${enc(uuid)}`,
+    projectItems: (uuid) => `/api/v3/dashboard/projects/${enc(uuid)}/items`,
+    organisations: '/api/v3/dashboard/organisations',
+    organisation: (vendorId) => `/api/v3/dashboard/organisations/${enc(vendorId)}`,
+  },
 };
