@@ -882,6 +882,10 @@ export default function ProjectDetailsPage() {
 
   if (!form) return null;
 
+  const documentEntries = feedEntries.filter(
+    (c) => Array.isArray(c.attachments) && c.attachments.length > 0
+  );
+
   return (
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "space-between" }}>
@@ -1269,7 +1273,7 @@ export default function ProjectDetailsPage() {
               ×
             </button>
             <h3 className="uidai-modal__title">
-              Project Documents and Comments
+              Project Documents 
             </h3>
             {feedLoading && (
               <div className="uidai-hint" style={{ marginTop: 8 }}>
@@ -1281,12 +1285,12 @@ export default function ProjectDetailsPage() {
                 {feedError}
               </div>
             )}
-            {!feedLoading && !feedError && feedEntries.length === 0 && (
+            {!feedLoading && !feedError && documentEntries.length === 0 && (
               <div className="uidai-hint" style={{ marginTop: 8 }}>
-                No comments yet.
+                No documents yet.
               </div>
             )}
-            {!feedLoading && feedEntries.length > 0 && (
+            {!feedLoading && documentEntries.length > 0 && (
               <ul
                 style={{
                   listStyle: "none",
@@ -1297,7 +1301,7 @@ export default function ProjectDetailsPage() {
                   gap: 10
                 }}
               >
-                {feedEntries.map((c) => {
+                {documentEntries.map((c) => {
                   const kindLabel = c.targetKind
                     ? c.targetKind.charAt(0).toUpperCase() + c.targetKind.slice(1)
                     : "";
@@ -1354,17 +1358,6 @@ export default function ProjectDetailsPage() {
                         )}
                         {whenLabel && <span>· {whenLabel}</span>}
                       </div>
-                      {c.body && (
-                        <div
-                          style={{
-                            color: "#1e2a3a",
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-word"
-                          }}
-                        >
-                          {c.body}
-                        </div>
-                      )}
                       {Array.isArray(c.attachments) && c.attachments.length > 0 && (
                         <ul
                           style={{
