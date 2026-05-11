@@ -190,6 +190,13 @@ export default function ProjectDetailsPage() {
   const [docInputKey, setDocInputKey] = useState(0);
   const [docUploading, setDocUploading] = useState(false);
 
+  // Discussion feed (comments + their attachments) for the View
+  // Documents modal. Lazy-loaded the first time the modal opens, then
+  // kept warm so reopening is instant.
+  const [feedEntries, setFeedEntries] = useState([]);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState("");
+
   const [apiProject, setApiProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
@@ -766,6 +773,52 @@ export default function ProjectDetailsPage() {
     }
   }
 
+  // Lazy-load the project discussion feed (comments + their
+  // attachments) when the View Documents modal opens. Cached after
+  // the first open; close-and-reopen does not re-fetch unless we
+  // explicitly clear feedEntries.
+  useEffect(() => {
+    if (!documentsOpen) return;
+    if (!project?.projectId) return;
+    if (feedLoading) return;
+    if (feedEntries.length > 0) return;
+    const token = getToken();
+    if (!token) return;
+    let cancelled = false;
+    setFeedLoading(true);
+    setFeedError("");
+    (async () => {
+      try {
+        const url = `${API_BASE}${ENDPOINTS.projects.discussionFeed(project.projectId)}?offset=1&pageSize=50`;
+        const res = await authorizedFetch(url, {
+          method: "GET",
+          headers: { accept: "application/json" }
+        });
+        if (res.status === 401) {
+          logout();
+          navigate("/login");
+          return;
+        }
+        if (!res.ok) {
+          const msg = await readErrorMessage(res);
+          throw new Error(msg);
+        }
+        const raw = await res.json().catch(() => ({}));
+        const elements =
+          raw?.data?._embedded?.elements ??
+          raw?._embedded?.elements ??
+          [];
+        if (!cancelled) setFeedEntries(Array.isArray(elements) ? elements : []);
+      } catch (err) {
+        if (!cancelled) setFeedError(err?.message || "Failed to load comments");
+      } finally {
+        if (!cancelled) setFeedLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentsOpen, project && project.projectId]);
+
   // Stream the attachment via authorizedFetch so the Authorization
   // header is included for protected file URLs, then save it via a
   // blob URL. Falls back to opening the raw URL in a new tab if the
@@ -1281,6 +1334,161 @@ export default function ProjectDetailsPage() {
                 </ul>
               );
             })()}
+
+            <h3 className="uidai-modal__title" style={{ marginTop: 24 }}>
+              Comments
+            </h3>
+            {feedLoading && (
+              <div className="uidai-hint" style={{ marginTop: 8 }}>
+                Loading comments…
+              </div>
+            )}
+            {!feedLoading && feedError && (
+              <div className="uidai-hint" style={{ marginTop: 8, color: "#d32f2f" }}>
+                {feedError}
+              </div>
+            )}
+            {!feedLoading && !feedError && feedEntries.length === 0 && (
+              <div className="uidai-hint" style={{ marginTop: 8 }}>
+                No comments yet.
+              </div>
+            )}
+            {!feedLoading && feedEntries.length > 0 && (
+              <ul
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: "12px 0 0 0",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10
+                }}
+              >
+                {feedEntries.map((c) => {
+                  const kindLabel = c.targetKind
+                    ? c.targetKind.charAt(0).toUpperCase() + c.targetKind.slice(1)
+                    : "";
+                  const when = c.createdAt ? new Date(c.createdAt) : null;
+                  const whenLabel =
+                    when && !Number.isNaN(when.getTime())
+                      ? when.toLocaleString("en-IN", {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })
+                      : "";
+                  return (
+                    <li
+                      key={c.id}
+                      style={{
+                        padding: "10px 12px",
+                        background: "#f5f7fa",
+                        borderRadius: 6,
+                        border: "1px solid #e0e5ec"
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: 6,
+                          alignItems: "baseline",
+                          marginBottom: 4,
+                          fontSize: 12,
+                          color: "#5a6680"
+                        }}
+                      >
+                        {kindLabel && (
+                          <span
+                            style={{
+                              padding: "1px 8px",
+                              borderRadius: 999,
+                              background: "#e3eefc",
+                              color: "#0b3c88",
+                              border: "1px solid #c8d9ee",
+                              fontWeight: 700
+                            }}
+                          >
+                            {kindLabel}
+                          </span>
+                        )}
+                        {c.targetName && (
+                          <span style={{ color: "#173e77", fontWeight: 600 }}>
+                            {c.targetName}
+                          </span>
+                        )}
+                        {whenLabel && <span>· {whenLabel}</span>}
+                      </div>
+                      {c.body && (
+                        <div
+                          style={{
+                            color: "#1e2a3a",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word"
+                          }}
+                        >
+                          {c.body}
+                        </div>
+                      )}
+                      {Array.isArray(c.attachments) && c.attachments.length > 0 && (
+                        <ul
+                          style={{
+                            listStyle: "none",
+                            padding: 0,
+                            margin: "8px 0 0 0",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4
+                          }}
+                        >
+                          {c.attachments.map((att, attIdx) => {
+                            const name = att.filename || att.name || `File ${attIdx + 1}`;
+                            const sizeLabel = formatBytes(att.sizeBytes);
+                            return (
+                              <li
+                                key={`${c.id}-${attIdx}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 8,
+                                  padding: "4px 8px",
+                                  background: "#fff",
+                                  borderRadius: 4,
+                                  border: "1px solid #dbe5f1"
+                                }}
+                              >
+                                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {name}
+                                  {sizeLabel && (
+                                    <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
+                                      ({sizeLabel})
+                                    </span>
+                                  )}
+                                </span>
+                                {att.url && (
+                                  <button
+                                    type="button"
+                                    className="uidai-btn"
+                                    style={{ padding: "2px 8px", fontSize: 12 }}
+                                    onClick={() => downloadAttachment(att)}
+                                  >
+                                    Download
+                                  </button>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
             <div className="uidai-modal__actions">
               <button
                 type="button"

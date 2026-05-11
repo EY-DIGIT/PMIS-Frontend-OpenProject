@@ -78,6 +78,7 @@ export const ENDPOINTS = {
     milestoneCreate: (uuid) => `/api/v3/projects/${enc(uuid)}/milestones/create`,
     auditLogs: (uuid) => `/api/v3/projects/${enc(uuid)}/audit-logs`,
     attachments: (uuid) => `/api/v3/projects/${enc(uuid)}/attachments`,
+    discussionFeed: (uuid) => `/api/v3/projects/${enc(uuid)}/discussion-feed`,
   },
 
   milestones: {
