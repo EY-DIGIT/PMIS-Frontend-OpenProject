@@ -1,3 +1,5 @@
+import { uiStore } from '../store/project/uiStore';
+
 const RAW_BASE = import.meta.env.VITE_API_BASE_URL || 'http://10.1.131.199:8000/';
 
 // Exported for modules that use raw `fetch` (e.g. milestoneConfigApi, project pages).
@@ -123,6 +125,31 @@ export class ApiError extends Error {
   }
 }
 
+// Global 401 handler: when an authenticated call fails auth after the
+// refresh attempt, surface a single popup and bounce the user to /login
+// once they click OK. Guarded so multiple concurrent 401s don't queue up
+// duplicate popups or duplicate redirects.
+let authErrorNotified = false;
+function notifyAuthError(message) {
+  if (authErrorNotified) return;
+  if (typeof window === 'undefined') return;
+  const path = window.location.pathname || '';
+  // Public auth pages don't need this — a bad login already shows its
+  // own error, and we don't want a redirect loop on /login itself.
+  if (
+    path === '/login' ||
+    path.startsWith('/forgot-password') ||
+    path.startsWith('/reset-password')
+  ) return;
+  authErrorNotified = true;
+  tokenStore.clear();
+  const body = (typeof message === 'string' && message) || 'Authentication required';
+  uiStore.showError(`Session Expired\n${body}. Please log in again.`, () => {
+    authErrorNotified = false;
+    window.location.href = '/login';
+  });
+}
+
 // Single-flight dedup: parallel requests that all hit 401 share one refresh.
 let refreshInFlight = null;
 
@@ -236,6 +263,18 @@ export async function authorizedFetch(input, init = {}) {
       res = await fetch(url, retryInit);
     }
   }
+  // If we still got a 401 after the refresh path, the session is gone —
+  // surface the global popup so the user is told before being kicked
+  // back to /login.
+  if (res.status === 401) {
+    let bodyMsg = '';
+    try {
+      const clone = res.clone();
+      const data = await clone.json();
+      bodyMsg = data?.error?.message || data?.message || '';
+    } catch { /* non-JSON body — ignore */ }
+    notifyAuthError(bodyMsg);
+  }
   return res;
 }
 
@@ -282,7 +321,16 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
   }
 
   if (!res.ok) {
-    if (res.status === 401) tokenStore.clear();
+    if (res.status === 401 && auth) {
+      const bodyMsg =
+        (payload && typeof payload === 'object' && payload.error && typeof payload.error === 'object'
+          ? payload.error.message
+          : null) ||
+        (payload && typeof payload?.message === 'string' ? payload.message : '');
+      notifyAuthError(bodyMsg);
+    } else if (res.status === 401) {
+      tokenStore.clear();
+    }
     const nested =
       (payload && typeof payload === 'object' && payload.error && typeof payload.error === 'object'
         ? payload.error.message
