@@ -406,7 +406,7 @@ export default function NodeModal({
 
   const isAdd = mode === "add";
   const showStatus = !isAdd;
-  const showActuals = !isAdd && kind !== "milestone";
+  const showActuals = !isAdd;
   // Doc 38: activity / task / subtask no longer have a `type` at the API
   // level (the four /standard, /transactional, /resource/* variants were
   // collapsed into a single create endpoint). The Type select is hidden;
