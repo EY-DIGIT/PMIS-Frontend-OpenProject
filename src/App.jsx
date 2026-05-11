@@ -1,7 +1,7 @@
 // ============================================================
 // MainApp.jsx  –  Providers + Router + Routes only
 // ============================================================
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
 
 import { ProjectProvider } from "./store/Projectstore";
@@ -48,6 +48,8 @@ import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import { useProjects as useProjectsList } from "./store/project/projectsStore";
 import { useData } from './data/DataContext';
+import * as usersApi from './api/users';
+import { tokenStore } from './api/client';
 
 import "./styles/Project.css"
 import "./styles/project/global.css"
@@ -102,7 +104,6 @@ function Breadcrumbs() {
     const projects = useProjectsList();
     const { users } = useData();
     const segments = pathname.split("/").filter(Boolean);
-    if (segments.length === 0) return null; // hide on Dashboard
 
     /* Static segment → pretty label. Dynamic params (IDs, UIDs) fall
        through to their raw decoded value. */
@@ -146,9 +147,33 @@ function Breadcrumbs() {
         segments[0] === "users" && segments[1] && segments[1] !== "new"
             ? decodeURIComponent(segments[1])
             : null;
-    const userCode = userIdSeg
+    const cachedUserCode = userIdSeg
         ? (users.find((u) => u.userId === userIdSeg)?.userCode || "")
         : "";
+
+    // On a hard refresh the DataContext cache is still empty when this
+    // renders, which would briefly flash the raw id. Fetch the single
+    // user directly so the breadcrumb shows userCode either way.
+    const [fetchedUserCode, setFetchedUserCode] = useState("");
+    useEffect(() => {
+        if (!userIdSeg || cachedUserCode || !tokenStore.get()) {
+            setFetchedUserCode("");
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const u = await usersApi.get(userIdSeg);
+                if (!cancelled) setFetchedUserCode(u?.userCode || "");
+            } catch {
+                if (!cancelled) setFetchedUserCode("");
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [userIdSeg, cachedUserCode]);
+    const userCode = cachedUserCode || fetchedUserCode;
+
+    if (segments.length === 0) return null; // hide on Dashboard
 
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so
