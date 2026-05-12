@@ -14,7 +14,9 @@ const ForgotPassword = () => {
 
   const isDisabled = !identifier.trim() || submitting;
 
-  const handleSend = async () => {
+  const handleSend = async (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (submitting) return;
     setSubmitError('');
     if (!identifier.trim()) return;
     setSubmitting(true);
@@ -132,7 +134,7 @@ const ForgotPassword = () => {
                 </button>
               </>
             ) : (
-              <>
+              <form onSubmit={handleSend} noValidate>
                 <div className="uidai-field">
                   <label className="uidai-label uidai-required">Username</label>
                   <input
@@ -152,12 +154,12 @@ const ForgotPassword = () => {
                 <button
                   className="uidai-btn-primary"
                   id="sendLinkBtn"
+                  type="submit"
                   disabled={isDisabled}
-                  onClick={handleSend}
                 >
                   {submitting ? 'Sending…' : 'Send Link'}
                 </button>
-              </>
+              </form>
             )}
 
             <div className="uidai-links">

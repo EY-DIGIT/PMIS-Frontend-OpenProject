@@ -37,7 +37,9 @@ const ResetPassword = () => {
   const toggleNewPassword = () => setShowNewPassword((v) => !v);
   const toggleConfirmPassword = () => setShowConfirmPassword((v) => !v);
 
-  const handleReset = async () => {
+  const handleReset = async (e) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (submitting) return;
     if (!allRulesValid) {
       setSubmitError('Please satisfy all password requirements');
       return;
@@ -166,13 +168,14 @@ const ResetPassword = () => {
       {/* MAIN */}
       <main className="uidai-rp-main" id="mainContent">
         <div className="uidai-rp-overlay">
-          <div className="uidai-rp-card">
+          <div className="uidai-rp-card-reset">
             <div className="uidai-rp-card-head">
               <img src={aadhaarLogo} alt="Aadhaar" />
               <h1>Reset Password</h1>
               <div className="uidai-rp-sub">Create a secure new password</div>
             </div>
 
+            <form onSubmit={handleReset} noValidate>
             {/* New Password */}
             <div className="uidai-rp-field">
               <label className="uidai-rp-label uidai-rp-required">New Password</label>
@@ -255,12 +258,13 @@ const ResetPassword = () => {
 
             <button
               id="resetBtn"
+              type="submit"
               className={`uidai-rp-btn ${isButtonEnabled ? 'uidai-rp-btn-enabled' : ''}`}
-              onClick={handleReset}
               disabled={!isButtonEnabled || submitting}
             >
               {submitting ? 'Resetting…' : 'Reset Password'}
             </button>
+            </form>
 
             <div className="uidai-rp-footer">
               © 2026 UIDAI · PMIS Automation Tool · Internal Use Only
