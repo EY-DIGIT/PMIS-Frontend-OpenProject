@@ -980,7 +980,7 @@ export default function ProjectDetailsPage() {
               Remove
             </button>
           )}
-          <button className="uidai-btn uidai-btn--cancel" onClick={() => navigate("/projects")}>
+          <button className="uidai-btn uidai-btn--cancel" onClick={() => navigate(-1)}>
             Back
           </button>
         </div>

@@ -669,12 +669,11 @@ export default function Dashboard() {
   }
 
   function navigateToPM(p /*, key */) {
-    /* "Open in PM" — jump to our Project Details page. While the
-       Dashboard is mocked, this lands on /projects/{designId}; once
-       the backend ships real data, swap `p.id` for the real project
-       UUID returned by the API. */
-    if (!p?.id) return;
-    navigate(`/projects/${encodeURIComponent(p.id)}`);
+    // Route param feeds GET /api/v3/projects/{id}, which expects the
+    // backend UUID. p.id is the human-readable projectCode and 404s.
+    const id = p?.uuid || p?.id;
+    if (!id) return;
+    navigate(`/projects/${encodeURIComponent(id)}/config`);
   }
 
   return (
@@ -1077,8 +1076,8 @@ function ProjectListView({ projects, mode, searchText, onSearch, onOpenProject }
       <div className="dash-card">
         <div className="dash-card-title">Pie Chart<span className="dash-card-sub">{title} status distribution</span></div>
         <div className="dash-donut-wrap">
-          <Donut counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
-          <Legend counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
+          <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
+          <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
         </div>
       </div>
       <div className="dash-card">
@@ -1108,7 +1107,7 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
     : "Track Progress";
 
   const kindKeys = ["milestone", "activity", "task", "subtask"];
-  const statusKeys = ["active", "completed", "ontrack", "delayed"];
+  const statusKeys = ["completed", "ontrack", "delayed"];
   const byKind = { milestone: 0, activity: 0, task: 0, subtask: 0, total: rows.length };
   rows.forEach((r) => { if (byKind[r.kind] != null) byKind[r.kind]++; });
   const pieCounts = isDelayed ? byKind : c;

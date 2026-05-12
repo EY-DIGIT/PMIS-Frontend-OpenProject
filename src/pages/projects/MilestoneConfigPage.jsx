@@ -1110,7 +1110,7 @@ export default function MilestoneConfigPage({ mode }) {
       <button
         type="button"
         className="uidai-btn uidai-btn--cancel"
-        onClick={() => navigate(`/projects/${encodeURIComponent(project.projectId)}`)}
+        onClick={() => navigate(-1)}
       >
         Back
       </button>
