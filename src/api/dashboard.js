@@ -43,18 +43,66 @@ export async function summary({ delayMinDays = 5 } = {}) {
   return unwrap(res);
 }
 
-export async function projectsList({
-  bucket,
-  q,
-  vendorId,
-  division,
-  page = 1,
-  pageSize = 200,
-} = {}) {
+export async function projectsList({ bucket, q, vendorId, division, page, pageSize } = {}) {
+  // page/pageSize intentionally not defaulted — caller decides, and when
+  // omitted the BE applies its own defaults (no pagination params in URL).
   const res = await api.get(ENDPOINTS.dashboard.projects, {
     query: { bucket, q, vendorId, division, page, pageSize },
   });
   return unwrap(res);
+}
+
+/* Fallback when /dashboard/projects is slow/hung on the BE: pull the raw
+   /api/v3/projects list and reshape each row into the same legacy form
+   the dashboard helpers expect. No `_be` aggregates are available here, so
+   KPI counts / progress / delayed buckets degrade to 0 — the user still
+   sees the project list and can navigate. */
+export async function projectsListFallback({ offset, pageSize } = {}) {
+  // offset/pageSize intentionally not defaulted; BE picks sensible defaults
+  // when the params are absent from the URL.
+  const res = await api.get(ENDPOINTS.projects.list, {
+    query: { offset, pageSize },
+  });
+  const elements =
+    res?.data?._embedded?.elements ??
+    res?._embedded?.elements ??
+    res?.data?.items ??
+    res?.items ??
+    (Array.isArray(res?.data) ? res.data : null) ??
+    (Array.isArray(res) ? res : []);
+  const list = Array.isArray(elements) ? elements : [];
+  return list.map(rawProjectToLegacy).filter(Boolean);
+}
+
+function rawProjectToLegacy(p) {
+  if (!p) return null;
+  const orgList = Array.isArray(p.vendors) ? p.vendors : [];
+  const primaryOrg = orgList[0] || null;
+  let orgName = '—';
+  if (primaryOrg && typeof primaryOrg === 'object') {
+    orgName = primaryOrg.name || '—';
+  } else if (primaryOrg) {
+    orgName = String(primaryOrg);
+  }
+  return {
+    id: p.projectCode || p.id || p.uuid,
+    uuid: p.id || p.uuid,
+    projectCode: p.projectCode || '',
+    name: p.name || '',
+    description: p.description || '',
+    organisation: orgName,
+    organisations: orgList,
+    vendorId: primaryOrg && typeof primaryOrg === 'object' ? primaryOrg.id : null,
+    division: p.owner || '—',
+    divisionCode: p.owner || null,
+    owner: p.owner || '—',
+    status: String(p.status || 'NEW').toUpperCase(),
+    plannedStart: fromApiDate(p.startDate),
+    plannedEnd: fromApiDate(p.endDate),
+    actualStart: fromApiDate(p.actualStartDate),
+    actualEnd: fromApiDate(p.actualEndDate),
+    milestones: [],
+  };
 }
 
 export async function projectDetail(uuid, { delayMinDays = 5 } = {}) {

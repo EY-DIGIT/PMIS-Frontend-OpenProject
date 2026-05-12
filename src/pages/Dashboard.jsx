@@ -4,10 +4,11 @@
    Progress hierarchy table scoped to the click. "Open in PM" rows
    navigate to the existing /projects/:projectId Project Details page. */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   projectsList as fetchDashboardProjects,
+  projectsListFallback as fetchProjectsFallback,
   projectCardToLegacy,
   treeToLegacyProject,
   getRawProjectTree,
@@ -25,16 +26,12 @@ import "../styles/Dashboard.css";
      prefer BE-computed values via `project._be` when present, falling back
      to client-side derivation when only legacy tree data is available. */
 
-// Per-project deterministic placeholder for the "Pending for Approval"
-// KPI until the BE ships `approvalState` on activities. Hashing the
-// project id keeps the value stable across renders and varied per
-// project so the tile doesn't look broken with a flat 0.
-function staticPendingApprovals(p) {
-  const id = String(p?.id || p?.uuid || "");
-  if (!id) return 0;
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
-  return Math.abs(h) % 5;
+// Placeholder for the "Pending for Approval" KPI. The BE doesn't ship
+// `approvalState` on activities yet, so this stays at 0 until that data
+// is wired up — was previously a project-id hash but the synthetic
+// numbers looked like real counts and confused users.
+function staticPendingApprovals(/* p */) {
+  return 0;
 }
 
 /* ─── Pure helpers ─────────────────────────────────────────── */
@@ -97,8 +94,15 @@ function projectBucket(p, today) {
 }
 function progress(node, today = todayDate()) {
   const tasks = allTasks(node);
-  if (!tasks.length) return 0;
-  return Math.round(tasks.filter((t) => taskStatus(t, today) === "completed").length / tasks.length * 100);
+  if (tasks.length) {
+    return Math.round(tasks.filter((t) => taskStatus(t, today) === "completed").length / tasks.length * 100);
+  }
+  // No tasks under this node — BE ships milestones/activities with empty
+  // task arrays in the tree payload, so fall back to the lifecycle status:
+  // only completed counts as 100%, everything else (in_progress / delayed
+  // / not_started) stays at 0% until the BE provides per-task completion.
+  if (node && node.status === "completed") return 100;
+  return 0;
 }
 function dates(node) {
   const tasks = allTasks(node);
@@ -162,16 +166,18 @@ function countsForProjects(list, today) {
   return c;
 }
 function countsForRows(rows) {
-  const c = { active: 0, completed: 0, ontrack: 0, delayed: 0, total: rows.length };
-  rows.forEach((r) => { c[r.status]++; });
+  const c = { active: 0, not_started: 0, completed: 0, ontrack: 0, delayed: 0, total: rows.length };
+  rows.forEach((r) => { if (c[r.status] != null) c[r.status]++; });
   return c;
 }
 const LABELS = {
-  active: "Active", completed: "Completed", ontrack: "On Track", delayed: "Delayed",
+  active: "Active", not_started: "Not Started",
+  completed: "Completed", ontrack: "In Progress", delayed: "Delayed",
   milestone: "Milestones", activity: "Activities", task: "Tasks", subtask: "Sub Tasks",
 };
 const COLORS = {
-  active: "#0b3c88", completed: "#1a8a3d", ontrack: "#0aa1c0", delayed: "#d4440e",
+  active: "#0b3c88", not_started: "#9aa6bd",
+  completed: "#1a8a3d", ontrack: "#0aa1c0", delayed: "#d4440e",
   milestone: "#0b3c88", activity: "#0aa1c0", task: "#5e3fb1", subtask: "#b25900",
 };
 
@@ -195,7 +201,10 @@ const BUCKET_FROM_SCHEDULE = {
   completed: "completed",
   delayed: "delayed",
   in_progress: "ontrack",
-  not_started: "active",
+  // not_started items haven't kicked off yet, but for status-pill purposes
+  // we surface them as "In Progress" (same bucket as in_progress) so the
+  // table reads as Completed / In Progress / Delayed only.
+  not_started: "ontrack",
 };
 
 /* Lifecycle `status === "completed"` wins over `scheduleStatus`: an item
@@ -464,7 +473,7 @@ function SignalCards({ groups, limit, onClick }) {
         const rows = [
           ["Total", g.projects.length, "var(--dash-navy)"],
           ["Completed", c.completed, "var(--dash-green)"],
-          ["On Track", c.ontrack, "var(--dash-cyan)"],
+          ["In Progress", c.ontrack, "var(--dash-cyan)"],
           ["Delayed", c.delayed, "var(--dash-saffron)"],
         ];
         return (
@@ -584,31 +593,67 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [reloadTick, setReloadTick] = useState(0);
+  // Guards the load effect from firing twice for the same tick. React 18
+  // StrictMode mounts every effect twice in dev, which without this would
+  // produce two parallel calls to /dashboard/projects + /api/v3/projects
+  // on every page load. Reset of this ref on a real refresh happens because
+  // setReloadTick gives us a new value to compare against.
+  const fetchedTickRef = useRef(-1);
 
   // Cache of full tree per project UUID — fetched lazily when a single
   // project drill-down view (Project View / Track Progress) is opened.
   const [trees, setTrees] = useState({});
 
   useEffect(() => {
-    let cancelled = false;
+    // StrictMode dedup: skip the second invocation for the same tick.
+    if (fetchedTickRef.current === reloadTick) return;
+    fetchedTickRef.current = reloadTick;
+
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setLoadError(null);
-    fetchDashboardProjects({ pageSize: 200 })
+
+    // Progressive load: fire dashboard + plain /projects in parallel.
+    // Loader hides the moment ANY one returns. If fallback wins first the
+    // user sees the project list immediately; if dashboard later succeeds
+    // with `_be` aggregates, we upgrade silently. Error only when both
+    // requests have failed — no client-side timeout, the user keeps the
+    // data they already have.
+    let dashboardSucceeded = false;
+    let dashboardFailed = false;
+    let fallbackFailed = false;
+
+    fetchDashboardProjects()
       .then((payload) => {
-        if (cancelled) return;
+        dashboardSucceeded = true;
         const cards = Array.isArray(payload?.projects) ? payload.projects : [];
         setProjects(cards.map(projectCardToLegacy).filter(Boolean));
+        setLoading(false);
       })
-      .catch((err) => {
-        if (cancelled) return;
-        setLoadError(err?.message || "Failed to load dashboard.");
-        setProjects([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+      .catch(() => {
+        dashboardFailed = true;
+        if (fallbackFailed) {
+          setLoadError("Failed to load dashboard. Please retry.");
+          setProjects([]);
+          setLoading(false);
+        }
       });
-    return () => { cancelled = true; };
+
+    fetchProjectsFallback()
+      .then((projects) => {
+        // Don't downgrade if dashboard already populated with aggregates.
+        if (dashboardSucceeded) return;
+        setProjects(projects);
+        setLoading(false);
+      })
+      .catch(() => {
+        fallbackFailed = true;
+        if (dashboardFailed) {
+          setLoadError("Failed to load dashboard. Please retry.");
+          setProjects([]);
+          setLoading(false);
+        }
+      });
   }, [reloadTick]);
 
   const [view, setView] = useState(() => URL_VIEW_TO_INTERNAL[urlView] || "summary");
@@ -818,7 +863,7 @@ function SummaryView({
           foot="open project list" onClick={() => onOpenProjectList("active")} />
         <Kpi cls="completed" label="Completed Projects" value={c.completed}
           foot="delivered projects" onClick={() => onOpenProjectList("completed")} />
-        <Kpi cls="ontrack" label="On Track" value={c.ontrack}
+        <Kpi cls="ontrack" label="In Progress" value={c.ontrack}
           foot="within schedule" onClick={() => onOpenProjectList("ontrack")} />
         <Kpi cls="delayed" label="Delayed" value={c.delayed}
           foot="open delayed track" onClick={() => onOpenTrack({ status: "delayed" })} />
@@ -856,7 +901,7 @@ function SummaryView({
 
       <div className="dash-grid-2" style={{marginTop:"20px",marginBottom:"20px"}}>
         <div className="dash-card">
-          <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / On Track / Delayed</span></div>
+          <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
           <SignalCards groups={orgs} limit={VIS_GROUPS} onClick={onOpenOrg} />
           {orgs.length > VIS_GROUPS && (
             <div className="dash-actions">
@@ -867,7 +912,7 @@ function SummaryView({
           )}
         </div>
         <div className="dash-card">
-          <div className="dash-card-title">Division View<span className="dash-card-sub">Total / Completed / On Track / Delayed</span></div>
+          <div className="dash-card-title">Division View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
           <SignalCards groups={divs} limit={VIS_GROUPS} onClick={onOpenDivision} />
           {divs.length > VIS_GROUPS && (
             <div className="dash-actions">
@@ -1001,7 +1046,7 @@ function OrgOrDivisionView({ projects, kind, name, showAll, onOpenGroup, onShowA
           <Kpi cls="total" label="Total Projects" value={g.projects.length} foot="assigned projects" />
           <Kpi cls="completed" label="Completed" value={c.completed} foot="delivered"
             onClick={() => onOpenTrack({ [kind === "org" ? "org" : "division"]: name, projectMode: "completed" })} />
-          <Kpi cls="ontrack" label="On Track" value={c.ontrack} foot="within schedule"
+          <Kpi cls="ontrack" label="In Progress" value={c.ontrack} foot="within schedule"
             onClick={() => onOpenTrack({ [kind === "org" ? "org" : "division"]: name, projectMode: "ontrack" })} />
           <Kpi cls="delayed" label="Delayed" value={c.delayed} foot="open delayed tracks"
             onClick={() => onOpenTrack({ [kind === "org" ? "org" : "division"]: name, status: "delayed" })} />
@@ -1091,7 +1136,7 @@ function ProjectListView({ projects, mode, searchText, onSearch, onOpenProject }
   });
   const titleMap = {
     total: "All Projects", active: "Active Projects", completed: "Completed Projects",
-    ontrack: "On Track Projects", delayed: "Delayed Projects",
+    ontrack: "In Progress Projects", delayed: "Delayed Projects",
   };
   const title = titleMap[mode] || "Projects";
   const c = countsForProjects(rows, today);
@@ -1167,13 +1212,23 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
         {!(scope.kind === "milestone" || scope.kind === "activity") &&
           <Kpi cls="delayed" label="Delayed" value={c.delayed} foot="past expected end date" />}
         {!isDelayed && !(scope.kind === "milestone" || scope.kind === "activity") &&
-          <Kpi cls="ontrack" label="On Track" value={c.ontrack} foot="within schedule" />}
+          <Kpi cls="ontrack" label="In Progress" value={c.ontrack} foot="within schedule" />}
         {!isDelayed && (scope.kind === "activity" || scope.approval) &&
           <Kpi cls="pending" label="Pending for Approval" value={pending} foot="activities only" />}
       </div>
 
       {isDelayed ? (
-        <div className="dash-card" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+        <div
+          className="dash-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+          }}
+        >
           <DelayFilter value={delayFilter} onChange={setDelayFilter} />
         </div>
       ) : (
