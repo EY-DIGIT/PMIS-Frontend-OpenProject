@@ -214,7 +214,7 @@ export function statusLabelFor(key) {
     case "completed":
       return "Completed";
     case "ontrack":
-      return "On Track";
+      return "In Progress";
     case "delayed":
       return "Delayed";
     case "notstarted":
