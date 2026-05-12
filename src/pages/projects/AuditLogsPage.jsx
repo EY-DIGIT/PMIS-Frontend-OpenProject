@@ -191,7 +191,11 @@ export default function AuditLogsPage() {
   // changes the page or page size. The response carries the project
   // context block too, so this single call powers the banner as well.
   // The "All" page size (0) is sent as a large pageSize the backend
-  // will cap.
+  // will cap. When any filter is active we also fetch the full corpus
+  // so search/date/action filtering matches across every entry — not
+  // only the rows that happened to land on the current server page.
+  const hasActiveFilter =
+    !!(appliedFilters.term || appliedFilters.from || appliedFilters.to || appliedFilters.action);
   useEffect(() => {
     if (!projectId) return;
     const token = getToken();
@@ -204,8 +208,9 @@ export default function AuditLogsPage() {
     setLoadError("");
     (async () => {
       try {
-        const apiPageSize = pageSize > 0 ? pageSize : 1000;
-        const url = `${API_BASE}${ENDPOINTS.projects.auditLogs(projectId)}?offset=${currentPage}&pageSize=${apiPageSize}`;
+        const apiPageSize = hasActiveFilter || pageSize === 0 ? 200 : pageSize;
+        const apiOffset = hasActiveFilter ? 1 : currentPage;
+        const url = `${API_BASE}${ENDPOINTS.projects.auditLogs(projectId)}?offset=${apiOffset}&pageSize=${apiPageSize}`;
         const res = await authorizedFetch(url, {
           method: "GET",
           headers: { accept: "application/json" }
@@ -256,7 +261,7 @@ export default function AuditLogsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId, currentPage, pageSize, navigate]);
+  }, [projectId, currentPage, pageSize, navigate, hasActiveFilter]);
 
   const allRows = useMemo(() => entries.map(normalizeEntry), [entries]);
 
@@ -296,15 +301,14 @@ export default function AuditLogsPage() {
   // Pagination math — when the user has any filter applied we hide the
   // server total and fall back to the filtered count so the range info
   // doesn't mislead.
-  const hasFilter =
-    !!(appliedFilters.term || appliedFilters.from || appliedFilters.to || appliedFilters.action);
+  const hasFilter = hasActiveFilter;
   const effectivePageSize = pageSize > 0 ? pageSize : Math.max(total, 1);
   const totalPages = Math.max(1, Math.ceil((hasFilter ? filteredRows.length : total) / effectivePageSize));
   const safePage = Math.min(Math.max(1, currentPage), totalPages);
 
-  // Server already gave us the right slice for `currentPage` when no
-  // filter is active. When filters ARE active, the slice we got back
-  // is still a single server page — display all matching rows from it.
+  // Server gave us the right slice for `currentPage` when no filter is
+  // active. When filters ARE active we re-fetched the full corpus, so
+  // show every matching row.
   const pageRows = hasFilter ? filteredRows : allRows;
 
   const rangeStart = total === 0 ? 0 : ((safePage - 1) * (pageSize > 0 ? pageSize : total)) + 1;
@@ -555,7 +559,7 @@ export default function AuditLogsPage() {
               onKeyDown={handleSearchKeyDown}
             />
             <div className="al-field-hint">
-              Filters the rows currently on screen. Search across user ID, username, role, action, old/new value.
+              Filters the rows currently on screen. Search across  username, role, action, old/new value.
             </div>
           </div>
           <div className="al-field">
@@ -611,7 +615,7 @@ export default function AuditLogsPage() {
           Log Entries{" "}
           <span className="al-card-title-meta">
             {hasFilter
-              ? `(${filteredRows.length} matching on current page)`
+              ? `(${filteredRows.length} ${filteredRows.length === 1 ? "match" : "matches"} across all entries)`
               : `(Showing ${rangeStart}–${rangeEnd} of ${total} ${total === 1 ? "entry" : "entries"})`}
           </span>
         </h2>
@@ -677,7 +681,7 @@ export default function AuditLogsPage() {
         <div className="al-pagination">
           <div className="al-page-info">
             {hasFilter
-              ? `Filter active on current page · ${filteredRows.length} match${filteredRows.length === 1 ? "" : "es"}`
+              ? `Filter active · ${filteredRows.length} match${filteredRows.length === 1 ? "" : "es"} across all entries`
               : `Showing ${rangeStart}–${rangeEnd} of ${total} ${total === 1 ? "entry" : "entries"}`}
           </div>
           <div className="al-page-controls">
@@ -734,7 +738,7 @@ export default function AuditLogsPage() {
               }}
             >
               {PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n === 0 ? "All" : n}</option>
+                <option key={n} value={n}>{n === 0 ? "200" : n}</option>
               ))}
             </select>
           </div>
