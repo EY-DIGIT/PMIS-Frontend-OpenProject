@@ -624,7 +624,7 @@ export default function AuditLogsPage() {
           <table className="al-table">
             <thead>
               <tr>
-                <th>User ID</th>
+                {/* <th>User ID</th> */}
                 <th>Username</th>
                 <th>Role</th>
                 <th>Action</th>
@@ -649,7 +649,7 @@ export default function AuditLogsPage() {
               ) : (
                 pageRows.map((row) => (
                   <tr key={row.id || `${row.rawWhen}-${row.username}`}>
-                    <td><span className="al-cell-userid">{row.userId}</span></td>
+                    {/* <td><span className="al-cell-userid">{row.userId}</span></td> */}
                     <td><div className="al-cell-user">{row.username}</div></td>
                     <td><span className="al-info-pill">{row.role}</span></td>
                     <td><span className="al-info-pill">{row.action}</span></td>
