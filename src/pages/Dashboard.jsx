@@ -791,7 +791,7 @@ function SummaryView({
 
   return (
     <>
-      <div className="dash-kpi-grid">
+      <div className="dash-kpi-grid" style={{marginTop:"20px",marginBottom:"20px"}}>
         <Kpi cls="total" label="Total Projects" value={projects.length}
           foot={`${orgs.length} organizations / ${divs.length} divisions`}
           onClick={() => onOpenProjectList("total")} />
@@ -805,7 +805,7 @@ function SummaryView({
           foot="open delayed track" onClick={() => onOpenTrack({ status: "delayed" })} />
       </div>
 
-      <div className="dash-grid-2">
+      <div className="dash-grid-2" style={{marginTop:"20px",marginBottom:"20px"}}>
         <div className="dash-card">
           <div className="dash-card-title">Pie Chart<span className="dash-card-sub">Project status</span></div>
           <div className="dash-donut-wrap">
@@ -835,7 +835,7 @@ function SummaryView({
         </div>
       </div>
 
-      <div className="dash-grid-2">
+      <div className="dash-grid-2" style={{marginTop:"20px",marginBottom:"20px"}}>
         <div className="dash-card">
           <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / On Track / Delayed</span></div>
           <SignalCards groups={orgs} limit={VIS_GROUPS} onClick={onOpenOrg} />
@@ -911,7 +911,7 @@ function ProjectView({
         </div>
       </div>
 
-      <div className="dash-kpi-grid">
+      <div className="dash-kpi-grid" style={{marginTop:"20px",marginBottom:"20px"}}>
         <Kpi cls="total" label="Overall Progress" value={pk.progress + "%"}
           foot={`${pk.tasksDone}/${pk.tasksTotal} tasks completed`}
           onClick={() => onOpenTrack({ projectId: p.id })} />
@@ -927,7 +927,7 @@ function ProjectView({
           onClick={() => onOpenTrack({ projectId: p.id, status: "delayed" })} />
       </div>
 
-      <div className="dash-grid-2">
+      <div className="dash-grid-2" style={{marginTop:"20px",marginBottom:"20px"}}>
         <div className="dash-card">
           <div className="dash-card-title">Project Pie Chart<span className="dash-card-sub">Milestones and activities</span></div>
           <div className="dash-donut-wrap">
@@ -978,7 +978,7 @@ function OrgOrDivisionView({ projects, kind, name, showAll, onOpenGroup, onShowA
             <button type="button" className="dash-ghost-btn" onClick={onBack}>Back</button>
           </div>
         </div>
-        <div className="dash-kpi-grid">
+        <div className="dash-kpi-grid" style={{marginTop:"20px",marginBottom:"20px"}}>
           <Kpi cls="total" label="Total Projects" value={g.projects.length} foot="assigned projects" />
           <Kpi cls="completed" label="Completed" value={c.completed} foot="delivered"
             onClick={() => onOpenTrack({ [kind === "org" ? "org" : "division"]: name, projectMode: "completed" })} />
@@ -1139,7 +1139,7 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
         </div>
       </div>
 
-      <div className="dash-kpi-grid">
+      <div className="dash-kpi-grid" style={{marginTop:"20px",marginBottom:"20px"}}>
         <Kpi cls="total" label="Overall Progress" value={avg + "%"} foot={`${rows.length} items in scope`} />
         <Kpi cls="total" label="Total Items" value={rows.length} foot="selected scope" />
         <Kpi cls="completed" label="Completed" value={c.completed} foot="finished" />
@@ -1163,7 +1163,7 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
         </div>
       </div>
 
-      <div className="dash-track-table-wrap">
+      <div className="dash-track-table-wrap" style={{marginTop:"20px", marginBottom:"20px"}}>
         <table className="dash-track-table">
           <thead>
             <tr>

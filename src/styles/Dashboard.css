@@ -69,7 +69,10 @@
 .dashboard-wrap .dash-primary-btn:disabled { opacity: .55; cursor: not-allowed; }
 .dashboard-wrap .dash-ghost-btn:hover,
 .dashboard-wrap .dash-more-btn:hover { background: #eef6fb; border-color: #c8d6ee; }
-
+.dash-card{
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
 /* ─── Card ─── */
 .dashboard-wrap .dash-card,
 .dashboard-wrap .dash-project-head,
@@ -337,6 +340,7 @@
 }
 .dashboard-wrap .dash-project-card-title {
   font-weight: 900; color: var(--dash-navy); margin-top: 3px;
+  word-break: break-all;
 }
 .dashboard-wrap .dash-project-card-meta {
   font-size: 11.5px; color: var(--dash-text-muted); margin-top: 5px; line-height: 1.45;
