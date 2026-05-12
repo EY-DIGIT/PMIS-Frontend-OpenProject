@@ -1306,16 +1306,27 @@ export default function ProjectDetailsPage() {
                   const kindLabel = c.targetKind
                     ? c.targetKind.charAt(0).toUpperCase() + c.targetKind.slice(1)
                     : "";
-                  const when = c.createdAt ? new Date(c.createdAt) : null;
+                  // Backend may return createdAt as a naive ISO string
+                  // (no Z / no ±HH:MM offset). Those are UTC in the
+                  // database — appending "Z" prevents the browser from
+                  // mis-parsing them as local time.
+                  const rawCreatedAt = c.createdAt || "";
+                  const normalizedCreatedAt =
+                    rawCreatedAt && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(rawCreatedAt)
+                      ? `${rawCreatedAt}Z`
+                      : rawCreatedAt;
+                  const when = normalizedCreatedAt ? new Date(normalizedCreatedAt) : null;
                   const whenLabel =
                     when && !Number.isNaN(when.getTime())
-                      ? when.toLocaleString("en-IN", {
+                      ? `${when.toLocaleString("en-IN", {
                           day: "2-digit",
                           month: "short",
                           year: "numeric",
                           hour: "2-digit",
-                          minute: "2-digit"
-                        })
+                          minute: "2-digit",
+                          hour12: true,
+                          timeZone: "Asia/Kolkata"
+                        })}`
                       : "";
                   const createdByLogin =
                     c.createdByLogin || c.created_by_login || "";
