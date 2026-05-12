@@ -549,7 +549,7 @@ export default function AuditLogsPage() {
             <label htmlFor="al-searchTerm">Search</label>
             <input
               id="al-searchTerm"
-              placeholder="User ID, username, action or value..."
+              placeholder="username, action or value..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={handleSearchKeyDown}
