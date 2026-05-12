@@ -173,6 +173,8 @@ function mapMilestone(m) {
     actualStart: fromApiDate(m.actualStartDate),
     actualEnd: fromApiDate(m.actualEndDate),
     status: m.status,
+    scheduleStatus: m.scheduleStatus,
+    daysDelayed: m.daysDelayed || 0,
     activities: Array.isArray(m.activities) ? m.activities.map(mapActivity) : [],
   };
 }
@@ -186,6 +188,8 @@ function mapActivity(a) {
     actualStart: fromApiDate(a.actualStartDate),
     actualEnd: fromApiDate(a.actualEndDate),
     status: a.status,
+    scheduleStatus: a.scheduleStatus,
+    daysDelayed: a.daysDelayed || 0,
     approvalState: a.approvalState || 'idle',
     tasks: Array.isArray(a.tasks) ? a.tasks.map(mapTask) : [],
   };

@@ -188,6 +188,28 @@ function groupBy(projects, field) {
     .sort((a, b) => b.projects.length - a.projects.length || a.name.localeCompare(b.name));
 }
 
+/* BE returns `scheduleStatus` on each milestone/activity with one of four
+   values; the dashboard pie/legend/KPI tiles operate on three buckets, so
+   collapse `in_progress` → `ontrack` and `not_started` → `active`. */
+const BUCKET_FROM_SCHEDULE = {
+  completed: "completed",
+  delayed: "delayed",
+  in_progress: "ontrack",
+  not_started: "active",
+};
+
+/* Lifecycle `status === "completed"` wins over `scheduleStatus`: an item
+   finished late is still done — pie chart shows it under "completed", and
+   the late-by-N-days info surfaces via the Delayed Track list, not by
+   stealing the row from the completed bucket. */
+function itemBucket(node, today) {
+  if (node && node.status === "completed") return "completed";
+  if (node && node.scheduleStatus) {
+    return BUCKET_FROM_SCHEDULE[node.scheduleStatus] || "active";
+  }
+  return nodeStatus(node, today);
+}
+
 function flattenRows(project, opts = {}) {
   const today = opts.today || todayDate();
   const rows = [];
@@ -219,9 +241,10 @@ function flattenRows(project, opts = {}) {
     rows.push({
       project, key: mKey, parentKey: null, kind: "milestone",
       wbs: `M${mi + 1}`, name: m.name, context: project.name, node: m,
-      status: nodeStatus(m, today), progress: progress(m, today),
+      status: itemBucket(m, today), progress: progress(m, today),
       plannedStart: m.plannedStart || md.plannedStart, plannedEnd: m.plannedEnd || md.plannedEnd,
-      actualStart: md.actualStart, actualEnd: md.actualEnd, delay: delayDays(m, today),
+      actualStart: md.actualStart, actualEnd: md.actualEnd,
+      delay: m.daysDelayed != null ? m.daysDelayed : delayDays(m, today),
     });
     (m.activities || []).forEach((a, ai) => {
       const aKey = `${mKey}:a:${ai}`;
@@ -229,9 +252,10 @@ function flattenRows(project, opts = {}) {
       rows.push({
         project, key: aKey, parentKey: mKey, kind: "activity",
         wbs: `A${mi + 1}.${ai + 1}`, name: a.name, context: m.name, node: a,
-        status: nodeStatus(a, today), progress: progress(a, today),
+        status: itemBucket(a, today), progress: progress(a, today),
         plannedStart: ad.plannedStart, plannedEnd: ad.plannedEnd,
-        actualStart: ad.actualStart, actualEnd: ad.actualEnd, delay: delayDays(a, today),
+        actualStart: ad.actualStart, actualEnd: ad.actualEnd,
+        delay: a.daysDelayed != null ? a.daysDelayed : delayDays(a, today),
         approvalState: a.approvalState,
       });
       includeTaskRows(a.tasks, aKey, a.name, mi, ai);
@@ -1106,14 +1130,13 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
     : (scope.kind && titleMap[scope.kind]) ? titleMap[scope.kind]
     : "Track Progress";
 
-  const kindKeys = ["milestone", "activity", "task", "subtask"];
   const statusKeys = ["completed", "ontrack", "delayed"];
-  const byKind = { milestone: 0, activity: 0, task: 0, subtask: 0, total: rows.length };
-  rows.forEach((r) => { if (byKind[r.kind] != null) byKind[r.kind]++; });
-  const pieCounts = isDelayed ? byKind : c;
-  const pieKeys = isDelayed ? kindKeys : statusKeys;
+  const pieCounts = isDelayed
+    ? { delayed: c.delayed, total: c.delayed }
+    : c;
+  const pieKeys = isDelayed ? ["delayed"] : statusKeys;
   const pieSubtitle = isDelayed
-    ? "Delayed items by hierarchy level"
+    ? "All items past expected end date"
     : scope.kind ? `${titleMap[scope.kind] || scope.kind} status distribution`
     : "Status distribution";
 
@@ -1135,28 +1158,36 @@ function TrackProgressView({ projects, scope, delayFilter, setDelayFilter, onBac
       </div>
 
       <div className="dash-kpi-grid" style={{marginTop:"20px",marginBottom:"20px"}}>
-        <Kpi cls="total" label="Overall Progress" value={avg + "%"} foot={`${rows.length} items in scope`} />
-        <Kpi cls="total" label="Total Items" value={rows.length} foot="selected scope" />
-        <Kpi cls="completed" label="Completed" value={c.completed} foot="finished" />
+        {!isDelayed &&
+          <Kpi cls="total" label="Overall Progress" value={avg + "%"} foot={`${rows.length} items in scope`} />}
+        {!isDelayed &&
+          <Kpi cls="total" label="Total Items" value={rows.length} foot="selected scope" />}
+        {!isDelayed &&
+          <Kpi cls="completed" label="Completed" value={c.completed} foot="finished" />}
         {!(scope.kind === "milestone" || scope.kind === "activity") &&
           <Kpi cls="delayed" label="Delayed" value={c.delayed} foot="past expected end date" />}
-        {!(scope.kind === "milestone" || scope.kind === "activity") &&
+        {!isDelayed && !(scope.kind === "milestone" || scope.kind === "activity") &&
           <Kpi cls="ontrack" label="On Track" value={c.ontrack} foot="within schedule" />}
-        {(scope.kind === "activity" || scope.approval) &&
+        {!isDelayed && (scope.kind === "activity" || scope.approval) &&
           <Kpi cls="pending" label="Pending for Approval" value={pending} foot="activities only" />}
       </div>
 
-      <div className="dash-card">
-        <div className="dash-card-title">
-          Pie Chart
-          {isDelayed && <DelayFilter value={delayFilter} onChange={setDelayFilter} />}
-          <span className="dash-card-sub">{pieSubtitle}</span>
+      {isDelayed ? (
+        <div className="dash-card" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+          <DelayFilter value={delayFilter} onChange={setDelayFilter} />
         </div>
-        <div className="dash-donut-wrap">
-          <Donut counts={pieCounts} keys={pieKeys} />
-          <Legend counts={pieCounts} keys={pieKeys} />
+      ) : (
+        <div className="dash-card">
+          <div className="dash-card-title">
+            Pie Chart
+            <span className="dash-card-sub">{pieSubtitle}</span>
+          </div>
+          <div className="dash-donut-wrap">
+            <Donut counts={pieCounts} keys={pieKeys} />
+            <Legend counts={pieCounts} keys={pieKeys} />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="dash-track-table-wrap" style={{marginTop:"20px", marginBottom:"20px"}}>
         <table className="dash-track-table">
