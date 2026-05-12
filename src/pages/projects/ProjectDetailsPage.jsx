@@ -1316,6 +1316,8 @@ export default function ProjectDetailsPage() {
                           minute: "2-digit"
                         })
                       : "";
+                  const createdByLogin =
+                    c.createdByLogin || c.created_by_login || "";
                   return (
                     <li
                       key={c.id}
@@ -1357,6 +1359,9 @@ export default function ProjectDetailsPage() {
                           </span>
                         )}
                         {whenLabel && <span>· {whenLabel}</span>}
+                        {createdByLogin && (
+                          <span>· by <strong style={{ color: "#173e77" }}>{createdByLogin}</strong></span>
+                        )}
                       </div>
                       {Array.isArray(c.attachments) && c.attachments.length > 0 && (
                         <ul

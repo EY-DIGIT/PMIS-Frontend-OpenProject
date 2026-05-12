@@ -177,7 +177,7 @@ export default function TrackProgressPage() {
             <div className="uidai-track-kpi__sub">Past expected end date</div>
           </div>
           <div className="uidai-track-kpi">
-            <div className="uidai-track-kpi__label">On Track</div>
+            <div className="uidai-track-kpi__label">In Progress</div>
             <div className="uidai-track-kpi__value" style={{ color: "#1a56db" }}>
               {totals.ontrack}
             </div>
@@ -198,7 +198,7 @@ export default function TrackProgressPage() {
               className="uidai-track-legend__swatch"
               style={{ background: "#e3eefc", border: "1px solid #b9d0f1" }}
             />
-            On Track
+            In Progress
           </span>
           <span className="uidai-track-legend__item">
             <span
