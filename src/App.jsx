@@ -245,13 +245,17 @@ function Breadcrumbs() {
                 const isProjectIdSeg = projectIdSeg && i === 1 && visibleSegments[0] === "projects";
                 const isUserIdSeg = userIdSeg && i === 1 && visibleSegments[0] === "users";
                 const isVendorIdSeg = vendorIdSeg && i === 1 && visibleSegments[0] === "vendors";
+                const isDashboardSub = visibleSegments[0] === "dashboard" && i === 1;
+                const DASH_SUB_LABELS = { summary: "Summary", project: "Project View", org: "Organization View" };
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
                     : isUserIdSeg && userCode
                         ? userCode
                         : isVendorIdSeg && vendorCode
                             ? vendorCode
-                            : (LABELS[seg] || decodeURIComponent(seg));
+                            : isDashboardSub && DASH_SUB_LABELS[seg]
+                                ? DASH_SUB_LABELS[seg]
+                                : (LABELS[seg] || decodeURIComponent(seg));
                 return (
                     <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#999" }}>›</span>
@@ -327,6 +331,16 @@ export default function MainApp() {
                                             <Route path="/" element={<HomePage />} />
                                             <Route
                                               path="/dashboard"
+                                              element={
+                                                <RequirePermission action="viewDashboard">
+                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                    <Dashboard />
+                                                  </Suspense>
+                                                </RequirePermission>
+                                              }
+                                            />
+                                            <Route
+                                              path="/dashboard/:view"
                                               element={
                                                 <RequirePermission action="viewDashboard">
                                                   <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>

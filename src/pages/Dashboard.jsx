@@ -5,7 +5,7 @@
    navigate to the existing /projects/:projectId Project Details page. */
 
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import {
   projectsList as fetchDashboardProjects,
   projectCardToLegacy,
@@ -546,8 +546,12 @@ const TITLE_BY_VIEW = {
   track: "Track Progress",
 };
 
+const URL_VIEW_TO_INTERNAL = { summary: "summary", project: "project", org: "org" };
+
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { view: urlView } = useParams();
+  const location = useLocation();
 
   /* Live project list — populated from GET /api/v3/dashboard/projects.
      Each entry carries BE-computed bucket / progress / counters under
@@ -583,7 +587,7 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, [reloadTick]);
 
-  const [view, setView] = useState("summary");
+  const [view, setView] = useState(() => URL_VIEW_TO_INTERNAL[urlView] || "summary");
   const [selectedProject, setSelectedProject] = useState(null);
   const [comboOpen, setComboOpen] = useState(false);
   const [org, setOrg] = useState(null);
@@ -598,6 +602,20 @@ export default function Dashboard() {
     setTrees({});
     setReloadTick((n) => n + 1);
   }
+
+  // Sync URL → internal view. The sidebar routes /dashboard/{summary,
+  // project, org} drive this; other views (track, projects list,
+  // division) are still set via in-page interactions and do not push
+  // to the URL. location.key is included so clicking the same sidebar
+  // entry from a deeper internal view (e.g., track) still resets.
+  useEffect(() => {
+    const next = URL_VIEW_TO_INTERNAL[urlView] || "summary";
+    setView(next);
+    setComboOpen(false);
+    setTrack(null);
+    if (next !== "org") setOrg(null);
+    if (next !== "division") setDivision(null);
+  }, [urlView, location.key]);
 
   // Lazy-fetch /tree the first time a single project is needed in depth
   // (Project View KPIs that come from /dashboard/projects/{id} OR Track
@@ -643,14 +661,6 @@ export default function Dashboard() {
     }
   }
 
-  function selectView(v) {
-    setView(v);
-    setComboOpen(false);
-    setTrack(null);
-    if (v !== "org") setOrg(null);
-    if (v !== "division") setDivision(null);
-  }
-
   function openProject(id) {
     setSelectedProject(id);
     setView("project");
@@ -674,20 +684,6 @@ export default function Dashboard() {
         <button type="button" className="dash-primary-btn" onClick={handleRefresh}>
           Refresh
         </button>
-      </div>
-
-      <div className="dash-view-tabs" role="tablist">
-        {[
-          { id: "summary", label: "Summary" },
-          { id: "project", label: "Project View" },
-          { id: "org", label: "Organization View" },
-        ].map((t) => (
-          <button key={t.id} type="button" role="tab"
-            className={`dash-tab${view === t.id || (view === "track" && track?.projectId && t.id === "project") ? " active" : ""}`}
-            onClick={() => selectView(t.id)}>
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {loading && <div className="dash-empty" style={{ padding: 24 }}>Loading dashboard…</div>}

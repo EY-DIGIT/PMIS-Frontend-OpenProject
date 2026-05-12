@@ -40,6 +40,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const showUserMgmt = canViewUsers || canCreateUser;
 
   // Submenu open/close state — mirrors original HTML (arrow ▶ / ▼)
+  const [dashOpen, setDashOpen] = useState(false);
   const [pmOpen, setPmOpen] = useState(false);
   const [mdOpen, setMdOpen] = useState(false);
   const [vmOpen, setVmOpen] = useState(false);
@@ -53,7 +54,10 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   // Active flags. "Search" rows share their prefix with the matching "Add"
   // page (e.g. /projects vs /projects/add) — so we explicitly exclude the
   // Add path from Search's match.
-  const dashActive = isExact("/dashboard");
+  const dashActive = isUnder("/dashboard");
+  const summaryActive = isExact("/dashboard") || isExact("/dashboard/summary");
+  const projectViewActive = isExact("/dashboard/project");
+  const orgViewActive = isExact("/dashboard/org");
   const addProjectActive = isUnder("/projects/add");
   const searchProjectActive = isUnder("/projects") && !addProjectActive;
   const pmActive = addProjectActive || searchProjectActive;
@@ -74,11 +78,12 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   // Auto-expand the section that matches the current route so the active
   // child is visible without the user having to click the parent first.
   useEffect(() => {
+    if (dashActive) setDashOpen(true);
     if (pmActive) setPmOpen(true);
     if (masterActive) setMdOpen(true);
     if (vmActive) setVmOpen(true);
     if (umActive) setUmOpen(true);
-  }, [pmActive, masterActive, vmActive, umActive]);
+  }, [dashActive, pmActive, masterActive, vmActive, umActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -88,13 +93,47 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
       <div className="pmis-menu">
         {/* Dashboard */}
         {canViewDashboard && (
-          <a
-            className={dashActive ? "active" : ""}
-            onClick={() => navigate("/dashboard")}
-          >
-            <FiGrid size={ICON_SIZE} />
-            <span className="pmis-text">Dashboard</span>
-          </a>
+          <>
+            <a
+              className={dashActive ? "active" : ""}
+              onClick={() => {
+                const next = !dashOpen;
+                setDashOpen(next);
+                if (next && !dashActive) {
+                  navigate("/dashboard/summary", { state: { tick: Date.now() } });
+                }
+              }}
+            >
+              <FiGrid size={ICON_SIZE} />
+              <span className="pmis-text">Dashboard</span>
+              <span className="pmis-submenu-arrow">
+                <Chevron open={dashOpen} />
+              </span>
+            </a>
+            <div className={`pmis-submenu${dashOpen ? " open" : ""}`}>
+              <div
+                className={summaryActive ? "active" : ""}
+                onClick={() => navigate("/dashboard/summary", { state: { tick: Date.now() } })}
+              >
+                <FiGrid size={ICON_SIZE} />
+                <span className="pmis-text">Summary</span>
+              </div>
+              <div
+                className={projectViewActive ? "active" : ""}
+                onClick={() => navigate("/dashboard/project", { state: { tick: Date.now() } })}
+              >
+                <FiFolder size={ICON_SIZE} />
+                <span className="pmis-text">Project View</span>
+              </div>
+              <div
+                className={orgViewActive ? "active" : ""}
+                onClick={() => navigate("/dashboard/org", { state: { tick: Date.now() } })}
+              >
+                <FiBriefcase size={ICON_SIZE} />
+                <span className="pmis-text">Organization View</span>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Project Management */}
