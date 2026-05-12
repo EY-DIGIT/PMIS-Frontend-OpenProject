@@ -4,6 +4,11 @@ services:
   pmis-frontend:
     image: ${DOCKER_USERNAME:+${DOCKER_USERNAME}/}pmis-frontend:${VERSION}
     container_name: pmis-frontend
+    environment:
+      TZ: Asia/Kolkata
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro  
     ports:
       - "3000:80"
     restart: unless-stopped

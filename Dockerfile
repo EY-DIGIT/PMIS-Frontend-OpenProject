@@ -25,9 +25,17 @@ RUN npm run build
 # ── Stage 2: Serve ────────────────────────────────────────────────
 FROM nginx:1.25-alpine
 
+ENV TZ=Asia/Kolkata
+
+RUN apk add --no-cache tzdata \
+    && cp /usr/share/zoneinfo/Asia/Kolkata /etc/localtime \
+    && echo "Asia/Kolkata" > /etc/timezone
+
 RUN rm -rf /usr/share/nginx/html/*
+
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 
 EXPOSE 80
+
 CMD ["nginx", "-g", "daemon off;"]
