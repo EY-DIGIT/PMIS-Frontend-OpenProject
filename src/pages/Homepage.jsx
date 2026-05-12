@@ -6,7 +6,7 @@ export default function HomePage() {
       <div className="uidai-home-title">Welcome to UIDAI Automation Governance Tool</div>
       <div className="uidai-home-subtitle">
         Please proceed to the relevant module to perform project onboarding,
-        master data handling, vendor administration, user access management,
+        master data handling, Organization administration, user access management,
         meeting coordination, and audit review. Use the sidebar to navigate
         across the workspace and keep your governance tasks organized,
         traceable, and consistent with the UIDAI theme.
@@ -22,10 +22,10 @@ export default function HomePage() {
           </p>
         </div>
         <div className="uidai-home-card">
-          <h3>Vendor &amp; User Management</h3>
+          <h3>Organization &amp; User Management</h3>
           <div className="uidai-home-tag">Controlled access for every role.</div>
           <p>
-            Maintain vendors and users in a controlled flow so access,
+            Maintain organizations and users in a controlled flow so access,
             mapping, and accountability stay clean.
           </p>
         </div>
