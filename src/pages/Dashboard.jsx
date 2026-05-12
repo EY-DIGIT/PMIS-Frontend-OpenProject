@@ -805,8 +805,8 @@ function SummaryView({
         <div className="dash-card">
           <div className="dash-card-title">Pie Chart<span className="dash-card-sub">Project status</span></div>
           <div className="dash-donut-wrap">
-            <Donut counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
-            <Legend counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
+            <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
+            <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
           </div>
         </div>
         <div className="dash-card">
@@ -927,8 +927,8 @@ function ProjectView({
         <div className="dash-card">
           <div className="dash-card-title">Project Pie Chart<span className="dash-card-sub">Milestones and activities</span></div>
           <div className="dash-donut-wrap">
-            <Donut counts={chartCounts} keys={["active", "completed", "ontrack", "delayed"]} />
-            <Legend counts={chartCounts} keys={["active", "completed", "ontrack", "delayed"]} />
+            <Donut counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
+            <Legend counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
           </div>
         </div>
         <div className="dash-card">
@@ -986,8 +986,8 @@ function OrgOrDivisionView({ projects, kind, name, showAll, onOpenGroup, onShowA
         <div className="dash-card">
           <div className="dash-card-title">Pie Chart<span className="dash-card-sub">{name}</span></div>
           <div className="dash-donut-wrap">
-            <Donut counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
-            <Legend counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
+            <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
+            <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
           </div>
         </div>
         <div className="dash-card">
@@ -1007,8 +1007,8 @@ function OrgOrDivisionView({ projects, kind, name, showAll, onOpenGroup, onShowA
           Pie Chart<span className="dash-card-sub">All {kind === "org" ? "organizations" : "divisions"} / project status</span>
         </div>
         <div className="dash-donut-wrap">
-          <Donut counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
-          <Legend counts={c} keys={["active", "completed", "ontrack", "delayed"]} />
+          <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
+          <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
         </div>
       </div>
       <div className="dash-card">
