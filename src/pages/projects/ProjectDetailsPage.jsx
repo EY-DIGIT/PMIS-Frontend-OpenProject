@@ -177,6 +177,7 @@ export default function ProjectDetailsPage() {
   const canPublishProject = useCan('publishProject');
   const canDeleteProject = useCan('deleteProject');
   const canManageDocuments = useCan('manageProjectDocuments');
+  const canViewDocuments = useCan('viewProjectDocuments');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -890,7 +891,7 @@ export default function ProjectDetailsPage() {
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "space-between" }}>
         <div className="uidai-page-header__actions">
-          {canManageDocuments && (
+          {canViewDocuments && (
             <button
               className="uidai-btn"
               disabled={editing}
