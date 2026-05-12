@@ -16,7 +16,7 @@ const ACTION_OPTIONS = [
   "Login"
 ];
 
-const PAGE_SIZE_OPTIONS = [5, 10, 20, 0];
+const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 
 // Format an ISO timestamp to "DD-MMM-YYYY HH:MM" in IST. Falls back to
 // the raw input if parsing fails.
@@ -738,7 +738,7 @@ export default function AuditLogsPage() {
               }}
             >
               {PAGE_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>{n === 0 ? "200" : n}</option>
+                <option key={n} value={n}>{n}</option>
               ))}
             </select>
           </div>
