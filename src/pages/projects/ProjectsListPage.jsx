@@ -203,11 +203,11 @@ export default function ProjectsListPage() {
           </div>
         </div>
 
-        {error && !loading && (
+        {/* {error && !loading && (
           <div className="uidai-hint" style={{ marginTop: 8, color: "#b91c1c" }}>
             Could not load projects: {error}
           </div>
-        )}
+        )} */}
 
         <div className="uidai-table-wrap">
           <table className="uidai-table">
