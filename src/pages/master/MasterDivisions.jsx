@@ -111,7 +111,6 @@ export default function MasterDivisions() {
               <tr>
                 <th>Code</th>
                 <th>Label</th>
-                <th>Requires Other</th>
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Status</th>
@@ -121,14 +120,14 @@ export default function MasterDivisions() {
             <tbody>
               {loading && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 16 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 16 }}>
                     Loading divisions...
                   </td>
                 </tr>
               )}
               {!loading && paged.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 16 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 16 }}>
                     No divisions found.
                   </td>
                 </tr>
@@ -145,7 +144,6 @@ export default function MasterDivisions() {
                     )}
                   </td>
                   <td>{d.label}</td>
-                  <td>{d.requiresOther ? 'Yes' : 'No'}</td>
                   <td>{d.email || '—'}</td>
                   <td>{d.phoneNumber || '—'}</td>
                   <td>

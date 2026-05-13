@@ -11,7 +11,6 @@ export default function MasterDivisionForm() {
 
   const [code, setCode] = useState('');
   const [label, setLabel] = useState('');
-  const [requiresOther, setRequiresOther] = useState(false);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [active, setActive] = useState(true);
@@ -48,7 +47,6 @@ export default function MasterDivisionForm() {
         }
         setCode(found.code);
         setLabel(found.label);
-        setRequiresOther(!!found.requiresOther);
         setEmail(found.email || '');
         setPhone(found.phoneNumber || '');
         setActive(!!found.active);
@@ -68,9 +66,11 @@ export default function MasterDivisionForm() {
     else if (!isEdit && !/^[a-zA-Z0-9_-]+$/.test(code.trim()))
       errs.code = 'Only letters, numbers, dash and underscore';
     if (!label.trim()) errs.label = 'Label is required';
-    if (email && !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
+    if (!email.trim()) errs.email = 'Email is required';
+    else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
       errs.email = 'Enter a valid email';
-    if (phone && !/^\+?\d{10,15}$/.test(phone.trim()))
+    if (!phone.trim()) errs.phone = 'Phone is required';
+    else if (!/^\+?\d{10,15}$/.test(phone.trim()))
       errs.phone = 'Enter a valid phone (digits only, 10-15)';
     return errs;
   }
@@ -92,7 +92,6 @@ export default function MasterDivisionForm() {
           ? { email: email.trim(), phone_number: phone.trim() }
           : {
               label: label.trim(),
-              requiresOther,
               email: email.trim(),
               phone_number: phone.trim(),
             };
@@ -101,7 +100,6 @@ export default function MasterDivisionForm() {
         await divisionsApi.create({
           code: code.trim(),
           label: label.trim(),
-          requiresOther,
           email: email.trim(),
           phone_number: phone.trim(),
         });
@@ -133,7 +131,7 @@ export default function MasterDivisionForm() {
         <h3>{isEdit ? `Edit Division${isBuiltin ? ' (Built-in)' : ''}` : 'Add Division'}</h3>
         {isBuiltin && (
           <div style={{ background: '#fdf3ee', border: '1px solid #fae0d2', color: '#a8390a', padding: '8px 12px', borderRadius: 6, fontSize: 13, margin: '8px 0 16px' }}>
-            🔒 This is a built-in division. Code, label, and the "requires other" flag are locked. Only email and phone may be updated.
+            🔒 This is a built-in division. Code and label are locked. Only email and phone may be updated.
           </div>
         )}
         <br />
@@ -160,17 +158,6 @@ export default function MasterDivisionForm() {
             />
             {errors.label && <div className="uidai-pmis-field-error">{errors.label}</div>}
           </div>
-          <div className="uidai-pmis-field">
-            <label>Requires "Other" Specification</label>
-            <select
-              value={requiresOther ? 'yes' : 'no'}
-              onChange={(e) => setRequiresOther(e.target.value === 'yes')}
-              disabled={isEdit && isBuiltin}
-            >
-              <option value="no">No</option>
-              <option value="yes">Yes — user must specify the division name when picked</option>
-            </select>
-          </div>
           {isEdit && (
             <div className="uidai-pmis-field">
               <label>Status</label>
@@ -178,7 +165,7 @@ export default function MasterDivisionForm() {
             </div>
           )}
           <div className={errClass('email')}>
-            <label>Email</label>
+            <label>Email <span className="uidai-pmis-required">*</span></label>
             <input
               type="email"
               placeholder="e.g. division@uidai.gov.in"
@@ -188,7 +175,7 @@ export default function MasterDivisionForm() {
             {errors.email && <div className="uidai-pmis-field-error">{errors.email}</div>}
           </div>
           <div className={errClass('phone')}>
-            <label>Phone Number</label>
+            <label>Phone Number <span className="uidai-pmis-required">*</span></label>
             <input
               type="tel"
               placeholder="e.g. 9876543210 or +919876543210"
