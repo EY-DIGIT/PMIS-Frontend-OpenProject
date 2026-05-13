@@ -89,7 +89,7 @@ function fmtScalar(v) {
   return String(v);
 }
 
-function summarizeSide(before, after, side) {
+function summarizeSide(before, after, side, displayOverrides) {
   if (!before && !after) return "—";
   if (!before || !after || typeof before !== "object" || typeof after !== "object") {
     const v = side === "old" ? before : after;
@@ -110,8 +110,16 @@ function summarizeSide(before, after, side) {
   const diffs = [];
   keys.forEach((k) => {
     if (ID_KEYS.has(k)) return;
-    const a = before[k];
-    const b = after[k];
+    let a = before[k];
+    let b = after[k];
+    // Audit logs reference dependencies by UUID in before/after, but the
+    // entry carries human-readable codes ("A1.1") under
+    // dependsOnDisplay / dependsOnDisplayBefore. Swap them in so the cell
+    // shows codes instead of opaque IDs.
+    if (k === "depends_on" && displayOverrides) {
+      if (displayOverrides.before !== undefined) a = displayOverrides.before;
+      if (displayOverrides.after !== undefined) b = displayOverrides.after;
+    }
     // Compare arrays element-wise so an unchanged list isn't flagged.
     if (Array.isArray(a) || Array.isArray(b)) {
       const aArr = Array.isArray(a) ? a : [];
@@ -142,14 +150,19 @@ function shortenId(id) {
 }
 
 function normalizeEntry(e) {
+  const displayOverrides = {
+    before: e.dependsOnDisplayBefore,
+    after: e.dependsOnDisplay
+  };
   return {
     userId: e.actorCode || e.actor_code || "—",
     username: e.actorLogin || e.actor_login || e.actorId || "—",
     role: e.actorRole || e.actor_role || "—",
     actionRaw: e.action || "",
     action: prettyAction(e.action),
-    old: summarizeSide(e.before, e.after, "old"),
-    new: summarizeSide(e.before, e.after, "new"),
+    code: e.code || "",
+    old: summarizeSide(e.before, e.after, "old", displayOverrides),
+    new: summarizeSide(e.before, e.after, "new", displayOverrides),
     time: formatIstTime(e.createdAt || e.created_at),
     sub: relativeTime(e.createdAt || e.created_at),
     rawWhen: e.createdAt || e.created_at || "",
@@ -657,15 +670,15 @@ export default function AuditLogsPage() {
                     <td><div className="al-cell-user">{row.username}</div></td>
                     <td><span className="al-info-pill">{row.role}</span></td>
                     <td><span className="al-info-pill">{row.action}</span></td>
-                    <td className="al-value-cell">
+                    <td className="al-value-cell" title={row.code || undefined}>
                       {row.old === "—"
                         ? <span className="al-value-empty">—</span>
-                        : <span className="al-value-old">{row.old}</span>}
+                        : <span className="al-value-old" title={row.code || undefined}>{row.old}</span>}
                     </td>
-                    <td className="al-value-cell">
+                    <td className="al-value-cell" title={row.code || undefined}>
                       {row.new === "—"
                         ? <span className="al-value-empty">—</span>
-                        : <span className="al-value-new">{row.new}</span>}
+                        : <span className="al-value-new" title={row.code || undefined}>{row.new}</span>}
                     </td>
                     <td className="al-time-cell">
                       {row.time}
