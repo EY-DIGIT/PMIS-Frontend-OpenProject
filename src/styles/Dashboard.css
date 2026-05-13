@@ -69,10 +69,10 @@
 .dashboard-wrap .dash-primary-btn:disabled { opacity: .55; cursor: not-allowed; }
 .dashboard-wrap .dash-ghost-btn:hover,
 .dashboard-wrap .dash-more-btn:hover { background: #eef6fb; border-color: #c8d6ee; }
-.dash-card{
+/* .dash-card{
   margin-top: 20px;
   margin-bottom: 20px;
-}
+} */
 /* ─── Card ─── */
 .dashboard-wrap .dash-card,
 .dashboard-wrap .dash-project-head,

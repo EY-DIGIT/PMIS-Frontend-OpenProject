@@ -36,9 +36,13 @@ import MasterDivisionForm from './pages/master/MasterDivisionForm';
 import { DataProvider } from './data/DataContext';
 import "./styles/global.css";
 
-// Dashboard is lazy-loaded so the heavy charts library only ships
-// when the user actually navigates there.
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+// Dashboard pages are lazy-loaded so the heavy charts library only
+// ships when the user actually navigates there. The three sidebar
+// entries (Summary / Project / Organization) each have their own
+// route + component file under src/pages/dashboard/.
+const DashboardSummary = lazy(() => import("./pages/dashboard/SummaryView"));
+const DashboardProject = lazy(() => import("./pages/dashboard/ProjectView"));
+const DashboardOrganization = lazy(() => import("./pages/dashboard/OrganizationView"));
 
 
 import ProjectsListPage from "./pages/projects/ProjectsListPage";
@@ -329,22 +333,33 @@ export default function MainApp() {
                                         <Breadcrumbs />
                                         <Routes>
                                             <Route path="/" element={<HomePage />} />
+                                            <Route path="/dashboard" element={<Navigate to="/dashboard/summary" replace />} />
                                             <Route
-                                              path="/dashboard"
+                                              path="/dashboard/summary"
                                               element={
                                                 <RequirePermission action="viewDashboard">
                                                   <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                    <Dashboard />
+                                                    <DashboardSummary />
                                                   </Suspense>
                                                 </RequirePermission>
                                               }
                                             />
                                             <Route
-                                              path="/dashboard/:view"
+                                              path="/dashboard/project"
                                               element={
                                                 <RequirePermission action="viewDashboard">
                                                   <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                    <Dashboard />
+                                                    <DashboardProject />
+                                                  </Suspense>
+                                                </RequirePermission>
+                                              }
+                                            />
+                                            <Route
+                                              path="/dashboard/org"
+                                              element={
+                                                <RequirePermission action="viewDashboard">
+                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                    <DashboardOrganization />
                                                   </Suspense>
                                                 </RequirePermission>
                                               }

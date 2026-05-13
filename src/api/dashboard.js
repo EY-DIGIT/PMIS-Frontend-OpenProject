@@ -36,19 +36,221 @@ function unwrap(res) {
 
 /* ─── Endpoint wrappers ────────────────────────────────────────── */
 
-export async function summary({ delayMinDays = 5 } = {}) {
-  const res = await api.get(ENDPOINTS.dashboard.summary, {
-    query: { delayMinDays },
+// Hard ceiling on every dashboard request. The BE has shipped slow /
+// hung responses in the past; without a timeout the UI sits on
+// "Loading…" indefinitely. 60s accommodates the slowest aggregate
+// queries (200-project roll-up) we've actually seen in prod.
+const DASHBOARD_TIMEOUT_MS = 60000;
+
+function withTimeout(promise, ms = DASHBOARD_TIMEOUT_MS, label = "request") {
+  let timer;
+  const t = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
   });
+  return Promise.race([promise, t]).finally(() => clearTimeout(timer));
+}
+
+export async function summary({ delayMinDays = 5 } = {}) {
+  const res = await withTimeout(
+    api.get(ENDPOINTS.dashboard.summary, { query: { delayMinDays } }),
+    DASHBOARD_TIMEOUT_MS, "dashboard summary",
+  );
   return unwrap(res);
+}
+
+/* Tries `/dashboard/summary` first; if that endpoint is missing, slow,
+   or returns an unexpected shape, derives the same view-model from
+   `/dashboard/projects` (or its raw-list fallback). View files only
+   ever need to call this one helper — they don't have to know which
+   path delivered the data. */
+export async function summaryWithFallback({ delayMinDays = 1 } = {}) {
+  console.info("[dashboard] summaryWithFallback start", { delayMinDays });
+  try {
+    const t0 = performance.now();
+    const data = await summary({ delayMinDays });
+    console.info("[dashboard] summary() ok in", Math.round(performance.now() - t0), "ms", { raw: data });
+    const normalized = normalizeSummaryResponse(data);
+    if (normalized) {
+      console.info("[dashboard] summary normalized →", normalized);
+      return normalized;
+    }
+    console.warn("[dashboard] summary returned unusable shape, falling back to projectsList");
+  } catch (e) {
+    console.warn("[dashboard] summary() failed:", e?.message || e);
+  }
+
+  let cards;
+  try {
+    const t0 = performance.now();
+    const payload = await withTimeout(
+      projectsList({ pageSize: 200 }), DASHBOARD_TIMEOUT_MS, "projects list",
+    );
+    console.info("[dashboard] projectsList() ok in", Math.round(performance.now() - t0), "ms");
+    cards = Array.isArray(payload?.projects) ? payload.projects : [];
+  } catch (e) {
+    console.warn("[dashboard] projectsList() failed:", e?.message || e, "→ trying raw fallback");
+    const t0 = performance.now();
+    const list = await withTimeout(
+      projectsListFallback(), DASHBOARD_TIMEOUT_MS, "raw projects list",
+    );
+    console.info("[dashboard] projectsListFallback() ok in", Math.round(performance.now() - t0), "ms");
+    cards = list.map(legacyToProjectCard);
+  }
+  const result = aggregateProjectsIntoSummary(cards, delayMinDays);
+  console.info("[dashboard] fallback aggregate →", result);
+  return result;
+}
+
+/* The BE summary response uses different field names than the
+   doc-spec frontend was written against (counts/delayedTrack/
+   topOrganisations/topDivisions instead of totals/delayedProjects/
+   byOrganisation/byDivision). This adapter maps it to the canonical
+   internal shape the views consume — so both the live endpoint and
+   the client-side fallback aggregator emit the same view-model. */
+export function normalizeSummaryResponse(data) {
+  if (!data || typeof data !== "object") return null;
+  const counts = data.totals || data.counts;
+  if (!counts || typeof counts !== "object") return null;
+
+  const totalProjects = counts.projects ?? counts.total ?? 0;
+  const completed = counts.completed ?? 0;
+  const totals = {
+    projects: totalProjects,
+    completed,
+    ontrack: counts.ontrack ?? 0,
+    delayed: counts.delayed ?? 0,
+    active: counts.active ?? Math.max(totalProjects - completed, 0),
+  };
+
+  const orgSource = data.byOrganisation || data.topOrganisations || [];
+  const byOrganisation = (Array.isArray(orgSource) ? orgSource : []).map((o) => {
+    const c = o.counts || o;
+    return {
+      name: o.name,
+      vendorId: o.id || o.vendorId || null,
+      total: c.total ?? o.projectCount ?? o.total ?? 0,
+      completed: c.completed ?? 0,
+      ontrack: c.ontrack ?? 0,
+      delayed: c.delayed ?? 0,
+    };
+  });
+
+  const divSource = data.byDivision || data.topDivisions || [];
+  const byDivision = (Array.isArray(divSource) ? divSource : []).map((dv) => {
+    const c = dv.counts || dv;
+    return {
+      name: dv.label || dv.name || dv.code || "—",
+      code: dv.code || null,
+      total: c.total ?? dv.projectCount ?? dv.total ?? 0,
+      completed: c.completed ?? 0,
+      ontrack: c.ontrack ?? 0,
+      delayed: c.delayed ?? 0,
+    };
+  });
+
+  const delayedSource = data.delayedProjects || data.delayedTrack || [];
+  const delayedProjects = (Array.isArray(delayedSource) ? delayedSource : []).map((dp) => {
+    const orgs = Array.isArray(dp.organisations) ? dp.organisations : [];
+    const orgName = orgs[0]?.name || dp.organisation || "—";
+    return {
+      projectId: dp.projectId || dp.id || "",
+      projectCode: dp.projectCode || dp.id || "",
+      name: dp.name || "",
+      organisation: orgName,
+      division: dp.divisionLabel || dp.division || "—",
+      delayedItems: dp.delayedItems ?? dp.delayedItemCount ?? 0,
+      maxDelayDays: dp.maxDelayDays ?? 0,
+    };
+  });
+
+  return { totals, byOrganisation, byDivision, delayedProjects };
+}
+
+/* Same shape /dashboard/summary returns, but built client-side from
+   the per-project list. Each ProjectCard carries the BE-computed
+   bucket and _be aggregates already, so this is a pure transform. */
+function aggregateProjectsIntoSummary(cards, delayMinDays = 0) {
+  const totals = { projects: cards.length, active: 0, completed: 0, ontrack: 0, delayed: 0 };
+  const byOrg = new Map();
+  const byDiv = new Map();
+  const delayedProjects = [];
+
+  for (const card of cards) {
+    const bucket = card?.bucket || "active";
+    if (totals[bucket] != null) totals[bucket]++;
+
+    const orgName = pickOrgName(card);
+    bumpGroup(byOrg, orgName, bucket);
+
+    const divName = card?.division || card?.divisionOther || "—";
+    bumpGroup(byDiv, divName, bucket);
+
+    const delayCount = card?.delayedItemCount || 0;
+    const maxDelay = card?.maxDelayDays || 0;
+    if (bucket === "delayed" && delayCount > 0 && maxDelay >= delayMinDays) {
+      delayedProjects.push({
+        projectId: card.id,
+        projectCode: card.projectCode || card.id,
+        name: card.name || "",
+        organisation: orgName,
+        division: divName,
+        delayedItems: delayCount,
+        maxDelayDays: maxDelay,
+      });
+    }
+  }
+
+  delayedProjects.sort((a, b) => b.delayedItems - a.delayedItems || b.maxDelayDays - a.maxDelayDays);
+
+  return {
+    totals,
+    byOrganisation: Array.from(byOrg.values()).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)),
+    byDivision: Array.from(byDiv.values()).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)),
+    delayedProjects,
+  };
+}
+
+function pickOrgName(card) {
+  const orgs = Array.isArray(card?.organisations) ? card.organisations : [];
+  return orgs[0]?.name || "—";
+}
+
+function bumpGroup(map, name, bucket) {
+  const key = name || "—";
+  const g = map.get(key) || { name: key, total: 0, active: 0, completed: 0, ontrack: 0, delayed: 0 };
+  g.total++;
+  if (g[bucket] != null) g[bucket]++;
+  map.set(key, g);
+}
+
+/* Reshape a legacy `/api/v3/projects` row back into the ProjectCard
+   shape so the aggregator above can consume both data paths. The raw
+   list lacks the BE aggregates, so we default bucket/counts to zero — the
+   summary still renders, just with empty delayed/active rollups. */
+function legacyToProjectCard(p) {
+  const status = String(p?.status || "NEW").toUpperCase();
+  return {
+    id: p?.uuid || p?.id || "",
+    projectCode: p?.projectCode || p?.id || "",
+    name: p?.name || "",
+    organisations: Array.isArray(p?.organisations) ? p.organisations.map((o) => (typeof o === "object" ? o : { name: o })) : [],
+    division: p?.division || p?.owner || "—",
+    bucket: status === "COMPLETED" ? "completed" : "active",
+    delayedItemCount: 0,
+    maxDelayDays: 0,
+    progressPct: 0,
+  };
 }
 
 export async function projectsList({ bucket, q, vendorId, division, page, pageSize } = {}) {
   // page/pageSize intentionally not defaulted — caller decides, and when
   // omitted the BE applies its own defaults (no pagination params in URL).
-  const res = await api.get(ENDPOINTS.dashboard.projects, {
-    query: { bucket, q, vendorId, division, page, pageSize },
-  });
+  const res = await withTimeout(
+    api.get(ENDPOINTS.dashboard.projects, {
+      query: { bucket, q, vendorId, division, page, pageSize },
+    }),
+    DASHBOARD_TIMEOUT_MS, "projects list",
+  );
   return unwrap(res);
 }
 
@@ -112,10 +314,16 @@ export async function projectDetail(uuid, { delayMinDays = 5 } = {}) {
   return unwrap(res);
 }
 
-export async function projectItems(uuid, { kind, bucket, milestoneId, minDelay = 0 } = {}) {
-  const res = await api.get(ENDPOINTS.dashboard.projectItems(uuid), {
-    query: { kind, bucket, milestoneId, minDelay },
-  });
+export async function projectItems(uuid, { kind, bucket, milestoneId, minDelay } = {}) {
+  // Only forward params the caller explicitly set — sending an
+  // unsolicited `minDelay=0` once made some BE deploys blank the
+  // response, so we let the server apply its own default.
+  const res = await withTimeout(
+    api.get(ENDPOINTS.dashboard.projectItems(uuid), {
+      query: { kind, bucket, milestoneId, minDelay },
+    }),
+    DASHBOARD_TIMEOUT_MS, "project items",
+  );
   return unwrap(res);
 }
 
