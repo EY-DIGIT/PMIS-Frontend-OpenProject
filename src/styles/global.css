@@ -58,6 +58,16 @@
   margin-bottom: 28px;
   position: relative;
 }
+.uidai-pmis-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--uidai-navy) 0%, var(--uidai-cyan) 100%);
+  border-radius: 10px 10px 0 0;
+}
 .uidai-pmis-card-actions {
   position: absolute;
   top: 20px;
