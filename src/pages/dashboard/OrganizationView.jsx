@@ -227,7 +227,7 @@ function OrgDetail({ name, reloadTick, onBack, onOpenProject }) {
 
       {!busy && !err && (
         <>
-          <div className="dash-kpi-grid" style={{ marginTop: "20px", marginBottom: "20px" }}>
+          <div className="dash-kpi-grid" >
             <Kpi cls="total" label="Total Projects" value={list.length} foot="assigned projects" />
             <Kpi cls="completed" label="Completed" value={c.completed} foot="delivered" />
             <Kpi cls="ontrack" label="In Progress" value={c.ontrack} foot="within schedule" />

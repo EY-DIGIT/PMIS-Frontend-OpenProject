@@ -253,7 +253,7 @@ function ProjectDetail({ p, navigate }) {
         </div>
       </div>
 
-      <div className="dash-kpi-grid" style={{ marginTop: "20px", marginBottom: "20px" }}>
+      <div className="dash-kpi-grid" >
         <Kpi cls="total" label="Overall Progress" value={pk.progress + "%"}
           foot="open all items"
           onClick={() => applyFilter(null)} />
@@ -272,7 +272,7 @@ function ProjectDetail({ p, navigate }) {
           onClick={() => applyFilter({ status: "delayed" })} />
       </div>
 
-      <div className="dash-grid-2" style={{ marginTop: "20px", marginBottom: "20px" }}>
+      <div className="dash-grid-2" >
         <div className="dash-card">
           <div className="dash-card-title">Project Pie Chart<span className="dash-card-sub">Milestones and activities</span></div>
           {itemsLoading && <div className="dash-empty">Loading items…</div>}

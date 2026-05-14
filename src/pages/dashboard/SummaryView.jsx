@@ -214,7 +214,7 @@ function SummaryContent({
 
   return (
     <>
-      <div className="dash-kpi-grid" style={{ marginTop: "20px", marginBottom: "20px" }}>
+      <div className="dash-kpi-grid" >
         <Kpi cls="total" label="Total Projects" value={counts.total}
           foot={`${orgs.length} organizations / ${divs.length} divisions`}
           onClick={() => onOpenProjectList("total")} />
@@ -228,7 +228,7 @@ function SummaryContent({
           foot="open project list" onClick={() => onOpenProjectList("delayed")} />
       </div>
 
-      <div className="dash-grid-2" style={{ marginTop: "20px", marginBottom: "20px" }}>
+      <div className="dash-grid-2" >
         <div className="dash-card">
           <div className="dash-card-title">Pie Chart<span className="dash-card-sub">Project status</span></div>
           <div className="dash-donut-wrap">
@@ -259,7 +259,7 @@ function SummaryContent({
         </div>
       </div>
 
-      <div className="dash-grid-2" style={{ marginTop: "20px", marginBottom: "20px" }}>
+      <div className="dash-grid-2" >
         <div className="dash-card">
           <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
           <SignalCards groups={orgs} limit={orgsExpanded ? undefined : VIS_GROUPS} onClick={onOpenOrg} />
@@ -485,7 +485,7 @@ function DivisionDetail({ name, onBack, onOpenProject }) {
 
       {!busy && !err && (
         <>
-          <div className="dash-kpi-grid" style={{ marginTop: "20px", marginBottom: "20px" }}>
+          <div className="dash-kpi-grid">
             <Kpi cls="total" label="Total Projects" value={list.length} foot="assigned projects" />
             <Kpi cls="completed" label="Completed" value={c.completed} foot="delivered" />
             <Kpi cls="ontrack" label="In Progress" value={c.ontrack} foot="within schedule" />
@@ -576,7 +576,7 @@ function ProjectItemsInline({ project, status, onBack, navigate }) {
       </div>
 
       {!isDelayed && (
-        <div className="dash-kpi-grid" style={{ marginTop: "20px", marginBottom: "20px" }}>
+        <div className="dash-kpi-grid" >
           <Kpi cls="total" label="Total Items" value={c.total} foot="milestones + activities" />
           <Kpi cls="completed" label="Completed" value={c.completed} foot="finished" />
           <Kpi cls="ontrack" label="In Progress" value={c.ontrack} foot="within schedule" />
