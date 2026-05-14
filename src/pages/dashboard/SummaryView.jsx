@@ -498,7 +498,7 @@ function DivisionDetail({ name, onBack, onOpenProject }) {
               <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
             </div>
           </div>
-          <div className="dash-card">
+          <div className="dash-card" style={{marginTop:"20px"}}>
             <div className="dash-card-title">Projects<span className="dash-card-sub">Click project to open Project View</span></div>
             <ProjectCardGrid projects={list} onOpenProject={onOpenProject} />
           </div>
