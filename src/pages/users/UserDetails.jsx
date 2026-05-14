@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useData } from '../../data/DataContext';
 import CharTextarea from '../../components/CharTextarea';
-import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
+import { DIVISION_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
@@ -55,12 +55,7 @@ export default function UserDetails() {
   const [division, setDivision] = useState('');
   const [divisionOther, setDivisionOther] = useState('');
   const [status, setStatus] = useState('Active');
-  // Project assignments — one row per project. No per-project role,
-  // no per-project user picks; just the project the user is mapped to.
-  // Shape: [{ projectId }]
-  const [assignments, setAssignments] = useState([]);
 
-  const [projectList, setProjectList] = useState([]);
   const [divisionList, setDivisionList] = useState([]);
 
   const seed = (u) => {
@@ -72,29 +67,7 @@ export default function UserDetails() {
     setDivision(u?.division || '');
     setDivisionOther(u?.divisionOther || '');
     setStatus(u?.status || 'Active');
-    // Seed assignments — accept legacy shapes (with roles[]/userIds) and
-    // collapse to just { projectId }. Per-project role and per-project
-    // user picks have both been removed from this page.
-    const normalize = (a) => ({ projectId: a?.projectId || '' });
-    if (Array.isArray(u?.projectAssignments) && u.projectAssignments.length) {
-      setAssignments(u.projectAssignments.map(normalize));
-    } else if (Array.isArray(u?.projectIds) && u.projectIds.length) {
-      setAssignments(u.projectIds.map((pid) => normalize({ projectId: pid })));
-    } else {
-      setAssignments([]);
-    }
   };
-
-  function updateAssignment(idx, patch) {
-    setAssignments((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
-  }
-  function addAssignmentRow() {
-    setAssignments((prev) => [...prev, { projectId: '' }]);
-  }
-  function deleteAssignmentRow(idx) {
-    if (!window.confirm('Delete this project mapping?')) return;
-    setAssignments((prev) => prev.filter((_, i) => i !== idx));
-  }
 
   useEffect(() => {
     if (!id) return;
@@ -135,30 +108,6 @@ export default function UserDetails() {
     (async () => {
       try {
         const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
-          { method: 'GET', headers: { accept: 'application/json' } }
-        );
-        if (!res.ok) return;
-        const raw = await res.json().catch(() => ({}));
-        const elements =
-          raw?.data?._embedded?.elements ??
-          raw?._embedded?.elements ??
-          raw?.data ??
-          [];
-        if (!cancelled && Array.isArray(elements)) setProjectList(elements);
-      } catch {
-        if (!cancelled) setProjectList([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!tokenStore.get()) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authorizedFetch(
           `${API_BASE}${ENDPOINTS.divisions.list}`,
           { method: 'GET', headers: { accept: 'application/json' } }
         );
@@ -180,25 +129,6 @@ export default function UserDetails() {
     return () => { cancelled = true; };
   }, []);
 
-  const projectOptions = useMemo(() => {
-    if (!tokenStore.get()) {
-      return PROJECT_OPTIONS.map((name) => ({ label: name, value: name }));
-    }
-    return projectList.map((p) => ({
-      label: p.name || p.projectCode || p.id,
-      value: p.id || p.uuid,
-    }));
-  }, [projectList]);
-
-  const projectNameById = useMemo(() => {
-    const map = {};
-    projectList.forEach((p) => {
-      const id = p.id || p.uuid;
-      if (id) map[id] = p.name || p.projectCode || id;
-    });
-    return map;
-  }, [projectList]);
-
   const divisionOptions = useMemo(() => {
     if (!tokenStore.get() || divisionList.length === 0) {
       return DIVISION_OPTIONS.map((d) => ({ code: d, label: d, requiresOther: false }));
@@ -212,6 +142,25 @@ export default function UserDetails() {
     (selectedDivision.requiresOther ||
       String(selectedDivision.label || '').toLowerCase() === 'others' ||
       String(selectedDivision.code || '').toLowerCase() === 'others');
+
+  // Project mapping is shown read-only on this page — names come straight
+  // from the user-detail API response (user.projectMapping).
+  const mappedProjects = useMemo(
+    () => (Array.isArray(user?.projectMapping) ? user.projectMapping : []),
+    [user]
+  );
+
+  // The global vendors list loads asynchronously via DataContext. Until it
+  // arrives, the user's own vendor (returned inline on the user-detail
+  // response) must still appear in the dropdown so the prefilled value
+  // renders as a name instead of a blank.
+  const vendorOptions = useMemo(() => {
+    const list = Array.isArray(vendors) ? [...vendors] : [];
+    if (user?.vendorId && !list.some((v) => v.vendorId === user.vendorId)) {
+      list.unshift({ vendorId: user.vendorId, vendorName: user.vendorName || user.vendorId });
+    }
+    return list;
+  }, [vendors, user]);
 
   const handleEditToggle = async () => {
     if (!editing) {
@@ -229,7 +178,6 @@ export default function UserDetails() {
     try {
       if (tokenStore.get()) {
         const { firstName, lastName } = splitName(fullName);
-        const projectIds = assignments.map((a) => a.projectId).filter(Boolean);
         const updated = await usersApi.update(id, {
           email: email.trim(),
           firstName,
@@ -239,7 +187,6 @@ export default function UserDetails() {
           division,
           division_other: divisionRequiresOther ? divisionOther.trim() : null,
           phone_number: phone.trim(),
-          project_ids: projectIds,
         });
         setUser(updated);
         seed(updated);
@@ -289,7 +236,6 @@ export default function UserDetails() {
         <div className="uidai-pmis-card-actions">
           {!isSelf && canEditTargetRole(currentRole, orgRole) && (
             <button className="uidai-pmis-btn" onClick={handleEditToggle} disabled={saving}>
-              {/* <span className="uidai-pmis-btn-icon">{editing ? '💾' : '✏️'}</span>{' '} */}
               <span className="uidai-pmis-btn-text">
                 {editing ? (saving ? 'Saving…' : 'Save') : 'Edit'}
               </span>
@@ -353,7 +299,7 @@ export default function UserDetails() {
             <label>Organization <span className="uidai-pmis-required">*</span></label>
             <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} disabled={!editing}>
               <option value="" disabled>Select Organization</option>
-              {vendors.map((v) => (
+              {vendorOptions.map((v) => (
                 <option key={v.vendorId} value={v.vendorId}>{v.vendorName}</option>
               ))}
             </select>
@@ -405,82 +351,21 @@ export default function UserDetails() {
               <thead>
                 <tr>
                   <th>Project Name</th>
-                  <th style={{ width: 140 }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {assignments.length === 0 && (
+                {mappedProjects.length === 0 ? (
                   <tr className="uidai-pmis-no-results">
-                    <td colSpan={2}>
-                      No projects mapped yet{editing ? '. Click Add to add one.' : '.'}
-                    </td>
+                    <td>No projects mapped.</td>
                   </tr>
-                )}
-                {assignments.map((a, pIdx) => {
-                  const projectLabel =
-                    projectNameById[a.projectId] ||
-                    (a.projectId ? a.projectId : '');
-                  return (
+                ) : (
+                  mappedProjects.map((name, pIdx) => (
                     <tr key={pIdx} className="uidai-pm-project-start">
                       <td className="uidai-pm-project-cell">
-                        {editing ? (
-                          <select
-                            className="uidai-pmis-filter-select"
-                            value={a.projectId}
-                            onChange={(e) =>
-                              updateAssignment(pIdx, { projectId: e.target.value })
-                            }
-                          >
-                            <option value="">— Select Project —</option>
-                            {projectOptions
-                              .filter(
-                                (p) =>
-                                  p.value === a.projectId ||
-                                  !assignments.some(
-                                    (other, i) =>
-                                      i !== pIdx && other.projectId === p.value
-                                  )
-                              )
-                              .map((p) => (
-                                <option key={p.value} value={p.value}>
-                                  {p.label}
-                                </option>
-                              ))}
-                          </select>
-                        ) : (
-                          <span>
-                            {projectLabel || <span className="uidai-pm-empty-cell">—</span>}
-                          </span>
-                        )}
-                      </td>
-                      <td className="uidai-pm-actions">
-                        {editing ? (
-                          <button
-                            type="button"
-                            className="uidai-pm-action-link uidai-pm-action-link--danger"
-                            onClick={() => deleteAssignmentRow(pIdx)}
-                          >
-                            Delete
-                          </button>
-                        ) : (
-                          <span className="uidai-pm-empty-cell">—</span>
-                        )}
+                        <span>{name || <span className="uidai-pm-empty-cell">—</span>}</span>
                       </td>
                     </tr>
-                  );
-                })}
-                {editing && (
-                  <tr className="uidai-pm-add-row">
-                    <td colSpan={2}>
-                      <button
-                        type="button"
-                        className="uidai-pmis-btn uidai-pmis-btn-small"
-                        onClick={addAssignmentRow}
-                      >
-                        + Add
-                      </button>
-                    </td>
-                  </tr>
+                  ))
                 )}
               </tbody>
             </table>
