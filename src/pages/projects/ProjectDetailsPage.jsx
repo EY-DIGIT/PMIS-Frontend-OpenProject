@@ -900,15 +900,17 @@ export default function ProjectDetailsPage() {
               View Documents
             </button>
           )}
-          <button
-            className="uidai-btn"
-            disabled={editing}
-            onClick={() =>
-              navigate(`/projects/${encodeURIComponent(project.projectId)}/audit-logs`)
-            }
-          >
-            Audit Log
-          </button>
+          {isPubBase && (
+            <button
+              className="uidai-btn"
+              disabled={editing}
+              onClick={() =>
+                navigate(`/projects/${encodeURIComponent(project.projectId)}/audit-logs`)
+              }
+            >
+              Audit Log
+            </button>
+          )}
         </div>
         <div className="uidai-page-header__actions">
           {(() => {

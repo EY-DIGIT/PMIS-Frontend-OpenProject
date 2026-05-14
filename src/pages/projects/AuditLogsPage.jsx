@@ -509,7 +509,7 @@ export default function AuditLogsPage() {
     <div className="audit-logs-page">
       <div className="al-page-header">
         <div className="al-page-header-text">
-          <div className="al-title">Audit Logs</div>
+          {/* <div className="al-title">Audit Logs</div> */}
           <div className="al-subtitle">Every change, fully traceable.</div>
           <div className="al-description">
             A chronological record of every action performed inside this project — who did what, when, and what changed.
