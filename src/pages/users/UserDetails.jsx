@@ -20,11 +20,6 @@ function canEditTargetRole(currentRole, targetRole) {
   return ci < ti;
 }
 
-function splitName(n) {
-  const parts = (n || '').trim().split(/\s+/);
-  return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') };
-}
-
 export default function UserDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -177,11 +172,9 @@ export default function UserDetails() {
     setSaving(true);
     try {
       if (tokenStore.get()) {
-        const { firstName, lastName } = splitName(fullName);
         const updated = await usersApi.update(id, {
           email: email.trim(),
-          firstName,
-          lastName,
+          fullName: fullName.trim(),
           status: status === 'Inactive' ? 'inactive' : 'active',
           vendor_id: vendorId,
           division,

@@ -276,11 +276,6 @@ export default function UserForm() {
     return errs;
   };
 
-  const splitName = (n) => {
-    const parts = n.trim().split(/\s+/);
-    return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') };
-  };
-
   const handleAdd = async () => {
     const errs = validate();
     setErrors(errs);
@@ -295,7 +290,6 @@ export default function UserForm() {
     uiStore.showLoader('Adding user...');
     try {
       if (tokenStore.get()) {
-        const { firstName, lastName } = splitName(fullName);
         // Project mapping is universal — same payload shape for every role.
         // No per-project role attached anymore.
         const projectIds = mapping.filter(Boolean);
@@ -304,8 +298,7 @@ export default function UserForm() {
           email: email.trim(),
           phone_number: mobile.trim(),
           password,
-          firstName,
-          lastName,
+          fullName: fullName.trim(),
           vendor_id: vendorId,
           division,
           division_other: divisionRequiresOther ? divisionOther.trim() : '',

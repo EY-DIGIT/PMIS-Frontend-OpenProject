@@ -19,8 +19,12 @@ function unwrapOne(res) {
 }
 
 export function fromApi(u) {
-  const firstName = u.firstName || u.first_name || '';
-  const lastName = u.lastName || u.last_name || '';
+  const fullName =
+    u.fullName ||
+    u.full_name ||
+    u.name ||
+    u.login ||
+    '';
   const vendorObj = u.vendor && typeof u.vendor === 'object' ? u.vendor : null;
   const vendorName = vendorObj?.name || u.vendorName || u.vendor_name || '';
   const vendorId = vendorObj?.id || u.vendor_id || u.vendorId || '';
@@ -40,7 +44,7 @@ export function fromApi(u) {
   return {
     userId: u.id || u.uuid,
     userCode: u.userCode || u.user_code || '',
-    fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
+    fullName,
     employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',
     role: u.admin ? 'Admin' : (u.role || 'Viewer'),
@@ -73,14 +77,13 @@ export async function create(body) {
 }
 
 // PATCH /api/v3/users/{id} — backend contract:
-//   { email, firstName, lastName, admin, status, vendor_id,
+//   { email, fullName, admin, status, vendor_id,
 //     division, division_other, phone_number, project_ids: [uuid, ...] }
 // Per-project roles + per-project user picks have been removed from the
 // User Details page, so we emit a flat `project_ids` array.
 export async function update(id, {
   email,
-  firstName,
-  lastName,
+  fullName,
   admin,
   status,
   vendor_id,
@@ -91,8 +94,7 @@ export async function update(id, {
 }) {
   const body = {};
   if (email !== undefined) body.email = email;
-  if (firstName !== undefined) body.firstName = firstName;
-  if (lastName !== undefined) body.lastName = lastName;
+  if (fullName !== undefined) body.fullName = fullName;
   if (admin !== undefined) body.admin = admin;
   if (status !== undefined) body.status = status;
   if (vendor_id !== undefined) body.vendor_id = vendor_id;

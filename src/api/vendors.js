@@ -77,12 +77,16 @@ function fromApi(v) {
       ua.users.forEach((u) => {
         const uid = u?.id || u?.uuid;
         if (!uid || embeddedUsersById.has(uid)) return;
-        const firstName = u.firstName || u.first_name || '';
-        const lastName = u.lastName || u.last_name || '';
+        const fullName =
+          u.fullName ||
+          u.full_name ||
+          u.name ||
+          u.login ||
+          '';
         embeddedUsersById.set(uid, {
           userId: uid,
           userCode: u.userCode || u.user_code || '',
-          fullName: [firstName, lastName].filter(Boolean).join(' ') || u.login || '',
+          fullName,
           employeeId: u.employeeId || u.employee_id || u.login || '',
           login: u.login || '',
           email: u.email || '',

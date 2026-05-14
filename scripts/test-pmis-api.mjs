@@ -193,8 +193,7 @@ async function run() {
       login: `tester_${STAMP}`,
       email: `tester_${STAMP}@example.com`,
       password: 'TestPass123!',
-      firstName: 'Test',
-      lastName: 'User',
+      fullName: 'Test User',
       admin: false,
     },
   });
@@ -203,7 +202,7 @@ async function run() {
   if (ctx.userId) {
     await call('Get User by ID', 'GET', `/api/v3/users/${ctx.userId}`);
     await call('Update User', 'PATCH', `/api/v3/users/${ctx.userId}`, {
-      body: { firstName: 'Test', lastName: 'User Updated', admin: false, status: 'active' },
+      body: { fullName: 'Test User Updated', admin: false, status: 'active' },
     });
     await call('Update User Password', 'PATCH', `/api/v3/users/${ctx.userId}/password`, {
       body: { password: 'NewTestPass123!' },

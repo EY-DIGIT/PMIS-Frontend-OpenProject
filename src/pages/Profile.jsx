@@ -29,11 +29,6 @@ function formatDateTime(iso) {
   }
 }
 
-function splitFullName(s) {
-  const parts = String(s || "").trim().split(/\s+/).filter(Boolean);
-  return { firstName: parts[0] || "", lastName: parts.slice(1).join(" ") };
-}
-
 export default function Profile() {
   const navigate = useNavigate();
   const [user, setUser] = useState(auth.getStoredUser() || null);
@@ -52,7 +47,7 @@ export default function Profile() {
   });
 
   function seedForm(u) {
-    const fn = [u?.firstName, u?.lastName].filter(Boolean).join(" ") || u?.login || "";
+    const fn = u?.fullName || u?.full_name || u?.name || u?.login || "";
     setForm({
       fullName: fn,
       email: u?.email || "",
@@ -114,12 +109,10 @@ export default function Profile() {
     if (divisionRequiresOther && !form.divisionOther.trim()) {
       setSaveError("Please specify the division"); return;
     }
-    const { firstName, lastName } = splitFullName(form.fullName);
     setSaving(true);
     try {
       await usersApi.update(user.id, {
-        firstName,
-        lastName,
+        fullName: form.fullName.trim(),
         email: form.email.trim(),
         phone_number: form.phoneNumber || null,
         division: form.division,

@@ -266,7 +266,7 @@ export async function loadCommentsForEntity(kind, entityApiId) {
 
 function mapApiCommentToLocal(c) {
   const a = c?.author || {};
-  const fullName = [a.firstName, a.lastName].filter(Boolean).join(" ");
+  const fullName = a.fullName || a.full_name || a.name || "";
   return {
     id: c?.id || "",
     who: fullName || a.login || a.email || "User",
