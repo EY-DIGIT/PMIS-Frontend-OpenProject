@@ -219,11 +219,11 @@ function ProjectDetail({ p, navigate }) {
     navigate(`/projects/${encodeURIComponent(id)}/config`);
   }
 
-  const chartCounts = useMemo(() => items.reduce((acc, r) => {
+  const chartCounts = useMemo(() => filteredItems.reduce((acc, r) => {
     acc[r.status] = (acc[r.status] || 0) + 1;
     acc.total = (acc.total || 0) + 1;
     return acc;
-  }, { active: 0, ontrack: 0, completed: 0, delayed: 0, total: 0 }), [items]);
+  }, { active: 0, ontrack: 0, completed: 0, delayed: 0, total: 0 }), [filteredItems]);
 
   const delays = useMemo(
     () => items.filter((r) => r.status === "delayed")
@@ -274,7 +274,7 @@ function ProjectDetail({ p, navigate }) {
 
       <div className="dash-grid-2" >
         <div className="dash-card">
-          <div className="dash-card-title">Project Pie Chart<span className="dash-card-sub">Milestones and activities</span></div>
+          <div className="dash-card-title">Project Pie Chart<span className="dash-card-sub">{itemsFilter ? `Filtered by ${filterLabel(itemsFilter)}` : "Milestones and activities"}</span></div>
           {itemsLoading && <div className="dash-empty">Loading items…</div>}
           {!itemsLoading && itemsError && <div className="dash-empty" style={{ color: "#d4440e" }}>{itemsError}</div>}
           {!itemsLoading && !itemsError && (
