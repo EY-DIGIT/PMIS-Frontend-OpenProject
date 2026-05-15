@@ -337,9 +337,33 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
         : null) ||
       (payload && typeof payload.error === 'string' ? payload.error : null);
     const flat = payload && typeof payload === 'object' ? payload.message : null;
+    // FastAPI validation errors come back as { detail: [{ loc, msg, ... }] }
+    // or sometimes a plain { detail: "string" }. Surface the human-readable
+    // message(s) so forms see "value is not a valid email address ..." instead
+    // of a generic "POST ... failed (422)".
+    const fastapiDetail = (() => {
+      const d = payload && typeof payload === 'object' ? payload.detail : null;
+      if (typeof d === 'string') return d;
+      if (Array.isArray(d)) {
+        const parts = d
+          .map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const field = Array.isArray(item.loc)
+              ? item.loc.filter((p) => p !== 'body').join('.')
+              : '';
+            const m = typeof item.msg === 'string' ? item.msg : '';
+            if (!m) return null;
+            return field ? `${field}: ${m}` : m;
+          })
+          .filter(Boolean);
+        if (parts.length) return parts.join('\n');
+      }
+      return null;
+    })();
     const msg =
       (typeof nested === 'string' && nested) ||
       (typeof flat === 'string' && flat) ||
+      (typeof fastapiDetail === 'string' && fastapiDetail) ||
       (typeof payload === 'string' && payload) ||
       `${method} ${path} failed (${res.status})`;
     throw new ApiError(msg, { status: res.status, body: payload });

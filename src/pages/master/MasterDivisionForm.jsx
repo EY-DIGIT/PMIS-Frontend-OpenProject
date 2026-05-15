@@ -48,7 +48,7 @@ export default function MasterDivisionForm() {
         setCode(found.code);
         setLabel(found.label);
         setEmail(found.email || '');
-        setPhone(found.phoneNumber || '');
+        setPhone(String(found.phoneNumber || '').replace(/\D/g, '').slice(-10));
         setActive(!!found.active);
         setIsBuiltin(!!found.isBuiltin);
       } catch (err) {
@@ -68,10 +68,10 @@ export default function MasterDivisionForm() {
     if (!label.trim()) errs.label = 'Label is required';
     if (!email.trim()) errs.email = 'Email is required';
     else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
-      errs.email = 'Enter a valid email';
-    if (!phone.trim()) errs.phone = 'Phone is required';
-    else if (!/^\+?\d{10,15}$/.test(phone.trim()))
-      errs.phone = 'Enter a valid phone (digits only, 10-15)';
+      errs.email = 'Enter a valid email (e.g. name@example.com)';
+    if (!phone.trim()) errs.phone = 'Mobile Number is required';
+    else if (!/^\d{10}$/.test(phone.trim()))
+      errs.phone = 'Enter a valid 10-digit mobile number';
     return errs;
   }
 
@@ -168,21 +168,33 @@ export default function MasterDivisionForm() {
             <label>Email <span className="uidai-pmis-required">*</span></label>
             <input
               type="email"
-              placeholder="e.g. division@uidai.gov.in"
+              placeholder="e.g. name@example.com"
               value={email}
               onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
             />
             {errors.email && <div className="uidai-pmis-field-error">{errors.email}</div>}
           </div>
           <div className={errClass('phone')}>
-            <label>Phone Number <span className="uidai-pmis-required">*</span></label>
-            <input
-              type="tel"
-              placeholder="e.g. 9876543210 or +919876543210"
-              value={phone}
-              onChange={(e) => { setPhone(e.target.value); clearFieldError('phone'); }}
-              maxLength={20}
-            />
+            <label>Mobile Number <span className="uidai-pmis-required">*</span></label>
+            <div className="uidai-pmis-phone-input">
+              <span className="uidai-pmis-phone-prefix" aria-hidden="true">+91</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="10-digit mobile number"
+                value={phone}
+                autoComplete="tel-national"
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
+                  setPhone(cleaned);
+                  clearFieldError('phone');
+                }}
+                onKeyPress={(e) => {
+                  if (e.key.length === 1 && !/[0-9]/.test(e.key)) e.preventDefault();
+                }}
+              />
+            </div>
             {errors.phone && <div className="uidai-pmis-field-error">{errors.phone}</div>}
           </div>
         </div>
