@@ -239,8 +239,8 @@ function ProjectDetail({ p, navigate }) {
         <div className="dash-project-desc">{p.description || "—"}</div>
         <div className="dash-project-meta">
           <div className="dash-meta-item"><span className="dash-meta-label">Organization</span><span className="dash-meta-value">{p.organisation}</span></div>
-          <div className="dash-meta-item"><span className="dash-meta-label">Division</span><span className="dash-meta-value">{p.division}</span></div>
-          <div className="dash-meta-item"><span className="dash-meta-label">Owner</span><span className="dash-meta-value">{p.owner || "—"}</span></div>
+          {/* <div className="dash-meta-item"><span className="dash-meta-label">Division</span><span className="dash-meta-value">{p.division}</span></div> */}
+          <div className="dash-meta-item"><span className="dash-meta-label">Owner</span><span className="dash-meta-value">{p.division || "—"}</span></div>
           <div className="dash-meta-item"><span className="dash-meta-label">Planned</span><span className="dash-meta-value">{range(p.plannedStart, p.plannedEnd)}</span></div>
         </div>
         <div className="dash-progress-line">
