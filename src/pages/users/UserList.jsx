@@ -235,13 +235,14 @@ export default function UserList() {
               <tr>
                 <th>User ID</th><th>Full Name</th><th>Username</th><th>Email</th>
                 <th>Role</th><th>Organization</th><th>Division</th>
-                <th>Project Mapping</th><th>Status</th><th>Action</th>
+                <th>Project Mapping</th><th>Status</th>
+                {canDeleteUser && <th>Action</th>}
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={10} style={{ textAlign: 'center', padding: 16 }}>
+                  <td colSpan={canDeleteUser ? 10 : 9} style={{ textAlign: 'center', padding: 16 }}>
                     Loading users...
                   </td>
                 </tr>
@@ -267,8 +268,8 @@ export default function UserList() {
                       {u.status}
                     </span>
                   </td>
-                  <td>
-                    {canDeleteUser ? (
+                  {canDeleteUser && (
+                    <td>
                       <button
                         type="button"
                         title="Delete user"
@@ -290,15 +291,13 @@ export default function UserList() {
                       >
                         <FaTrashAlt />
                       </button>
-                    ) : (
-                      <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
               ))}
               {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={10}>No matching users found.</td>
+                  <td colSpan={canDeleteUser ? 10 : 9}>No matching users found.</td>
                 </tr>
               )}
             </tbody>

@@ -220,13 +220,14 @@ export default function VendorList() {
             <thead>
               <tr>
                 <th>Organization ID</th><th>Organization Name</th><th>Status</th>
-                <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th><th>Action</th>
+                <th>Contact Person</th><th>Email</th><th>Phone</th><th>Project Mapping</th>
+                {canDeleteVendor && <th>Action</th>}
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8} style={{ textAlign: 'center', padding: 16 }}>
+                  <td colSpan={canDeleteVendor ? 8 : 7} style={{ textAlign: 'center', padding: 16 }}>
                     Loading organizations...
                   </td>
                 </tr>
@@ -250,8 +251,8 @@ export default function VendorList() {
                   <td>{v.email}</td>
                   <td>{v.phone}</td>
                   <td>{renderMappingText(v.projectMapping)}</td>
-                  <td>
-                    {canDeleteVendor ? (
+                  {canDeleteVendor && (
+                    <td>
                       <button
                         type="button"
                         title="Delete organization"
@@ -273,15 +274,13 @@ export default function VendorList() {
                       >
                         <FaTrashAlt />
                       </button>
-                    ) : (
-                      <span style={{ color: '#aaa', fontSize: 12 }}>—</span>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
               ))}
               {!loading && filtered.length === 0 && (
                 <tr className="uidai-pmis-no-results">
-                  <td colSpan={8}>No matching organizations found.</td>
+                  <td colSpan={canDeleteVendor ? 8 : 7}>No matching organizations found.</td>
                 </tr>
               )}
             </tbody>
