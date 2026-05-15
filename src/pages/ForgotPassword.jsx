@@ -126,12 +126,12 @@ const ForgotPassword = () => {
                   If an account matches that username, a reset link has been sent.
                   Please check your registered email.
                 </div>
-                <button
+                {/* <button
                   className="uidai-btn-primary"
                   onClick={() => navigate('/login')}
                 >
                   Back to Login
-                </button>
+                </button> */}
               </>
             ) : (
               <form onSubmit={handleSend} noValidate>
