@@ -263,8 +263,8 @@ export default function ProjectDetailsPage() {
           [];
         const mapped = Array.isArray(elements)
           ? elements
-              .filter((v) => v && v.name)
-              .map((v) => ({ id: v.id, name: v.name }))
+            .filter((v) => v && v.name)
+            .map((v) => ({ id: v.id, name: v.name }))
           : [];
 
         if (!cancelled) setVendorMaster(mapped);
@@ -665,7 +665,7 @@ export default function ProjectDetailsPage() {
       target.endDate = form.endDate;
       target.vendors = rebuiltVendors;
       addAudit(target, "Update Project Details", before, deepClone(target));
-      try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
+      try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) { }
 
       if (apiData && apiData.id) {
         const mapped = mapApiProject(apiData);
@@ -715,7 +715,7 @@ export default function ProjectDetailsPage() {
       const before = deepClone(t);
       t.status = (apiData && apiData.status ? String(apiData.status).toUpperCase() : "PUBLISHED");
       addAudit(t, "Publish Project", before, deepClone(t));
-      try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) {}
+      try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) { }
 
       if (apiData && apiData.id) {
         const mapped = mapApiProject(apiData);
@@ -855,7 +855,7 @@ export default function ProjectDetailsPage() {
     const finish = () => {
       try {
         if (projectsStore.removeProject) projectsStore.removeProject(project.projectId);
-      } catch (e) {}
+      } catch (e) { }
       uiStore.hideLoader();
       uiStore.showMessage("Project removed", () => navigate("/projects"));
     };
@@ -931,23 +931,37 @@ export default function ProjectDetailsPage() {
             const firstVendor = safeArray(form.vendors)[0];
             const firstVendorId = firstVendor
               ? (projectVendorIndex[firstVendor]?.id ||
-                 vendorMasterIndex[firstVendor]?.id ||
-                 "")
+                vendorMasterIndex[firstVendor]?.id ||
+                "")
               : "";
             const targetOrgId =
               userRole === "org_admin" ? own || firstVendorId : firstVendorId;
             if (!targetOrgId) return null;
             return (
+              // <button
+              //   className="uidai-btn"
+              //   disabled={editing}
+              //   onClick={() =>
+              //     navigate(`/vendors/${targetOrgId}`, {
+              //       state: { from: `/projects/${project.projectId}` },
+              //     })
+              //   }
+              // >
+              //   Manage Users
+              // </button>
               <button
                 className="uidai-btn"
                 disabled={editing}
                 onClick={() =>
-                  navigate(`/vendors/${targetOrgId}`, {
-                    state: { from: `/projects/${project.projectId}` },
+                  navigate(`/manage-users/${targetOrgId}`, {
+                    state: {
+                      projectId: project.projectCode,
+                      projectName: project.projectName,
+                    },
                   })
                 }
               >
-                Manage Users
+                Manage Team
               </button>
             );
           })()}
@@ -1276,7 +1290,7 @@ export default function ProjectDetailsPage() {
               ×
             </button>
             <h3 className="uidai-modal__title">
-              Project Documents 
+              Project Documents
             </h3>
             {feedLoading && (
               <div className="uidai-hint" style={{ marginTop: 8 }}>
@@ -1321,14 +1335,14 @@ export default function ProjectDetailsPage() {
                   const whenLabel =
                     when && !Number.isNaN(when.getTime())
                       ? `${when.toLocaleString("en-IN", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          hour12: true,
-                          timeZone: "Asia/Kolkata"
-                        })}`
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: true,
+                        timeZone: "Asia/Kolkata"
+                      })}`
                       : "";
                   const createdByLogin =
                     c.createdByLogin || c.created_by_login || "";

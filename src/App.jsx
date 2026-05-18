@@ -64,7 +64,7 @@ import "./styles/project/pages.css"
 import MessageModal from "./components/projects/modals/MessageModal";
 import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
-
+import ManageTeam from "./pages/users/ManageUsers";
 /* ─────────────────────────────────────────────────────────────
    PageTitle — route-driven page heading. Rendered above the
    breadcrumb so the heading sits at the very top of every page.
@@ -236,7 +236,7 @@ function Breadcrumbs() {
             flexWrap: "wrap"
         }}>
             <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
-                 Home
+                Home
             </Link>
             {newRouteOverride ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -328,89 +328,90 @@ export default function MainApp() {
                                 path="/*"
                                 element={
                                     <RequireAuth>
-                                    <Layout>
-                                        <PageTitle />
-                                        <Breadcrumbs />
-                                        <Routes>
-                                            <Route path="/" element={<HomePage />} />
-                                            <Route path="/dashboard" element={<Navigate to="/dashboard/summary" replace />} />
-                                            <Route
-                                              path="/dashboard/summary"
-                                              element={
-                                                <RequirePermission action="viewDashboard">
-                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                    <DashboardSummary />
-                                                  </Suspense>
-                                                </RequirePermission>
-                                              }
-                                            />
-                                            <Route
-                                              path="/dashboard/project"
-                                              element={
-                                                <RequirePermission action="viewDashboard">
-                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                    <DashboardProject />
-                                                  </Suspense>
-                                                </RequirePermission>
-                                              }
-                                            />
-                                            <Route
-                                              path="/dashboard/org"
-                                              element={
-                                                <RequirePermission action="viewDashboard">
-                                                  <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
-                                                    <DashboardOrganization />
-                                                  </Suspense>
-                                                </RequirePermission>
-                                              }
-                                            />
-                                            <Route path="/profile" element={<Profile />} />
+                                        <Layout>
+                                            <PageTitle />
+                                            <Breadcrumbs />
+                                            <Routes>
+                                                <Route path="/" element={<HomePage />} />
+                                                <Route path="/dashboard" element={<Navigate to="/dashboard/summary" replace />} />
+                                                <Route
+                                                    path="/dashboard/summary"
+                                                    element={
+                                                        <RequirePermission action="viewDashboard">
+                                                            <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                                <DashboardSummary />
+                                                            </Suspense>
+                                                        </RequirePermission>
+                                                    }
+                                                />
+                                                <Route
+                                                    path="/dashboard/project"
+                                                    element={
+                                                        <RequirePermission action="viewDashboard">
+                                                            <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                                <DashboardProject />
+                                                            </Suspense>
+                                                        </RequirePermission>
+                                                    }
+                                                />
+                                                <Route
+                                                    path="/dashboard/org"
+                                                    element={
+                                                        <RequirePermission action="viewDashboard">
+                                                            <Suspense fallback={<div style={{ padding: 24, color: "#5a6680" }}>Loading dashboard…</div>}>
+                                                                <DashboardOrganization />
+                                                            </Suspense>
+                                                        </RequirePermission>
+                                                    }
+                                                />
+                                                <Route path="/profile" element={<Profile />} />
 
-                                            <Route path="/projects" element={<RequirePermission action="viewProjects"><ProjectsListPage /></RequirePermission>} />
+                                                <Route path="/projects" element={<RequirePermission action="viewProjects"><ProjectsListPage /></RequirePermission>} />
 
-                                            {/* Onboarding — step 1 = details, step 2 = milestone config (draft) */}
-                                            <Route path="/projects/add" element={<RequirePermission action="createProject"><AddProjectPage /></RequirePermission>} />
-                                            <Route
-                                                path="/projects/add/config"
-                                                element={<RequirePermission action="createProject"><MilestoneConfigPage mode="onboarding" /></RequirePermission>}
-                                            />
+                                                {/* Onboarding — step 1 = details, step 2 = milestone config (draft) */}
+                                                <Route path="/projects/add" element={<RequirePermission action="createProject"><AddProjectPage /></RequirePermission>} />
+                                                <Route
+                                                    path="/projects/add/config"
+                                                    element={<RequirePermission action="createProject"><MilestoneConfigPage mode="onboarding" /></RequirePermission>}
+                                                />
 
-                                            {/* Existing project — details / config / track */}
-                                            <Route path="/projects/:projectId" element={<RequirePermission action="viewProjects"><ProjectDetailsPage /></RequirePermission>} />
-                                            <Route
-                                                path="/projects/:projectId/config"
-                                                element={<RequirePermission action="viewProjects"><MilestoneConfigPage mode="update" /></RequirePermission>}
-                                            />
-                                            <Route path="/projects/:projectId/track" element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>} />
-                                            <Route
-                                                path="/projects/:projectId/track/:nodeUid"
-                                                element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>}
-                                            />
-                                            <Route
-                                                path="/projects/:projectId/audit-logs"
-                                                element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
-                                            />
+                                                {/* Existing project — details / config / track */}
+                                                <Route path="/projects/:projectId" element={<RequirePermission action="viewProjects"><ProjectDetailsPage /></RequirePermission>} />
+                                                <Route
+                                                    path="/projects/:projectId/config"
+                                                    element={<RequirePermission action="viewProjects"><MilestoneConfigPage mode="update" /></RequirePermission>}
+                                                />
+                                                <Route path="/projects/:projectId/track" element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>} />
+                                                <Route
+                                                    path="/projects/:projectId/track/:nodeUid"
+                                                    element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>}
+                                                />
+                                                <Route
+                                                    path="/projects/:projectId/audit-logs"
+                                                    element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
+                                                />
 
 
-                                            {/* Vendors */}
-                                            <Route path="vendors" element={<RequirePermission action="viewVendors"><VendorList /></RequirePermission>} />
-                                            <Route path="vendors/new" element={<RequirePermission action="createVendor"><VendorForm /></RequirePermission>} />
-                                            <Route path="vendors/:id" element={<RequirePermission action="viewVendors"><VendorDetails /></RequirePermission>} />
+                                                {/* Vendors */}
+                                                <Route path="vendors" element={<RequirePermission action="viewVendors"><VendorList /></RequirePermission>} />
+                                                <Route path="vendors/new" element={<RequirePermission action="createVendor"><VendorForm /></RequirePermission>} />
+                                                <Route path="vendors/:id" element={<RequirePermission action="viewVendors"><VendorDetails /></RequirePermission>} />
 
-                                            {/* Users */}
-                                            <Route path="users" element={<RequirePermission action="viewUsers"><UserList /></RequirePermission>} />
-                                            <Route path="users/new" element={<RequirePermission action="createUser"><UserForm /></RequirePermission>} />
-                                            <Route path="users/:id" element={<RequirePermission action="viewUsers"><UserDetails /></RequirePermission>} />
+                                                {/* Users */}
+                                                <Route path="users" element={<RequirePermission action="viewUsers"><UserList /></RequirePermission>} />
+                                                <Route path="users/new" element={<RequirePermission action="createUser"><UserForm /></RequirePermission>} />
+                                                <Route path="users/:id" element={<RequirePermission action="viewUsers"><UserDetails /></RequirePermission>} />
 
-                                            {/* Master Data */}
-                                            <Route path="master" element={<RequirePermission action="viewMasterData"><MasterOverview /></RequirePermission>} />
-                                            <Route path="master/vendors" element={<RequirePermission action="viewMasterData"><MasterVendors /></RequirePermission>} />
-                                            <Route path="master/users" element={<RequirePermission action="viewMasterData"><MasterUsers /></RequirePermission>} />
-                                            <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
-                                            <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
-                                            <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
-                                        </Routes>
-                                    </Layout>
+                                                {/* Master Data */}
+                                                <Route path="master" element={<RequirePermission action="viewMasterData"><MasterOverview /></RequirePermission>} />
+                                                <Route path="master/vendors" element={<RequirePermission action="viewMasterData"><MasterVendors /></RequirePermission>} />
+                                                <Route path="master/users" element={<RequirePermission action="viewMasterData"><MasterUsers /></RequirePermission>} />
+                                                <Route path="manage-users/:id" element={<RequirePermission action="createUser"><ManageTeam  /></RequirePermission>} />
+                                                <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
+                                                <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
+                                                <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
+                                            </Routes>
+                                        </Layout>
                                     </RequireAuth>
                                 }
                             />
