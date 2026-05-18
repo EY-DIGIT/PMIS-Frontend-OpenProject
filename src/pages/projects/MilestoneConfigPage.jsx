@@ -97,22 +97,22 @@ export default function MilestoneConfigPage({ mode }) {
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
 
-  // Priority master — fetched once so the grid can render the friendly
-  // label ("High", "Medium", …) instead of the raw `p1` / `p2` code the
-  // node payload carries.
+  // Priority master state — the effect that loads it lives further
+  // down, *after* `pid` is declared, so we can safely depend on `pid`
+  // without hitting a temporal-dead-zone error.
   const [priorities, setPriorities] = useState([]);
-  useEffect(() => {
-    if (!getToken()) return;
-    let cancelled = false;
-    loadPriorities()
-      .then((list) => { if (!cancelled) setPriorities(Array.isArray(list) ? list : []); })
-      .catch(() => { if (!cancelled) setPriorities([]); });
-    return () => { cancelled = true; };
-  }, []);
+
   const priorityLabelByCode = useMemo(() => {
     const map = {};
     (priorities || []).forEach((p) => {
-      if (p && p.code) map[p.code] = p.name || p.code;
+      if (!p) return;
+      // Support a few shapes the backend has used in the wild:
+      //   { code: "p1", name: "High" }
+      //   { priorityCode: "p1", priorityName: "High" }
+      //   { id: "p1", label: "High" }
+      const code = p.code || p.priorityCode || p.id || p.value;
+      const name = p.name || p.priorityName || p.label || p.displayName;
+      if (code) map[String(code).toLowerCase()] = name || code;
     });
     return map;
   }, [priorities]);
@@ -161,6 +161,42 @@ export default function MilestoneConfigPage({ mode }) {
   const depMap = useMemo(() => (project ? buildDepDisplayMap(project) : {}), [project]);
 
   const pid = project && project.projectId ? project.projectId : null;
+
+  /* ─── Priority master loader ───
+     Earlier this ran once on mount with an empty dep array and bailed
+     silently if `getToken()` was falsy at that instant. On a hard
+     refresh the auth token sometimes settles slightly *after* the first
+     render, which meant priorities never loaded for that session and
+     the Priority column showed blank until the next navigation. We now
+     retry whenever `pid` becomes available (token is almost certainly
+     ready by then) and also schedule a single 300ms safety-net retry
+     in case the token hydrates asynchronously on first mount. */
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer = null;
+
+    const attempt = () => {
+      if (cancelled) return false;
+      if (!getToken()) return false;
+      loadPriorities()
+        .then((list) => {
+          if (!cancelled) setPriorities(Array.isArray(list) ? list : []);
+        })
+        .catch(() => {
+          if (!cancelled) setPriorities([]);
+        });
+      return true;
+    };
+
+    if (!attempt()) {
+      retryTimer = setTimeout(() => { attempt(); }, 300);
+    }
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [pid]);
 
   function commitUpdate(target) {
     if (!target) return;
@@ -742,6 +778,9 @@ export default function MilestoneConfigPage({ mode }) {
           }
         } else {
           newNode.vendor = formData.vendor;
+          // Milestone-level priority — without this the Priority column
+          // shows blank after Add Milestone until the tree refetch resolves.
+          newNode.priority = formData.priority || "";
         }
 
         if (kind === "milestone") {
@@ -829,6 +868,8 @@ export default function MilestoneConfigPage({ mode }) {
           }
         } else {
           node.vendor = formData.vendor;
+          // Milestone-level priority — see matching note in the add branch.
+          node.priority = formData.priority || "";
         }
         node.comments = safeArray(formData.comments);
 

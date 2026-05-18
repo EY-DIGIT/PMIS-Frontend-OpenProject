@@ -127,6 +127,52 @@ export default function MilestoneGridRow({
   const parentUidForEdit =
     r.milestoneUid || r.activityUid || r.parentTaskUid || "";
 
+  /* ─── Priority resolution ───
+     The backend has shipped this field in a few different shapes over
+     time. We accept all of them and fall through to the safest render
+     we can produce:
+
+       string  : "p1"                           → label map ("High") or "P1"
+       object  : { code: "p1", name: "High" }   → name
+       object  : { priorityCode, priorityName } → priorityName
+       object  : { id, label }                  → label
+       object  : { value, name }                → name
+
+     Also: priorityLabels is now indexed by *lowercased* code, so case
+     differences between the API and the master ("p1" vs "P1") no
+     longer cause the label to vanish. */
+  function resolvePriorityDisplay(raw) {
+    if (raw == null || raw === "") return "";
+
+    let code = "";
+    let inlineName = "";
+
+    if (typeof raw === "string") {
+      code = raw;
+    } else if (typeof raw === "object") {
+      code =
+        raw.code ||
+        raw.priorityCode ||
+        raw.id ||
+        raw.value ||
+        "";
+      inlineName =
+        raw.name ||
+        raw.priorityName ||
+        raw.label ||
+        raw.displayName ||
+        "";
+    }
+
+    if (inlineName) return inlineName;
+    if (!code) return "";
+
+    const key = String(code).toLowerCase();
+    if (priorityLabels[key]) return priorityLabels[key];
+    return String(code).toUpperCase();
+  }
+  const priorityDisplay = resolvePriorityDisplay(node.priority);
+
   return (
     <tr className={rowClass}>
       <td className="uidai-msgrid__cell uidai-msgrid__cell--wbs">{node.id || ""}</td>
@@ -157,18 +203,7 @@ export default function MilestoneGridRow({
         {typeLabel ? <span className="uidai-type-tag">{typeLabel}</span> : null}
       </td>
       <td className="uidai-msgrid__cell" style={{ textAlign: "center" }}>
-        {(() => {
-          // Backend returns priority either as a code string ("p1") or
-          // an object like {code, name}. Resolve to the friendly label
-          // from the priorities master if we have one, otherwise fall
-          // back to the upper-cased code so it at least reads as "P1".
-          const raw = node.priority;
-          if (!raw) return "";
-          const code = typeof raw === "object" ? (raw.code || raw.name || "") : String(raw);
-          if (!code) return "";
-          if (typeof raw === "object" && raw.name) return raw.name;
-          return priorityLabels[code] || code.toUpperCase();
-        })()}
+        {priorityDisplay}
       </td>
       {showStatusCol && (
         <td className="uidai-msgrid__cell">
