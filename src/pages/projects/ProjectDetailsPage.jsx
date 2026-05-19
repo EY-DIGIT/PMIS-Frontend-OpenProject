@@ -950,16 +950,17 @@ export default function ProjectDetailsPage() {
                 >
                   Manage Users
                 </button>
-                <button
+               
+              </>
+            );
+          })()}
+           <button
                   className="uidai-btn"
                   disabled={editing}
                   onClick={() => navigate(`/CriticalPathAnalysis/${project.projectId}`)}
                 >
                   Critical Path
                 </button>
-              </>
-            );
-          })()}
           {canEditProject && (
             <button className="uidai-btn" onClick={toggleEdit}>
               {editing ? "Save" : "Edit"}

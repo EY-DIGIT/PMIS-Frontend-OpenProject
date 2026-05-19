@@ -340,7 +340,7 @@ function FlowDiagram({ activitySchedule }) {
   });
   const levels = Object.keys(byLevel).map(Number).sort((a, b) => a - b);
 
-  const nodeW = 200, nodeH = 82;
+  const nodeW = 200, nodeH = 95;
   const hGap = 60, vGap = 24;
   const padX = 60, padY = 28;
 
@@ -443,6 +443,9 @@ function FlowDiagram({ activitySchedule }) {
             </text>
             <text className="cpa-flow-text cpa-flow-text-range" x={nodeW / 2} y="64" textAnchor="middle">
               Day {a.earlyStart} → Day {a.earlyFinish}
+            </text>
+             <text className="cpa-flow-text cpa-flow-text-range" x={nodeW / 2} y="86" textAnchor="middle">
+              Delayed {a.daysDelayed} 
             </text>
           </g>
         );
