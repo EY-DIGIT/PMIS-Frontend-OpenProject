@@ -8,7 +8,7 @@ import { ENDPOINTS } from '../../api/endpoint';
 /* ===================================================================
    DEPENDENCY TABLE
    =================================================================== */
-function DependencyTable({ activities, durationOverrides, onDurationChange }) {
+function DependencyTable({ activities }) {
   return (
     <div className="cpa-table-wrap">
       <table className="cpa-grid" aria-label="Activities and their dependencies">
@@ -33,7 +33,7 @@ function DependencyTable({ activities, durationOverrides, onDurationChange }) {
               </td>
               <td>{a.name}</td>
               <td>
-                <input
+                {/* <input
                   type="number"
                   min="1"
                   max="999"
@@ -41,7 +41,8 @@ function DependencyTable({ activities, durationOverrides, onDurationChange }) {
                   value={durationOverrides[a.activityId] ?? a.daysNeeded}
                   onChange={(e) => onDurationChange(a.activityId, e.target.value)}
                   aria-label={`Duration for ${a.id}`}
-                />
+                /> */}
+                {a.daysNeeded}
               </td>
               <td className="cpa-col-num">{a.daysDelayed}</td>
               <td>
@@ -569,7 +570,7 @@ export default function CriticalPathAnalysis() {
   const [depError, setDepError] = useState('');
   const [depData, setDepData] = useState(null);
 
-  const [durationOverrides, setDurationOverrides] = useState({});
+  // const [durationOverrides, setDurationOverrides] = useState({});
 
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
@@ -599,7 +600,7 @@ export default function CriticalPathAnalysis() {
         const raw = await res.json();
         if (!cancelled) {
           setDepData(raw?.data ?? raw);
-          setDurationOverrides({});
+          // setDurationOverrides({});
           setAnalysisData(null);
           setShowResults(false);
         }
@@ -631,21 +632,21 @@ export default function CriticalPathAnalysis() {
     }));
   }, [depData]);
 
-  function handleDurationChange(activityId, raw) {
-    const v = Math.max(1, Math.min(999, parseInt(raw, 10) || 1));
-    setDurationOverrides(prev => ({ ...prev, [activityId]: v }));
-    setShowResults(false);
-  }
+  // function handleDurationChange(activityId, raw) {
+  //   const v = Math.max(1, Math.min(999, parseInt(raw, 10) || 1));
+  //   setDurationOverrides(prev => ({ ...prev, [activityId]: v }));
+  //   setShowResults(false);
+  // }
 
   async function handleCalculate() {
     if (!projectId) return;
     const token = getToken();
     if (!token) { navigate('/login'); return; }
 
-    const overrides = Object.entries(durationOverrides).map(([activity_id, days_needed]) => ({
-      activity_id,
-      days_needed,
-    }));
+    // const overrides = Object.entries(durationOverrides).map(([activity_id, days_needed]) => ({
+    //   activity_id,
+    //   days_needed,
+    // }));
 
     setAnalysisLoading(true);
     setAnalysisError('');
@@ -655,7 +656,7 @@ export default function CriticalPathAnalysis() {
         {
           method: 'POST',
           headers: { accept: 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify(overrides.length ? { overrides } : {}),
+          body: JSON.stringify({}),
         }
       );
       if (res.status === 401) { logout(); navigate('/login'); return; }
@@ -719,8 +720,8 @@ export default function CriticalPathAnalysis() {
 
           <DependencyTable
             activities={activities}
-            durationOverrides={durationOverrides}
-            onDurationChange={handleDurationChange}
+            // durationOverrides={durationOverrides}
+            // onDurationChange={handleDurationChange}
           />
 
           {analysisError && (
