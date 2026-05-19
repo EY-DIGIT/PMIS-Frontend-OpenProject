@@ -938,31 +938,26 @@ export default function ProjectDetailsPage() {
               userRole === "org_admin" ? own || firstVendorId : firstVendorId;
             if (!targetOrgId) return null;
             return (
-              <button
-                className="uidai-btn"
-                disabled={editing}
-                onClick={() =>
-                  navigate(`/vendors/${targetOrgId}`, {
-                    state: { from: `/projects/${project.projectId}` },
-                  })
-                }
-              >
-                Manage Users
-              </button>
-              // <button
-              //   className="uidai-btn"
-              //   disabled={editing}
-              //   onClick={() =>
-              //     navigate(`/manage-users/${targetOrgId}`, {
-              //       state: {
-              //         projectId: project.projectCode,
-              //         projectName: project.projectName,
-              //       },
-              //     })
-              //   }
-              // >
-              //   Manage Team
-              // </button>
+              <>
+                <button
+                  className="uidai-btn"
+                  disabled={editing}
+                  onClick={() =>
+                    navigate(`/vendors/${targetOrgId}`, {
+                      state: { from: `/projects/${project.projectId}` },
+                    })
+                  }
+                >
+                  Manage Users
+                </button>
+                <button
+                  className="uidai-btn"
+                  disabled={editing}
+                  onClick={() => navigate(`/CriticalPathAnalysis/${project.projectId}`)}
+                >
+                  Critical Path
+                </button>
+              </>
             );
           })()}
           {canEditProject && (

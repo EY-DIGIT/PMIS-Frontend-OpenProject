@@ -79,6 +79,8 @@ export const ENDPOINTS = {
     auditLogs: (uuid) => `/api/v3/projects/${enc(uuid)}/audit-logs`,
     attachments: (uuid) => `/api/v3/projects/${enc(uuid)}/attachments`,
     discussionFeed: (uuid) => `/api/v3/projects/${enc(uuid)}/discussion-feed`,
+    criticalPathDependencies: (uuid) => `/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
+    criticalPathAnalysis: (uuid) => `/api/v3/projects/${enc(uuid)}/critical-path/analysis`,
   },
 
   milestones: {
