@@ -402,7 +402,7 @@ export default function MainApp() {
                                                 <Route path="users" element={<RequirePermission action="viewUsers"><UserList /></RequirePermission>} />
                                                 <Route path="users/new" element={<RequirePermission action="createUser"><UserForm /></RequirePermission>} />
                                                 <Route path="users/:id" element={<RequirePermission action="viewUsers"><UserDetails /></RequirePermission>} />
-                                                <Route path="CriticalPathAnalysis" element={<RequirePermission action="editUser"><CriticalPathAnalysis /></RequirePermission>} />
+                                                <Route path="CriticalPathAnalysis/:id" element={<RequirePermission action="editUser"><CriticalPathAnalysis /></RequirePermission>} />
                                                 {/* Master Data */}
                                                 <Route path="master" element={<RequirePermission action="viewMasterData"><MasterOverview /></RequirePermission>} />
                                                 <Route path="master/vendors" element={<RequirePermission action="viewMasterData"><MasterVendors /></RequirePermission>} />
