@@ -960,7 +960,7 @@ export default function ProjectDetailsPage() {
                   disabled={editing}
                   onClick={() => navigate(`/CriticalPathAnalysis/${project.projectId}`)}
                 >
-                  Critical Path
+                  Critical Path Analysis
                 </button>
            )}
           {canEditProject && (
