@@ -33,7 +33,7 @@ import MasterVendors from './pages/master/MasterVendors';
 import MasterUsers from './pages/master/MasterUsers';
 import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
-import { DataProvider } from './data/DataContext';
+import { DataProvider, useData } from './data/DataContext';
 import "./styles/global.css";
 
 // Dashboard pages are lazy-loaded so the heavy charts library only
@@ -51,8 +51,7 @@ import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
 import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import AuditLogsPage from "./pages/projects/AuditLogsPage";
-import { useProjects as useProjectsList } from "./store/project/projectsStore";
-import { useData } from './data/DataContext';
+import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
 import * as vendorsApi from './api/vendors';
 import { tokenStore } from './api/client';
@@ -215,7 +214,41 @@ function Breadcrumbs() {
     }, [vendorIdSeg, cachedVendorCode]);
     const vendorCode = cachedVendorCode || fetchedVendorCode;
 
+    const criticalPathProjectIdSeg =
+        segments[0] === "CriticalPathAnalysis" && segments[1]
+            ? decodeURIComponent(segments[1])
+            : null;
+    const criticalPathProject = useProject(criticalPathProjectIdSeg);
+    const criticalPathProjectCode = criticalPathProject?.projectCode || "";
+
     if (segments.length === 0) return null; // hide on Dashboard
+
+    if (criticalPathProjectIdSeg) {
+        const projectUrl = `/projects/${encodeURIComponent(criticalPathProjectIdSeg)}`;
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Home
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <Link to={projectUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Project Details
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <span style={{ color: "#333", fontWeight: 600 }}>
+                    {criticalPathProjectCode || criticalPathProjectIdSeg}
+                </span>
+            </nav>
+        );
+    }
 
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so

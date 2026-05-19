@@ -4,6 +4,7 @@ import './CriticalPathAnalysis.css';
 import { authorizedFetch, API_BASE } from '../../api/client';
 import { getToken, logout } from '../../api/auth';
 import { ENDPOINTS } from '../../api/endpoint';
+import { useProject } from '../../store/project/projectsStore';
 
 /* ===================================================================
    DEPENDENCY TABLE
@@ -576,6 +577,8 @@ export default function CriticalPathAnalysis() {
   const [analysisError, setAnalysisError] = useState('');
   const [analysisData, setAnalysisData] = useState(null);
   const [showResults, setShowResults] = useState(false);
+  const project = useProject(projectId);
+  const projectCode = depData?.projectCode || project?.projectCode || depData?.projectId || projectId;
 
   /* Fetch dependency table on mount */
   useEffect(() => {
@@ -683,7 +686,7 @@ export default function CriticalPathAnalysis() {
       <div className="cpa-page-header">
         <div className="cpa-pm-title">
           Critical Path Analysis
-          {depData?.projectId && <span style={{ marginLeft: 12, opacity: 0.7, fontWeight: 400, fontSize: '0.85em' }}>{depData.projectId}</span>}
+          {projectCode && <span style={{ marginLeft: 12, opacity: 0.7, fontWeight: 400, fontSize: '0.85em' }}>{projectCode}</span>}
         </div>
         <div className="cpa-pm-subtitle">
           {depData ? `${depData.totalActivities} activities loaded` : ''}
