@@ -954,13 +954,15 @@ export default function ProjectDetailsPage() {
               </>
             );
           })()}
-           <button
+           {canPublishProject && project.status === "PUBLISHED" && (
+            <button
                   className="uidai-btn"
                   disabled={editing}
                   onClick={() => navigate(`/CriticalPathAnalysis/${project.projectId}`)}
                 >
                   Critical Path
                 </button>
+           )}
           {canEditProject && (
             <button className="uidai-btn" onClick={toggleEdit}>
               {editing ? "Save" : "Edit"}
@@ -975,6 +977,7 @@ export default function ProjectDetailsPage() {
               Publish
             </button>
           )}
+         
           <button
             className="uidai-btn"
             disabled={editing}
