@@ -70,6 +70,7 @@ export const uiStore = {
         "please wait",
         "failed",
         "no permissions",
+        "unknown",
         "before saving"
       ].join("|"),
       "i"

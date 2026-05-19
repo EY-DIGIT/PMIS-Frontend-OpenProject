@@ -895,7 +895,7 @@ export default function MilestoneConfigPage({ mode }) {
         .catch((err) => {
           uiStore.hideLoader();
           if (err?.isAuth) return handleAuthError(err);
-          uiStore.showMessage(err?.message || failMessage);
+          uiStore.showError(err?.message || failMessage);
         });
     };
 
