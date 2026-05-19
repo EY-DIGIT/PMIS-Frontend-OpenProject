@@ -371,8 +371,13 @@ function FlowDiagram({ activitySchedule }) {
   const endPos = { x: colXs[colXs.length - 1], y: padY + (colHeight - nodeH) / 2 };
 
   const renderEdge = (key, from, to, isCritical) => {
-    const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
-    const x2 = to.x, y2 = to.y + nodeH / 2;
+    const x1 = from.x + nodeW;
+    const x2 = to.x;
+    const baseY1 = from.y + nodeH / 2;
+    const baseY2 = to.y + nodeH / 2;
+    const yOffset = isCritical ? 6 : 0;
+    const y1 = baseY1 + yOffset;
+    const y2 = baseY2 + yOffset;
     const dx = (x2 - x1) * 0.45;
     const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
     const ax = x2 - 7;
@@ -380,7 +385,7 @@ function FlowDiagram({ activitySchedule }) {
     const arrowCls = isCritical ? 'cpa-flow-arrow cpa-flow-arrow-critical' : 'cpa-flow-arrow';
     return (
       <g key={key}>
-        <path d={d} className={cls} />
+        <path d={d} className={cls} strokeLinecap="round" strokeLinejoin="round" />
         <path d={`M ${x2} ${y2} L ${ax} ${y2 - 4} L ${ax} ${y2 + 4} Z`} className={arrowCls} />
       </g>
     );
