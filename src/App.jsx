@@ -65,6 +65,7 @@ import MessageModal from "./components/projects/modals/MessageModal";
 import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
 import ManageTeam from "./pages/users/ManageUsers";
+import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
 /* ─────────────────────────────────────────────────────────────
    PageTitle — route-driven page heading. Rendered above the
    breadcrumb so the heading sits at the very top of every page.
@@ -401,12 +402,12 @@ export default function MainApp() {
                                                 <Route path="users" element={<RequirePermission action="viewUsers"><UserList /></RequirePermission>} />
                                                 <Route path="users/new" element={<RequirePermission action="createUser"><UserForm /></RequirePermission>} />
                                                 <Route path="users/:id" element={<RequirePermission action="viewUsers"><UserDetails /></RequirePermission>} />
-
+                                                <Route path="CriticalPathAnalysis" element={<RequirePermission action="editUser"><CriticalPathAnalysis /></RequirePermission>} />
                                                 {/* Master Data */}
                                                 <Route path="master" element={<RequirePermission action="viewMasterData"><MasterOverview /></RequirePermission>} />
                                                 <Route path="master/vendors" element={<RequirePermission action="viewMasterData"><MasterVendors /></RequirePermission>} />
                                                 <Route path="master/users" element={<RequirePermission action="viewMasterData"><MasterUsers /></RequirePermission>} />
-                                                <Route path="manage-users/:id" element={<RequirePermission action="createUser"><ManageTeam  /></RequirePermission>} />
+                                                <Route path="manage-users/:id" element={<RequirePermission action="createUser"><ManageTeam /></RequirePermission>} />
                                                 <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
                                                 <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
