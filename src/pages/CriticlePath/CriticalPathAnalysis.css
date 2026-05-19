@@ -24,7 +24,7 @@
   font-family: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
   color: var(--cpa-text);
   background: var(--cpa-light);
-  padding: 14px 20px 22px;
+  padding-top: 24px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   box-sizing: border-box;
