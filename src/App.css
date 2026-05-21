@@ -58,7 +58,7 @@ body {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 3px 20px;
+  padding:26px;
   gap: 12px;
   min-height: 28px;
   font-size: 13px;
@@ -122,7 +122,7 @@ body {
   align-items: center;
   gap: 14px;
   padding: 8px 20px;
-  background: linear-gradient(90deg, #ffebc7 0%, #ffffff 45%, #ffffff 55%, #d7efd9 100%);
+  background: linear-gradient(119.54deg, #FFD9B3 0, #E3FEE4 100%);
 }
 
 .header-brand {
@@ -213,10 +213,11 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #f9fbff;
+  background: linear-gradient(119.54deg,#000046 0,#1cb5e0 100%);
   border-bottom: 1px solid var(--border);
   min-height: 58px;
   position: relative;
+  color: #fff;
   z-index: 30;
 }
 
@@ -391,11 +392,12 @@ body {
 }
 
 .pmis-footer {
-  background: #fff;
+  background: linear-gradient(119.54deg,rgba(0,0,70,.8));
   border-top: 3px solid var(--navy);
   text-align: center;
   padding: 10px;
   font-size: 12px;
+  color: #fff;
 }
 
 .pm-title {
