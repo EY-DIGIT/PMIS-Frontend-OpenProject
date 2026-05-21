@@ -254,7 +254,7 @@ body {
   position: absolute;
   right: 0;
   top: 40px;
-  background: #fff;
+  background: linear-gradient(119.54deg,#000046 0,#1cb5e0 100%);
   border: 1px solid var(--border);
   border-radius: 8px;
   display: none;
@@ -275,6 +275,7 @@ body {
 
 .pmis-profile-menu div:hover {
   background: #eef6fb;
+  color: #000046;
 }
 
 .pmis-layout {
@@ -285,13 +286,14 @@ body {
 
 .pmis-sidebar {
   width: 240px;
-  background: #fff;
+  background: linear-gradient(119.54deg,#000046 0,#1cb5e0 100%);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   transition: width .25s ease;
   min-height: 0;
+  color: #fff;
 }
 
 .pmis-sidebar.collapsed {
@@ -329,6 +331,7 @@ body {
 .pmis-menu a:hover,
 .pmis-submenu div:hover {
   background: #eef6fb;
+  color: rgba(0,0,70,.8);
 }
 
 .pmis-menu a.active,
