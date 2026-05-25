@@ -939,7 +939,7 @@ export default function ProjectDetailsPage() {
             if (!targetOrgId) return null;
             return (
               <>
-                <button
+                {/* <button
                   className="uidai-btn"
                   disabled={editing}
                   onClick={() =>
@@ -948,7 +948,15 @@ export default function ProjectDetailsPage() {
                     })
                   }
                 >
-                  Manage Users
+                  Manage Teams
+                </button> */}
+
+                  <button
+                  className="uidai-btn"
+                  disabled={editing}
+                  onClick={() =>navigate(`/manage-users/${project.projectId}`)}
+                >
+                  Manage Teams
                 </button>
                
               </>

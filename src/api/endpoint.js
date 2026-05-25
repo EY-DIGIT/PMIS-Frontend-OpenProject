@@ -220,6 +220,7 @@ export const ENDPOINTS = {
     discussionFeed: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/discussion-feed`,
     criticalPathDependencies: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
     criticalPathAnalysis: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/analysis`,
+      teamPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-page`,
   },
 
   milestones: {

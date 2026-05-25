@@ -1,148 +1,201 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
-import '../../styles/ManageUsers.css';
-import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
-import { ENDPOINTS } from '../../api/endpoint';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { getTeamPage, updateTeamPage } from '../../api/teamPage';
+import './ManageTeam.css';
 
-/* ═══════════════════════════════════════════════════════════
-   UNIQUE CLASS PREFIX HELPER
-   ═══════════════════════════════════════════════════════════ */
-const C = (name) => 'qahftrxckafn-' + name;
+/* ──────────────────────────────────────────────────────────
+   STATIC ROLE DEFINITIONS — single source of truth for the UI.
+   `roleLabel` is the canonical key sent to / received from the API.
+   `displayLabel` (optional) is what we render in the UI.
+   `single` is true for radio-like (one user) selectors.
+   To add / rename / reorder roles, edit just these two arrays.
+   ────────────────────────────────────────────────────────── */
+// `roleLabel` is the canonical key the API uses (kept as-is from the GET
+// response so PUT round-trips correctly). `displayLabel` is what we render
+// in the UI — change these freely to match design without touching the
+// server contract.
+const ORG_USER_ROLES = [
+  { roleLabel: 'project_admin',  displayLabel: 'Project Admin' },
+  { roleLabel: 'project_member', displayLabel: 'Project User'  },
+];
 
-/* ═══════════════════════════════════════════════════════════
-   HELPERS
-   ═══════════════════════════════════════════════════════════ */
-function escapeAttr(s) {
-  return String(s ?? '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const PROJECT_OWNER_ROLES = [
+  { roleLabel: 'Approver',      displayLabel: 'Approver',      single: true  },
+  { roleLabel: 'project_owner', displayLabel: 'Project Owner', single: false },
+];
+
+/* Merge the server's users[] for each role into the static row list.
+   Matching is purely positional — we ignore the API's `roleLabel` and
+   `single` fields entirely. Whatever the server names its roles, the UI
+   shows the static labels above and pulls users[] from the same array
+   index. Static row 0 gets API row 0's users, row 1 gets row 1's, etc.
+   Missing API rows render with an empty selection. */
+function mergeRolesWithApi(staticRoles, apiRows) {
+  const apiArr = Array.isArray(apiRows) ? apiRows : [];
+  return staticRoles.map((cfg, i) => ({
+    roleLabel: cfg.roleLabel,
+    displayLabel: cfg.displayLabel || cfg.roleLabel,
+    single: !!cfg.single,
+    users: Array.isArray(apiArr[i]?.users) ? apiArr[i].users : [],
+  }));
 }
 
-function userFullLabel(uid, userDirectory) {
-  const u = userDirectory.find(x => x.id === uid);
-  return u ? u.name : uid;
-}
-
-function normalizeUsers(rawList) {
-  if (!Array.isArray(rawList)) return [];
-  return rawList.map(u => {
-    const id = u.userId || u.id || u.login || '';
-    const username = u.employeeId || u.login || '';
-    const fullName = u.fullName || '';
-    const name = username
-      ? (fullName ? `${username} (${fullName})` : username)
-      : (fullName || u.email || id);
-    return { id, name };
-  }).filter(u => u.id);
-}
-
-/* ═══════════════════════════════════════════════════════════
-   TOAST
-   ═══════════════════════════════════════════════════════════ */
-function Toast({ message, type, visible }) {
-  return (
-    <div
-      className={[C('toast'), visible ? C('toast--visible') : '', type ? C('toast--' + type) : ''].filter(Boolean).join(' ')}
-      role="status"
-      aria-live="polite"
-    >
-      {message}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════
-   MULTI-SELECT
-   ═══════════════════════════════════════════════════════════ */
-function MultiSelect({ path, selectedIds, onToggle, userDirectory }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const wrapRef = useRef(null);
+/* ──────────────────────────────────────────────────────────
+   MULTI-SELECT — chip-style user picker.
+   `users` prop is the directory loaded from the API.
+   ────────────────────────────────────────────────────────── */
+function MultiSelect({ path, users, selectedIds, single, isOpen, onToggleOpen, onChange, disabled }) {
+  const [search, setSearch] = useState('');
+  const toggleRef = useRef(null);
+  const panelRef = useRef(null);
   const searchRef = useRef(null);
+  const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 0, ready: false });
 
+  const directory = Array.isArray(users) ? users : [];
+  const userFullLabel = (uid) => {
+    const u = directory.find((x) => x.id === uid);
+    return u ? u.name : uid;
+  };
+
+  const displayIds = single ? (selectedIds || []).slice(0, 1) : (selectedIds || []);
   const selectedSet = new Set(selectedIds || []);
 
-  useEffect(() => {
-    function handleOutsideClick(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
-        setIsOpen(false);
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPanelPos((p) => ({ ...p, ready: false }));
+      setSearch('');
+      return;
+    }
+    const positionPanel = () => {
+      const toggle = toggleRef.current;
+      const panel = panelRef.current;
+      if (!toggle || !panel) return;
+
+      const rect = toggle.getBoundingClientRect();
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+      const margin = 10;
+
+      const panelMinWidth = 240;
+      const panelMaxWidth = Math.min(viewportW - margin * 2, 480);
+      let width = Math.max(panelMinWidth, Math.min(rect.width, panelMaxWidth));
+      if (width > viewportW - margin * 2) width = viewportW - margin * 2;
+
+      let left = rect.left;
+      if (left + width > viewportW - margin) left = viewportW - margin - width;
+      if (left < margin) left = margin;
+
+      panel.style.width = width + 'px';
+      const panelHeight = panel.offsetHeight;
+      const spaceBelow = viewportH - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      const gap = 6;
+
+      let top;
+      if (spaceBelow >= panelHeight + gap || spaceBelow >= spaceAbove) {
+        top = rect.bottom + gap;
+        if (top + panelHeight > viewportH - margin) {
+          top = Math.max(margin, viewportH - margin - panelHeight);
+        }
+      } else {
+        top = rect.top - panelHeight - gap;
+        if (top < margin) top = margin;
       }
-    }
-    if (isOpen) {
-      document.addEventListener('click', handleOutsideClick);
-      setTimeout(() => searchRef.current?.focus(), 50);
-    }
-    return () => document.removeEventListener('click', handleOutsideClick);
+      setPanelPos({ top, left, width, ready: true });
+    };
+
+    positionPanel();
+    const handleReposition = () => positionPanel();
+    window.addEventListener('scroll', handleReposition, true);
+    window.addEventListener('resize', handleReposition);
+    const focusTimer = setTimeout(() => searchRef.current?.focus(), 60);
+
+    return () => {
+      window.removeEventListener('scroll', handleReposition, true);
+      window.removeEventListener('resize', handleReposition);
+      clearTimeout(focusTimer);
+    };
   }, [isOpen]);
 
-  const filteredUsers = userDirectory.filter(u =>
-    !searchQuery || u.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredOptions = directory.filter(
+    (u) => !search || u.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleToggle = useCallback((uid, checked) => {
-    onToggle(path, uid, checked);
-    setTimeout(() => setIsOpen(true), 0);
-  }, [onToggle, path]);
+  const placeholder = single ? 'Select a user...' : 'Search user...';
+  const wrapCls = `mt-ms-wrap${single ? ' mt-ms-single' : ''}${isOpen ? ' mt-ms-open' : ''}`;
 
   return (
-    <div
-      ref={wrapRef}
-      className={[C('ms-wrap'), isOpen ? C('ms-wrap--open') : ''].filter(Boolean).join(' ')}
-      data-path={path}
-    >
+    <div className={wrapCls} data-path={path}>
       <button
         type="button"
-        className={C('ms-toggle')}
-        onClick={() => setIsOpen(o => !o)}
-        aria-expanded={isOpen}
+        className="mt-ms-toggle"
+        ref={toggleRef}
+        disabled={disabled}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!disabled) onToggleOpen();
+        }}
         aria-haspopup="listbox"
+        aria-expanded={isOpen}
       >
-        <div className={C('ms-display')}>
-          {(selectedIds || []).length === 0 ? (
-            <span className={C('ms-placeholder')}>Search user...</span>
+        <div className="mt-ms-display">
+          {displayIds.length > 0 ? (
+            displayIds.map((uid) => (
+              <span key={uid} className="mt-ms-tag" title={userFullLabel(uid)}>
+                {userFullLabel(uid)}
+              </span>
+            ))
           ) : (
-            (selectedIds || []).map(uid => {
-              const label = userFullLabel(uid, userDirectory);
-              return (
-                <span key={uid} className={C('ms-tag')} title={label}>{label}</span>
-              );
-            })
+            <span className="mt-ms-placeholder">{placeholder}</span>
           )}
         </div>
-        <span className={C('ms-caret')} aria-hidden="true">▾</span>
+        <span className="mt-ms-caret" aria-hidden="true">▾</span>
       </button>
 
       {isOpen && (
-        <div className={C('ms-panel')} onClick={e => e.stopPropagation()}>
+        <div
+          className="mt-ms-panel"
+          ref={panelRef}
+          style={{
+            position: 'fixed',
+            top: panelPos.top + 'px',
+            left: panelPos.left + 'px',
+            width: panelPos.width + 'px',
+            maxWidth: 'calc(100vw - 20px)',
+            visibility: panelPos.ready ? 'visible' : 'hidden'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <input
             ref={searchRef}
             type="text"
-            className={C('ms-search')}
-            placeholder="Search user..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            className="mt-ms-search"
+            placeholder={placeholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             aria-label="Search users"
           />
-          <div className={C('ms-options')} role="listbox">
-            {filteredUsers.length === 0 ? (
-              <div className={C('ms-empty')}>No matching users</div>
-            ) : (
-              filteredUsers.map(u => {
-                const isChecked = selectedSet.has(u.id);
+          <div className="mt-ms-options" role="listbox">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((u) => {
+                const checked = selectedSet.has(u.id);
                 return (
                   <label
                     key={u.id}
-                    className={[C('ms-option'), isChecked ? C('ms-option--checked') : ''].filter(Boolean).join(' ')}
-                    data-uid={u.id}
+                    className={`mt-ms-option${checked ? ' mt-ms-checked' : ''}`}
                   >
                     <input
                       type="checkbox"
                       value={u.id}
-                      checked={isChecked}
-                      onChange={e => handleToggle(u.id, e.target.checked)}
+                      checked={checked}
+                      onChange={(e) => onChange(u.id, e.target.checked)}
                     />
                     <span>{u.name}</span>
                   </label>
                 );
               })
+            ) : (
+              <div className="mt-ms-empty">No matching users</div>
             )}
           </div>
         </div>
@@ -151,495 +204,227 @@ function MultiSelect({ path, selectedIds, onToggle, userDirectory }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   SECTION TABLE (org user / project owner rows)
-   ═══════════════════════════════════════════════════════════ */
-function SectionCard({ sectionId, title, subtag, rows, onToggleUser, userDirectory }) {
-  return (
-    <div className={C('card')} data-section={sectionId}>
-      <h2 className={C('card-title')}>
-        {title}
-        {subtag && <span className={C('card-title__subtag')}>{subtag}</span>}
-      </h2>
-      <div className={C('table-wrap')}>
-        <table className={C('team-table')}>
-          <thead>
-            <tr>
-              <th className={C('team-table__col-role')}>Role</th>
-              <th>Users</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={2} className={C('team-table__empty')}>No role assignments.</td>
-              </tr>
-            ) : (
-              rows.map((row, idx) => {
-                const path = `section:${sectionId}:${idx}`;
-                return (
-                  <tr key={`${sectionId}-${idx}`} data-row-idx={idx}>
-                    <td data-label="Role">
-                      <span className={C('role-pill')} title="Role is fixed and cannot be edited">
-                        {row.roleLabel}
-                      </span>
-                    </td>
-                    <td data-label="Users">
-                      <MultiSelect
-                        path={path}
-                        selectedIds={row.users}
-                        onToggle={onToggleUser}
-                        userDirectory={userDirectory}
-                      />
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+/* ──────────────────────────────────────────────────────────
+   MAIN PAGE COMPONENT
+   ────────────────────────────────────────────────────────── */
+const EMPTY_STATE = {
+  orgUser: mergeRolesWithApi(ORG_USER_ROLES, []),
+  projectOwner: mergeRolesWithApi(PROJECT_OWNER_ROLES, []),
+  activities: [],
+};
 
-/* ═══════════════════════════════════════════════════════════
-   ACTIVITY LIST — grouped by Milestone
-   ═══════════════════════════════════════════════════════════ */
-function ActivityList({ activities, onOpen }) {
-  // Group by milestone, preserving insertion order
-  const groups = [];
-  const groupMap = new Map();
-  (activities || []).forEach(a => {
-    const m = a.milestone || '(Unassigned)';
-    if (!groupMap.has(m)) {
-      const g = { milestone: m, items: [] };
-      groupMap.set(m, g);
-      groups.push(g);
-    }
-    groupMap.get(m).items.push(a);
-  });
-
-  if (groups.length === 0) {
-    return (
-      <div className={C('activity-empty')}>
-        No activities defined for this project.
-      </div>
-    );
-  }
-
-  return (
-    <div className={C('activity-list')} role="list">
-      {groups.map(group => (
-        <MilestoneGroup key={group.milestone} group={group} onOpen={onOpen} />
-      ))}
-    </div>
-  );
-}
-
-function MilestoneGroup({ group, onOpen }) {
-  const count = group.items.length;
-  return (
-    <section className={C('milestone-group')}>
-      <header className={C('milestone-head')}>
-        <span className={C('milestone-icon')} aria-hidden="true">📍</span>
-        <span className={C('milestone-label')}>Milestone</span>
-        <span className={C('milestone-name')}>{group.milestone}</span>
-        <span className={C('milestone-count')}>
-          {count} {count === 1 ? 'activity' : 'activities'}
-        </span>
-      </header>
-      <div className={C('milestone-items')}>
-        {group.items.map(act => (
-          <ActivityItem key={act.id} act={act} onOpen={onOpen} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ActivityItem({ act, onOpen }) {
-  return (
-    <div
-      className={C('activity-item')}
-      role="listitem"
-      tabIndex={0}
-      data-activity-id={act.id}
-      onClick={() => onOpen(act.id)}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpen(act.id);
-        }
-      }}
-      aria-label={`Configure activity ${act.name}`}
-    >
-      <div className={C('activity-id-name')}>
-        <span className={C('activity-id')}>{act.id}</span>
-        <span className={C('activity-name')}>{act.name}</span>
-      </div>
-      <span className={C('activity-arrow')} aria-hidden="true">›</span>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════
-   ACTIVITY MODAL
-   ═══════════════════════════════════════════════════════════ */
-function ActivityModal({ modalState, activities, userDirectory, onClose, onSave, onToggle }) {
-  const overlayRef = useRef(null);
-  const closeBtnRef = useRef(null);
-
-  const act = modalState ? activities.find(a => a.id === modalState.activityId) : null;
-  const divisions = modalState ? (modalState.concernedDivisionsSnapshot || []) : [];
-
-  // Focus close button on open; close on Escape
-  useEffect(() => {
-    if (!modalState) return;
-    const timer = setTimeout(() => closeBtnRef.current?.focus(), 50);
-    return () => clearTimeout(timer);
-  }, [modalState]);
-
-  useEffect(() => {
-    function handleKey(e) {
-      if (e.key === 'Escape' && modalState) onClose();
-    }
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [modalState, onClose]);
-
-  if (!modalState || !act) return null;
-
-  return (
-    <div
-      ref={overlayRef}
-      className={C('modal-overlay')}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="actModalTitle"
-      onClick={e => { if (e.target === overlayRef.current) onClose(); }}
-    >
-      <div className={C('modal')}>
-        {/* Header */}
-        <div className={C('modal-header')}>
-          <div className={C('modal-title-block')}>
-            <span className={C('modal-eyebrow')}>
-              📍 Milestone · {act.milestone || '—'}
-            </span>
-            <div className={C('modal-title')} id="actModalTitle">
-              {act.name}
-              <span className={C('modal-title-id')}>{act.id}</span>
-            </div>
-          </div>
-          <button
-            ref={closeBtnRef}
-            type="button"
-            className={C('modal-close')}
-            aria-label="Close"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className={C('modal-body')}>
-          {/* Activity Owner */}
-          <div className={C('modal-field')}>
-            <div className={C('modal-field-label')}>Activity Owner</div>
-            <div className={C('modal-field-hint')}>
-              Pick one or more users responsible for this activity.
-            </div>
-            <MultiSelect
-              path="modal:owner"
-              selectedIds={modalState.owner}
-              onToggle={onToggle}
-              userDirectory={userDirectory}
-            />
-          </div>
-
-          {/* Concerned Divisions */}
-          {divisions.length > 0 ? (
-            <>
-              <div className={C('modal-divisions-heading')}>Concerned Division Users</div>
-              {divisions.map(div => (
-                <div key={div} className={C('modal-field')}>
-                  <div className={C('modal-field-label')}>
-                    <span className={C('division-tag')}>{div}</span>
-                    <span className={C('division-field-suffix')}>users</span>
-                  </div>
-                  <div className={C('modal-field-hint')}>
-                    Pick users from <strong>{div}</strong> who will work on this activity.
-                  </div>
-                  <MultiSelect
-                    path={`modal:div:${div}`}
-                    selectedIds={modalState.divisionUsers[div] || []}
-                    onToggle={onToggle}
-                    userDirectory={userDirectory}
-                  />
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className={C('modal-empty-divisions')}>
-              <span aria-hidden="true">ℹ️</span>
-              <span>
-                No Concerned Divisions are set for this activity in{' '}
-                <strong>Project Management</strong>. Add divisions there to assign
-                division users here.
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className={C('modal-footer')}>
-          <button type="button" className={`${C('btn')} ${C('btn--cancel')}`} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className={C('btn')} onClick={onSave}>
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════
-   MAIN COMPONENT
-   ═══════════════════════════════════════════════════════════ */
 export default function ManageTeam() {
-  const { id } = useParams();
-  const location = useLocation();
-  const projectId   = location.state?.projectId   || '';
-  const projectName = location.state?.projectName || '';
+  const { id: projectId } = useParams();
+  const navigate = useNavigate();
 
-  /* ── User directory ── */
+  /* ─── Data + UI state ─── */
   const [userDirectory, setUserDirectory] = useState([]);
-  const [usersLoading, setUsersLoading] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [projectCode, setProjectCode] = useState('');
+  const [state, setState] = useState(EMPTY_STATE);
 
-  useEffect(() => {
-    let cancelled = false;
-    let pollTimer = null;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
-    async function fetchUsers() {
-      if (cancelled) return;
-      const token = tokenStore.get();
-      if (!token) { pollTimer = setTimeout(fetchUsers, 200); return; }
-      setUsersLoading(true);
-      try {
-        const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.users.list}`,
-          { method: 'GET', headers: { accept: 'application/json' } }
-        );
-        if (!res.ok) return;
-        const raw = await res.json().catch(() => ({}));
-        const elements =
-          raw?.data?._embedded?.elements ??
-          raw?._embedded?.elements ??
-          raw?.data ??
-          (Array.isArray(raw) ? raw : []);
-        if (!cancelled) setUserDirectory(normalizeUsers(elements));
-      } catch {
-        if (!cancelled) setUserDirectory([]);
-      } finally {
-        if (!cancelled) setUsersLoading(false);
-      }
-    }
-
-    fetchUsers();
-    return () => { cancelled = true; if (pollTimer) clearTimeout(pollTimer); };
-  }, []);
-
-  /* ── Page-level team state (orgUser, projectOwner) ── */
-  const [teamState, setTeamState] = useState({
-    orgUser: [
-      { roleLabel: 'Project Admin', users: [] },
-      { roleLabel: 'Project User',  users: [] }
-    ],
-    projectOwner: [{ roleLabel: 'Project Owner', users: [] }]
-  });
-
-  /* ── Activities state ── */
-  const [activities, setActivities] = useState([
-    { id: 'ACT001', name: 'Requirement Collection', milestone: 'Initiation',
-      concernedDivisions: ['TMD2'], owner: [], divisionUsers: {} },
-    { id: 'ACT002', name: 'Kickoff Preparation',    milestone: 'Initiation',
-      concernedDivisions: ['TMD1'], owner: [], divisionUsers: {} },
-    { id: 'ACT003', name: 'Configuration Setup',    milestone: 'Execution',
-      concernedDivisions: ['TMD2', 'PMO'], owner: [], divisionUsers: {} },
-    { id: 'ACT004', name: 'User Acceptance Testing',milestone: 'Execution',
-      concernedDivisions: ['TMD1', 'TMD2'], owner: [], divisionUsers: {} },
-    { id: 'ACT005', name: 'Go-Live Readiness',      milestone: 'Closure',
-      concernedDivisions: ['TMD1'], owner: [], divisionUsers: {} },
-    { id: 'ACT006', name: 'Documentation Handover', milestone: 'Closure',
-      concernedDivisions: [], owner: [], divisionUsers: {} }
-  ]);
-
-  /* ── Modal state ── */
-  const [modalState, setModalState] = useState(null);
-  const lastFocusRef = useRef(null);
-
-  /* ── Toast ── */
-  const [toast, setToast] = useState({ message: '', type: '', visible: false });
+  const [openMsPath, setOpenMsPath] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [toast, setToast] = useState({ msg: '', type: '', show: false });
   const toastTimerRef = useRef(null);
 
-  const showToast = useCallback((message, type = '') => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast({ message, type, visible: true });
-    toastTimerRef.current = setTimeout(
-      () => setToast(prev => ({ ...prev, visible: false })),
-      2400
-    );
-  }, []);
-
-  /* ── Toggle user (handles both section paths and modal paths) ── */
-  const handleToggleUser = useCallback((path, userId, isChecked) => {
-    const parts = path.split(':');
-
-    if (parts[0] === 'section') {
-      const sectionId = parts[1];
-      const rowIdx = parseInt(parts[2], 10);
-      setTeamState(prev => {
-        const next = { ...prev };
-        const sectionRows = [...next[sectionId]];
-        const row = { ...sectionRows[rowIdx] };
-        const userSet = new Set(row.users);
-        isChecked ? userSet.add(userId) : userSet.delete(userId);
-        row.users = Array.from(userSet);
-        sectionRows[rowIdx] = row;
-        next[sectionId] = sectionRows;
-        return next;
-      });
+  /* ─── Fetch team page on mount / projectId change ─── */
+  useEffect(() => {
+    if (!projectId) {
+      setLoadError('No project selected.');
+      setLoading(false);
       return;
     }
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+    (async () => {
+      try {
+        const data = await getTeamPage(projectId);
+        if (cancelled) return;
+        setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
+        setProjectName(data?.projectName || '');
+        setProjectCode(data?.projectCode || '');
+        setState({
+          // Roles are static — only the user IDs come from the API.
+          orgUser: mergeRolesWithApi(ORG_USER_ROLES, data?.orgUser),
+          projectOwner: mergeRolesWithApi(PROJECT_OWNER_ROLES, data?.projectOwner),
+          activities: (data?.activities || []).map((a) => ({
+            id: a?.id,
+            name: a?.name || '',
+            milestone: a?.milestone || '(Unassigned)',
+            concernedDivisions: Array.isArray(a?.concernedDivisions) ? a.concernedDivisions : [],
+            owner: Array.isArray(a?.owner) ? a.owner : [],
+            ownerApprover: Array.isArray(a?.ownerApprover) ? a.ownerApprover : [],
+            divisionUsers: (a?.divisionUsers && typeof a.divisionUsers === 'object') ? a.divisionUsers : {},
+            divisionApprovers: (a?.divisionApprovers && typeof a.divisionApprovers === 'object') ? a.divisionApprovers : {},
+          })),
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err?.message || 'Failed to load team page.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, reloadKey]);
 
-    if (parts[0] === 'modal') {
-      if (parts[1] === 'owner') {
-        setModalState(prev => {
-          if (!prev) return prev;
-          const set = new Set(prev.owner);
-          isChecked ? set.add(userId) : set.delete(userId);
-          return { ...prev, owner: Array.from(set) };
-        });
-        return;
+  /* Close dropdowns on outside click */
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (!e.target.closest('.mt-ms-wrap') && !e.target.closest('.mt-ms-panel')) {
+        setOpenMsPath(null);
       }
-      if (parts[1] === 'div') {
-        const division = parts.slice(2).join(':');
-        setModalState(prev => {
-          if (!prev) return prev;
-          const set = new Set(prev.divisionUsers[division] || []);
-          isChecked ? set.add(userId) : set.delete(userId);
-          return {
-            ...prev,
-            divisionUsers: { ...prev.divisionUsers, [division]: Array.from(set) }
-          };
-        });
-        return;
-      }
-    }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
   }, []);
 
-  /* ── Open modal ── */
-  const handleOpenModal = useCallback((activityId) => {
-    const act = activities.find(a => a.id === activityId);
-    if (!act) return;
-    const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
-    const seedDivUsers = {};
-    concerned.forEach(d => {
-      seedDivUsers[d] = [...((act.divisionUsers && act.divisionUsers[d]) || [])];
-    });
-    lastFocusRef.current = document.activeElement;
-    document.body.classList.add(C('body--modal-open'));
-    setModalState({
-      activityId,
-      owner: [...(act.owner || [])],
-      divisionUsers: seedDivUsers,
-      concernedDivisionsSnapshot: [...concerned]
-    });
-  }, [activities]);
+  /* ESC collapses any open accordion panel */
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'Escape' && expandedId) {
+        setOpenMsPath(null);
+        setExpandedId(null);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [expandedId]);
 
-  /* ── Close modal ── */
-  const handleCloseModal = useCallback(() => {
-    document.body.classList.remove(C('body--modal-open'));
-    setModalState(null);
-    try { lastFocusRef.current?.focus(); } catch (_) {}
-  }, []);
-
-  /* ── Save modal ── */
-  const handleSaveModal = useCallback(() => {
-    if (!modalState) return;
-    const actName = activities.find(a => a.id === modalState.activityId)?.name || '';
-    setActivities(prev => prev.map(a => {
-      if (a.id !== modalState.activityId) return a;
-      const newDivUsers = {};
-      (a.concernedDivisions || []).forEach(d => {
-        newDivUsers[d] = [...(modalState.divisionUsers[d] || [])];
-      });
-      return { ...a, owner: [...modalState.owner], divisionUsers: newDivUsers };
-    }));
-    document.body.classList.remove(C('body--modal-open'));
-    setModalState(null);
-    try { lastFocusRef.current?.focus(); } catch (_) {}
-    showToast(`Saved assignments for "${actName}".`, 'success');
-  }, [modalState, activities, showToast]);
-
-  /* ── Go Back ── */
-  const handleGoBack = () => {
-    if (window.history.length > 1) window.history.back();
-    else showToast('Back to project list.');
+  const showToast = (msg, type = '') => {
+    setToast({ msg, type, show: true });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      setToast((t) => ({ ...t, show: false }));
+    }, 2800);
   };
 
-  /* ── Submit ── */
-  const [saving, setSaving] = useState(false);
+  const toggleMsOpen = (path) => {
+    setOpenMsPath((prev) => (prev === path ? null : path));
+  };
 
-  const handleSubmit = async () => {
+  /* ─── Section row user toggle (Org User / Project Owner) ─── */
+  const handleSectionChange = (sectionId, idx, row) => (uid, checked) => {
+    setState((prev) => {
+      const newRows = [...prev[sectionId]];
+      const newRow = { ...newRows[idx] };
+      if (newRow.single) {
+        newRow.users = checked ? [uid] : [];
+      } else {
+        const set = new Set(newRow.users);
+        if (checked) set.add(uid);
+        else set.delete(uid);
+        newRow.users = Array.from(set);
+      }
+      newRows[idx] = newRow;
+      return { ...prev, [sectionId]: newRows };
+    });
+    if (row.single && checked) setOpenMsPath(null);
+  };
+
+  /* ─── Accordion expand / collapse ─── */
+  const toggleExpand = (activityId) => {
+    setOpenMsPath(null);
+    setExpandedId((prev) => (prev === activityId ? null : activityId));
+  };
+
+  /* ─── Direct activity edits (no draft layer — write to state immediately) ─── */
+  const updateActivity = (activityId, updater) => {
+    setState((prev) => ({
+      ...prev,
+      activities: prev.activities.map((a) => (a.id === activityId ? updater(a) : a)),
+    }));
+  };
+
+  const toggleActivityOwner = (activityId) => (uid, checked) => {
+    updateActivity(activityId, (a) => {
+      const set = new Set(a.owner || []);
+      if (checked) set.add(uid);
+      else set.delete(uid);
+      return { ...a, owner: Array.from(set) };
+    });
+  };
+
+  const toggleActivityOwnerApprover = (activityId) => (uid, checked) => {
+    updateActivity(activityId, (a) => ({ ...a, ownerApprover: checked ? [uid] : [] }));
+    if (checked) setOpenMsPath(null);
+  };
+
+  const toggleActivityDivUser = (activityId, division) => (uid, checked) => {
+    updateActivity(activityId, (a) => {
+      const current = (a.divisionUsers || {})[division] || [];
+      const set = new Set(current);
+      if (checked) set.add(uid);
+      else set.delete(uid);
+      return {
+        ...a,
+        divisionUsers: { ...(a.divisionUsers || {}), [division]: Array.from(set) },
+      };
+    });
+  };
+
+  const toggleActivityDivApprover = (activityId, division) => (uid, checked) => {
+    updateActivity(activityId, (a) => ({
+      ...a,
+      divisionApprovers: {
+        ...(a.divisionApprovers || {}),
+        [division]: checked ? [uid] : [],
+      },
+    }));
+    if (checked) setOpenMsPath(null);
+  };
+
+  /* ─── Submit (PUT) / Back ─── */
+  const submitTeam = async () => {
     const missing = [];
-
-    teamState.orgUser.forEach(r => {
-      if (!r.users || r.users.length === 0)
-        missing.push(`Organization User → ${r.roleLabel}`);
+    state.orgUser.forEach((r) => {
+      if (!r.users || r.users.length === 0) missing.push(`Organization User → ${r.displayLabel}`);
     });
-    teamState.projectOwner.forEach(r => {
-      if (!r.users || r.users.length === 0)
-        missing.push(`Project Owner → ${r.roleLabel}`);
+    state.projectOwner.forEach((r) => {
+      if (!r.users || r.users.length === 0) missing.push(`Project Owner → ${r.displayLabel}`);
     });
-    activities.forEach(a => {
-      if (!a.owner || a.owner.length === 0)
-        missing.push(`Activity "${a.name}" → Activity Owner`);
-      (a.concernedDivisions || []).forEach(d => {
+    state.activities.forEach((a) => {
+      if (!a.owner || a.owner.length === 0) missing.push(`Activity "${a.name}" → Activity Owner`);
+      if (!a.ownerApprover || a.ownerApprover.length === 0)
+        missing.push(`Activity "${a.name}" → Approver`);
+      (a.concernedDivisions || []).forEach((d) => {
         const users = (a.divisionUsers || {})[d];
-        if (!users || users.length === 0)
-          missing.push(`Activity "${a.name}" → ${d} users`);
+        if (!users || users.length === 0) missing.push(`Activity "${a.name}" → ${d} users`);
+        const approvers = (a.divisionApprovers || {})[d];
+        if (!approvers || approvers.length === 0) missing.push(`Activity "${a.name}" → ${d} Approver`);
       });
     });
 
     if (missing.length) {
+      const first = missing[0];
       const more = missing.length > 1 ? ` (+ ${missing.length - 1} more)` : '';
-      showToast(`Please complete: ${missing[0]}${more}`, 'error');
+      showToast(`Please complete: ${first}${more}`, 'error');
       return;
     }
 
-    if (!tokenStore.get()) {
-      showToast('Team saved successfully.', 'success');
-      return;
-    }
+    // PUT body must only carry { roleLabel, users, single? } — strip displayLabel
+    // (UI-only field) before sending so the server contract stays clean.
+    const stripDisplay = (rows) => rows.map((r) => {
+      const out = { roleLabel: r.roleLabel, users: r.users };
+      if (typeof r.single === 'boolean') out.single = r.single;
+      return out;
+    });
 
     setSaving(true);
     try {
-      const res = await authorizedFetch(
-        `${API_BASE}/manage/user`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({ orgId: id, projectId, projectName, teamState, activities })
-        }
-      );
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody?.message || `Request failed (${res.status})`);
-      }
+      await updateTeamPage(projectId, {
+        orgUser: stripDisplay(state.orgUser),
+        projectOwner: stripDisplay(state.projectOwner),
+        activities: state.activities,
+      });
       showToast('Team saved successfully.', 'success');
     } catch (err) {
       showToast(err?.message || 'Failed to save team.', 'error');
@@ -648,111 +433,392 @@ export default function ManageTeam() {
     }
   };
 
-  /* ── Total activity/milestone count tag ── */
-  const milestoneSet = new Set((activities || []).map(a => a.milestone || '(Unassigned)'));
-  const actCountTag = `${milestoneSet.size} ${milestoneSet.size === 1 ? 'milestone' : 'milestones'} · ${activities.length} ${activities.length === 1 ? 'activity' : 'activities'}`;
+  const goBack = () => {
+    if (window.history.length > 1) navigate(-1);
+    else navigate('/');
+  };
+
+  /* ─── Group activities by milestone ─── */
+  const activityGroups = (() => {
+    const groups = [];
+    const groupMap = new Map();
+    state.activities.forEach((a) => {
+      const m = a.milestone || '(Unassigned)';
+      if (!groupMap.has(m)) {
+        const g = { milestone: m, items: [] };
+        groupMap.set(m, g);
+        groups.push(g);
+      }
+      groupMap.get(m).items.push(a);
+    });
+    return groups;
+  })();
+
+  const totalAct = state.activities.length;
+  const totalMs = activityGroups.length;
+
+  /* ─── Inline editor for one activity (no Save/Cancel — persists immediately) ─── */
+  const renderActivityPanel = (act) => {
+    const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
+    return (
+      <div
+        id={`mt-activity-panel-${act.id}`}
+        className="mt-activity-panel"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mt-activity-panel-body">
+          {/* Activity ownership */}
+          <div className="mt-modal-role-group mt-division-group">
+            <div className="mt-division-group-header">
+              <span className="mt-division-tag">Activity</span>
+              <span className="mt-division-group-sub">
+                Pick the Approver and Activity Owner for this activity.
+              </span>
+            </div>
+            <div className="mt-modal-field">
+              <div className="mt-modal-field-label">Approver</div>
+              <div className="mt-modal-field-hint">
+                A single approver who will sign off on the Activity Owner's work.
+              </div>
+              <MultiSelect
+                path={`exp:${act.id}:ownerApprover`}
+                users={userDirectory}
+                selectedIds={act.ownerApprover}
+                single
+                isOpen={openMsPath === `exp:${act.id}:ownerApprover`}
+                onToggleOpen={() => toggleMsOpen(`exp:${act.id}:ownerApprover`)}
+                onChange={toggleActivityOwnerApprover(act.id)}
+                disabled={saving}
+              />
+            </div>
+            <div className="mt-modal-field">
+              <div className="mt-modal-field-label">Activity Owner</div>
+              <div className="mt-modal-field-hint">
+                One or more users responsible for this activity.
+              </div>
+              <MultiSelect
+                path={`exp:${act.id}:owner`}
+                users={userDirectory}
+                selectedIds={act.owner}
+                single={false}
+                isOpen={openMsPath === `exp:${act.id}:owner`}
+                onToggleOpen={() => toggleMsOpen(`exp:${act.id}:owner`)}
+                onChange={toggleActivityOwner(act.id)}
+                disabled={saving}
+              />
+            </div>
+          </div>
+
+          {/* Concerned Divisions */}
+          {concerned.length > 0 ? (
+            <>
+              <div className="mt-modal-divisions-heading">Concerned Divisions</div>
+              {concerned.map((d) => (
+                <div key={d} className="mt-modal-role-group mt-division-group">
+                  <div className="mt-division-group-header">
+                    <span className="mt-division-tag">{d}</span>
+                    <span className="mt-division-group-sub">
+                      Pick the Approver and Users from <strong>{d}</strong>.
+                    </span>
+                  </div>
+                  <div className="mt-modal-field">
+                    <div className="mt-modal-field-label">Approver</div>
+                    <div className="mt-modal-field-hint">
+                      A single approver from <strong>{d}</strong> for this activity.
+                    </div>
+                    <MultiSelect
+                      path={`exp:${act.id}:divApprover:${d}`}
+                      users={userDirectory}
+                      selectedIds={(act.divisionApprovers || {})[d] || []}
+                      single
+                      isOpen={openMsPath === `exp:${act.id}:divApprover:${d}`}
+                      onToggleOpen={() => toggleMsOpen(`exp:${act.id}:divApprover:${d}`)}
+                      onChange={toggleActivityDivApprover(act.id, d)}
+                      disabled={saving}
+                    />
+                  </div>
+                  <div className="mt-modal-field">
+                    <div className="mt-modal-field-label">Users</div>
+                    <div className="mt-modal-field-hint">
+                      Users from <strong>{d}</strong> who will work on this activity.
+                    </div>
+                    <MultiSelect
+                      path={`exp:${act.id}:div:${d}`}
+                      users={userDirectory}
+                      selectedIds={(act.divisionUsers || {})[d] || []}
+                      single={false}
+                      isOpen={openMsPath === `exp:${act.id}:div:${d}`}
+                      onToggleOpen={() => toggleMsOpen(`exp:${act.id}:div:${d}`)}
+                      onChange={toggleActivityDivUser(act.id, d)}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : (
+            <div className="mt-modal-empty-divisions">
+              <span aria-hidden="true">ℹ️</span>
+              <span>
+                No Concerned Divisions are set for this activity in{' '}
+                <strong>Project Management</strong>. Add divisions there to assign division
+                users here.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  /* ─── Loading / error states ─── */
+  if (loading) {
+    return (
+      <div className="mt-page">
+        <div className="mt-page-header">
+          <div className="mt-page-header-text">
+            <div className="mt-pm-title">Manage Team</div>
+            <div className="mt-pm-subtitle">Loading…</div>
+          </div>
+        </div>
+        <div className="mt-card">
+          <div className="mt-no-activities">Loading team data…</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mt-page">
+        <div className="mt-page-header">
+          <div className="mt-page-header-text">
+            <div className="mt-pm-title">Manage Team</div>
+            <div className="mt-pm-subtitle" style={{ color: 'var(--mt-red)' }}>
+              Could not load team data
+            </div>
+            <div className="mt-pm-description">{loadError}</div>
+          </div>
+        </div>
+        <div className="mt-page-footer-actions">
+          <button className="mt-btn mt-btn-cancel" onClick={goBack}>← Back</button>
+          <button className="mt-btn" onClick={() => setReloadKey((k) => k + 1)}>Retry</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={C('manage-team')}>
-      <main className={C('content')} id="mainContent" role="main" tabIndex={-1}>
-
-        {/* ─── PAGE HEADER ─── */}
-        <div className={C('page-header')}>
-          <div className={C('page-header__text')}>
-            <div className={C('pm-title')}>Manage Team</div>
-            <div className={C('pm-subtitle')}>Roles set. People in.</div>
-            <div className={C('pm-description')}>
-              Assign users to project roles, then configure ownership for each activity.
-              Click any activity below to set its Activity Owner and Concerned Divisions.
-            </div>
-          </div>
-          <div className={C('page-header__actions')}>
-            <button
-              className={`${C('btn')} ${C('btn--cancel')}`}
-              onClick={handleGoBack}
-              disabled={saving}
-            >
-              ← Back
-            </button>
-            <button
-              className={C('btn')}
-              onClick={handleSubmit}
-              disabled={saving || usersLoading}
-            >
-              {saving ? 'Saving…' : 'Submit'}
-            </button>
+    <div className="mt-page">
+      {/* ─── PAGE HEADER ─── */}
+      <div className="mt-page-header">
+        <div className="mt-page-header-text">
+          <div className="mt-pm-title">Manage Team</div>
+          <div className="mt-pm-subtitle">Roles set. People in.</div>
+          <div className="mt-pm-description">
+            Assign users to project roles, then configure ownership for each activity.
+            Click any activity below to set its Activity Owner and Concerned Divisions.
           </div>
         </div>
+      </div>
 
-        {/* ─── PROJECT CONTEXT BANNER ─── */}
-        <div className={C('card')} aria-label="Project context">
-          <div className={C('project-context')}>
-            <div className={C('project-context__id-block')}>
-              <span className={C('context-label')}>Project ID</span>
-              <span className={C('context-id-value')}>{projectId || '—'}</span>
-            </div>
-            <div className={C('project-context__name-block')}>
-              <span className={C('context-label')}>Project Name</span>
-              <span className={C('context-name-value')}>{projectName || '—'}</span>
-            </div>
+      {/* ─── PROJECT CONTEXT BANNER ─── */}
+      <div className="mt-card" aria-label="Project context">
+        <div className="mt-project-context">
+          <div>
+            <span className="mt-context-label">Project ID</span>
+            <span className="mt-context-id-value">{projectCode || '—'}</span>
+          </div>
+          <div>
+            <span className="mt-context-label">Project Name</span>
+            <span className="mt-context-name-value">{projectName || '—'}</span>
           </div>
         </div>
+      </div>
 
-        {usersLoading && (
-          <div className={C('card')} style={{ textAlign: 'center', padding: '12px', color: '#888', fontSize: 14 }}>
-            Loading users…
-          </div>
-        )}
-
-        {/* ─── 1. ORGANIZATION USER ─── */}
-        <SectionCard
-          sectionId="orgUser"
-          title="Organization User"
-          subtag={null}
-          rows={teamState.orgUser}
-          onToggleUser={handleToggleUser}
-          userDirectory={userDirectory}
-        />
-
-        {/* ─── 2. PROJECT OWNER ─── */}
-        <SectionCard
-          sectionId="projectOwner"
-          title="Project Owner"
-          subtag="TMD1"
-          rows={teamState.projectOwner}
-          onToggleUser={handleToggleUser}
-          userDirectory={userDirectory}
-        />
-
-        {/* ─── 3. ACTIVITIES ─── */}
-        <div className={C('card')} data-section="activities">
-          <h2 className={C('card-title')}>
-            Activities
-            <span className={C('card-title__subtag')}>{actCountTag}</span>
-          </h2>
-          <p className={C('card-subtitle')}>
-            Activities are grouped by milestone. Click any activity to assign its
-            Activity Owner and the users for each Concerned Division
-            (set in <strong>Project Management</strong>).
-          </p>
-          <ActivityList activities={activities} onOpen={handleOpenModal} />
+      {/* ─── ORGANIZATION USER (static roles) ─── */}
+      <div className="mt-card">
+        <h2 className="mt-card-title">Organization User</h2>
+        <div className="mt-table-wrap">
+          <table className="mt-team-table">
+            <thead>
+              <tr>
+                <th className="mt-col-role">Role</th>
+                <th>Users</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.orgUser.map((row, idx) => {
+                const path = `section:orgUser:${idx}`;
+                return (
+                  <tr key={row.roleLabel}>
+                    <td data-label="Role">
+                      <span className="mt-role-pill" title="Role is fixed and cannot be edited">
+                        {row.displayLabel}
+                      </span>
+                    </td>
+                    <td data-label={row.single ? 'User' : 'Users'}>
+                      <MultiSelect
+                        path={path}
+                        users={userDirectory}
+                        selectedIds={row.users}
+                        single={!!row.single}
+                        isOpen={openMsPath === path}
+                        onToggleOpen={() => toggleMsOpen(path)}
+                        onChange={handleSectionChange('orgUser', idx, row)}
+                        disabled={saving}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+      </div>
 
-      </main>
+      {/* ─── PROJECT OWNER (static roles) ─── */}
+      <div className="mt-card">
+        <h2 className="mt-card-title">Project Owner</h2>
+        <div className="mt-table-wrap">
+          <table className="mt-team-table">
+            <thead>
+              <tr>
+                <th className="mt-col-role">Role</th>
+                <th>Users</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.projectOwner.map((row, idx) => {
+                const path = `section:projectOwner:${idx}`;
+                return (
+                  <tr key={row.roleLabel}>
+                    <td data-label="Role">
+                      <span className="mt-role-pill" title="Role is fixed and cannot be edited">
+                        {row.displayLabel}
+                      </span>
+                    </td>
+                    <td data-label={row.single ? 'User' : 'Users'}>
+                      <MultiSelect
+                        path={path}
+                        users={userDirectory}
+                        selectedIds={row.users}
+                        single={!!row.single}
+                        isOpen={openMsPath === path}
+                        onToggleOpen={() => toggleMsOpen(path)}
+                        onChange={handleSectionChange('projectOwner', idx, row)}
+                        disabled={saving}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-      {/* ─── ACTIVITY MODAL ─── */}
-      {modalState && (
-        <ActivityModal
-          modalState={modalState}
-          activities={activities}
-          userDirectory={userDirectory}
-          onClose={handleCloseModal}
-          onSave={handleSaveModal}
-          onToggle={handleToggleUser}
-        />
-      )}
+      {/* ─── ACTIVITIES (inline expand/collapse — accordion) ─── */}
+      <div className="mt-card">
+        <h2 className="mt-card-title">
+          Activities{' '}
+          <span className="mt-subtag">
+            {totalMs} {totalMs === 1 ? 'milestone' : 'milestones'} · {totalAct}{' '}
+            {totalAct === 1 ? 'activity' : 'activities'}
+          </span>
+        </h2>
+        <p className="mt-card-subtitle">
+          Activities are grouped by milestone. Click any activity to expand it and assign its
+          Activity Owner and the users for each Concerned Division (set in{' '}
+          <strong>Project Management</strong>).
+        </p>
+        <div className="mt-activity-list">
+          {activityGroups.length === 0 ? (
+            <div className="mt-no-activities">No activities defined for this project.</div>
+          ) : (
+            activityGroups.map((group) => (
+              <section key={group.milestone} className="mt-milestone-group">
+                <header className="mt-milestone-head">
+                  <span className="mt-milestone-icon" aria-hidden="true">📍</span>
+                  <span className="mt-milestone-label">Milestone</span>
+                  <span className="mt-milestone-name">{group.milestone}</span>
+                  <span className="mt-milestone-count">
+                    {group.items.length} {group.items.length === 1 ? 'activity' : 'activities'}
+                  </span>
+                </header>
+                <div className="mt-milestone-items">
+                  {group.items.map((act) => {
+                    const isExpanded = expandedId === act.id;
+                    return (
+                      <div
+                        key={act.id}
+                        className={`mt-activity-row${isExpanded ? ' mt-activity-row-expanded' : ''}`}
+                      >
+                        <div
+                          className={`mt-activity-item${isExpanded ? ' mt-activity-item-active' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleExpand(act.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleExpand(act.id);
+                            }
+                          }}
+                          aria-expanded={isExpanded}
+                          aria-controls={`mt-activity-panel-${act.id}`}
+                          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} activity ${act.name}`}
+                        >
+                          <div className="mt-activity-id-name">
+                            <span className="mt-activity-id">{act.id?.slice(0, 8) || ''}</span>
+                            <span className="mt-activity-name">{act.name}</span>
+                          </div>
+                          <span
+                            className={`mt-activity-arrow${isExpanded ? ' mt-activity-arrow-open' : ''}`}
+                            aria-hidden="true"
+                          >
+                            {isExpanded ? '▾' : '›'}
+                          </span>
+                        </div>
+                        {isExpanded && renderActivityPanel(act)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </div>
 
-      <Toast message={toast.message} type={toast.type} visible={toast.visible} />
+      {/* ─── PAGE FOOTER ACTIONS (Back / Submit) ─── */}
+      <div style={{gap:"10px",display:"flex",justifyContent:"center"}}>
+        <button
+          className="mt-btn mt-btn-cancel"
+          onClick={goBack}
+          disabled={saving}
+        >
+          ← Back
+        </button>
+        <button
+          className="mt-btn"
+          onClick={submitTeam}
+          disabled={saving}
+        >
+          {saving ? 'Saving…' : 'Submit'}
+        </button>
+      </div>
+
+      {/* ─── TOAST ─── */}
+      <div
+        className={`mt-toast${toast.show ? ' mt-toast-show' : ''}${
+          toast.type ? ` mt-toast-${toast.type}` : ''
+        }`}
+        role="status"
+        aria-live="polite"
+      >
+        {toast.msg}
+      </div>
     </div>
   );
 }
