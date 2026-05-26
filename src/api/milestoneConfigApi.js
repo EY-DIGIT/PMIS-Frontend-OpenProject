@@ -50,6 +50,18 @@ function hasConcernedDivision(v) {
   return Array.isArray(v) ? v.some((x) => String(x || "").trim()) : Boolean(v);
 }
 
+/* "Others" detection — used by activity create/update to decide whether
+   the *_other free-text field should be sent. Backend treats anything
+   case-insensitively equal to "others" as the catch-all option that
+   needs a user-supplied label. */
+function isOthersCode(code) {
+  return String(code || "").trim().toLowerCase() === "others";
+}
+function hasOthersInList(v) {
+  if (Array.isArray(v)) return v.some(isOthersCode);
+  return isOthersCode(v);
+}
+
 function throwAuth() {
   logout();
   const err = new Error("Session expired. Please sign in again.");
@@ -620,9 +632,17 @@ export async function createActivityApi(milestoneApiId, formData, project) {
       startDate: toMilestoneIsoStart(formData.startDate),
       endDate: toMilestoneIsoEnd(formData.endDate),
       ownerDivision: formData.ownerDivision || null,
+      ownerDivisionOther:
+        isOthersCode(formData.ownerDivision) && String(formData.ownerDivisionOther || "").trim()
+          ? formData.ownerDivisionOther.trim()
+          : null,
       vendorId: formData.vendorId || null,
       priority: formData.priority || null,
       concernedDivision: serializeConcernedDivision(formData.concernedDivision),
+      concernedDivisionOther:
+        hasOthersInList(formData.concernedDivision) && String(formData.concernedDivisionOther || "").trim()
+          ? formData.concernedDivisionOther.trim()
+          : null,
       dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
     }
   );
@@ -636,12 +656,24 @@ function buildActivityPatchBody(project, formData) {
   };
   if (formData.ownerDivision !== undefined)
     body.ownerDivision = formData.ownerDivision || null;
+  if (formData.ownerDivisionOther !== undefined || formData.ownerDivision !== undefined) {
+    body.ownerDivisionOther =
+      isOthersCode(formData.ownerDivision) && String(formData.ownerDivisionOther || "").trim()
+        ? formData.ownerDivisionOther.trim()
+        : null;
+  }
   if (formData.vendorId !== undefined)
     body.vendorId = formData.vendorId || null;
   if (formData.priority !== undefined)
     body.priority = formData.priority || null;
   if (formData.concernedDivision !== undefined)
     body.concernedDivision = serializeConcernedDivision(formData.concernedDivision);
+  if (formData.concernedDivisionOther !== undefined || formData.concernedDivision !== undefined) {
+    body.concernedDivisionOther =
+      hasOthersInList(formData.concernedDivision) && String(formData.concernedDivisionOther || "").trim()
+        ? formData.concernedDivisionOther.trim()
+        : null;
+  }
   return body;
 }
 

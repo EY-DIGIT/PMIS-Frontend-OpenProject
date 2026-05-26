@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import DependencyPicker from "../DependencyPicker";
 import ChipControl from "../ChipControl";
@@ -142,6 +143,7 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     // Doc 38: activity-only fields. Backend stores them as ownerDivision /
     // vendorId / concernedDivision and accepts them on PATCH only.
     ownerDivision: n.ownerDivision || "",
+    ownerDivisionOther: n.ownerDivisionOther || "",
     vendorId: n.vendorId || "",
     priority: n.priority || "",
     /* Task / Subtask only — id of the user this item is assigned to.
@@ -149,6 +151,7 @@ function makeDefaultForm(kind, node, mode, parentNode) {
        activity's vendor. Activity / Milestone don't carry this. */
     assignedTo: n.assignedTo || "",
     concernedDivision: parseDivisionList(n.concernedDivision),
+    concernedDivisionOther: n.concernedDivisionOther || "",
     vendor: n.vendor || "",
     dependsOn: safeArray(n.dependsOn),
     resourceEntryType: n.resourceEntryType || "details",
@@ -259,6 +262,7 @@ export default function NodeModal({
   const [priorities, setPriorities] = useState([]);
   const [prioritiesLoading, setPrioritiesLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -272,6 +276,7 @@ export default function NodeModal({
       setPosting(false);
       setFileInputKey((k) => k + 1);
       setFullscreen(false);
+      setSaveError("");
     }
   }, [open, kind, node, mode, parentNode]);
 
@@ -482,6 +487,30 @@ export default function NodeModal({
   }
 
   function save() {
+    // Validate Owner Division + Concerned Division "Others" fields for
+    // activities — backend needs the user-supplied text whenever an
+    // "Others" code is selected.
+    if (kind === "activity") {
+      const divList = safeArray(divisions);
+
+      if (
+        divisionRequiresOther(divList, form.ownerDivision) &&
+        !String(form.ownerDivisionOther || "").trim()
+      ) {
+        setSaveError("Please specify the owner division.");
+        return;
+      }
+
+      const concernedNeedsOther = safeArray(form.concernedDivision).some((code) =>
+        divisionRequiresOther(divList, code)
+      );
+      if (concernedNeedsOther && !String(form.concernedDivisionOther || "").trim()) {
+        setSaveError("Please specify the concerned division.");
+        return;
+      }
+    }
+    setSaveError("");
+
     const payload = { ...form, bounds };
     const body = commentText.trim();
     if (body) payload.body = body;
@@ -757,72 +786,135 @@ export default function NodeModal({
             </div>
           )}
 
-          {showActivityFields && (
-            <>
-              <div className="uidai-field">
-                <label className="uidai-field__label">
-                  Owner Division <span className="uidai-required-project">*</span>
-                </label>
-                <select
-                  className="uidai-select"
-                  value={form.ownerDivision}
-                  onChange={(e) => updateField({ ownerDivision: e.target.value })}
-                  disabled={dis}
-                >
-                  <option value="">Select Owner Division</option>
-                  {safeArray(divisions).map((d) => (
-                    <option key={d.code} value={d.code}>{d.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="uidai-field">
-                <label className="uidai-field__label">
-                  Organization <span className="uidai-required-project">*</span>
-                </label>
-                <select
-                  className="uidai-select"
-                  value={form.vendorId}
-                  onChange={(e) => updateField({ vendorId: e.target.value })}
-                  disabled={dis}
-                >
-                  <option value="">— Select Organization —</option>
-                  {projectVendors.map((v) => {
-                    const id = typeof v === "object" ? (v.id || v.uuid || "") : "";
-                    const name = vendorName(v);
-                    if (!id || !name) return null;
-                    return <option key={id} value={id}>{name}</option>;
-                  })}
-                </select>
-                {projectVendors.length === 0 && (
-                  <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                    No organizations are associated with this project yet. Add them in Project Details &rarr; Organizations.
+          {showActivityFields && (() => {
+            const divList = safeArray(divisions);
+
+            // Owner Division — does the current selection require an
+            // "Other" free-text input?
+            const ownerNeedsOther = divisionRequiresOther(divList, form.ownerDivision);
+
+            // Concerned Division is multi-select. If ANY selected code is
+            // an "Others" entry, surface the specify input below.
+            const concernedNeedsOther = safeArray(form.concernedDivision).some((code) =>
+              divisionRequiresOther(divList, code)
+            );
+
+            return (
+              <>
+                <div className="uidai-field">
+                  <label className="uidai-field__label">
+                    Owner Division <span className="uidai-required-project">*</span>
+                  </label>
+                  <select
+                    className="uidai-select"
+                    value={form.ownerDivision}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      const stillNeedsOther = divisionRequiresOther(divList, next);
+                      updateField({
+                        ownerDivision: next,
+                        ownerDivisionOther: stillNeedsOther ? form.ownerDivisionOther : ""
+                      });
+                    }}
+                    disabled={dis}
+                  >
+                    <option value="">Select Owner Division</option>
+                    {divList.map((d) => (
+                      <option key={d.code} value={d.code}>{d.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {ownerNeedsOther && (
+                  <div className="uidai-field">
+                    <label className="uidai-field__label">
+                      Specify Owner Division <span className="uidai-required-project">*</span>
+                    </label>
+                    <input
+                      className="uidai-input"
+                      placeholder="Specify owner division"
+                      value={form.ownerDivisionOther}
+                      onChange={(e) => updateField({ ownerDivisionOther: e.target.value })}
+                      disabled={dis}
+                      maxLength={100}
+                    />
                   </div>
                 )}
-              </div>
-              <div className="uidai-field uidai-grid__full">
-                <label className="uidai-field__label">
-                  Concerned Division <span className="uidai-required-project">*</span>{" "}
-                  <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
-                    (the divisions whose consent is required for this activity)
-                  </span>
-                </label>
-                <ChipControl
-                  value={safeArray(form.concernedDivision)}
-                  options={
-                    safeArray(divisions).length
-                      ? safeArray(divisions).map((d) => ({ uid: d.code, name: d.label }))
-                      : DIVISION_OPTIONS.map((o) => ({
-                          uid: String(o).toLowerCase(),
-                          name: o
-                        }))
-                  }
-                  onChange={(next) => updateField({ concernedDivision: next })}
-                  label="division"
-                  disabled={dis}
-                />
-              </div>
-            </>
-          )}
+
+                <div className="uidai-field">
+                  <label className="uidai-field__label">
+                    Organization <span className="uidai-required-project">*</span>
+                  </label>
+                  <select
+                    className="uidai-select"
+                    value={form.vendorId}
+                    onChange={(e) => updateField({ vendorId: e.target.value })}
+                    disabled={dis}
+                  >
+                    <option value="">— Select Organization —</option>
+                    {projectVendors.map((v) => {
+                      const id = typeof v === "object" ? (v.id || v.uuid || "") : "";
+                      const name = vendorName(v);
+                      if (!id || !name) return null;
+                      return <option key={id} value={id}>{name}</option>;
+                    })}
+                  </select>
+                  {projectVendors.length === 0 && (
+                    <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
+                      No organizations are associated with this project yet. Add them in Project Details &rarr; Organizations.
+                    </div>
+                  )}
+                </div>
+
+                <div className="uidai-field uidai-grid__full">
+                  <label className="uidai-field__label">
+                    Concerned Division <span className="uidai-required-project">*</span>{" "}
+                    <span style={{ fontWeight: 400, fontSize: 12, color: "#66788f" }}>
+                      (the divisions whose consent is required for this activity)
+                    </span>
+                  </label>
+                  <ChipControl
+                    value={safeArray(form.concernedDivision)}
+                    options={
+                      divList.length
+                        ? divList.map((d) => ({ uid: d.code, name: d.label }))
+                        : DIVISION_OPTIONS.map((o) => ({
+                            uid: String(o).toLowerCase(),
+                            name: o
+                          }))
+                    }
+                    onChange={(next) => {
+                      const stillNeedsOther = safeArray(next).some((code) =>
+                        divisionRequiresOther(divList, code)
+                      );
+                      updateField({
+                        concernedDivision: next,
+                        concernedDivisionOther: stillNeedsOther ? form.concernedDivisionOther : ""
+                      });
+                    }}
+                    label="division"
+                    disabled={dis}
+                  />
+                </div>
+
+                {concernedNeedsOther && (
+                  <div className="uidai-field uidai-grid__full">
+                    <label className="uidai-field__label">
+                      Specify Concerned Division <span className="uidai-required-project">*</span>
+                    </label>
+                    <input
+                      className="uidai-input"
+                      placeholder="Specify concerned division"
+                      value={form.concernedDivisionOther}
+                      onChange={(e) => updateField({ concernedDivisionOther: e.target.value })}
+                      disabled={dis}
+                      maxLength={200}
+                    />
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Priority field is shown for all kinds (milestone / activity /
               task / subtask) — backend accepts `priority` on every level.
@@ -928,6 +1020,12 @@ export default function NodeModal({
             posting={posting}
             postError={postError}
           />
+        )}
+
+        {saveError && (
+          <div className="uidai-attach-error" style={{ marginTop: 8 }}>
+            {saveError}
+          </div>
         )}
 
         <div className="uidai-modal__actions">

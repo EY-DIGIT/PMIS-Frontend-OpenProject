@@ -240,6 +240,7 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     dependsOn: rawDeps.slice(),
     dependsOnDisplay: rawDisplay.slice(),
     ownerDivision: a.ownerDivision || "",
+    ownerDivisionOther: a.ownerDivisionOther || a.owner_division_other || "",
     vendorId: a.vendorId || "",
     /* Server returns priority either as a plain code string ("p2") or
        sometimes as a {code, name} object — normalize to a code string. */
@@ -253,6 +254,7 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     concernedDivision: Array.isArray(a.concernedDivision)
       ? a.concernedDivision.slice()
       : (a.concernedDivision ? [a.concernedDivision] : []),
+    concernedDivisionOther: a.concernedDivisionOther || a.concerned_division_other || "",
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0

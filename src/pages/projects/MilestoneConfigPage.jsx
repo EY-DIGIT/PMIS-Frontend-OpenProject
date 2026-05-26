@@ -549,6 +549,14 @@ export default function MilestoneConfigPage({ mode }) {
         uiStore.showMessage("Please select Owner Division.");
         return;
       }
+      // Owner Division "Others" must have a free-text value alongside.
+      if (
+        String(formData.ownerDivision).toLowerCase() === "others" &&
+        !String(formData.ownerDivisionOther || "").trim()
+      ) {
+        uiStore.showMessage("Please specify the owner division.");
+        return;
+      }
       if (!formData.vendorId) {
         uiStore.showMessage("Please select an Organization.");
         return;
@@ -558,11 +566,18 @@ export default function MilestoneConfigPage({ mode }) {
         return;
       }
       const cd = formData.concernedDivision;
-      const cdHasValue = Array.isArray(cd)
-        ? cd.some((x) => String(x || "").trim())
-        : Boolean(cd);
+      const cdArr = Array.isArray(cd) ? cd : (cd ? [cd] : []);
+      const cdHasValue = cdArr.some((x) => String(x || "").trim());
       if (!cdHasValue) {
         uiStore.showMessage("Please select at least one Concerned Division.");
+        return;
+      }
+      // Concerned Division "Others" must have a free-text value alongside.
+      const cdHasOthers = cdArr.some(
+        (x) => String(x || "").toLowerCase() === "others"
+      );
+      if (cdHasOthers && !String(formData.concernedDivisionOther || "").trim()) {
+        uiStore.showMessage("Please specify the concerned division.");
         return;
       }
     }
@@ -767,9 +782,11 @@ export default function MilestoneConfigPage({ mode }) {
           if (kind === "activity") {
             newNode.vendorId = formData.vendorId || "";
             newNode.ownerDivision = formData.ownerDivision || "";
+            newNode.ownerDivisionOther = formData.ownerDivisionOther || "";
             newNode.concernedDivision = Array.isArray(formData.concernedDivision)
               ? formData.concernedDivision.slice()
               : (formData.concernedDivision ? [formData.concernedDivision] : []);
+            newNode.concernedDivisionOther = formData.concernedDivisionOther || "";
             newNode.priority = formData.priority || "";
           } else {
             // Task / Subtask carry assignedTo instead of vendorId.
@@ -858,9 +875,11 @@ export default function MilestoneConfigPage({ mode }) {
           if (kind === "activity") {
             node.vendorId = formData.vendorId || "";
             node.ownerDivision = formData.ownerDivision || "";
+            node.ownerDivisionOther = formData.ownerDivisionOther || "";
             node.concernedDivision = Array.isArray(formData.concernedDivision)
               ? formData.concernedDivision.slice()
               : (formData.concernedDivision ? [formData.concernedDivision] : []);
+            node.concernedDivisionOther = formData.concernedDivisionOther || "";
             node.priority = formData.priority || "";
           } else {
             node.assignedTo = formData.assignedTo || "";
