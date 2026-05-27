@@ -25,15 +25,28 @@ const PROJECT_OWNER_ROLES = [
 ];
 
 /* Normalize a single directory user into the `{id, name}` shape the
-   MultiSelect components rely on. Backend payloads have come back with
-   different key sets over time (userId vs id vs uuid, fullName vs name
-   vs displayName vs login), so accept the union and fall back to the
-   most useful string we can find. Users that yield no usable id are
-   dropped entirely — they'd render as un-pickable rows otherwise. */
-function normalizeDirectoryUser(raw) {
-  if (!raw || typeof raw !== 'object') return null;
+   MultiSelect components rely on. Backend payloads have shipped under
+   many different key sets — accept the union, fall back through
+   plausible labels, and synthesize a stable id (`__dir-${index}`) when
+   the record has none rather than dropping the row. Dropping silently
+   was the bug that left only one user visible. */
+function normalizeDirectoryUser(raw, index) {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    return { id: raw, name: raw };
+  }
+  if (typeof raw !== 'object') return null;
   const id =
-    raw.id || raw.userId || raw.uuid || raw.user_id || raw.uid || '';
+    raw.id ||
+    raw.userId ||
+    raw.uuid ||
+    raw.user_id ||
+    raw.uid ||
+    raw.value ||
+    raw.key ||
+    raw.email ||
+    raw.login ||
+    `__dir-${index}`;
   const name =
     raw.name ||
     raw.fullName ||
@@ -42,15 +55,25 @@ function normalizeDirectoryUser(raw) {
     raw.display_name ||
     raw.userName ||
     raw.username ||
+    raw.label ||
     raw.login ||
     raw.email ||
-    id;
-  if (!id) return null;
-  return { id: String(id), name: String(name || id) };
+    String(id);
+  return { id: String(id), name: String(name) };
 }
 
 function normalizeDirectory(raw) {
-  return (Array.isArray(raw) ? raw : []).map(normalizeDirectoryUser).filter(Boolean);
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  raw.forEach((entry, i) => {
+    const u = normalizeDirectoryUser(entry, i);
+    if (!u) return;
+    if (seen.has(u.id)) return; // de-dupe by id
+    seen.add(u.id);
+    out.push(u);
+  });
+  return out;
 }
 
 /* Merge the server's users[] for each role into the static row list.
@@ -286,23 +309,27 @@ export default function ManageTeam() {
             ? rawData.data
             : rawData;
         /* Backend has shipped the directory under a few different keys in
-           the past. Accept the most likely ones and normalize each entry
-           into the `{id, name}` shape the MultiSelect needs. */
+           the past. Accept the most likely ones (including OpenProject's
+           HAL-style `_embedded.elements` envelope) and normalize each
+           entry into the `{id, name}` shape the MultiSelect needs. */
         const rawDir =
-          data?.userDirectory ||
-          data?.users ||
-          data?.directory ||
-          data?.userList ||
-          data?.allUsers ||
+          (Array.isArray(data?.userDirectory) && data.userDirectory) ||
+          (Array.isArray(data?.users) && data.users) ||
+          (Array.isArray(data?.directory) && data.directory) ||
+          (Array.isArray(data?.userList) && data.userList) ||
+          (Array.isArray(data?.allUsers) && data.allUsers) ||
+          (Array.isArray(data?._embedded?.elements) && data._embedded.elements) ||
+          (Array.isArray(data?.userDirectory?._embedded?.elements) &&
+            data.userDirectory._embedded.elements) ||
           [];
         const directory = normalizeDirectory(rawDir);
-        if (directory.length === 0) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            '[ManageTeam] userDirectory came back empty. Raw team-page payload:',
-            data
-          );
-        }
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[ManageTeam] team-page payload: raw directory length=${
+            Array.isArray(rawDir) ? rawDir.length : 'not-array'
+          }, normalized length=${directory.length}`,
+          { raw: data, rawDir, directory }
+        );
         setUserDirectory(directory);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
