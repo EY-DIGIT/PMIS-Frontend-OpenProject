@@ -4,22 +4,47 @@
 
    Two states (mirroring the HTML reference's `.activity-start-banner`):
      • Not started — amber banner with a "▶ Start Activity" button.
-       Click stamps `actualStartDate = today` locally. The approval
-       workflow is independent of this — driven by the Mark Ready /
-       Request Division buttons inside the ApprovalPanel.
+       Click fires SUBMIT to the workflow service AND stamps
+       `actualStartDate = today` locally. Errors surface inline.
      • Started — green banner showing the actual start date.
+
+   The approval workflow itself (Mark Ready / Request Division /
+   Approve / Reject / Request Owner) is driven separately by the
+   ApprovalPanel on the right column.
    ══════════════════════════════════════════════════════════════════ */
 
-import React from "react";
+import React, { useState } from "react";
 import { formatDateDisplay } from "../../../utils/project/helpers";
 import { startActivity } from "../../../utils/project/approvalWorkflow";
+import { transitionActivity, WORKFLOW_ACTIONS } from "../../../api/activityWorkflow";
 
 export default function StartActivityBanner({ activity, form, editable, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
   const startedDate = form.actualStartDate || activity.actualStartDate || "";
   const isStarted = !!startedDate;
+  const businessId = activity.apiId || activity.uid || "";
 
-  function handleStart() {
-    onChange(startActivity(form));
+  async function handleStart() {
+    if (!businessId) {
+      setError("Save the activity first, then start it.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await transitionActivity({
+        businessId,
+        action: WORKFLOW_ACTIONS.SUBMIT,
+        comment: "Activity started."
+      });
+      onChange(startActivity(form));
+    } catch (err) {
+      setError(err && err.message ? err.message : "Failed to start activity.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -51,13 +76,19 @@ export default function StartActivityBanner({ activity, form, editable, onChange
                 type="button"
                 className="pmis-awf-start-banner__btn"
                 onClick={handleStart}
+                disabled={busy}
               >
-                ▶ Start Activity
+                {busy ? "Submitting…" : "▶ Start Activity"}
               </button>
             )}
           </>
         )}
       </div>
+      {error && (
+        <div className="pmis-awf-error" style={{ marginTop: 8 }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }
