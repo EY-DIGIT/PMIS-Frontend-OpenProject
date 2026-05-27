@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getTeamPage, updateTeamPage } from '../../api/teamPage';
+import * as usersApi from '../../api/users';
 import './ManageTeam.css';
 
 /* ──────────────────────────────────────────────────────────
@@ -297,7 +298,18 @@ export default function ManageTeam() {
     setLoadError('');
     (async () => {
       try {
-        const rawData = await getTeamPage(projectId);
+        /* Fetch both endpoints in parallel:
+             • team-page  → project-specific context (roles, activities,
+                            existing assignments)
+             • users list → the full org-wide user directory. Team-page
+                            sometimes ships userDirectory with only the
+                            current user, so we use the users list as the
+                            primary directory and merge in any extras
+                            the team-page might mention. */
+        const [rawData, usersList] = await Promise.all([
+          getTeamPage(projectId),
+          usersApi.list({ pageSize: 500 }).catch(() => [])
+        ]);
         if (cancelled) return;
         /* The envelope unwrap in teamPage.js only peels one `data` layer.
            If the backend ever responds with a doubly-nested {data:{data:…}}
@@ -310,8 +322,7 @@ export default function ManageTeam() {
             : rawData;
         /* Backend has shipped the directory under a few different keys in
            the past. Accept the most likely ones (including OpenProject's
-           HAL-style `_embedded.elements` envelope) and normalize each
-           entry into the `{id, name}` shape the MultiSelect needs. */
+           HAL-style `_embedded.elements` envelope). */
         const rawDir =
           (Array.isArray(data?.userDirectory) && data.userDirectory) ||
           (Array.isArray(data?.users) && data.users) ||
@@ -322,15 +333,24 @@ export default function ManageTeam() {
           (Array.isArray(data?.userDirectory?._embedded?.elements) &&
             data.userDirectory._embedded.elements) ||
           [];
-        const directory = normalizeDirectory(rawDir);
+        /* Build the final directory: org-wide users list is the source of
+           truth; team-page's userDirectory is merged in case it has
+           anyone the users list omitted. De-dupe by id inside
+           normalizeDirectory. */
+        const merged = normalizeDirectory([
+          ...(Array.isArray(usersList) ? usersList : []),
+          ...rawDir
+        ]);
         // eslint-disable-next-line no-console
         console.warn(
-          `[ManageTeam] team-page payload: raw directory length=${
+          `[ManageTeam] users list length=${
+            Array.isArray(usersList) ? usersList.length : 'not-array'
+          }, team-page directory length=${
             Array.isArray(rawDir) ? rawDir.length : 'not-array'
-          }, normalized length=${directory.length}`,
-          { raw: data, rawDir, directory }
+          }, merged length=${merged.length}`,
+          { teamPage: data, usersList, rawDir, merged }
         );
-        setUserDirectory(directory);
+        setUserDirectory(merged);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
         setState({
