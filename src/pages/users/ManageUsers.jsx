@@ -24,6 +24,35 @@ const PROJECT_OWNER_ROLES = [
   { roleLabel: 'project_owner', displayLabel: 'Project Owner', single: false },
 ];
 
+/* Normalize a single directory user into the `{id, name}` shape the
+   MultiSelect components rely on. Backend payloads have come back with
+   different key sets over time (userId vs id vs uuid, fullName vs name
+   vs displayName vs login), so accept the union and fall back to the
+   most useful string we can find. Users that yield no usable id are
+   dropped entirely — they'd render as un-pickable rows otherwise. */
+function normalizeDirectoryUser(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id =
+    raw.id || raw.userId || raw.uuid || raw.user_id || raw.uid || '';
+  const name =
+    raw.name ||
+    raw.fullName ||
+    raw.full_name ||
+    raw.displayName ||
+    raw.display_name ||
+    raw.userName ||
+    raw.username ||
+    raw.login ||
+    raw.email ||
+    id;
+  if (!id) return null;
+  return { id: String(id), name: String(name || id) };
+}
+
+function normalizeDirectory(raw) {
+  return (Array.isArray(raw) ? raw : []).map(normalizeDirectoryUser).filter(Boolean);
+}
+
 /* Merge the server's users[] for each role into the static row list.
    Matching is purely positional — we ignore the API's `roleLabel` and
    `single` fields entirely. Whatever the server names its roles, the UI
@@ -245,9 +274,36 @@ export default function ManageTeam() {
     setLoadError('');
     (async () => {
       try {
-        const data = await getTeamPage(projectId);
+        const rawData = await getTeamPage(projectId);
         if (cancelled) return;
-        setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
+        /* The envelope unwrap in teamPage.js only peels one `data` layer.
+           If the backend ever responds with a doubly-nested {data:{data:…}}
+           shape, peel once more here so we don't quietly fail. */
+        const data =
+          rawData && typeof rawData === 'object' && rawData.data &&
+          typeof rawData.data === 'object' && !Array.isArray(rawData.data) &&
+          !Array.isArray(rawData.userDirectory) && !Array.isArray(rawData.activities)
+            ? rawData.data
+            : rawData;
+        /* Backend has shipped the directory under a few different keys in
+           the past. Accept the most likely ones and normalize each entry
+           into the `{id, name}` shape the MultiSelect needs. */
+        const rawDir =
+          data?.userDirectory ||
+          data?.users ||
+          data?.directory ||
+          data?.userList ||
+          data?.allUsers ||
+          [];
+        const directory = normalizeDirectory(rawDir);
+        if (directory.length === 0) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[ManageTeam] userDirectory came back empty. Raw team-page payload:',
+            data
+          );
+        }
+        setUserDirectory(directory);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
         setState({
