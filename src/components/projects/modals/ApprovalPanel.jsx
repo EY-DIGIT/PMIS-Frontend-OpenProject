@@ -20,6 +20,9 @@ import {
 } from "../../../utils/project/helpers";
 import { effectiveStatus } from "../../../utils/project/nodeUtils";
 import {
+  markReadyForApproval,
+  requestDivisionApproval,
+  requestOwnerApproval,
   resubmitAfterRejection,
   approveDivision,
   rejectDivision,
@@ -174,6 +177,33 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     }
   }
 
+  function handleMarkReady() {
+    /* Local-only transition: idle → ready_for_approval. The backend isn't
+       told yet; SUBMIT fires on Request Division Approval. */
+    apply(markReadyForApproval(form, "manual"));
+  }
+
+  async function handleRequestDivision() {
+    if (!consentDivisions.length) {
+      setError(
+        "Add at least one Concerned Division to the activity before submitting."
+      );
+      return;
+    }
+    await runTransition({
+      action: WORKFLOW_ACTIONS.SUBMIT,
+      comment: "Activity submitted for Concerned Division approval.",
+      transform: () => requestDivisionApproval(form, consentDivisions)
+    });
+  }
+
+  function handleRequestOwner() {
+    /* Local-only transition: division_approved → pending_owner. Backend
+       auto-progresses on the last division's APPROVE call; this button is
+       the explicit confirmation that the user wants to forward to Owner. */
+    apply(requestOwnerApproval(form, ownerName));
+  }
+
   async function handleResubmit() {
     if (!consentDivisions.length) {
       setError("No Concerned Divisions configured — cannot resubmit.");
@@ -235,10 +265,34 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     apply(resetWorkflow(form));
   }
 
-  /* ─── Toolbar ─── */
+  /* ─── Toolbar (HTML reference parity) ─── */
   const toolbarBtns = [];
   if (workflowEnabled && !rejection) {
-    if (state === "rejected_to_vendor") {
+    if (state === "idle" && allTasksDone) {
+      toolbarBtns.push(
+        <button
+          key="ready"
+          type="button"
+          className="pmis-awf-toolbar__btn"
+          disabled={busy}
+          onClick={handleMarkReady}
+        >
+          Mark Ready for Approval
+        </button>
+      );
+    } else if (state === "ready_for_approval") {
+      toolbarBtns.push(
+        <button
+          key="req-div"
+          type="button"
+          className="pmis-awf-toolbar__btn"
+          disabled={busy || !consentDivisions.length}
+          onClick={handleRequestDivision}
+        >
+          {busy ? "Submitting…" : "Request Division Approval"}
+        </button>
+      );
+    } else if (state === "rejected_to_vendor") {
       toolbarBtns.push(
         <button
           key="resubmit"
@@ -247,7 +301,19 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
           disabled={busy || !consentDivisions.length}
           onClick={handleResubmit}
         >
-          {busy ? "Submitting…" : "Resubmit for Approval"}
+          {busy ? "Submitting…" : "Resend for Approval"}
+        </button>
+      );
+    } else if (state === "division_approved") {
+      toolbarBtns.push(
+        <button
+          key="req-owner"
+          type="button"
+          className="pmis-awf-toolbar__btn"
+          disabled={busy}
+          onClick={handleRequestOwner}
+        >
+          Request Owner Approval
         </button>
       );
     }
@@ -275,16 +341,28 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
         Workflow complete.
       </div>
     );
-  } else if (state === "idle" && !isStarted) {
+  } else if (state === "idle" && hasTasks && !allTasksDone) {
     toolbarNode = (
       <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
-        Click <b>▶ Start Activity</b> above to submit for approval.
+        Complete every task before submitting for approval.
+      </div>
+    );
+  } else if (state === "pending_division") {
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
+        Awaiting Concerned Division decisions — approve or reject from the rows below.
+      </div>
+    );
+  } else if (state === "pending_owner") {
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
+        Awaiting Activity Owner decision — approve or reject from the row below.
       </div>
     );
   } else if (editable) {
     toolbarNode = (
       <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
-        Awaiting reviewer action — approve or reject from the rows below.
+        No actions available at this stage.
       </div>
     );
   }
@@ -333,13 +411,19 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
             <i>{form.lastRejection.reason || "—"}</i>
           </div>
         )}
-        {isStarted
-          ? <>Will route to: <b>{targets}</b>.</>
-          : <>Click <b>▶ Start Activity</b> at the top to submit and route to: <b>{targets}</b>.</>}
+        {state === "idle" && (
+          <>Click <b>Mark Ready for Approval</b> above to enter the workflow. Will route to: <b>{targets}</b>.</>
+        )}
+        {state === "ready_for_approval" && (
+          <>Click <b>Request Division Approval</b> above to submit. Will route to: <b>{targets}</b>.</>
+        )}
+        {state === "rejected_to_vendor" && (
+          <>Click <b>Resend for Approval</b> above to re-route to: <b>{targets}</b>.</>
+        )}
       </>
     );
   } else {
-    s2Body = "Pending — complete tasks and start the activity.";
+    s2Body = "Pending — complete tasks first.";
   }
 
   let s3Body;
@@ -439,6 +523,13 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
             {rj.revertDivisions.join(", ")}
           </div>
         )}
+      </>
+    );
+  } else if (s4 === "active" && state === "division_approved") {
+    s4Body = (
+      <>
+        All Concerned Divisions approved. Click{" "}
+        <b>Request Owner Approval</b> above to forward to <b>{ownerName}</b>.
       </>
     );
   } else if (s4 === "active" && state === "pending_owner") {
@@ -577,7 +668,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
         <StepRow index={1} state={s1} title={hasTasks ? "Tasks Completed" : "No Tasks Required"}>
           {s1Body}
         </StepRow>
-        <StepRow index={2} state={s2} title="Activity Submitted">
+        <StepRow index={2} state={s2} title="Ready for Approval">
           {s2Body}
         </StepRow>
         <StepRow index={3} state={s3} title="Concerned Division Review">

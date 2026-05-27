@@ -175,6 +175,12 @@ export function rollUpStatus(project) {
       walk(k, childKind);
     });
     if (kids.length && kids.every((k) => k.status === "Completed")) {
+      /* Activity completion is gated by the approval workflow (Concerned
+         Division + Activity Owner). Rolling up purely on child-task
+         completion would skip the workflow and silently mark the activity
+         Completed — so we leave activities for approveOwner() to flip and
+         only roll up project/milestone/task levels here. */
+      if (kind === "activity" && node.approvalState !== "completed") return;
       node.status = "Completed";
     }
   }

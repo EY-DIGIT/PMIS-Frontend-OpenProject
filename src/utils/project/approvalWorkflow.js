@@ -33,35 +33,22 @@ function pushSystemComment(form, payload) {
   return comments;
 }
 
-/* Convenience: stamp Actual Start Date AND submit for division approval in
-   one step. Matches the backend's SUBMIT action which moves the activity
-   straight into pending_division with the configured Concerned Divisions. */
-export function startActivity(form, divisions) {
+/* Stamp Actual Start Date — independent of the approval workflow. Matches
+   the HTML reference where "Start Activity" only marks the start date and
+   the workflow is driven separately by Mark Ready / Request Division. */
+export function startActivity(form /*, divisions */) {
   const today = new Date().toISOString().slice(0, 10);
-  const list = safeArray(divisions);
-  const next = {
+  if (form.actualStartDate) return form;
+  return {
     ...form,
-    actualStartDate: form.actualStartDate || today,
-    approvalState: list.length ? "pending_division" : form.approvalState,
-    divisionApprovals: list.map((d) => ({
-      division: d,
-      status: "pending",
-      decidedBy: "",
-      decidedAt: "",
-      reason: ""
-    })),
-    ownerApproval: null,
-    lastRejection: null
+    actualStartDate: today,
+    comments: pushSystemComment(form, {
+      who: "System",
+      text: "Activity started.",
+      systemType: "start",
+      approvalStage: null
+    })
   };
-  next.comments = pushSystemComment(form, {
-    who: "System",
-    text: list.length
-      ? `Activity started and submitted for approval. Routed to: ${list.join(", ")}.`
-      : "Activity started.",
-    systemType: "request",
-    approvalStage: list.length ? "division" : null
-  });
-  return next;
 }
 
 /* Resubmit a rejected activity. Used after REJECT bounced the activity back
@@ -158,7 +145,6 @@ export function approveDivision(form, divisionName) {
       : r
   );
   let nextState = form.approvalState;
-  let nextOwnerApproval = form.ownerApproval || null;
   let comments = pushSystemComment(form, {
     who: divisionName,
     text: `${divisionName} has approved.`,
@@ -166,23 +152,17 @@ export function approveDivision(form, divisionName) {
     approvalStage: "division",
     divisionName
   });
-  /* When the last concerned division approves, the backend auto-progresses
-     to pending_owner (no separate "request owner" action exists). Mirror that
-     locally so the panel jumps straight to the Owner Review step. */
+  /* When the last concerned division approves, move to division_approved.
+     User must then click "Request Owner Approval" to forward to the Owner
+     (matches the HTML reference's explicit two-step flow). */
   if (rows.every((r) => r.status === "approved")) {
-    nextState = "pending_owner";
-    nextOwnerApproval = {
-      status: "pending",
-      decidedBy: "",
-      decidedAt: "",
-      reason: ""
-    };
+    nextState = "division_approved";
     comments = pushSystemComment(
       { ...form, comments },
       {
         who: "System",
         text:
-          "All Concerned Divisions have approved. Routing to Activity Owner for final approval.",
+          "All Concerned Divisions have approved. Ready to request Owner approval.",
         systemType: "completion",
         approvalStage: "division"
       }
@@ -191,7 +171,6 @@ export function approveDivision(form, divisionName) {
   return {
     ...form,
     divisionApprovals: rows,
-    ownerApproval: nextOwnerApproval,
     approvalState: nextState,
     comments
   };
