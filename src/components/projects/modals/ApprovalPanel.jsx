@@ -177,10 +177,16 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     }
   }
 
-  function handleMarkReady() {
-    /* Local-only transition: idle → ready_for_approval. The backend isn't
-       told yet; SUBMIT fires on Request Division Approval. */
-    apply(markReadyForApproval(form, "manual"));
+  async function handleMarkReady() {
+    /* Fires SUBMIT on the workflow service AND moves the local state to
+       ready_for_approval. The backend gets a heads-up at this step; the
+       subsequent Request Division Approval click will follow up with the
+       per-division dispatch. */
+    await runTransition({
+      action: WORKFLOW_ACTIONS.SUBMIT,
+      comment: "Activity marked Ready for Approval.",
+      transform: () => markReadyForApproval(form, "manual")
+    });
   }
 
   async function handleRequestDivision() {
@@ -277,7 +283,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
           disabled={busy}
           onClick={handleMarkReady}
         >
-          Mark Ready for Approval
+          {busy ? "Submitting…" : "Mark Ready for Approval"}
         </button>
       );
     } else if (state === "ready_for_approval") {

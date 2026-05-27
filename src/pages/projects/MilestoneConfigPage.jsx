@@ -11,6 +11,7 @@ import {
   activityTasksAllComplete
 } from "../../utils/project/helpers";
 import { markReadyForApproval } from "../../utils/project/approvalWorkflow";
+import { transitionActivity, WORKFLOW_ACTIONS } from "../../api/activityWorkflow";
 import {
   normalizeProject,
   recomputeActualDates,
@@ -1006,18 +1007,33 @@ export default function MilestoneConfigPage({ mode }) {
 
       if (openPopupForActivity) {
         const activityForPopup = openPopupForActivity;
-        lastTaskConfirm.open(activityForPopup, () => {
-          /* Yes → flip the activity to ready_for_approval locally. No API
-             call yet: SUBMIT only fires when the user clicks Request
-             Division Approval inside the ApprovalPanel. Matches the HTML
-             reference's last-task → markActivityReadyForApproval flow. */
-          const next = markReadyForApproval(activityForPopup, "last-task");
-          Object.assign(activityForPopup, next);
-          commitUpdate(target);
-          lastTaskConfirm.close();
-          uiStore.showMessage(
-            "Activity is now Ready for Approval. Open the activity and click Request Division Approval to submit."
-          );
+        lastTaskConfirm.open(activityForPopup, async () => {
+          lastTaskConfirm.setBusy(true);
+          lastTaskConfirm.setError("");
+          try {
+            const businessId = activityForPopup.apiId || activityForPopup.uid;
+            if (businessId && getToken()) {
+              await transitionActivity({
+                businessId,
+                action: WORKFLOW_ACTIONS.SUBMIT,
+                comment: "Activity marked Ready for Approval (last task completed)."
+              });
+            }
+            const next = markReadyForApproval(activityForPopup, "last-task");
+            /* Mutate in place so the project tree reflects the new state
+               without us having to re-locate the node. */
+            Object.assign(activityForPopup, next);
+            commitUpdate(target);
+            lastTaskConfirm.close();
+            uiStore.showMessage(
+              "Activity is now Ready for Approval. Open the activity and click Request Division Approval to dispatch."
+            );
+          } catch (err) {
+            lastTaskConfirm.setError(
+              err && err.message ? err.message : "Failed to mark ready for approval."
+            );
+            lastTaskConfirm.setBusy(false);
+          }
         });
       }
     };
