@@ -10,6 +10,8 @@ import {
   FiBriefcase,
   FiUser,
   FiUsers,
+  FiInbox,
+  FiCheckCircle,
   FiChevronRight,
   FiChevronDown
 } from "react-icons/fi";
@@ -45,6 +47,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const [mdOpen, setMdOpen] = useState(false);
   const [vmOpen, setVmOpen] = useState(false);
   const [umOpen, setUmOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
 
   // Helper: is the current URL inside a given section?
   const isUnder = (prefix) =>
@@ -75,6 +78,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const searchUserActive = isUnder("/users") && !addUserActive;
   const umActive = addUserActive || searchUserActive;
 
+  // Approval Inbox routes. Two sub-items because role-based gating
+  // isn't wired up yet — once the current user's role is known, hide
+  // whichever doesn't apply.
+  const inboxCdActive = isUnder("/approvals/concerned-division");
+  const inboxAoActive = isUnder("/approvals/activity-owner");
+  const inboxActive = inboxCdActive || inboxAoActive;
+
   // Auto-expand the section that matches the current route so the active
   // child is visible without the user having to click the parent first.
   useEffect(() => {
@@ -83,7 +93,8 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
     if (masterActive) setMdOpen(true);
     if (vmActive) setVmOpen(true);
     if (umActive) setUmOpen(true);
-  }, [dashActive, pmActive, masterActive, vmActive, umActive]);
+    if (inboxActive) setInboxOpen(true);
+  }, [dashActive, pmActive, masterActive, vmActive, umActive, inboxActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -288,6 +299,36 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </div>
           </>
         )}
+
+        {/* Approval Inbox — both sub-items visible until role gating is
+            wired up. A Concerned Division reviewer should see only the
+            first; an Activity Owner the second. */}
+        <a
+          className={inboxActive ? "active" : ""}
+          onClick={() => setInboxOpen(!inboxOpen)}
+        >
+          <FiInbox size={ICON_SIZE} />
+          <span className="pmis-text">Approval Inbox</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={inboxOpen} />
+          </span>
+        </a>
+        <div className={`pmis-submenu${inboxOpen ? " open" : ""}`}>
+          <div
+            className={inboxCdActive ? "active" : ""}
+            onClick={() => navigate("/approvals/concerned-division")}
+          >
+            <FiUsers size={ICON_SIZE} />
+            <span className="pmis-text">Concerned Division</span>
+          </div>
+          <div
+            className={inboxAoActive ? "active" : ""}
+            onClick={() => navigate("/approvals/activity-owner")}
+          >
+            <FiCheckCircle size={ICON_SIZE} />
+            <span className="pmis-text">Activity Owner</span>
+          </div>
+        </div>
       </div>
     </div>
   );

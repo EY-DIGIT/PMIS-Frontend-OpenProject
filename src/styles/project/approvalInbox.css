@@ -1,0 +1,531 @@
+/* ══════════════════════════════════════════════════════════════════
+   approvalInbox.css — Approval Inbox pages (Concerned Division +
+   Activity Owner). Ported from the reference HTML prototypes with a
+   unique `pmis-apinbox-` prefix so the styles cannot collide with any
+   other module.
+   ══════════════════════════════════════════════════════════════════ */
+
+.pmis-apinbox {
+  --pa-navy: #0b3c88;
+  --pa-navy-deep: #062a63;
+  --pa-cyan: #0aa1c0;
+  --pa-green: #1a8a3d;
+  --pa-green-soft: #e7f7ec;
+  --pa-saffron: #d4440e;
+  --pa-red: #d32f2f;
+  --pa-border: #dbe5f1;
+  --pa-border-soft: #e9eef6;
+  --pa-text: #1e2a3a;
+  --pa-text-soft: #5a6680;
+  --pa-text-muted: #7a869a;
+  --pa-stripe: linear-gradient(90deg, #0b3c88 0%, #0aa1c0 100%);
+  color: var(--pa-text);
+}
+
+/* Page header */
+.pmis-apinbox-head { margin-bottom: 14px; }
+.pmis-apinbox-head h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--pa-navy);
+  line-height: 1.2;
+  padding-left: 14px;
+  margin: 0 0 6px;
+  letter-spacing: -0.1px;
+}
+.pmis-apinbox-head .pmis-apinbox-sub {
+  color: var(--pa-green);
+  font-weight: 700;
+  font-size: 14px;
+  margin: -2px 0 8px 14px;
+}
+.pmis-apinbox-head .pmis-apinbox-desc {
+  color: var(--pa-text-soft);
+  font-size: 14px;
+  margin: 0 0 0 14px;
+  line-height: 1.5;
+}
+
+/* Card */
+.pmis-apinbox-card {
+  background: #fff;
+  padding: 18px 22px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--pa-border-soft);
+  box-shadow: 0 2px 8px rgba(11, 60, 136, 0.08);
+  position: relative;
+}
+.pmis-apinbox-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--pa-stripe);
+  border-radius: 10px 10px 0 0;
+}
+.pmis-apinbox-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.pmis-apinbox-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pa-navy);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.pmis-apinbox-card-title .pmis-apinbox-meta {
+  color: var(--pa-text-muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+/* Filter bar */
+.pmis-apinbox-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pmis-apinbox-input,
+.pmis-apinbox-select {
+  padding: 7px 11px;
+  border: 1px solid var(--pa-border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--pa-text);
+  font-family: inherit;
+}
+.pmis-apinbox-input { min-width: 220px; }
+.pmis-apinbox-input:focus,
+.pmis-apinbox-select:focus {
+  outline: none;
+  border-color: var(--pa-cyan);
+  box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.12);
+}
+.pmis-apinbox-select { cursor: pointer; min-width: 150px; }
+
+/* Buttons */
+.pmis-apinbox-btn {
+  background: var(--pa-stripe);
+  color: #fff;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(11, 60, 136, 0.15);
+}
+.pmis-apinbox-btn:hover { box-shadow: 0 4px 10px rgba(11, 60, 136, 0.22); }
+.pmis-apinbox-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.pmis-apinbox-btn--cancel {
+  background: #fff;
+  color: var(--pa-navy);
+  border: 1px solid var(--pa-border);
+  box-shadow: none;
+}
+.pmis-apinbox-btn--cancel:hover { background: #f4f8fd; border-color: #c4d3e8; }
+.pmis-apinbox-btn--danger {
+  background: linear-gradient(90deg, #b42318 0%, #d32f2f 100%);
+  color: #fff;
+}
+.pmis-apinbox-btn--sm { padding: 6px 14px; font-size: 13px; }
+.pmis-apinbox-btn--back {
+  background: #fff;
+  color: var(--pa-navy);
+  border: 1px solid var(--pa-border);
+  border-radius: 6px;
+  padding: 7px 14px 7px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pmis-apinbox-btn--back:hover {
+  background: #f4f8fd;
+  border-color: var(--pa-cyan);
+  color: var(--pa-navy-deep);
+}
+
+/* Table */
+.pmis-apinbox-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--pa-border);
+}
+.pmis-apinbox-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  min-width: 820px;
+}
+.pmis-apinbox-table th {
+  background: #f1f6fd;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--pa-border);
+  text-align: left;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--pa-navy-deep);
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+.pmis-apinbox-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--pa-border-soft);
+  vertical-align: middle;
+  font-size: 13.5px;
+}
+.pmis-apinbox-table tbody tr:hover { background: #fbfdff; }
+.pmis-apinbox-table tbody tr:last-child td { border-bottom: none; }
+.pmis-apinbox-cell-id {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--pa-navy-deep);
+  font-size: 12px;
+}
+.pmis-apinbox-cell-name { font-weight: 600; color: var(--pa-navy); margin-top: 2px; }
+.pmis-apinbox-cell-sub { font-size: 12px; color: var(--pa-text-muted); margin-top: 2px; }
+.pmis-apinbox-cell-actions { text-align: right; white-space: nowrap; }
+.pmis-apinbox-link {
+  color: var(--pa-navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+.pmis-apinbox-link:hover { color: var(--pa-cyan); }
+
+/* Pills */
+.pmis-apinbox-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  border: 1px solid;
+}
+.pmis-apinbox-pill--pending { background: #fff3e0; color: #b25900; border-color: #f5d0a0; }
+.pmis-apinbox-pill--approved { background: #e7f8ee; color: #1b7a42; border-color: #b6e7c7; }
+.pmis-apinbox-pill--rejected { background: #fdecec; color: #c0392b; border-color: #f4b8b8; }
+
+.pmis-apinbox-empty {
+  padding: 34px 14px;
+  text-align: center;
+  color: var(--pa-text-muted);
+  font-size: 13.5px;
+}
+
+/* Detail view */
+.pmis-apinbox-detail { display: flex; flex-direction: column; gap: 18px; }
+.pmis-apinbox-detail-title-block {
+  padding: 18px 22px;
+  background: linear-gradient(180deg, #f7f9fd 0%, #eef3fb 100%);
+  border: 1px solid var(--pa-border-soft);
+  border-radius: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.pmis-apinbox-detail-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  background: var(--pa-stripe);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 8px;
+}
+.pmis-apinbox-detail-title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--pa-navy);
+  line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pmis-apinbox-detail-title-id {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--pa-navy);
+  background: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  border: 1px solid var(--pa-border);
+}
+
+.pmis-apinbox-section {
+  background: #fff;
+  border: 1px solid var(--pa-border-soft);
+  border-radius: 10px;
+  padding: 18px 22px;
+}
+.pmis-apinbox-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--pa-border-soft);
+}
+.pmis-apinbox-section-head::before {
+  content: "";
+  width: 3px;
+  height: 16px;
+  background: var(--pa-stripe);
+  border-radius: 2px;
+  display: inline-block;
+}
+.pmis-apinbox-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--pa-navy);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pmis-apinbox-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 32px;
+}
+.pmis-apinbox-kv .pmis-apinbox-kv-full { grid-column: 1 / -1; }
+.pmis-apinbox-kv .pmis-apinbox-k {
+  font-size: 11px;
+  color: var(--pa-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+.pmis-apinbox-kv .pmis-apinbox-v {
+  font-size: 14px;
+  color: var(--pa-text);
+  font-weight: 500;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.pmis-apinbox-kv .pmis-apinbox-v--strong { font-weight: 600; color: var(--pa-navy); }
+
+.pmis-apinbox-project-line { font-size: 15px; font-weight: 600; color: var(--pa-navy); line-height: 1.5; }
+.pmis-apinbox-project-line .pmis-apinbox-pid {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--pa-text-muted);
+  background: #f0f4fa;
+  padding: 2px 9px;
+  border-radius: 5px;
+  font-weight: 600;
+  margin-left: 6px;
+  display: inline-block;
+}
+.pmis-apinbox-desc-text { font-size: 14px; color: var(--pa-text); line-height: 1.65; }
+
+.pmis-apinbox-cmt {
+  padding: 14px 16px;
+  border: 1px solid var(--pa-border-soft);
+  border-radius: 8px;
+  background: #f7f9fd;
+}
+.pmis-apinbox-cmt + .pmis-apinbox-cmt { margin-top: 10px; }
+.pmis-apinbox-cmt-meta {
+  font-size: 12px;
+  color: var(--pa-text-soft);
+  margin-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.pmis-apinbox-cmt-meta .pmis-apinbox-who { font-weight: 700; color: var(--pa-navy); font-size: 13px; }
+.pmis-apinbox-cmt-text { font-size: 14px; color: var(--pa-text); line-height: 1.6; white-space: pre-wrap; }
+.pmis-apinbox-cmt-atts { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+.pmis-apinbox-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 11px;
+  border: 1px solid var(--pa-border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  color: var(--pa-navy);
+}
+.pmis-apinbox-att:hover { background: #eaf2fb; border-color: var(--pa-cyan); }
+.pmis-apinbox-att-size { color: var(--pa-text-muted); font-weight: 500; }
+
+.pmis-apinbox-div-status { display: flex; flex-direction: column; gap: 8px; }
+.pmis-apinbox-ds {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--pa-border-soft);
+  border-radius: 8px;
+  background: #f7f9fd;
+  font-size: 13.5px;
+  gap: 12px;
+}
+.pmis-apinbox-ds--me { background: #fff8eb; border-color: #f5d59d; }
+.pmis-apinbox-ds .pmis-apinbox-nm { font-weight: 600; color: var(--pa-text); display: flex; align-items: center; gap: 8px; }
+.pmis-apinbox-ds .pmis-apinbox-you {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: var(--pa-saffron);
+  letter-spacing: 0.4px;
+  padding: 2px 7px;
+  background: #fff;
+  border: 1px solid #f5d59d;
+  border-radius: 4px;
+}
+
+.pmis-apinbox-decided {
+  padding: 14px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.pmis-apinbox-decided--approved { background: var(--pa-green-soft); border: 1px solid #b6e7c7; color: #1b6a3a; }
+.pmis-apinbox-decided--rejected { background: #fdecec; border: 1px solid #f4b8b8; color: #9b2c1f; }
+.pmis-apinbox-decided > div + div { margin-top: 6px; }
+
+.pmis-apinbox-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-top: 6px;
+  flex-wrap: wrap;
+}
+
+/* Reject form */
+.pmis-apinbox-reject {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pa-border-soft);
+}
+.pmis-apinbox-reject label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--pa-navy);
+  display: block;
+  margin-bottom: 4px;
+}
+.pmis-apinbox-reject textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 9px 11px;
+  border: 1px solid var(--pa-border);
+  border-radius: 6px;
+  background: #fff;
+  resize: vertical;
+  font-size: 13.5px;
+}
+.pmis-apinbox-reject textarea:focus {
+  outline: none;
+  border-color: var(--pa-cyan);
+  box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.12);
+}
+.pmis-apinbox-reject-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Revert picker (Activity Owner only) */
+.pmis-apinbox-revert-kind { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.pmis-apinbox-revert-kind .pmis-apinbox-opt {
+  flex: 1 1 0;
+  min-width: 180px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--pa-border);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.pmis-apinbox-revert-kind .pmis-apinbox-opt:hover { border-color: var(--pa-cyan); background: #f6fbfd; }
+.pmis-apinbox-revert-kind .pmis-apinbox-opt.is-selected {
+  border-color: var(--pa-cyan);
+  background: #eef9fc;
+  box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.1);
+}
+.pmis-apinbox-revert-kind .pmis-apinbox-opt input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--pa-cyan);
+  cursor: pointer;
+}
+.pmis-apinbox-revert-kind .pmis-apinbox-opt-body { display: flex; flex-direction: column; gap: 2px; }
+.pmis-apinbox-revert-kind .pmis-apinbox-opt-title { font-size: 13px; font-weight: 700; color: var(--pa-navy); }
+.pmis-apinbox-revert-kind .pmis-apinbox-opt-sub { font-size: 11.5px; color: var(--pa-text-muted); line-height: 1.45; }
+
+.pmis-apinbox-revert-panel {
+  border: 1px solid var(--pa-border);
+  border-radius: 8px;
+  background: #fafcfe;
+  padding: 10px 12px;
+}
+.pmis-apinbox-revert-panel .pmis-apinbox-panel-hint {
+  font-size: 11.5px;
+  color: var(--pa-text-muted);
+  margin-bottom: 8px;
+}
+
+.pmis-apinbox-checklist { display: flex; flex-direction: column; gap: 6px; }
+.pmis-apinbox-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--pa-border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 500;
+}
+.pmis-apinbox-checklist label:hover { border-color: var(--pa-cyan); background: #f6fbfd; }
+.pmis-apinbox-checklist label.is-checked { border-color: var(--pa-cyan); background: #eef9fc; }
+.pmis-apinbox-checklist input[type="checkbox"] { accent-color: var(--pa-cyan); cursor: pointer; }
+
+@media (max-width: 420px) {
+  .pmis-apinbox-kv { grid-template-columns: 1fr; gap: 14px; }
+}

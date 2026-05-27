@@ -33,6 +33,8 @@ import MasterVendors from './pages/master/MasterVendors';
 import MasterUsers from './pages/master/MasterUsers';
 import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
+import ApprovalInboxConcernedDivision from './pages/approvals/ApprovalInboxConcernedDivision';
+import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityOwner';
 import { DataProvider, useData } from './data/DataContext';
 import "./styles/global.css";
 
@@ -445,6 +447,10 @@ export default function MainApp() {
                                                 <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
                                                 <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
+                                                {/* Approval Inbox — gated by role at the data level for now; both sidebar links
+                                                    are visible because the role gating isn't wired up yet. */}
+                                                <Route path="approvals/concerned-division" element={<ApprovalInboxConcernedDivision />} />
+                                                <Route path="approvals/activity-owner" element={<ApprovalInboxActivityOwner />} />
                                             </Routes>
                                         </Layout>
                                     </RequireAuth>
