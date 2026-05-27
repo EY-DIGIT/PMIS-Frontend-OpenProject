@@ -4,6 +4,7 @@ import DependencyPicker from "../DependencyPicker";
 import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
 import ActivityAuditTrail from "./ActivityAuditTrail";
+import StartActivityBanner from "./StartActivityBanner";
 import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
@@ -655,7 +656,8 @@ export default function NodeModal({
     ? {
         display: "grid",
         gridTemplateColumns: "minmax(0, 1.05fr) minmax(0, 1fr)",
-        gridTemplateAreas: '"form panel" "comments panel"',
+        gridTemplateAreas:
+          '"banner panel" "form panel" "comments panel"',
         gap: 16,
         alignItems: "flex-start"
       }
@@ -701,6 +703,16 @@ export default function NodeModal({
         </div>
 
         <div style={splitWrapperStyle}>
+        {isActivityEdit && (
+          <div style={{ gridArea: "banner", minWidth: 0 }}>
+            <StartActivityBanner
+              activity={node}
+              form={form}
+              editable={editable}
+              onChange={(next) => setForm(next)}
+            />
+          </div>
+        )}
         <div
           className="uidai-grid"
           style={

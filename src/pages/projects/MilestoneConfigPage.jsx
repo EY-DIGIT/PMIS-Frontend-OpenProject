@@ -3,7 +3,15 @@ import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
-import { safeArray, deepClone, generateNodeUid, formatDateDisplay } from "../../utils/project/helpers";
+import {
+  safeArray,
+  deepClone,
+  generateNodeUid,
+  formatDateDisplay,
+  activityTasksAllComplete
+} from "../../utils/project/helpers";
+import { startActivity } from "../../utils/project/approvalWorkflow";
+import { transitionActivity, WORKFLOW_ACTIONS } from "../../api/activityWorkflow";
 import {
   normalizeProject,
   recomputeActualDates,
@@ -43,6 +51,7 @@ import {
   loadPriorities
 } from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
+import LastTaskConfirmModal, { useLastTaskConfirm } from "../../components/projects/modals/LastTaskConfirmModal";
 import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
 import MilestonePagination from "../../components/projects/MilestonePagination";
 import * as projectsApi from "../../api/projects";
@@ -90,6 +99,7 @@ export default function MilestoneConfigPage({ mode }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [modalCtx, setModalCtx] = useState(null);
+  const lastTaskConfirm = useLastTaskConfirm();
   const [milestonesLoading, setMilestonesLoading] = useState(false);
   const [milestonesError, setMilestonesError] = useState("");
 
@@ -945,14 +955,88 @@ export default function MilestoneConfigPage({ mode }) {
         }
       }
 
+      /* Snapshot the parent activity BEFORE rollup/normalize so we can detect
+         the "last task just completed" condition without being confused by
+         the normalizer auto-promoting the activity to status='Completed' /
+         approvalState='completed'. Popup only fires if the activity was
+         idle going into this save and is fully completed coming out. */
+      let pendingLastTaskActivity = null;
+      if (
+        (kind === "task" || kind === "subtask") &&
+        modeAction === "edit" &&
+        formData.status === "Completed"
+      ) {
+        const loc = locateNode(target, nodeUid);
+        const actStep = loc && safeArray(loc.chain).find((s) => s.kind === "activity");
+        const activity = actStep && actStep.node;
+        if (
+          activity &&
+          (activity.approvalState || "idle") === "idle" &&
+          safeArray(activity.tasks).length > 0
+        ) {
+          pendingLastTaskActivity = activity;
+        }
+      }
+
       rollUpStatus(target);
       recomputeActualDates(target);
       normalizeProject(target);
+
+      /* Confirm the popup condition AFTER normalization. If the normalizer
+         auto-promoted the activity (status='Completed' / approvalState=
+         'completed') as a side-effect of rollup, roll it back to idle so
+         the user's popup choice controls the outcome. */
+      let openPopupForActivity = null;
+      if (pendingLastTaskActivity && activityTasksAllComplete(pendingLastTaskActivity)) {
+        if (
+          pendingLastTaskActivity.approvalState === "completed" &&
+          !pendingLastTaskActivity.ownerApproval
+        ) {
+          pendingLastTaskActivity.approvalState = "idle";
+          if (pendingLastTaskActivity.status === "Completed") {
+            pendingLastTaskActivity.status = "Not Completed";
+          }
+        }
+        openPopupForActivity = pendingLastTaskActivity;
+      }
 
       commitUpdate(target);
       uiStore.hideLoader();
       closeNodeModal();
       uiStore.showMessage(modeAction === "add" ? "Item added" : "Item updated");
+
+      if (openPopupForActivity) {
+        const activityForPopup = openPopupForActivity;
+        lastTaskConfirm.open(activityForPopup, async () => {
+          lastTaskConfirm.setBusy(true);
+          lastTaskConfirm.setError("");
+          try {
+            const businessId = activityForPopup.apiId || activityForPopup.uid;
+            if (businessId && getToken()) {
+              await transitionActivity({
+                businessId,
+                action: WORKFLOW_ACTIONS.SUBMIT,
+                comment: "Activity started — last task completed."
+              });
+            }
+            const consentDivs = safeArray(activityForPopup.concernedDivision).length
+              ? safeArray(activityForPopup.concernedDivision)
+              : safeArray(activityForPopup.consentDivisions);
+            const next = startActivity(activityForPopup, consentDivs);
+            /* Mutate the activity in place so the project tree reflects the
+               new workflow state without us having to re-locate it. */
+            Object.assign(activityForPopup, next);
+            commitUpdate(target);
+            lastTaskConfirm.close();
+            uiStore.showMessage("Activity submitted for approval.");
+          } catch (err) {
+            lastTaskConfirm.setError(
+              err && err.message ? err.message : "Failed to start workflow."
+            );
+            lastTaskConfirm.setBusy(false);
+          }
+        });
+      }
     };
 
     /* ─── Dispatch to the correct remote branch, then run doLocal ─── */
@@ -1351,6 +1435,15 @@ export default function MilestoneConfigPage({ mode }) {
           onCancel={closeNodeModal}
           onSave={saveNodeFromModal}
           onError={(m) => uiStore.showMessage(m)}
+        />
+      )}
+      {lastTaskConfirm.pending && (
+        <LastTaskConfirmModal
+          activity={lastTaskConfirm.pending.activity}
+          busy={lastTaskConfirm.busy}
+          error={lastTaskConfirm.error}
+          onYes={lastTaskConfirm.pending.onYes}
+          onNo={lastTaskConfirm.close}
         />
       )}
     </div>

@@ -1,0 +1,656 @@
+/* ══════════════════════════════════════════════════════════════════
+   activityWorkflow.css — styles for the activity approval workflow
+   UI inside the Activity edit modal. Ported from the reference HTML
+   prototype (Project Management 6) with a unique `pmis-awf-` prefix
+   so the rules can't collide with any other module's classes.
+
+   Sections:
+     1. Start Activity banner (top of left column)
+     2. Approval panel + toolbar (right column)
+     3. Vertical stepper (5 steps)
+     4. Per-target rows + actions (inside steps)
+     5. Resend banner + Owner reject revert picker
+     6. Audit trail panel + items
+     7. Last-task confirmation modal
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Local design tokens (mirror the HTML's :root values so the look
+   matches exactly without depending on global CSS variables). */
+.pmis-awf-scope {
+  --pmis-awf-navy: #0b3c88;
+  --pmis-awf-navy-deep: #07306b;
+  --pmis-awf-cyan: #129ab8;
+  --pmis-awf-green: #1b7a42;
+  --pmis-awf-green-soft: #e7f8ee;
+  --pmis-awf-red: #c0392b;
+  --pmis-awf-border: #d6e0ee;
+  --pmis-awf-border-soft: #e2e8f2;
+  --pmis-awf-text: #1f2a44;
+  --pmis-awf-text-soft: #42526e;
+  --pmis-awf-text-muted: #66788f;
+}
+
+/* ─── 1. Start Activity banner ──────────────────────────────────── */
+.pmis-awf-start-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #fff7ea;
+  border: 1px solid #f5c97a;
+  border-left: 4px solid #c97c00;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.pmis-awf-start-banner--started {
+  background: #e7f8ee;
+  border-color: #bbe5cb;
+  border-left-color: #1b7a42;
+}
+.pmis-awf-start-banner__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+  color: #7c5b03;
+  margin-bottom: 2px;
+}
+.pmis-awf-start-banner--started .pmis-awf-start-banner__label {
+  color: #1b7a42;
+}
+.pmis-awf-start-banner__value {
+  font-size: 15px;
+  font-weight: 700;
+  color: #07306b;
+}
+.pmis-awf-start-banner__hint {
+  font-size: 12px;
+  color: #7c5b03;
+  line-height: 1.4;
+  max-width: 520px;
+}
+.pmis-awf-start-banner__btn {
+  background: linear-gradient(90deg, #0b3c88, #129ab8);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pmis-awf-start-banner__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ─── 2. Approval panel + toolbar ───────────────────────────────── */
+.pmis-awf-panel {
+  margin-top: 0;
+  padding: 14px 16px;
+  border: 1px solid #c8d6ee;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f4f8ff 0%, #ffffff 100%);
+}
+.pmis-awf-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.pmis-awf-panel__head h4 {
+  color: #173e77;
+  font-size: 14px;
+  margin: 0;
+}
+.pmis-awf-panel__state {
+  font-size: 12px;
+  font-weight: 500;
+  color: #42526e;
+}
+.pmis-awf-panel__state b {
+  color: #07306b;
+}
+
+.pmis-awf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f2;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  align-items: center;
+}
+.pmis-awf-toolbar--empty {
+  color: #66788f;
+  font-size: 12.5px;
+  font-style: italic;
+  background: #f8fbff;
+}
+.pmis-awf-toolbar__btn {
+  background: linear-gradient(90deg, #0b3c88, #129ab8);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pmis-awf-toolbar__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pmis-awf-toolbar__btn--ghost {
+  background: transparent;
+  color: #66788f;
+  border: 1px solid #dbe5f1;
+  margin-left: auto;
+}
+.pmis-awf-toolbar__btn--ghost:hover:not(:disabled) {
+  color: #07306b;
+}
+
+.pmis-awf-error {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: #fdecec;
+  color: #9b1c1c;
+  border: 1px solid #f4b8b8;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+/* ─── 3. Vertical stepper (5 steps) ─────────────────────────────── */
+.pmis-awf-stepper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 4px 0;
+}
+.pmis-awf-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 0 0 18px 0;
+}
+.pmis-awf-step:last-child {
+  padding-bottom: 0;
+}
+.pmis-awf-step__marker {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #cbd6e6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #9aaac1;
+  z-index: 2;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.pmis-awf-step::before {
+  content: "";
+  position: absolute;
+  top: 28px;
+  left: 13px;
+  width: 2px;
+  bottom: 0;
+  background: #dbe5f1;
+  z-index: 1;
+}
+.pmis-awf-step:last-child::before {
+  display: none;
+}
+.pmis-awf-step--done .pmis-awf-step__marker {
+  background: #1b7a42;
+  color: #fff;
+  border-color: #1b7a42;
+}
+.pmis-awf-step--done::before {
+  background: #1b7a42;
+}
+.pmis-awf-step--active .pmis-awf-step__marker {
+  background: #0b3c88;
+  color: #fff;
+  border-color: #0b3c88;
+  box-shadow: 0 0 0 4px rgba(11, 60, 136, 0.18);
+}
+.pmis-awf-step--rejected .pmis-awf-step__marker {
+  background: #c0392b;
+  color: #fff;
+  border-color: #c0392b;
+}
+.pmis-awf-step--rejected::before {
+  background: #c0392b;
+}
+.pmis-awf-step__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 1px;
+}
+.pmis-awf-step__title {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #07306b;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.pmis-awf-step--done .pmis-awf-step__title {
+  color: #1b7a42;
+}
+.pmis-awf-step--active .pmis-awf-step__title {
+  color: #0b3c88;
+}
+.pmis-awf-step--rejected .pmis-awf-step__title {
+  color: #c0392b;
+}
+.pmis-awf-step__sub {
+  font-size: 12.5px;
+  color: #42526e;
+  line-height: 1.5;
+}
+.pmis-awf-step__meta {
+  font-size: 11.5px;
+  color: #66788f;
+  margin-top: 3px;
+}
+.pmis-awf-step__pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pmis-awf-step__pill--done {
+  background: #e7f8ee;
+  color: #1b7a42;
+}
+.pmis-awf-step__pill--active {
+  background: #e6f1ff;
+  color: #0b3c88;
+}
+.pmis-awf-step__pill--rejected {
+  background: #fdecec;
+  color: #c0392b;
+}
+.pmis-awf-step__pill--future {
+  background: #f1f4f8;
+  color: #66788f;
+}
+
+/* ─── 4. Per-target rows + actions ──────────────────────────────── */
+.pmis-awf-targets {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pmis-awf-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #d6e0ee;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.pmis-awf-target--approved {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.pmis-awf-target--rejected {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.pmis-awf-target__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: #07306b;
+}
+.pmis-awf-target__status {
+  font-size: 11px;
+}
+.pmis-awf-target__reason {
+  flex: 1 1 100%;
+  font-size: 11.5px;
+  color: #9b1c1c;
+  margin-top: 4px;
+}
+.pmis-awf-target__actions {
+  display: flex;
+  gap: 6px;
+}
+.pmis-awf-target__actions .pmis-awf-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.pmis-awf-btn {
+  background: linear-gradient(90deg, #0b3c88, #129ab8);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pmis-awf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pmis-awf-btn--danger {
+  background: #fff;
+  color: #c0392b;
+  border: 1px solid #f4b8b8;
+}
+.pmis-awf-btn--danger:hover:not(:disabled) {
+  background: #fdeeee;
+}
+.pmis-awf-btn--ghost {
+  background: #fff;
+  color: #42526e;
+  border: 1px solid #d6e0ee;
+}
+
+.pmis-awf-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.pmis-awf-status-pill--pending {
+  background: #fff3cd;
+  color: #8a6d10;
+}
+.pmis-awf-status-pill--approved {
+  background: #dff5e1;
+  color: #1d6b3a;
+}
+.pmis-awf-status-pill--rejected {
+  background: #fde2e2;
+  color: #9b1c1c;
+}
+
+/* ─── 5. Resend banner + Owner reject revert picker ─────────────── */
+.pmis-awf-resend-banner {
+  background: #fff7ea;
+  border: 1px solid #f5c97a;
+  border-left: 3px solid #b45309;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #7c5b03;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.pmis-awf-resend-banner b {
+  color: #7c5b03;
+}
+
+.pmis-awf-reject {
+  border: 1px solid #fcd6d6;
+  background: #fff5f5;
+  padding: 10px;
+  border-radius: 6px;
+  margin-top: 6px;
+}
+.pmis-awf-reject__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #1f2a44;
+}
+.pmis-awf-reject__textarea {
+  width: 100%;
+  min-height: 50px;
+  padding: 6px 8px;
+  border: 1px solid #e6c6c6;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.pmis-awf-reject__actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+.pmis-awf-reject__mode {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.pmis-awf-reject__mode input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.pmis-awf-reject__divlist {
+  margin-left: 22px;
+  margin-bottom: 6px;
+}
+.pmis-awf-reject__divlist label {
+  display: inline-block;
+  margin-right: 12px;
+  font-size: 13px;
+}
+.pmis-awf-reject__divlist input[type="checkbox"] {
+  margin-right: 4px;
+}
+
+/* ─── 6. Audit trail ────────────────────────────────────────────── */
+.pmis-awf-audit {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #c8d6ee;
+  border-radius: 10px;
+  background: #fff;
+}
+.pmis-awf-audit__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pmis-awf-audit__head h4 {
+  color: #173e77;
+  font-size: 14px;
+  margin: 0;
+}
+.pmis-awf-audit__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pmis-awf-audit__summary .pmis-awf-audit__pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef2fa;
+  color: #42526e;
+  border: 1px solid #d6e0ee;
+}
+.pmis-awf-audit__summary .pmis-awf-audit__pill b {
+  font-weight: 800;
+  color: #07306b;
+}
+.pmis-awf-audit__pill--req {
+  background: #e6f1ff !important;
+}
+.pmis-awf-audit__pill--req b {
+  color: #0b3c88 !important;
+}
+.pmis-awf-audit__pill--ok {
+  background: #e7f8ee !important;
+}
+.pmis-awf-audit__pill--ok b {
+  color: #1b7a42 !important;
+}
+.pmis-awf-audit__pill--bad {
+  background: #fdecec !important;
+}
+.pmis-awf-audit__pill--bad b {
+  color: #c0392b !important;
+}
+
+.pmis-awf-audit__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  overflow: auto;
+}
+.pmis-awf-audit__item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background: #f8fbff;
+  border: 1px solid #e2e8f2;
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+.pmis-awf-audit__item--approval {
+  background: #f4fbf6;
+  border-color: #cfe8d8;
+}
+.pmis-awf-audit__item--rejection {
+  background: #fdf3f3;
+  border-color: #f4cccc;
+}
+.pmis-awf-audit__item--completion {
+  background: #eef6ff;
+  border-color: #c8d6ec;
+}
+.pmis-awf-audit__dot {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #dbe5f1;
+  color: #07306b;
+  font-size: 12px;
+  font-weight: 700;
+}
+.pmis-awf-audit__item--approval .pmis-awf-audit__dot {
+  background: #1b7a42;
+  color: #fff;
+}
+.pmis-awf-audit__item--rejection .pmis-awf-audit__dot {
+  background: #c0392b;
+  color: #fff;
+}
+.pmis-awf-audit__item--completion .pmis-awf-audit__dot {
+  background: #0b3c88;
+  color: #fff;
+}
+.pmis-awf-audit__item--request .pmis-awf-audit__dot {
+  background: #129ab8;
+  color: #fff;
+}
+.pmis-awf-audit__item--ready .pmis-awf-audit__dot {
+  background: #c97c00;
+  color: #fff;
+}
+.pmis-awf-audit__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pmis-awf-audit__line {
+  font-weight: 500;
+  color: #1f2a44;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.pmis-awf-audit__meta {
+  font-size: 11px;
+  color: #66788f;
+  margin-top: 3px;
+}
+.pmis-awf-audit__empty {
+  font-size: 13px;
+  color: #66788f;
+  padding: 8px 0;
+}
+
+/* ─── 7. Last-task confirmation modal ───────────────────────────── */
+.pmis-awf-confirm {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 48, 107, 0.55);
+  z-index: 1830;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pmis-awf-confirm__box {
+  background: #fff;
+  width: min(440px, 92%);
+  max-width: 440px;
+  border-radius: 12px;
+  padding: 22px 20px 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  position: relative;
+}
+.pmis-awf-confirm__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.pmis-awf-confirm__head h3 {
+  margin: 0;
+  color: #07306b;
+  font-size: 16px;
+}
+.pmis-awf-confirm__close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: #66788f;
+  cursor: pointer;
+}
+.pmis-awf-confirm__body {
+  font-size: 13.5px;
+  color: #42526e;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.pmis-awf-confirm__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

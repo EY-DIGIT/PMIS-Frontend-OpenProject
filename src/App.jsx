@@ -59,6 +59,7 @@ import { tokenStore } from './api/client';
 import "./styles/Project.css"
 import "./styles/project/global.css"
 import "./styles/project/modals.css"
+import "./styles/project/activityWorkflow.css"
 import "./styles/project/pages.css"
 import MessageModal from "./components/projects/modals/MessageModal";
 import LoaderModal from "./components/projects/modals/LoaderModal";

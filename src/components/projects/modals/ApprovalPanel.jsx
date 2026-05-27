@@ -4,14 +4,9 @@
    (SUBMIT / APPROVE / REJECT / UPDATE) before applying the local
    state change so the UI mirrors what the backend records.
 
-   Action → API mapping:
-     • Start Activity     → SUBMIT  (stamps actualStartDate too)
-     • Division Approve   → APPROVE
-     • Division Reject    → REJECT  (rejection reason becomes the comment)
-     • Owner Approve      → APPROVE
-     • Owner Reject       → REJECT
-     • Resubmit (vendor)  → UPDATE
-     • Reset Workflow     → no API call (admin-only local nuke)
+   CSS classes live in src/styles/project/activityWorkflow.css with
+   the unique `pmis-awf-` prefix so they cannot collide with any
+   other module.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useState } from "react";
@@ -25,7 +20,6 @@ import {
 } from "../../../utils/project/helpers";
 import { effectiveStatus } from "../../../utils/project/nodeUtils";
 import {
-  startActivity,
   resubmitAfterRejection,
   approveDivision,
   rejectDivision,
@@ -36,111 +30,50 @@ import {
 } from "../../../utils/project/approvalWorkflow";
 import { transitionActivity, WORKFLOW_ACTIONS } from "../../../api/activityWorkflow";
 
-const STEP_PILL_STYLE = {
-  display: "inline-block",
-  fontSize: 11,
-  fontWeight: 600,
-  padding: "2px 8px",
-  borderRadius: 999,
-  marginLeft: 8,
-  textTransform: "capitalize"
-};
-
-const STEP_PILL_COLOR = {
-  future: { bg: "#eef1f6", fg: "#66788f" },
-  active: { bg: "#fff3cd", fg: "#8a6d10" },
-  done: { bg: "#dff5e1", fg: "#1d6b3a" },
-  rejected: { bg: "#fde2e2", fg: "#9b1c1c" }
-};
-
-function stepPill(state) {
-  const c = STEP_PILL_COLOR[state] || STEP_PILL_COLOR.future;
-  return (
-    <span style={{ ...STEP_PILL_STYLE, background: c.bg, color: c.fg }}>
-      {state.replace("_", " ")}
-    </span>
-  );
-}
-
-function stepMarker(state, index) {
-  const c = STEP_PILL_COLOR[state] || STEP_PILL_COLOR.future;
-  return (
-    <div
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: "50%",
-        background: c.bg,
-        color: c.fg,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 700,
-        fontSize: 13,
-        flex: "none",
-        marginRight: 10
-      }}
-    >
-      {state === "done" ? "✓" : state === "rejected" ? "!" : index}
-    </div>
-  );
-}
-
 function StepRow({ index, state, title, children }) {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", padding: "10px 0" }}>
-      {stepMarker(state, index)}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: "#1f2a44" }}>
+    <div className={`pmis-awf-step pmis-awf-step--${state}`}>
+      <div className="pmis-awf-step__marker">
+        {state === "done" ? "✓" : state === "rejected" ? "!" : index}
+      </div>
+      <div className="pmis-awf-step__body">
+        <div className="pmis-awf-step__title">
           {title}
-          {stepPill(state)}
+          <span className={`pmis-awf-step__pill pmis-awf-step__pill--${state}`}>
+            {state.replace("_", " ")}
+          </span>
         </div>
-        <div style={{ fontSize: 13, color: "#42526e", marginTop: 4 }}>
-          {children}
-        </div>
+        <div className="pmis-awf-step__sub">{children}</div>
       </div>
     </div>
   );
 }
 
-function TargetRow({ name, status, decidedAt, reason, actions }) {
-  const pillBg =
-    status === "approved" ? "#dff5e1" :
-    status === "rejected" ? "#fde2e2" : "#fff3cd";
-  const pillFg =
-    status === "approved" ? "#1d6b3a" :
-    status === "rejected" ? "#9b1c1c" : "#8a6d10";
+function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions }) {
+  const variant =
+    status === "approved"
+      ? "pmis-awf-target--approved"
+      : status === "rejected"
+      ? "pmis-awf-target--rejected"
+      : "";
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "6px 10px",
-        margin: "4px 0",
-        background: "#f8fafc",
-        border: "1px solid #e6ebf2",
-        borderRadius: 6,
-        gap: 8,
-        flexWrap: "wrap"
-      }}
-    >
-      <span style={{ fontWeight: 500 }}>
-        🏛️ {name}
+    <div className={`pmis-awf-target ${variant}`.trim()}>
+      <span className="pmis-awf-target__name">
+        {icon} {name}
         {decidedAt && (
           <span style={{ fontSize: 11, color: "#66788f", marginLeft: 6 }}>
             · {formatDateTime(decidedAt)}
           </span>
         )}
       </span>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-        <span style={{ ...STEP_PILL_STYLE, background: pillBg, color: pillFg, marginLeft: 0 }}>
+      <span className="pmis-awf-target__status">
+        <span className={`pmis-awf-status-pill pmis-awf-status-pill--${status}`}>
           {status}
         </span>
-        {actions}
       </span>
+      {actions && <span className="pmis-awf-target__actions">{actions}</span>}
       {reason && (
-        <div style={{ flexBasis: "100%", fontSize: 12, color: "#9b1c1c", marginTop: 4 }}>
+        <div className="pmis-awf-target__reason">
           <b>Reason:</b> {reason}
         </div>
       )}
@@ -149,32 +82,22 @@ function TargetRow({ name, status, decidedAt, reason, actions }) {
 }
 
 function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, busy, embedded }) {
-  const wrapStyle = embedded
-    ? { marginTop: 6 }
-    : {
-        border: "1px solid #fcd6d6",
-        background: "#fff5f5",
-        padding: 10,
-        borderRadius: 6,
-        marginTop: 6
-      };
   return (
-    <div style={wrapStyle}>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+    <div className="pmis-awf-reject" style={embedded ? { border: "none", background: "transparent", padding: 0 } : undefined}>
+      <label className="pmis-awf-reject__label">
         {label} <span style={{ color: "#9b1c1c" }}>*</span>
       </label>
       <textarea
-        className="uidai-textarea"
-        style={{ minHeight: 50, width: "100%" }}
+        className="pmis-awf-reject__textarea"
         placeholder="Why is this being rejected?"
         value={reasonText}
         onChange={(e) => onReasonChange(e.target.value)}
         disabled={busy}
       />
-      <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+      <div className="pmis-awf-reject__actions">
         <button
           type="button"
-          className="uidai-btn"
+          className="pmis-awf-btn"
           disabled={!reasonText.trim() || busy}
           onClick={onCommit}
         >
@@ -182,7 +105,7 @@ function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, b
         </button>
         <button
           type="button"
-          className="uidai-btn uidai-btn--cancel"
+          className="pmis-awf-btn pmis-awf-btn--ghost"
           onClick={onCancel}
           disabled={busy}
         >
@@ -194,8 +117,6 @@ function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, b
 }
 
 export default function ApprovalPanel({ activity, form, editable, onChange }) {
-  /* Inline rejection composer state. `rejection.kind` is 'division' | 'owner'
-     and (for division) `rejection.divisionName` identifies the row. */
   const [rejection, setRejection] = useState(null);
   const [revertTo, setRevertTo] = useState("vendor");
   const [revertDivisions, setRevertDivisions] = useState([]);
@@ -231,10 +152,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     setReasonText("");
   }
 
-  /* Generic API + local transition runner. Calls the workflow endpoint with
-     the given action/comment; on success applies the supplied local transform
-     to update form state. Surfaces backend errors inline so the user can
-     correct and retry without losing context. */
   async function runTransition({ action, comment, transform }) {
     if (!businessId) {
       setError(
@@ -255,20 +172,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleStartActivity() {
-    if (!consentDivisions.length) {
-      setError(
-        "Add at least one Concerned Division to the activity before starting the workflow."
-      );
-      return;
-    }
-    await runTransition({
-      action: WORKFLOW_ACTIONS.SUBMIT,
-      comment: "Activity started — initial submission for approval.",
-      transform: () => startActivity(form, consentDivisions)
-    });
   }
 
   async function handleResubmit() {
@@ -328,8 +231,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
   }
 
   function handleResetWorkflow() {
-    /* Admin-only local reset — no API for this in the curl set, kept as a
-       client-side escape hatch. */
     if (!window.confirm("Reset the approval workflow for this activity?")) return;
     apply(resetWorkflow(form));
   }
@@ -337,24 +238,12 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
   /* ─── Toolbar ─── */
   const toolbarBtns = [];
   if (workflowEnabled && !rejection) {
-    if (!isStarted) {
-      toolbarBtns.push(
-        <button
-          key="start"
-          type="button"
-          className="uidai-btn"
-          disabled={busy}
-          onClick={handleStartActivity}
-        >
-          {busy ? "Submitting…" : "▶ Start Activity"}
-        </button>
-      );
-    } else if (state === "rejected_to_vendor") {
+    if (state === "rejected_to_vendor") {
       toolbarBtns.push(
         <button
           key="resubmit"
           type="button"
-          className="uidai-btn"
+          className="pmis-awf-toolbar__btn"
           disabled={busy || !consentDivisions.length}
           onClick={handleResubmit}
         >
@@ -367,7 +256,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
         <button
           key="reset"
           type="button"
-          className="uidai-btn uidai-btn--cancel"
+          className="pmis-awf-toolbar__btn pmis-awf-toolbar__btn--ghost"
           disabled={busy}
           onClick={handleResetWorkflow}
         >
@@ -377,24 +266,24 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     }
   }
 
-  let toolbarContent;
+  let toolbarNode = null;
   if (toolbarBtns.length) {
-    toolbarContent = (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {toolbarBtns}
-      </div>
-    );
+    toolbarNode = <div className="pmis-awf-toolbar">{toolbarBtns}</div>;
   } else if (state === "completed") {
-    toolbarContent = (
-      <div style={{ padding: 8, fontSize: 13, color: "#1d6b3a" }}>
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty" style={{ color: "#1b7a42" }}>
         Workflow complete.
       </div>
     );
-  } else if (!editable) {
-    toolbarContent = null;
-  } else {
-    toolbarContent = (
-      <div style={{ padding: 8, fontSize: 13, color: "#66788f" }}>
+  } else if (state === "idle" && !isStarted) {
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
+        Click <b>▶ Start Activity</b> above to submit for approval.
+      </div>
+    );
+  } else if (editable) {
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
         Awaiting reviewer action — approve or reject from the rows below.
       </div>
     );
@@ -421,7 +310,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     s1Body = (
       <>
         Complete every task / sub-task before submitting.
-        <div style={{ fontSize: 11, color: "#66788f", marginTop: 2 }}>
+        <div className="pmis-awf-step__meta">
           {done} of {leaves.length} tasks / sub-tasks completed.
         </div>
       </>
@@ -438,16 +327,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     s2Body = (
       <>
         {state === "rejected_to_vendor" && form.lastRejection && (
-          <div
-            style={{
-              background: "#fde2e2",
-              color: "#9b1c1c",
-              padding: 6,
-              borderRadius: 4,
-              marginBottom: 6,
-              fontSize: 12
-            }}
-          >
+          <div className="pmis-awf-resend-banner">
             <b>⟲ Returned to vendor</b> by{" "}
             <b>{form.lastRejection.byName || "reviewer"}</b>. Reason:{" "}
             <i>{form.lastRejection.reason || "—"}</i>
@@ -455,7 +335,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
         )}
         {isStarted
           ? <>Will route to: <b>{targets}</b>.</>
-          : <>Click <b>▶ Start Activity</b> above to submit and route to: <b>{targets}</b>.</>}
+          : <>Click <b>▶ Start Activity</b> at the top to submit and route to: <b>{targets}</b>.</>}
       </>
     );
   } else {
@@ -469,7 +349,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     const rows = safeArray(form.divisionApprovals);
     if (rows.length) {
       s3Body = (
-        <div>
+        <div className="pmis-awf-targets">
           {rows.map((r) => {
             const isPending = r.status === "pending";
             const isRejectingThis =
@@ -490,8 +370,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
                       <>
                         <button
                           type="button"
-                          className="uidai-btn"
-                          style={{ padding: "2px 8px", fontSize: 12 }}
+                          className="pmis-awf-btn"
                           disabled={busy}
                           onClick={() => handleApproveDivision(r.division)}
                         >
@@ -499,8 +378,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
                         </button>
                         <button
                           type="button"
-                          className="uidai-btn uidai-btn--cancel"
-                          style={{ padding: "2px 8px", fontSize: 12 }}
+                          className="pmis-awf-btn pmis-awf-btn--danger"
                           disabled={busy}
                           onClick={() =>
                             startRejection({
@@ -551,12 +429,12 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
       <>
         <b>Rejected by {rj.byName || "Owner"}:</b> {rj.reason || ""}
         {rj.revertTo === "vendor" && (
-          <div style={{ fontSize: 11, color: "#66788f", marginTop: 2 }}>
+          <div className="pmis-awf-step__meta">
             <b>Reverted to:</b> Vendor (full resend required)
           </div>
         )}
         {rj.revertTo === "divisions" && safeArray(rj.revertDivisions).length > 0 && (
-          <div style={{ fontSize: 11, color: "#66788f", marginTop: 2 }}>
+          <div className="pmis-awf-step__meta">
             <b>Reverted to Concerned Division(s):</b>{" "}
             {rj.revertDivisions.join(", ")}
           </div>
@@ -568,49 +446,42 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     s4Body = (
       <>
         Awaiting decision from <b>{ownerName}</b>.
-        <TargetRow
-          name={`👤 ${ownerName}`}
-          status={form.ownerApproval?.status || "pending"}
-          decidedAt={form.ownerApproval?.decidedAt}
-          actions={
-            workflowEnabled && !isRejectingOwner ? (
-              <>
-                <button
-                  type="button"
-                  className="uidai-btn"
-                  style={{ padding: "2px 8px", fontSize: 12 }}
-                  disabled={busy}
-                  onClick={handleApproveOwner}
-                >
-                  {busy ? "…" : "Approve"}
-                </button>
-                <button
-                  type="button"
-                  className="uidai-btn uidai-btn--cancel"
-                  style={{ padding: "2px 8px", fontSize: 12 }}
-                  disabled={busy}
-                  onClick={() => startRejection({ kind: "owner" })}
-                >
-                  Reject
-                </button>
-              </>
-            ) : null
-          }
-        />
+        <div className="pmis-awf-targets">
+          <TargetRow
+            icon="👤"
+            name={ownerName}
+            status={form.ownerApproval?.status || "pending"}
+            decidedAt={form.ownerApproval?.decidedAt}
+            actions={
+              workflowEnabled && !isRejectingOwner ? (
+                <>
+                  <button
+                    type="button"
+                    className="pmis-awf-btn"
+                    disabled={busy}
+                    onClick={handleApproveOwner}
+                  >
+                    {busy ? "…" : "Approve"}
+                  </button>
+                  <button
+                    type="button"
+                    className="pmis-awf-btn pmis-awf-btn--danger"
+                    disabled={busy}
+                    onClick={() => startRejection({ kind: "owner" })}
+                  >
+                    Reject
+                  </button>
+                </>
+              ) : null
+            }
+          />
+        </div>
         {isRejectingOwner && (
-          <div
-            style={{
-              border: "1px solid #fcd6d6",
-              background: "#fff5f5",
-              padding: 10,
-              borderRadius: 6,
-              marginTop: 6
-            }}
-          >
+          <div className="pmis-awf-reject">
             <div style={{ fontWeight: 600, marginBottom: 6 }}>
               Owner Rejection — Pick Revert Target
             </div>
-            <label style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+            <label className="pmis-awf-reject__mode">
               <input
                 type="radio"
                 name="revertTo"
@@ -618,10 +489,10 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
                 checked={revertTo === "vendor"}
                 onChange={() => setRevertTo("vendor")}
                 disabled={busy}
-              />{" "}
+              />
               Revert to Vendor (full resend)
             </label>
-            <label style={{ display: "block", marginBottom: 4, fontSize: 13 }}>
+            <label className="pmis-awf-reject__mode">
               <input
                 type="radio"
                 name="revertTo"
@@ -629,18 +500,18 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
                 checked={revertTo === "divisions"}
                 onChange={() => setRevertTo("divisions")}
                 disabled={busy}
-              />{" "}
+              />
               Revert to Concerned Division(s)
             </label>
             {revertTo === "divisions" && (
-              <div style={{ marginLeft: 18, marginBottom: 6 }}>
+              <div className="pmis-awf-reject__divlist">
                 {consentDivisions.length === 0 && (
                   <div style={{ fontSize: 12, color: "#66788f" }}>
                     No concerned divisions to revert to.
                   </div>
                 )}
                 {consentDivisions.map((d) => (
-                  <label key={d} style={{ display: "inline-block", marginRight: 10, fontSize: 13 }}>
+                  <label key={d}>
                     <input
                       type="checkbox"
                       checked={revertDivisions.includes(d)}
@@ -652,7 +523,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
                             : cur.filter((x) => x !== d)
                         );
                       }}
-                    />{" "}
+                    />
                     {d}
                   </label>
                 ))}
@@ -693,47 +564,16 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     );
 
   return (
-    <div
-      style={{
-        marginTop: 16,
-        padding: 12,
-        border: "1px solid #e6ebf2",
-        background: "#fbfcfe",
-        borderRadius: 6
-      }}
-    >
-      <div
-        style={{
-          fontSize: 14,
-          fontWeight: 700,
-          color: "#173e77",
-          marginBottom: 10,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center"
-        }}
-      >
-        <span>Activity Approval Workflow</span>
-        <span style={{ fontSize: 12, fontWeight: 500, color: "#42526e" }}>
+    <div className="pmis-awf-panel pmis-awf-scope">
+      <div className="pmis-awf-panel__head">
+        <h4>Activity Approval Workflow</h4>
+        <span className="pmis-awf-panel__state">
           State: <b>{APPROVAL_STATE_LABELS[state] || state}</b>
         </span>
       </div>
-      <div style={{ marginBottom: 10 }}>{toolbarContent}</div>
-      {error && (
-        <div
-          style={{
-            padding: 8,
-            marginBottom: 10,
-            background: "#fde2e2",
-            color: "#9b1c1c",
-            borderRadius: 6,
-            fontSize: 13
-          }}
-        >
-          {error}
-        </div>
-      )}
-      <div>
+      {toolbarNode}
+      {error && <div className="pmis-awf-error">{error}</div>}
+      <div className="pmis-awf-stepper">
         <StepRow index={1} state={s1} title={hasTasks ? "Tasks Completed" : "No Tasks Required"}>
           {s1Body}
         </StepRow>

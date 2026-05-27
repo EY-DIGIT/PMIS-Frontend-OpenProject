@@ -1,33 +1,23 @@
 /* ══════════════════════════════════════════════════════════════════
    ActivityAuditTrail.jsx — chronological record of every approval
-   event on an activity (request / approval / rejection / reset).
+   event on an activity (request / approval / rejection / completion /
+   ready / start).
 
-   Source: the activity's comments tagged with `kind: 'system'`. These
-   are emitted by every workflow transition in approvalWorkflow.js
-   (startActivity, approveDivision, rejectDivision, approveOwner,
-   rejectOwner, resubmitAfterRejection, resetWorkflow).
-
-   Rendered to the right of the form in activity edit mode, beneath
-   the ApprovalPanel timeline.
+   Source: the activity's comments tagged with `kind: 'system'`. CSS
+   classes live in src/styles/project/activityWorkflow.css with the
+   unique `pmis-awf-` prefix.
    ══════════════════════════════════════════════════════════════════ */
 
 import React from "react";
 import { safeArray, formatDateTime } from "../../../utils/project/helpers";
 
-const SYSTEM_ICON = {
-  ready: "🟡",
+const SYSTEM_GLYPH = {
+  ready: "⏳",
   request: "📤",
-  approval: "✅",
-  rejection: "❌",
-  completion: "🏁"
-};
-
-const SYSTEM_BG = {
-  ready: { bg: "#fff3cd", border: "#f3d472" },
-  request: { bg: "#e0f2fe", border: "#7dd3fc" },
-  approval: { bg: "#dff5e1", border: "#86d9a0" },
-  rejection: { bg: "#fde2e2", border: "#fca5a5" },
-  completion: { bg: "#dff5e1", border: "#86d9a0" }
+  approval: "✓",
+  rejection: "✕",
+  completion: "★",
+  start: "▶"
 };
 
 function typeOf(item) {
@@ -51,96 +41,47 @@ export default function ActivityAuditTrail({ form }) {
   );
 
   return (
-    <div
-      style={{
-        marginTop: 16,
-        padding: 12,
-        border: "1px solid #e6ebf2",
-        background: "#fff",
-        borderRadius: 6
-      }}
-    >
-      <div
-        style={{
-          fontSize: 14,
-          fontWeight: 700,
-          color: "#173e77",
-          marginBottom: 8,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 6
-        }}
-      >
-        <span>📜 Activity Audit Trail</span>
-        <span style={{ fontSize: 11, fontWeight: 500, color: "#66788f" }}>
-          {counts.requests} request{counts.requests === 1 ? "" : "s"} ·{" "}
-          {counts.approvals} approval{counts.approvals === 1 ? "" : "s"} ·{" "}
-          {counts.rejections} rejection{counts.rejections === 1 ? "" : "s"}
-        </span>
+    <div className="pmis-awf-audit pmis-awf-scope">
+      <div className="pmis-awf-audit__head">
+        <h4>📜 Activity Audit Trail</h4>
+        <div className="pmis-awf-audit__summary">
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--req">
+            <b>{counts.requests}</b> request{counts.requests === 1 ? "" : "s"}
+          </span>
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--ok">
+            <b>{counts.approvals}</b> approval{counts.approvals === 1 ? "" : "s"}
+          </span>
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--bad">
+            <b>{counts.rejections}</b> rejection{counts.rejections === 1 ? "" : "s"}
+          </span>
+        </div>
       </div>
 
       {events.length === 0 ? (
-        <div style={{ fontSize: 13, color: "#66788f", padding: "8px 0" }}>
+        <div className="pmis-awf-audit__empty">
           No workflow events yet — actions taken on the panel above will appear
           here.
         </div>
       ) : (
-        <ol
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 6
-          }}
-        >
+        <ol className="pmis-awf-audit__list">
           {events.map((e, idx) => {
             const t = typeOf(e);
-            const palette = SYSTEM_BG[t] || SYSTEM_BG.request;
             return (
               <li
                 key={idx}
-                style={{
-                  padding: "8px 10px",
-                  background: palette.bg,
-                  border: `1px solid ${palette.border}`,
-                  borderRadius: 6
-                }}
+                className={`pmis-awf-audit__item pmis-awf-audit__item--${t}`}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "baseline",
-                    gap: 6,
-                    fontSize: 12,
-                    color: "#42526e"
-                  }}
-                >
-                  <span style={{ fontWeight: 600 }}>
-                    {SYSTEM_ICON[t] || "•"} {e.who || "System"}
-                  </span>
-                  <span>{formatDateTime(e.when)}</span>
-                </div>
-                <div style={{ fontSize: 13, color: "#1f2a44", marginTop: 4 }}>
-                  {e.text || ""}
-                </div>
-                {e.approvalStage && (
-                  <div
-                    style={{
-                      marginTop: 4,
-                      fontSize: 11,
-                      color: "#66788f",
-                      textTransform: "capitalize"
-                    }}
-                  >
-                    Stage: {e.approvalStage}
+                <span className="pmis-awf-audit__dot">
+                  {SYSTEM_GLYPH[t] || "•"}
+                </span>
+                <div className="pmis-awf-audit__body">
+                  <div className="pmis-awf-audit__line">{e.text || ""}</div>
+                  <div className="pmis-awf-audit__meta">
+                    {e.who || "System"} · {formatDateTime(e.when)}
+                    {e.approvalStage ? ` · Stage: ${e.approvalStage}` : ""}
                     {e.approvalTarget ? ` · ${e.approvalTarget}` : ""}
                   </div>
-                )}
+                </div>
               </li>
             );
           })}
