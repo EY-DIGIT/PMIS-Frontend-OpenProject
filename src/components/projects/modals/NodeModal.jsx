@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import DependencyPicker from "../DependencyPicker";
 import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
+import ActivityAuditTrail from "./ActivityAuditTrail";
 import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
@@ -622,6 +623,10 @@ export default function NodeModal({
     ? "This item is part of the published baseline and cannot be edited within a version."
     : hintFor(kind);
 
+  /* Activity edit mode renders a wider 2-column layout: form on the left,
+     approval workflow + audit trail on the right. The extra width keeps
+     both columns readable without forcing the user into fullscreen. */
+  const isActivityEdit = kind === "activity" && !isAdd && !!node;
   const boxStyle = fullscreen
     ? {
         position: "relative",
@@ -633,7 +638,28 @@ export default function NodeModal({
         borderRadius: 0,
         overflowY: "auto"
       }
+    : isActivityEdit
+    ? {
+        position: "relative",
+        width: "min(1280px, 100%)",
+        maxWidth: "min(1280px, 100%)"
+      }
     : { position: "relative" };
+
+  /* CSS Grid template that lays out the activity-edit body:
+       row 1: form | panel   (panel spans both rows)
+       row 2: comments | (panel continues)
+     Items get their grid-area via inline style. Outside activity edit, the
+     wrapper renders as a plain block so milestone/task modals are unchanged. */
+  const splitWrapperStyle = isActivityEdit
+    ? {
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1.05fr) minmax(0, 1fr)",
+        gridTemplateAreas: '"form panel" "comments panel"',
+        gap: 16,
+        alignItems: "flex-start"
+      }
+    : undefined;
 
   const iconBtnStyle = {
     position: "absolute",
@@ -674,7 +700,15 @@ export default function NodeModal({
           {hintText}
         </div>
 
-        <div className="uidai-grid">
+        <div style={splitWrapperStyle}>
+        <div
+          className="uidai-grid"
+          style={
+            isActivityEdit
+              ? { gridArea: "form", gridTemplateColumns: "1fr", minWidth: 0 }
+              : undefined
+          }
+        >
           {node && node.id && (
             <div className="uidai-field">
               <label className="uidai-field__label">
@@ -1233,30 +1267,52 @@ export default function NodeModal({
           )}
         </div>
 
-        {kind === "activity" && !isAdd && node && (
-          <ApprovalPanel
-            activity={node}
-            form={form}
-            editable={editable}
-            onChange={(next) => setForm(next)}
-          />
+        {isActivityEdit && (
+          <div style={{ gridArea: "panel", minWidth: 0 }}>
+            <ApprovalPanel
+              activity={node}
+              form={form}
+              editable={editable}
+              onChange={(next) => setForm(next)}
+            />
+            <ActivityAuditTrail form={form} />
+          </div>
         )}
 
         {project.projectId && !isAdd && (
-          <CommentsPanel
-            comments={form.comments}
-            editable={editable}
-            commentText={commentText}
-            setCommentText={setCommentText}
-            commentFiles={commentFiles}
-            onFileChange={handleFileChange}
-            fileInputKey={fileInputKey}
-            attachError={attachError}
-            onPostComment={postCommentNow}
-            posting={posting}
-            postError={postError}
-          />
+          isActivityEdit ? (
+            <div style={{ gridArea: "comments", minWidth: 0 }}>
+              <CommentsPanel
+                comments={form.comments}
+                editable={editable}
+                commentText={commentText}
+                setCommentText={setCommentText}
+                commentFiles={commentFiles}
+                onFileChange={handleFileChange}
+                fileInputKey={fileInputKey}
+                attachError={attachError}
+                onPostComment={postCommentNow}
+                posting={posting}
+                postError={postError}
+              />
+            </div>
+          ) : (
+            <CommentsPanel
+              comments={form.comments}
+              editable={editable}
+              commentText={commentText}
+              setCommentText={setCommentText}
+              commentFiles={commentFiles}
+              onFileChange={handleFileChange}
+              fileInputKey={fileInputKey}
+              attachError={attachError}
+              onPostComment={postCommentNow}
+              posting={posting}
+              postError={postError}
+            />
+          )
         )}
+        </div>
 
         {saveError && (
           <div className="uidai-attach-error" style={{ marginTop: 8 }}>
