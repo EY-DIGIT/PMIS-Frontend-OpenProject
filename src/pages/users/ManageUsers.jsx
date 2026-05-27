@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getTeamPage, updateTeamPage } from '../../api/teamPage';
-import * as usersApi from '../../api/users';
 import './ManageTeam.css';
 
 /* ──────────────────────────────────────────────────────────
@@ -24,58 +23,6 @@ const PROJECT_OWNER_ROLES = [
   { roleLabel: 'Approver',      displayLabel: 'Approver',      single: true  },
   { roleLabel: 'project_owner', displayLabel: 'Project Owner', single: false },
 ];
-
-/* Normalize a single directory user into the `{id, name}` shape the
-   MultiSelect components rely on. Backend payloads have shipped under
-   many different key sets — accept the union, fall back through
-   plausible labels, and synthesize a stable id (`__dir-${index}`) when
-   the record has none rather than dropping the row. Dropping silently
-   was the bug that left only one user visible. */
-function normalizeDirectoryUser(raw, index) {
-  if (raw == null) return null;
-  if (typeof raw === 'string') {
-    return { id: raw, name: raw };
-  }
-  if (typeof raw !== 'object') return null;
-  const id =
-    raw.id ||
-    raw.userId ||
-    raw.uuid ||
-    raw.user_id ||
-    raw.uid ||
-    raw.value ||
-    raw.key ||
-    raw.email ||
-    raw.login ||
-    `__dir-${index}`;
-  const name =
-    raw.name ||
-    raw.fullName ||
-    raw.full_name ||
-    raw.displayName ||
-    raw.display_name ||
-    raw.userName ||
-    raw.username ||
-    raw.label ||
-    raw.login ||
-    raw.email ||
-    String(id);
-  return { id: String(id), name: String(name) };
-}
-
-function normalizeDirectory(raw) {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set();
-  const out = [];
-  raw.forEach((entry, i) => {
-    const u = normalizeDirectoryUser(entry, i);
-    if (!u) return;
-    if (seen.has(u.id)) return; // de-dupe by id
-    seen.add(u.id);
-    out.push(u);
-  });
-  return out;
-}
 
 /* Merge the server's users[] for each role into the static row list.
    Matching is purely positional — we ignore the API's `roleLabel` and
@@ -298,59 +245,9 @@ export default function ManageTeam() {
     setLoadError('');
     (async () => {
       try {
-        /* Fetch both endpoints in parallel:
-             • team-page  → project-specific context (roles, activities,
-                            existing assignments)
-             • users list → the full org-wide user directory. Team-page
-                            sometimes ships userDirectory with only the
-                            current user, so we use the users list as the
-                            primary directory and merge in any extras
-                            the team-page might mention. */
-        const [rawData, usersList] = await Promise.all([
-          getTeamPage(projectId),
-          usersApi.list({ pageSize: 500 }).catch(() => [])
-        ]);
+        const data = await getTeamPage(projectId);
         if (cancelled) return;
-        /* The envelope unwrap in teamPage.js only peels one `data` layer.
-           If the backend ever responds with a doubly-nested {data:{data:…}}
-           shape, peel once more here so we don't quietly fail. */
-        const data =
-          rawData && typeof rawData === 'object' && rawData.data &&
-          typeof rawData.data === 'object' && !Array.isArray(rawData.data) &&
-          !Array.isArray(rawData.userDirectory) && !Array.isArray(rawData.activities)
-            ? rawData.data
-            : rawData;
-        /* Backend has shipped the directory under a few different keys in
-           the past. Accept the most likely ones (including OpenProject's
-           HAL-style `_embedded.elements` envelope). */
-        const rawDir =
-          (Array.isArray(data?.userDirectory) && data.userDirectory) ||
-          (Array.isArray(data?.users) && data.users) ||
-          (Array.isArray(data?.directory) && data.directory) ||
-          (Array.isArray(data?.userList) && data.userList) ||
-          (Array.isArray(data?.allUsers) && data.allUsers) ||
-          (Array.isArray(data?._embedded?.elements) && data._embedded.elements) ||
-          (Array.isArray(data?.userDirectory?._embedded?.elements) &&
-            data.userDirectory._embedded.elements) ||
-          [];
-        /* Build the final directory: org-wide users list is the source of
-           truth; team-page's userDirectory is merged in case it has
-           anyone the users list omitted. De-dupe by id inside
-           normalizeDirectory. */
-        const merged = normalizeDirectory([
-          ...(Array.isArray(usersList) ? usersList : []),
-          ...rawDir
-        ]);
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[ManageTeam] users list length=${
-            Array.isArray(usersList) ? usersList.length : 'not-array'
-          }, team-page directory length=${
-            Array.isArray(rawDir) ? rawDir.length : 'not-array'
-          }, merged length=${merged.length}`,
-          { teamPage: data, usersList, rawDir, merged }
-        );
-        setUserDirectory(merged);
+        setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
         setState({
