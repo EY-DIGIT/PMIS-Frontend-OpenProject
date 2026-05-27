@@ -23,6 +23,29 @@ export function normalizeNode(node, kind) {
   if (!("fromBaseline" in node)) node.fromBaseline = false;
   if (kind === "milestone" && !("vendor" in node)) node.vendor = "";
   if (kind !== "milestone" && !("type" in node)) node.type = "Standard Type";
+  /* Category — applies to Milestones and Activities only.
+       'original' — part of the original contract (created in DRAFT)
+       'asg'      — Annual Strategic Goal (added post-publish)
+       'ccn'      — Change Control Note (added post-publish; consumes CCN cap)
+     ccnValue is only meaningful when category === 'ccn'. */
+  if (kind === "milestone" || kind === "activity") {
+    if (!("category" in node) || !node.category) node.category = "original";
+    if (!("ccnValue" in node)) node.ccnValue = 0;
+  }
+  /* Activity-only: payment linkage + full approval workflow state bag. */
+  if (kind === "activity") {
+    if (!("linkedToPayment" in node)) node.linkedToPayment = false;
+    if (!("activityPaymentPercent" in node)) node.activityPaymentPercent = 0;
+    if (!("approvalState" in node)) node.approvalState = "idle";
+    if (!Array.isArray(node.divisionApprovals)) node.divisionApprovals = [];
+    if (!("ownerApproval" in node)) node.ownerApproval = null;
+    if (!("lastRejection" in node)) node.lastRejection = null;
+    /* Sync status with workflow: a Completed activity must have its workflow
+       in 'completed' (older data may not have approvalState set). */
+    if (node.status === "Completed" && node.approvalState !== "completed") {
+      node.approvalState = "completed";
+    }
+  }
   if (kind === "activity" || kind === "task" || kind === "subtask") {
     if (!("resourceEntryType" in node)) node.resourceEntryType = "details";
     if (!node.resourceDetails) node.resourceDetails = {};
@@ -36,6 +59,17 @@ export function normalizeProject(project) {
   if (!("actualEndDate" in project)) project.actualEndDate = "";
   if (!project.vendors) project.vendors = [];
   if (!project.resources) project.resources = [];
+  /* Contract-level financial fields. totalProjectValue is the contract value
+     in ₹. ccnCapPercent is the configurable cap (default 25%) up to which the
+     project value may be extended via CCNs. Frozen after publish. */
+  if (!("totalProjectValue" in project) || project.totalProjectValue == null) {
+    project.totalProjectValue = 0;
+  }
+  if (!("ccnCapPercent" in project) || project.ccnCapPercent == null) {
+    project.ccnCapPercent = 25;
+  }
+  if (!("contractTypeId" in project)) project.contractTypeId = "";
+  if (!Array.isArray(project.quarterlyPayments)) project.quarterlyPayments = [];
   project.milestones = safeArray(project.milestones);
 
   project.milestones.forEach((m, mi) => {

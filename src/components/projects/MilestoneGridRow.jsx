@@ -6,8 +6,87 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React from "react";
-import { safeArray, formatDateDisplay } from "../../utils/project/helpers";
+import { safeArray, formatDateDisplay, formatINR } from "../../utils/project/helpers";
 import { effectiveStatus } from "../../utils/project/nodeUtils";
+import { APPROVAL_STATE_LABELS } from "../../utils/project/constants";
+
+function CategoryPill({ node }) {
+  const cat = node && node.category;
+  if (!cat || cat === "original") return null;
+  if (cat === "asg") {
+    return (
+      <span
+        title="Annual Strategic Goal"
+        style={{
+          marginLeft: 6,
+          padding: "1px 7px",
+          fontSize: 10,
+          fontWeight: 700,
+          borderRadius: 999,
+          background: "#dbeafe",
+          color: "#1e40af",
+          letterSpacing: 0.2
+        }}
+      >
+        ASG
+      </span>
+    );
+  }
+  if (cat === "ccn") {
+    const v = Number(node.ccnValue) || 0;
+    return (
+      <span
+        title={`Change Control Note — ${formatINR(v)}`}
+        style={{
+          marginLeft: 6,
+          padding: "1px 7px",
+          fontSize: 10,
+          fontWeight: 700,
+          borderRadius: 999,
+          background: "#fee2e2",
+          color: "#9b1c1c",
+          letterSpacing: 0.2
+        }}
+      >
+        CCN · {formatINR(v)}
+      </span>
+    );
+  }
+  return null;
+}
+
+const APPROVAL_BADGE_COLOR = {
+  idle: { bg: "#eef1f6", fg: "#66788f" },
+  ready_for_approval: { bg: "#fff3cd", fg: "#8a6d10" },
+  pending_division: { bg: "#fff3cd", fg: "#8a6d10" },
+  division_approved: { bg: "#e0f2fe", fg: "#075985" },
+  pending_owner: { bg: "#fff3cd", fg: "#8a6d10" },
+  completed: { bg: "#dff5e1", fg: "#1d6b3a" },
+  rejected_to_vendor: { bg: "#fde2e2", fg: "#9b1c1c" }
+};
+
+function ApprovalStateBadge({ node, kind }) {
+  if (kind !== "activity") return null;
+  const state = node && node.approvalState;
+  if (!state || state === "idle") return null;
+  const c = APPROVAL_BADGE_COLOR[state] || APPROVAL_BADGE_COLOR.idle;
+  return (
+    <span
+      title={`Approval: ${APPROVAL_STATE_LABELS[state] || state}`}
+      style={{
+        marginLeft: 6,
+        padding: "1px 7px",
+        fontSize: 10,
+        fontWeight: 600,
+        borderRadius: 999,
+        background: c.bg,
+        color: c.fg
+      }}
+    >
+      {APPROVAL_STATE_LABELS[state] || state}
+    </span>
+  );
+}
 
 export default function MilestoneGridRow({
   r,
@@ -196,6 +275,8 @@ export default function MilestoneGridRow({
           <span className="uidai-msgrid__row-label" title={node.name}>
             {node.name}
           </span>
+          <CategoryPill node={node} />
+          <ApprovalStateBadge node={node} kind={kind} />
           {addChildBtn}
         </div>
       </td>

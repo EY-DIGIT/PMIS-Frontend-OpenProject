@@ -660,6 +660,26 @@ export default function MilestoneConfigPage({ mode }) {
       resourceDetails: formData.resourceDetails,
       resourceCount: formData.resourceCount
     };
+    /* New post-publish fields (frontend draft only — backend doesn't accept
+       these yet, so they're persisted on the local node but never sent in
+       the API body). Category + CCN Value live on milestones and activities;
+       payment linkage + approval-workflow state are activity-only. */
+    if (kind === "milestone" || kind === "activity") {
+      uiPayload.category = formData.category || "original";
+      uiPayload.ccnValue = formData.category === "ccn"
+        ? Math.max(0, Number(formData.ccnValue) || 0)
+        : 0;
+    }
+    if (kind === "activity") {
+      uiPayload.linkedToPayment = !!formData.linkedToPayment;
+      uiPayload.activityPaymentPercent = formData.linkedToPayment
+        ? Math.max(0, Math.min(100, Number(formData.activityPaymentPercent) || 0))
+        : 0;
+      uiPayload.approvalState = formData.approvalState || "idle";
+      uiPayload.divisionApprovals = safeArray(formData.divisionApprovals);
+      uiPayload.ownerApproval = formData.ownerApproval || null;
+      uiPayload.lastRejection = formData.lastRejection || null;
+    }
 
     /* ─── Resolve which remote branch to take ─── */
     const shouldCreateMilestoneRemotely =
@@ -788,6 +808,17 @@ export default function MilestoneConfigPage({ mode }) {
               : (formData.concernedDivision ? [formData.concernedDivision] : []);
             newNode.concernedDivisionOther = formData.concernedDivisionOther || "";
             newNode.priority = formData.priority || "";
+            // Category + payment linkage + approval workflow (frontend draft).
+            newNode.category = formData.category || "original";
+            newNode.ccnValue = formData.category === "ccn"
+              ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
+            newNode.linkedToPayment = !!formData.linkedToPayment;
+            newNode.activityPaymentPercent = formData.linkedToPayment
+              ? Math.max(0, Math.min(100, Number(formData.activityPaymentPercent) || 0)) : 0;
+            newNode.approvalState = formData.approvalState || "idle";
+            newNode.divisionApprovals = safeArray(formData.divisionApprovals).slice();
+            newNode.ownerApproval = formData.ownerApproval || null;
+            newNode.lastRejection = formData.lastRejection || null;
           } else {
             // Task / Subtask carry assignedTo instead of vendorId.
             newNode.assignedTo = formData.assignedTo || "";
@@ -798,6 +829,9 @@ export default function MilestoneConfigPage({ mode }) {
           // Milestone-level priority — without this the Priority column
           // shows blank after Add Milestone until the tree refetch resolves.
           newNode.priority = formData.priority || "";
+          newNode.category = formData.category || "original";
+          newNode.ccnValue = formData.category === "ccn"
+            ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
         }
 
         if (kind === "milestone") {
@@ -881,6 +915,17 @@ export default function MilestoneConfigPage({ mode }) {
               : (formData.concernedDivision ? [formData.concernedDivision] : []);
             node.concernedDivisionOther = formData.concernedDivisionOther || "";
             node.priority = formData.priority || "";
+            // Category + payment linkage + approval workflow (frontend draft).
+            node.category = formData.category || "original";
+            node.ccnValue = formData.category === "ccn"
+              ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
+            node.linkedToPayment = !!formData.linkedToPayment;
+            node.activityPaymentPercent = formData.linkedToPayment
+              ? Math.max(0, Math.min(100, Number(formData.activityPaymentPercent) || 0)) : 0;
+            node.approvalState = formData.approvalState || "idle";
+            node.divisionApprovals = safeArray(formData.divisionApprovals).slice();
+            node.ownerApproval = formData.ownerApproval || null;
+            node.lastRejection = formData.lastRejection || null;
           } else {
             node.assignedTo = formData.assignedTo || "";
             node.priority = formData.priority || "";
@@ -889,6 +934,9 @@ export default function MilestoneConfigPage({ mode }) {
           node.vendor = formData.vendor;
           // Milestone-level priority — see matching note in the add branch.
           node.priority = formData.priority || "";
+          node.category = formData.category || "original";
+          node.ccnValue = formData.category === "ccn"
+            ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
         }
         node.comments = safeArray(formData.comments);
 
