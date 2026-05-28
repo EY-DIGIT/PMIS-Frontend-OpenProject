@@ -34,42 +34,39 @@ function roleLabel(code) {
     .join(" ");
 }
 
-/* Coalesce whatever the login response stored on the user into the
-   `[{code, name}]` array the workflow service expects. Tries several
-   shapes in order:
-     1. user.roles (already an array — clean it up)
-     2. is_super_admin / is_admin booleans (per /api/v3/users response)
-     3. org_role / orgRole single-role string
-     4. role / roleCode single-role string
-   Returns at least one entry whenever any of those resolve to a code. */
+/* Pick the SINGLE current role of the logged-in user. Backend wants
+   exactly one entry — the role they signed in with — not every elevation
+   flag the user object happens to carry. Priority order:
+     1. First entry of `user.roles` (array, if login supplied one)
+     2. user.role / org_role / orgRole / roleCode string field
+     3. is_super_admin boolean → "super_admin"
+     4. is_admin boolean → "admin"
+   Returns a one-element array, or [] if nothing resolves. */
 function deriveRoles(user) {
-  const seen = new Set();
-  const out = [];
-  function push(code, name) {
-    const c = String(code || "").trim();
-    if (!c) return;
-    if (seen.has(c)) return;
-    seen.add(c);
-    out.push({ code: c, name: String(name || roleLabel(c)) });
+  if (Array.isArray(user.roles) && user.roles.length > 0) {
+    const r = user.roles[0];
+    if (typeof r === "string") {
+      return [{ code: r, name: roleLabel(r) }];
+    }
+    if (r && typeof r === "object") {
+      const code = r.code || r.roleCode || r.role || "";
+      if (code) return [{ code, name: r.name || r.roleName || roleLabel(code) }];
+    }
   }
-  if (Array.isArray(user.roles)) {
-    user.roles.forEach((r) => {
-      if (!r) return;
-      if (typeof r === "string") return push(r);
-      push(r.code || r.roleCode || r.role || "", r.name || r.roleName);
-    });
-  }
-  // Boolean elevation flags shipped by /api/v3/users — recognise them
-  // even if `roles` wasn't supplied separately.
-  if (user.is_super_admin || user.isSuperAdmin) push("super_admin", "Super Admin");
-  if (user.is_admin || user.isAdmin) push("admin", "Admin");
-  // Single-role string fields (org_role, orgRole, role, roleCode)
   const single =
-    user.org_role || user.orgRole ||
-    (typeof user.role === "string" ? user.role : "") ||
-    user.roleCode || "";
-  if (single) push(single);
-  return out;
+    (typeof user.role === "string" && user.role) ||
+    user.org_role ||
+    user.orgRole ||
+    user.roleCode ||
+    "";
+  if (single) return [{ code: single, name: roleLabel(single) }];
+  if (user.is_super_admin || user.isSuperAdmin) {
+    return [{ code: "super_admin", name: "Super Admin" }];
+  }
+  if (user.is_admin || user.isAdmin) {
+    return [{ code: "admin", name: "Admin" }];
+  }
+  return [];
 }
 
 /* Build the RequestInfo wrapper from the currently stored user + token.
