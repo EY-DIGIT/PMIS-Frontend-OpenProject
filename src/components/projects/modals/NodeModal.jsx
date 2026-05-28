@@ -5,6 +5,7 @@ import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
 import ActivityAuditTrail from "./ActivityAuditTrail";
 import StartActivityBanner from "./StartActivityBanner";
+import { getProcessInstances } from "../../../api/activityWorkflow";
 import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
@@ -294,6 +295,14 @@ export default function NodeModal({
   const [prioritiesLoading, setPrioritiesLoading] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [saveError, setSaveError] = useState("");
+  /* Workflow audit trail + timeline data, fetched from the activity-
+     workflow service for activity edit mode. `refreshKey` triggers a
+     refetch after any transition action (Mark Ready, Approve, etc.). */
+  const [processInstances, setProcessInstances] = useState([]);
+  const [processLoading, setProcessLoading] = useState(false);
+  const [processError, setProcessError] = useState("");
+  const [processRefreshKey, setProcessRefreshKey] = useState(0);
+  const refreshProcessInstances = () => setProcessRefreshKey((k) => k + 1);
 
   useEffect(() => {
     if (open) {
@@ -433,6 +442,38 @@ export default function NodeModal({
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, kind, node && node.apiId]);
+
+  /* For activity edit mode, fetch the workflow's process-instance
+     history from the activity-workflow service. Drives both the
+     ApprovalPanel timeline cues and the ActivityAuditTrail list.
+     `refreshProcessInstances()` re-runs this after every transition
+     action so the audit reflects the new state immediately. */
+  useEffect(() => {
+    if (!open || mode === "add") return;
+    if (kind !== "activity" || !node) return;
+    const businessId = node.apiId || node.uid || "";
+    if (!businessId) return;
+    let cancelled = false;
+    setProcessLoading(true);
+    setProcessError("");
+    getProcessInstances(businessId)
+      .then((list) => {
+        if (cancelled) return;
+        setProcessInstances(Array.isArray(list) ? list : []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setProcessInstances([]);
+        setProcessError(err && err.message ? err.message : "Failed to load workflow history.");
+      })
+      .finally(() => {
+        if (!cancelled) setProcessLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mode, kind, node && (node.apiId || node.uid), processRefreshKey]);
 
   /* Load existing comments + attachments for the node so they appear in
      the Comments panel when the modal opens — for both view and edit
@@ -1286,8 +1327,14 @@ export default function NodeModal({
               form={form}
               editable={editable}
               onChange={(next) => setForm(next)}
+              onTransition={refreshProcessInstances}
             />
-            <ActivityAuditTrail form={form} />
+            <ActivityAuditTrail
+              form={form}
+              processInstances={processInstances}
+              loading={processLoading}
+              error={processError}
+            />
           </div>
         )}
 

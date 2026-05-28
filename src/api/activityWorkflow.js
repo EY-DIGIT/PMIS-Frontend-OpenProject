@@ -158,3 +158,45 @@ export const WORKFLOW_ACTIONS = {
   REJECT: "REJECT",
   UPDATE: "UPDATE"
 };
+
+/* GET the full audit / process-instance history for an activity:
+     GET /activity-workflow/activities/process/_search/ACTIVITY/{businessId}
+   Returns an array of ProcessInstance entries in the order the backend
+   ships them (typically chronological). Falls back to [] on error so
+   callers can simply render the result. */
+export async function getProcessInstances(businessId) {
+  if (!businessId) return [];
+  const token = getToken();
+  const headers = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const url = `${API_BASE}/activity-workflow/activities/process/_search/ACTIVITY/${encodeURIComponent(
+    businessId
+  )}`;
+  const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let payload = null;
+    if (text) {
+      try { payload = JSON.parse(text); } catch { payload = text; }
+    }
+    const msg =
+      (payload && typeof payload === "object" &&
+        (payload.error?.message || payload.message || payload.errorMessage)) ||
+      (typeof payload === "string" ? payload : "") ||
+      `Workflow history fetch failed (${res.status})`;
+    throw new ApiError(msg, { status: res.status, body: payload });
+  }
+  const body = await res.json().catch(() => null);
+  return Array.isArray(body && body.ProcessInstances) ? body.ProcessInstances : [];
+}
+
+/* Map a backend previousStatus string to one of our local approvalState
+   codes. Used by the timeline + audit trail to render API-driven flow. */
+export const STATUS_MAP = {
+  READYFORAPPROVAL: "ready_for_approval",
+  PENDINGATCONCERNEDDIVISION: "pending_division",
+  PENDINGATOWNERDIVISION: "pending_owner",
+  COMPLETED: "completed",
+  REJECTED: "rejected_to_vendor",
+  RETURNEDTOVENDOR: "rejected_to_vendor"
+};

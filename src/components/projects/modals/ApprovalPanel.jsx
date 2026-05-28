@@ -120,7 +120,7 @@ function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, b
   );
 }
 
-export default function ApprovalPanel({ activity, form, editable, onChange }) {
+export default function ApprovalPanel({ activity, form, editable, onChange, onTransition }) {
   const [rejection, setRejection] = useState(null);
   const [revertTo, setRevertTo] = useState("vendor");
   const [revertDivisions, setRevertDivisions] = useState([]);
@@ -176,6 +176,9 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
       await transitionActivity({ businessId, action, comment });
       const next = transform();
       if (next) apply(next);
+      /* Tell the parent to re-fetch the process-instance audit so the
+         trail + timeline reflect the new state. */
+      if (typeof onTransition === "function") onTransition();
       return true;
     } catch (err) {
       setError(err && err.message ? err.message : `Workflow ${action} failed.`);
