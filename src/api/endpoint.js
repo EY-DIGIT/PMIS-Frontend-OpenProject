@@ -224,12 +224,6 @@ export const ENDPOINTS = {
       teamPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-page`,
   },
 
-  approvalInbox: {
-    list: '/projects/activity-workflow/api/v3/approval-inbox',
-    detail: (id) => `/projects/activity-workflow/api/v3/approval-inbox/${enc(id)}`,
-    transition: (id) => `/projects/activity-workflow/api/v3/approval-inbox/${enc(id)}/_transition`,
-  },
-
   milestones: {
     update: (id) => `/projects/api/v3/milestones/${enc(id)}`,
     remove: (id) => `/projects/api/v3/milestones/${enc(id)}`,
@@ -280,5 +274,21 @@ export const ENDPOINTS = {
     projectItems: (uuid) => `/projects/api/v3/dashboard/projects/${enc(uuid)}/items`,
     organisations: '/projects/api/v3/dashboard/organisations',
     organisation: (vendorId) => `/projects/api/v3/dashboard/organisations/${enc(vendorId)}`,
+  },
+
+  /* ──────────────────────────────────────────────────────────────────
+     Approval Inbox — kept at the bottom and scoped strictly to the
+     /approvals/* pages (Concerned Division + Activity Owner inboxes).
+     Nothing else in the app should reference these. Move/rename here
+     if the gateway path changes; do NOT inline these URLs anywhere.
+
+     The backend exposes these at /api/v3/approval-inbox with no
+     service prefix — DO NOT add /activity-workflow/, /users/, or any
+     other prefix here.
+     ────────────────────────────────────────────────────────────────── */
+  approvalInbox: {
+    list: '/api/v3/approval-inbox',
+    detail: (id) => `/api/v3/approval-inbox/${enc(id)}`,
+    transition: (id) => `/api/v3/approval-inbox/${enc(id)}/_transition`,
   },
 };
