@@ -32,6 +32,7 @@ import {
   classifyStep
 } from "../../../utils/project/approvalWorkflow";
 import { transitionActivity, WORKFLOW_ACTIONS } from "../../../api/activityWorkflow";
+import ApprovalRequestModal from "./ApprovalRequestModal";
 
 function StepRow({ index, state, title, children }) {
   return (
@@ -126,6 +127,9 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
   const [reasonText, setReasonText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /* Per-target Request popup state. `kind` is 'division' or 'owner'
+     while the popup is open; null when closed. */
+  const [requestPopup, setRequestPopup] = useState({ open: false, kind: null });
 
   const state = form.approvalState || "idle";
   const isStarted = !!form.actualStartDate || !!activity.actualStartDate;
@@ -190,37 +194,145 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
   }
 
   function handleRequestDivision() {
-    /* Local-only transition: ready_for_approval → pending_division. No
-       API fires here — Mark Ready already SUBMITted the activity to the
-       backend, and the Concerned Division's APPROVE/REJECT calls drive
-       the next state changes. This click just routes the local UI to
-       the per-division decision rows. */
+    /* Open per-target popup. Each Concerned Division gets its own
+       comment + attachments row so the audit trail records exactly
+       what each reviewer was sent. Backend isn't called here — Mark
+       Ready already SUBMITted; the individual APPROVE / REJECT calls
+       drive the next state changes. */
     if (!consentDivisions.length) {
       setError(
         "Add at least one Concerned Division to the activity before submitting."
       );
       return;
     }
-    apply(requestDivisionApproval(form, consentDivisions));
+    setError("");
+    setRequestPopup({ open: true, kind: "division" });
   }
 
   function handleRequestOwner() {
-    /* Local-only transition: division_approved → pending_owner. Backend
-       auto-progresses on the last division's APPROVE call; this button is
-       the explicit confirmation that the user wants to forward to Owner. */
-    apply(requestOwnerApproval(form, ownerName));
+    /* Same pattern as division — a single-row popup for the Activity
+       Owner. Local only; backend auto-progresses on the last division's
+       APPROVE call. */
+    setError("");
+    setRequestPopup({ open: true, kind: "owner" });
   }
 
-  async function handleResubmit() {
+  function closeRequestPopup() {
+    setRequestPopup({ open: false, kind: null });
+  }
+
+  async function submitRequestPopup(payloads) {
+    if (requestPopup.kind === "division") {
+      /* Local-only — no API call here per the workflow spec. */
+      apply(requestDivisionApproval(form, consentDivisions, payloads));
+      closeRequestPopup();
+    } else if (requestPopup.kind === "owner") {
+      const p = payloads[0] || {};
+      apply(requestOwnerApproval(form, ownerName, p));
+      closeRequestPopup();
+    } else if (requestPopup.kind === "resubmit") {
+      /* Resubmit after rejection — fires UPDATE and then applies the
+         local resubmit transition. Concatenate per-target messages into
+         the comment so the backend audit log captures every note. */
+      const combined = payloads
+        .map((p) =>
+          p && p.text && p.text.trim() ? `[${p.label}] ${p.text.trim()}` : ""
+        )
+        .filter(Boolean)
+        .join(" | ");
+      const ok = await runTransition({
+        action: WORKFLOW_ACTIONS.UPDATE,
+        comment: combined || "Activity re-submitted after rejection.",
+        transform: () => {
+          /* Reuse the per-target comment-emit path so each reviewer sees
+             their own message + attachments after the resend. */
+          const next = resubmitAfterRejection(form, consentDivisions);
+          return requestDivisionApprovalPayloadOverlay(next, payloads);
+        }
+      });
+      if (ok) closeRequestPopup();
+    }
+  }
+
+  /* Helper: after resubmitAfterRejection has reset the state, replace the
+     bulk system comment it emitted with per-target ones so the audit trail
+     matches the rich popup data. Implemented inline to keep the workflow
+     helper signatures backward-compatible. */
+  function requestDivisionApprovalPayloadOverlay(nextForm, payloads) {
+    if (!Array.isArray(payloads) || payloads.length === 0) return nextForm;
+    const comments = (nextForm.comments || []).slice();
+    /* Drop the single combined comment requestDivisionApproval/resubmit
+       added so we can replace it with per-target rows. Identified by
+       systemType='request' & approvalStage='division' and most recent. */
+    const idx = comments.findIndex(
+      (c) =>
+        c &&
+        c.kind === "system" &&
+        c.systemType === "request" &&
+        c.approvalStage === "division" &&
+        !c.approvalTarget
+    );
+    if (idx >= 0) comments.splice(idx, 1);
+    payloads.forEach((p) => {
+      const text = String((p && p.text) || "").trim();
+      comments.unshift({
+        kind: "system",
+        when: new Date().toISOString(),
+        who: "System",
+        text: `Approval request re-sent to Division: ${p.label}.${
+          text ? " Message: " + text : ""
+        }`,
+        systemType: "request",
+        approvalStage: "division",
+        approvalTarget: p.label,
+        approvalTargetKind: "division",
+        attachments: Array.isArray(p.files) ? p.files : []
+      });
+    });
+    return { ...nextForm, comments };
+  }
+
+  const requestPopupRows = (() => {
+    if (!requestPopup.open) return [];
+    if (requestPopup.kind === "division" || requestPopup.kind === "resubmit") {
+      return consentDivisions.map((d) => ({
+        id: `div::${d}`,
+        kind: "division",
+        label: d
+      }));
+    }
+    if (requestPopup.kind === "owner") {
+      return [{ id: `owner::${ownerName}`, kind: "owner", label: ownerName }];
+    }
+    return [];
+  })();
+  const requestPopupTitle =
+    requestPopup.kind === "owner"
+      ? "Request Activity Owner Approval"
+      : requestPopup.kind === "resubmit"
+      ? "Resend for Approval"
+      : "Request Concerned Division Approval";
+  const requestPopupSubtitle = (() => {
+    const actName = activity.name || activity.id || "";
+    if (requestPopup.kind === "owner") {
+      return `Activity: ${actName}. Add a comment and/or attachments for the activity owner, then click Send Request.`;
+    }
+    if (requestPopup.kind === "resubmit") {
+      return `Activity: ${actName}. Update each reviewer's message and attachments, then click Send Request to re-dispatch.`;
+    }
+    return `Activity: ${actName}. Add a comment and/or attachments for each reviewer separately, then click Send Request.`;
+  })();
+
+  function handleResubmit() {
+    /* Resend after a rejection — opens the same per-target popup as
+       Request Division Approval. The popup submit handler dispatches
+       UPDATE (not SUBMIT) and applies the resubmit transition. */
     if (!consentDivisions.length) {
       setError("No Concerned Divisions configured — cannot resubmit.");
       return;
     }
-    await runTransition({
-      action: WORKFLOW_ACTIONS.UPDATE,
-      comment: "Activity re-submitted after rejection.",
-      transform: () => resubmitAfterRejection(form, consentDivisions)
-    });
+    setError("");
+    setRequestPopup({ open: true, kind: "resubmit" });
   }
 
   async function handleApproveDivision(divisionName) {
@@ -688,6 +800,16 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
           {s5Body}
         </StepRow>
       </div>
+      <ApprovalRequestModal
+        open={requestPopup.open}
+        title={requestPopupTitle}
+        subtitle={requestPopupSubtitle}
+        rows={requestPopupRows}
+        submitting={busy}
+        error={error}
+        onSubmit={submitRequestPopup}
+        onClose={closeRequestPopup}
+      />
     </div>
   );
 }

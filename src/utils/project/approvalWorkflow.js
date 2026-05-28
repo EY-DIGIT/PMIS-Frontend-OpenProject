@@ -99,7 +99,13 @@ export function markReadyForApproval(form, source = "manual") {
   };
 }
 
-export function requestDivisionApproval(form, divisions, message = "") {
+/* Request Concerned Division approval. Two call signatures:
+     1. (form, divisions[], message?)               — backward-compat single combined comment
+     2. (form, divisions[], payloads[])             — per-target {label,text,files}; one
+                                                       system comment per division so each
+                                                       reviewer's instructions + attachments
+                                                       sit on their own audit-trail entry. */
+export function requestDivisionApproval(form, divisions, payloadsOrMessage) {
   const list = safeArray(divisions);
   if (!list.length) return form;
   if (
@@ -115,21 +121,48 @@ export function requestDivisionApproval(form, divisions, message = "") {
     decidedAt: "",
     reason: ""
   }));
-  return {
+  let next = {
     ...form,
     approvalState: "pending_division",
     divisionApprovals,
     ownerApproval: null,
-    lastRejection: null,
-    comments: pushSystemComment(form, {
-      who: "System",
-      text: `Approval request sent to Concerned Division(s): ${list.join(
-        ", "
-      )}.${message ? " Message: " + message : ""}`,
-      systemType: "request",
-      approvalStage: "division"
-    })
+    lastRejection: null
   };
+  /* Per-target payload path: emit one system comment per division. Each
+     entry carries the user-typed message + attachments visible to that
+     specific reviewer in the timeline. */
+  if (Array.isArray(payloadsOrMessage) && payloadsOrMessage.length > 0) {
+    let comments = safeArray(next.comments).slice();
+    payloadsOrMessage.forEach((p) => {
+      const label = (p && p.label) || (p && p.division) || "";
+      const text = String((p && p.text) || "").trim();
+      const files = safeArray(p && p.files);
+      comments.unshift({
+        kind: "system",
+        when: nowIso(),
+        who: "System",
+        text: `Approval request sent to Division: ${label}.${text ? " Message: " + text : ""}`,
+        systemType: "request",
+        approvalStage: "division",
+        approvalTarget: label,
+        approvalTargetKind: "division",
+        attachments: files
+      });
+    });
+    next = { ...next, comments };
+    return next;
+  }
+  /* Fallback: single combined comment (no per-target payload supplied). */
+  const message = typeof payloadsOrMessage === "string" ? payloadsOrMessage : "";
+  next.comments = pushSystemComment(form, {
+    who: "System",
+    text: `Approval request sent to Concerned Division(s): ${list.join(
+      ", "
+    )}.${message ? " Message: " + message : ""}`,
+    systemType: "request",
+    approvalStage: "division"
+  });
+  return next;
 }
 
 export function approveDivision(form, divisionName) {
@@ -212,8 +245,19 @@ export function rejectDivision(form, divisionName, reason) {
   };
 }
 
-export function requestOwnerApproval(form, ownerName, message = "") {
+/* Request Owner approval. payload may be a string (back-compat) or a
+   `{text, files}` object captured from the request popup. The single
+   system comment carries the user-typed message + attachments. */
+export function requestOwnerApproval(form, ownerName, payloadOrMessage) {
   if (form.approvalState !== "division_approved") return form;
+  let text = "";
+  let files = [];
+  if (typeof payloadOrMessage === "string") {
+    text = payloadOrMessage;
+  } else if (payloadOrMessage && typeof payloadOrMessage === "object") {
+    text = String(payloadOrMessage.text || "").trim();
+    files = safeArray(payloadOrMessage.files);
+  }
   return {
     ...form,
     approvalState: "pending_owner",
@@ -226,12 +270,13 @@ export function requestOwnerApproval(form, ownerName, message = "") {
     comments: pushSystemComment(form, {
       who: "System",
       text: `Owner approval request sent to ${ownerName || "Owner"}.${
-        message ? " Message: " + message : ""
+        text ? " Message: " + text : ""
       }`,
       systemType: "request",
       approvalStage: "owner",
       approvalTarget: ownerName || "Owner",
-      approvalTargetKind: "owner"
+      approvalTargetKind: "owner",
+      attachments: files
     })
   };
 }
