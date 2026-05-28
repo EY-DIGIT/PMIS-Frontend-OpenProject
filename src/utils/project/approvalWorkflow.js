@@ -416,9 +416,18 @@ const _STATUS_TO_LOCAL = {
    transition therefore reflects the backend truth even though the
    local form was wiped.
 
+   The flow has two LOCAL intermediate steps the backend doesn't track:
+     • ready_for_approval (after SUBMIT, before user clicks Request
+       Division Approval) — backend has already moved to
+       PENDINGATCONCERNEDDIVISION but we surface a "Request Division
+       Approval" button to the user first.
+     • division_approved (after all Concerned Divisions approve, before
+       user clicks Request Owner Approval) — same idea, surface a
+       "Request Owner Approval" button.
+
    `consentDivisions` is the activity's configured division list — used
-   to disambiguate "is one division still pending or did the last APPROVE
-   from concerned-division also move us to owner?". */
+   to count whether enough APPROVE-at-concerned events have come in to
+   transition into division_approved. */
 export function deriveStateFromInstances(instances, consentDivisions) {
   if (!Array.isArray(instances) || instances.length === 0) return null;
   const sorted = [...instances].sort(
@@ -431,8 +440,13 @@ export function deriveStateFromInstances(instances, consentDivisions) {
   const prev = String((last && last.previousStatus) || "").toUpperCase();
   const divCount = safeArray(consentDivisions).length;
 
-  if (action === "SUBMIT") return "pending_division";
-  if (action === "UPDATE") return "pending_division";
+  /* SUBMIT or UPDATE was the most recent event — backend has moved the
+     activity into PENDINGATCONCERNEDDIVISION, but our UI splits this
+     into two visible steps. Surface "Request Division Approval" by
+     parking at ready_for_approval; the user clicks through locally to
+     reach pending_division and the per-division rows. */
+  if (action === "SUBMIT") return "ready_for_approval";
+  if (action === "UPDATE") return "ready_for_approval";
   if (action === "REJECT") return "rejected_to_vendor";
   if (action === "APPROVE") {
     if (prev === "PENDINGATOWNERDIVISION") return "completed";
@@ -443,8 +457,11 @@ export function deriveStateFromInstances(instances, consentDivisions) {
           String((e && e.previousStatus) || "").toUpperCase() ===
             "PENDINGATCONCERNEDDIVISION"
       ).length;
+      /* All configured Concerned Divisions have signed off — park at
+         division_approved so the "Request Owner Approval" button
+         surfaces, then user clicks through to pending_owner. */
       if (divCount > 0 && approvalsAtConcerned >= divCount) {
-        return "pending_owner";
+        return "division_approved";
       }
       return "pending_division";
     }
