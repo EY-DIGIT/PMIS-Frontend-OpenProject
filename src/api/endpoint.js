@@ -225,9 +225,9 @@ export const ENDPOINTS = {
   },
 
   approvalInbox: {
-    list: '/activity-workflow/api/v3/approval-inbox',
-    detail: (id) => `/activity-workflow/api/v3/approval-inbox/${enc(id)}`,
-    transition: (id) => `/activity-workflow/api/v3/approval-inbox/${enc(id)}/_transition`,
+    list: '/projects/activity-workflow/api/v3/approval-inbox',
+    detail: (id) => `/projects/activity-workflow/api/v3/approval-inbox/${enc(id)}`,
+    transition: (id) => `/projects/activity-workflow/api/v3/approval-inbox/${enc(id)}/_transition`,
   },
 
   milestones: {
