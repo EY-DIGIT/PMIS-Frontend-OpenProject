@@ -7,6 +7,11 @@ import ActivityAuditTrail from "./ActivityAuditTrail";
 import StartActivityBanner from "./StartActivityBanner";
 import { getProcessInstances } from "../../../api/activityWorkflow";
 import {
+  deriveStateFromInstances,
+  deriveDivisionApprovalsFromInstances,
+  deriveOwnerApprovalFromInstances
+} from "../../../utils/project/approvalWorkflow";
+import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
   DIVISION_OPTIONS,
@@ -459,7 +464,36 @@ export default function NodeModal({
     getProcessInstances(businessId)
       .then((list) => {
         if (cancelled) return;
-        setProcessInstances(Array.isArray(list) ? list : []);
+        const instances = Array.isArray(list) ? list : [];
+        setProcessInstances(instances);
+        /* Sync the local form state with the workflow service's view —
+           refresh otherwise loses every transition the user made and
+           the timeline rewinds to "Mark Ready". The activity's
+           Concerned Divisions list disambiguates how many APPROVE-at-
+           concerned events imply the move to pending_owner. */
+        const consentDivisions = parseDivisionList(node && node.concernedDivision);
+        const derivedState = deriveStateFromInstances(instances, consentDivisions);
+        if (!derivedState) return;
+        const derivedDivs = deriveDivisionApprovalsFromInstances(instances, consentDivisions);
+        const derivedOwner = deriveOwnerApprovalFromInstances(instances);
+        setForm((f) => ({
+          ...f,
+          approvalState: derivedState,
+          divisionApprovals:
+            derivedDivs.length > 0 ? derivedDivs : safeArray(f.divisionApprovals),
+          ownerApproval: derivedOwner || f.ownerApproval || null
+        }));
+        setBaseline((b) =>
+          b
+            ? {
+                ...b,
+                approvalState: derivedState,
+                divisionApprovals:
+                  derivedDivs.length > 0 ? derivedDivs : safeArray(b.divisionApprovals),
+                ownerApproval: derivedOwner || b.ownerApproval || null
+              }
+            : b
+        );
       })
       .catch((err) => {
         if (cancelled) return;
