@@ -28,7 +28,6 @@ import {
   rejectDivision,
   approveOwner,
   rejectOwner,
-  resetWorkflow,
   classifyStep
 } from "../../../utils/project/approvalWorkflow";
 import { transitionActivity, WORKFLOW_ACTIONS } from "../../../api/activityWorkflow";
@@ -386,10 +385,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     }
   }
 
-  function handleResetWorkflow() {
-    if (!window.confirm("Reset the approval workflow for this activity?")) return;
-    apply(resetWorkflow(form));
-  }
 
   /* ─── Toolbar (HTML reference parity) ─── */
   const toolbarBtns = [];
@@ -440,19 +435,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
           onClick={handleRequestOwner}
         >
           Request Owner Approval
-        </button>
-      );
-    }
-    if (state !== "idle") {
-      toolbarBtns.push(
-        <button
-          key="reset"
-          type="button"
-          className="pmis-awf-toolbar__btn pmis-awf-toolbar__btn--ghost"
-          disabled={busy}
-          onClick={handleResetWorkflow}
-        >
-          Reset Workflow
         </button>
       );
     }
