@@ -40,3 +40,38 @@ export async function updateTeamPage(projectId, payload) {
   const res = await api.put(ENDPOINTS.projects.teamPage(projectId), body);
   return unwrap(res);
 }
+
+/* POST /api/v3/associated-users — returns users that are associated with
+   either the project's organization (orgDetails=true) or a specific
+   division (divisionId + divisionDetails=true).
+
+   Response shape (envelope already unwrapped):
+     { _type, users: [{ id, login, email, firstName, lastName,
+                        matchedOrganizations[], matchedOwnerDivision[],
+                        matchedDivision[] }] }
+   Falls back to [] on error so callers can render an empty dropdown
+   without crashing the page. */
+export async function listAssociatedUsers(body) {
+  try {
+    const res = await api.post(ENDPOINTS.users.associated, body);
+    const data = unwrap(res);
+    return Array.isArray(data?.users) ? data.users : [];
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[listAssociatedUsers] failed for body:', body, e);
+    return [];
+  }
+}
+
+/* Convenience: users matching the project's organization(s). */
+export function listUsersByProjectOrg(projectId) {
+  return listAssociatedUsers({ projectId, orgDetails: true });
+}
+
+/* Convenience: users belonging to a specific division id. */
+export function listUsersByDivision(divisionId) {
+  if (divisionId === null || divisionId === undefined) {
+    return Promise.resolve([]);
+  }
+  return listAssociatedUsers({ divisionId, divisionDetails: true });
+}

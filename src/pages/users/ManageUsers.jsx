@@ -1,7 +1,38 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getTeamPage, updateTeamPage } from '../../api/teamPage';
+import {
+  getTeamPage,
+  updateTeamPage,
+  listUsersByProjectOrg,
+  listUsersByDivision
+} from '../../api/teamPage';
 import './ManageTeam.css';
+
+/* Build a {id, name} record the MultiSelect understands from a raw
+   associated-user. Backend ships `firstName`/`lastName`/`login`/`email`
+   in a mix; coalesce to the friendliest label we have. */
+function normalizeAssociatedUser(u) {
+  if (!u || !u.id) return null;
+  const first = (u.firstName || '').trim();
+  const last = (u.lastName || '').trim();
+  const full = `${first} ${last}`.trim();
+  const name = full || u.login || u.email || u.id;
+  return { id: String(u.id), name: String(name) };
+}
+
+function normalizeUsersList(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  list.forEach((u) => {
+    const norm = normalizeAssociatedUser(u);
+    if (!norm) return;
+    if (seen.has(norm.id)) return;
+    seen.add(norm.id);
+    out.push(norm);
+  });
+  return out;
+}
 
 /* ──────────────────────────────────────────────────────────
    STATIC ROLE DEFINITIONS — single source of truth for the UI.
@@ -219,6 +250,18 @@ export default function ManageTeam() {
 
   /* ─── Data + UI state ─── */
   const [userDirectory, setUserDirectory] = useState([]);
+  /* Users matched against the project's organization — drive the
+     Organization User section dropdowns. */
+  const [orgUsers, setOrgUsers] = useState([]);
+  /* Users belonging to each division id we've fetched. Indexed by the
+     numeric division id from the team-page response. */
+  const [divisionUsersById, setDivisionUsersById] = useState({});
+  /* Owner division shipped on the team-page response (id/code/name).
+     Drives the Project Owner section + per-activity Owner / Approver. */
+  const [ownerDivision, setOwnerDivision] = useState(null);
+  /* All concerned divisions seen on the team page so we can look up
+     {code → {id,name}} when an activity row only references the code. */
+  const [divisionByCode, setDivisionByCode] = useState({});
   const [projectName, setProjectName] = useState('');
   const [projectCode, setProjectCode] = useState('');
   const [state, setState] = useState(EMPTY_STATE);
@@ -250,21 +293,66 @@ export default function ManageTeam() {
         setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
+        const owner = data?.ownerDivision || null;
+        setOwnerDivision(owner);
+        /* Map code → { id, name } so activity rows that only carry the
+           division code can resolve to a numeric id (needed to look up
+           that division's user dropdown). */
+        const codeMap = {};
+        (Array.isArray(data?.concernedDivisions) ? data.concernedDivisions : []).forEach((d) => {
+          if (d && d.code) codeMap[String(d.code).toLowerCase()] = d;
+        });
+        if (owner && owner.code) codeMap[String(owner.code).toLowerCase()] = owner;
+        setDivisionByCode(codeMap);
+
+        const activities = (data?.activities || []).map((a) => ({
+          id: a?.id,
+          name: a?.name || '',
+          milestone: a?.milestone || '(Unassigned)',
+          concernedDivisions: Array.isArray(a?.concernedDivisions) ? a.concernedDivisions : [],
+          owner: Array.isArray(a?.owner) ? a.owner : [],
+          ownerApprover: Array.isArray(a?.ownerApprover) ? a.ownerApprover : [],
+          divisionUsers: (a?.divisionUsers && typeof a.divisionUsers === 'object') ? a.divisionUsers : {},
+          divisionApprovers: (a?.divisionApprovers && typeof a.divisionApprovers === 'object') ? a.divisionApprovers : {},
+        }));
         setState({
           // Roles are static — only the user IDs come from the API.
           orgUser: mergeRolesWithApi(ORG_USER_ROLES, data?.orgUser),
           projectOwner: mergeRolesWithApi(PROJECT_OWNER_ROLES, data?.projectOwner),
-          activities: (data?.activities || []).map((a) => ({
-            id: a?.id,
-            name: a?.name || '',
-            milestone: a?.milestone || '(Unassigned)',
-            concernedDivisions: Array.isArray(a?.concernedDivisions) ? a.concernedDivisions : [],
-            owner: Array.isArray(a?.owner) ? a.owner : [],
-            ownerApprover: Array.isArray(a?.ownerApprover) ? a.ownerApprover : [],
-            divisionUsers: (a?.divisionUsers && typeof a.divisionUsers === 'object') ? a.divisionUsers : {},
-            divisionApprovers: (a?.divisionApprovers && typeof a.divisionApprovers === 'object') ? a.divisionApprovers : {},
-          })),
+          activities,
         });
+
+        /* Now fetch the user directories for each context in parallel:
+             • org users  — drive the Organization User section
+             • owner-division users — drive the Project Owner section +
+               every per-activity Owner / Approver dropdown
+             • each Concerned Division's users — drive the per-division
+               Users / Approver dropdowns inside an activity panel */
+        const uniqueDivIds = new Set();
+        if (owner && owner.id) uniqueDivIds.add(owner.id);
+        activities.forEach((a) => {
+          (a.concernedDivisions || []).forEach((code) => {
+            const d = codeMap[String(code).toLowerCase()];
+            if (d && d.id) uniqueDivIds.add(d.id);
+          });
+        });
+        Object.values(codeMap).forEach((d) => {
+          if (d && d.id) uniqueDivIds.add(d.id);
+        });
+
+        const [orgResp, ...divResps] = await Promise.all([
+          listUsersByProjectOrg(projectId).then(normalizeUsersList),
+          ...Array.from(uniqueDivIds).map((id) =>
+            listUsersByDivision(id).then(normalizeUsersList).then((u) => [id, u])
+          )
+        ]);
+        if (cancelled) return;
+        setOrgUsers(orgResp);
+        const divMap = {};
+        divResps.forEach(([id, users]) => {
+          divMap[id] = users;
+        });
+        setDivisionUsersById(divMap);
       } catch (err) {
         if (!cancelled) {
           setLoadError(err?.message || 'Failed to load team page.');
@@ -457,6 +545,33 @@ export default function ManageTeam() {
   const totalAct = state.activities.length;
   const totalMs = activityGroups.length;
 
+  /* ─── User-list resolvers ─── */
+  /* Owner-division dropdown source: drives Project Owner section +
+     activity Owner / Approver fields. Fallback to userDirectory so the
+     legacy seed data still renders if the new API responds empty. */
+  const ownerDivisionUsers = (() => {
+    if (ownerDivision && ownerDivision.id && Array.isArray(divisionUsersById[ownerDivision.id])) {
+      return divisionUsersById[ownerDivision.id];
+    }
+    return normalizeUsersList(userDirectory);
+  })();
+  /* Per-Concerned-Division dropdown source. Activity rows reference
+     divisions by CODE — translate to the numeric id via the code map
+     so we hit the right entry of divisionUsersById. */
+  const usersForDivisionCode = (code) => {
+    const d = divisionByCode[String(code || '').toLowerCase()];
+    if (d && d.id && Array.isArray(divisionUsersById[d.id])) {
+      return divisionUsersById[d.id];
+    }
+    return normalizeUsersList(userDirectory);
+  };
+  /* Friendly division label — keeps the original code as fallback for
+     anything not in the code map. */
+  const labelForDivisionCode = (code) => {
+    const d = divisionByCode[String(code || '').toLowerCase()];
+    return (d && (d.name || d.code)) || code;
+  };
+
   /* ─── Inline editor for one activity (no Save/Cancel — persists immediately) ─── */
   const renderActivityPanel = (act) => {
     const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
@@ -482,7 +597,7 @@ export default function ManageTeam() {
               </div>
               <MultiSelect
                 path={`exp:${act.id}:ownerApprover`}
-                users={userDirectory}
+                users={ownerDivisionUsers}
                 selectedIds={act.ownerApprover}
                 single
                 isOpen={openMsPath === `exp:${act.id}:ownerApprover`}
@@ -498,7 +613,7 @@ export default function ManageTeam() {
               </div>
               <MultiSelect
                 path={`exp:${act.id}:owner`}
-                users={userDirectory}
+                users={ownerDivisionUsers}
                 selectedIds={act.owner}
                 single={false}
                 isOpen={openMsPath === `exp:${act.id}:owner`}
@@ -513,22 +628,25 @@ export default function ManageTeam() {
           {concerned.length > 0 ? (
             <>
               <div className="mt-modal-divisions-heading">Concerned Divisions</div>
-              {concerned.map((d) => (
+              {concerned.map((d) => {
+                const divLabel = labelForDivisionCode(d);
+                const divUsers = usersForDivisionCode(d);
+                return (
                 <div key={d} className="mt-modal-role-group mt-division-group">
                   <div className="mt-division-group-header">
-                    <span className="mt-division-tag">{d}</span>
+                    <span className="mt-division-tag">{divLabel}</span>
                     <span className="mt-division-group-sub">
-                      Pick the Approver and Users from <strong>{d}</strong>.
+                      Pick the Approver and Users from <strong>{divLabel}</strong>.
                     </span>
                   </div>
                   <div className="mt-modal-field">
                     <div className="mt-modal-field-label">Approver</div>
                     <div className="mt-modal-field-hint">
-                      A single approver from <strong>{d}</strong> for this activity.
+                      A single approver from <strong>{divLabel}</strong> for this activity.
                     </div>
                     <MultiSelect
                       path={`exp:${act.id}:divApprover:${d}`}
-                      users={userDirectory}
+                      users={divUsers}
                       selectedIds={(act.divisionApprovers || {})[d] || []}
                       single
                       isOpen={openMsPath === `exp:${act.id}:divApprover:${d}`}
@@ -540,11 +658,11 @@ export default function ManageTeam() {
                   <div className="mt-modal-field">
                     <div className="mt-modal-field-label">Users</div>
                     <div className="mt-modal-field-hint">
-                      Users from <strong>{d}</strong> who will work on this activity.
+                      Users from <strong>{divLabel}</strong> who will work on this activity.
                     </div>
                     <MultiSelect
                       path={`exp:${act.id}:div:${d}`}
-                      users={userDirectory}
+                      users={divUsers}
                       selectedIds={(act.divisionUsers || {})[d] || []}
                       single={false}
                       isOpen={openMsPath === `exp:${act.id}:div:${d}`}
@@ -554,7 +672,8 @@ export default function ManageTeam() {
                     />
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </>
           ) : (
             <div className="mt-modal-empty-divisions">
@@ -660,7 +779,7 @@ export default function ManageTeam() {
                     <td data-label={row.single ? 'User' : 'Users'}>
                       <MultiSelect
                         path={path}
-                        users={userDirectory}
+                        users={orgUsers}
                         selectedIds={row.users}
                         single={!!row.single}
                         isOpen={openMsPath === path}
@@ -701,7 +820,7 @@ export default function ManageTeam() {
                     <td data-label={row.single ? 'User' : 'Users'}>
                       <MultiSelect
                         path={path}
-                        users={userDirectory}
+                        users={ownerDivisionUsers}
                         selectedIds={row.users}
                         single={!!row.single}
                         isOpen={openMsPath === path}
