@@ -135,7 +135,11 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
   const isStarted = !!form.actualStartDate || !!activity.actualStartDate;
   const allTasksDone = activityTasksAllComplete(activity);
   const hasTasks = !activityHasNoTasks(activity);
-  const workflowEnabled = editable && !busy;
+  /* Workflow toolbar buttons (Mark Ready, Request Division, etc.) only
+     enable once the activity has been started — the Start Activity
+     banner sits in the left column and stamping actualStartDate flips
+     this flag. */
+  const workflowEnabled = editable && !busy && isStarted;
   const ownerName = form.ownerDivision || activity.owner || "Owner";
   const consentDivisions = safeArray(form.concernedDivision).length
     ? safeArray(form.concernedDivision)
@@ -458,6 +462,12 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     toolbarNode = (
       <div className="pmis-awf-toolbar pmis-awf-toolbar--empty" style={{ color: "#1b7a42" }}>
         Workflow complete.
+      </div>
+    );
+  } else if (!isStarted) {
+    toolbarNode = (
+      <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
+        🔒 Click <b>▶ Start Activity</b> on the left to enable approval actions.
       </div>
     );
   } else if (state === "idle" && hasTasks && !allTasksDone) {

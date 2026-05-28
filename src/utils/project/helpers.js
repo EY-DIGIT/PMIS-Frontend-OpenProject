@@ -102,6 +102,8 @@ export function flattenActivityLeaves(activity) {
 
 export function activityTasksAllComplete(activity) {
   const leaves = flattenActivityLeaves(activity);
-  if (!leaves.length) return false;
+  /* No tasks → vacuously true. An activity with zero tasks can move into
+     the approval workflow as soon as it's started; nothing to wait on. */
+  if (!leaves.length) return true;
   return leaves.every(isLeafCompleted);
 }
