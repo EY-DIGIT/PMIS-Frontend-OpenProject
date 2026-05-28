@@ -123,8 +123,10 @@ export default function ApprovalInboxConcernedDivision() {
     setListLoading(true);
     setListError("");
     const handle = setTimeout(() => {
+      /* Concerned-division view is the backend's default (no role
+         param). Skip it so the request mirrors the curl exactly:
+           GET /api/v3/approval-inbox?status=...&search=... */
       listApprovalInbox({
-        role: CURRENT_ROLE,
         status: filterStatus,
         search: filterText
       })
