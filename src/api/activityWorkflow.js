@@ -25,26 +25,82 @@ const PATH = "/activity-workflow/activities/process/_transition";
 const MODULE_NAME = "activity-workflow";
 const BUSINESS_SERVICE = "ACTIVITY";
 
+/* Human-readable label for a role code, e.g. super_admin → "Super Admin". */
+function roleLabel(code) {
+  return String(code || "")
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/* Coalesce whatever the login response stored on the user into the
+   `[{code, name}]` array the workflow service expects. Tries several
+   shapes in order:
+     1. user.roles (already an array — clean it up)
+     2. is_super_admin / is_admin booleans (per /api/v3/users response)
+     3. org_role / orgRole single-role string
+     4. role / roleCode single-role string
+   Returns at least one entry whenever any of those resolve to a code. */
+function deriveRoles(user) {
+  const seen = new Set();
+  const out = [];
+  function push(code, name) {
+    const c = String(code || "").trim();
+    if (!c) return;
+    if (seen.has(c)) return;
+    seen.add(c);
+    out.push({ code: c, name: String(name || roleLabel(c)) });
+  }
+  if (Array.isArray(user.roles)) {
+    user.roles.forEach((r) => {
+      if (!r) return;
+      if (typeof r === "string") return push(r);
+      push(r.code || r.roleCode || r.role || "", r.name || r.roleName);
+    });
+  }
+  // Boolean elevation flags shipped by /api/v3/users — recognise them
+  // even if `roles` wasn't supplied separately.
+  if (user.is_super_admin || user.isSuperAdmin) push("super_admin", "Super Admin");
+  if (user.is_admin || user.isAdmin) push("admin", "Admin");
+  // Single-role string fields (org_role, orgRole, role, roleCode)
+  const single =
+    user.org_role || user.orgRole ||
+    (typeof user.role === "string" ? user.role : "") ||
+    user.roleCode || "";
+  if (single) push(single);
+  return out;
+}
+
 /* Build the RequestInfo wrapper from the currently stored user + token.
    Returns the minimum shape the backend requires; any missing identity
    fields are filled with safe blanks so the call doesn't 400 on shape. */
 function buildRequestInfo() {
   const user = tokenStore.getUser() || {};
   const token = getToken() || "";
-  const roles = Array.isArray(user.roles)
-    ? user.roles.map((r) => {
-        if (!r) return null;
-        if (typeof r === "string") return { code: r, name: r };
-        const code = r.code || r.roleCode || r.role || "";
-        return { code, name: r.name || r.roleName || code };
-      }).filter((r) => r && r.code)
-    : [];
+  const roles = deriveRoles(user);
   return {
     authToken: token,
     userInfo: {
-      uuid: user.uuid || user.id || user.userId || "",
-      userName: user.userName || user.username || user.login || "",
-      name: user.name || user.fullName || user.displayName || "",
+      uuid:
+        user.uuid ||
+        user.id ||
+        user.userId ||
+        user.user_id ||
+        "",
+      userName:
+        user.userName ||
+        user.user_name ||
+        user.username ||
+        user.login ||
+        "",
+      name:
+        user.name ||
+        user.full_name ||
+        user.fullName ||
+        user.displayName ||
+        user.display_name ||
+        "",
       type: user.type || "EMPLOYEE",
       roles
     }
