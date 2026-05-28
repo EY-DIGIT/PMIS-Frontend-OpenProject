@@ -1,182 +1,123 @@
 /* ══════════════════════════════════════════════════════════════════
-   ApprovalInboxActivityOwner.jsx — inbox for an Activity Owner. The
-   Owner is the final decision-maker after every Concerned Division has
-   approved.
+   ApprovalInboxActivityOwner.jsx — inbox for the Activity Owner. The
+   owner is the final decision-maker after every Concerned Division
+   has signed off. Driven by /api/v3/approval-inbox.
 
-     • Approve → activity is marked Completed
-     • Reject  → user picks a revert target:
-                   - Organization (full restart)
-                   - Concerned Divisions (multi-select, re-examination)
+     • Approve & Complete  → POST {action: APPROVE, comment: ...}
+     • Reject              → POST {action: REJECT,  comment: <reason + revert hint>}
 
-   Ported from "Approval Inbox Activity Owner.html". Mock data driven;
-   wire to a real listing endpoint when backend ships one.
+   The backend transition payload only accepts action+comment, so the
+   revert picker (Vendor full restart vs. Concerned Divisions
+   re-examination) is encoded into the leading line of the comment so
+   downstream consumers can parse it. Local banner still shows the
+   pretty UI breakdown.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { formatDateTime } from "../../utils/project/helpers";
-import { transitionActivity, WORKFLOW_ACTIONS } from "../../api/activityWorkflow";
+import { tokenStore } from "../../api/client";
+import {
+  listApprovalInbox,
+  getApprovalInboxItem,
+  transitionApprovalInbox,
+  INBOX_ROLES,
+  INBOX_ACTIONS
+} from "../../api/approvalInbox";
 import "../../styles/project/approvalInbox.css";
 
-const CURRENT_USER = {
-  name: "Vikram Singh",
-  division: "TMD2",
-  divisionLong: "Activity Owner · TMD2",
-  role: "activity_owner"
-};
-
-const SEED_ITEMS = [
-  {
-    requestId: "AP-2026-201",
-    projectId: "PRJ-2026-018",
-    projectName: "Aadhaar Authentication API v3.0 Upgrade",
-    activity: {
-      id: "A1.1",
-      name: "Project Charter & Scope Statement",
-      owner: "TMD2",
-      vendor: "Wipro Limited",
-      consentDivisions: ["TMD1", "PMO"],
-      plannedDates: "2026-03-01 to 2026-03-18",
-      description:
-        "Charter covering scope inclusions/exclusions, success criteria, stakeholder register and high-level milestones for the API v3.0 programme."
-    },
-    submittedAt: "2026-03-19T09:20:00",
-    divisionDecisions: [
-      { division: "TMD1", status: "approved" },
-      { division: "PMO", status: "approved" }
-    ],
-    comments: [
-      {
-        kind: "user",
-        who: "Wipro Limited",
-        when: "2026-03-17T18:05:00",
-        text:
-          "Charter packet attached — scope, stakeholder register and milestone plan aligned with the BSP contract clauses. Out-of-scope items listed explicitly. Requesting sign-off.",
-        attachments: [
-          { name: "Charter_v1.0.pdf", size: "1.8 MB" },
-          { name: "Stakeholder_Register.xlsx", size: "214 KB" }
-        ]
-      }
-    ]
-  },
-  {
-    requestId: "AP-2026-205",
-    projectId: "PRJ-2026-018",
-    projectName: "Aadhaar Authentication API v3.0 Upgrade",
-    activity: {
-      id: "A1.4",
-      name: "Risk Assessment Matrix",
-      owner: "TMD2",
-      vendor: "Deloitte Touche Tohmatsu India LLP",
-      consentDivisions: ["TMD1", "PMO"],
-      plannedDates: "2026-04-05 to 2026-04-25",
-      description:
-        "Risk register covering technical, operational and compliance risks with mitigation plans and owners. Heat-mapped and prioritised."
-    },
-    submittedAt: "2026-05-12T11:05:00",
-    divisionDecisions: [
-      { division: "TMD1", status: "approved" },
-      { division: "PMO", status: "approved" }
-    ],
-    comments: [
-      {
-        kind: "user",
-        who: "Deloitte Touche Tohmatsu India LLP",
-        when: "2026-05-10T18:32:00",
-        text:
-          "Latest submission. Addressed prior owner feedback — added rollout-window risk, re-scored crypto-migration risks from Medium to High and updated the heat-map.",
-        attachments: [
-          { name: "Risk_Matrix_v2.0.xlsx", size: "468 KB" },
-          { name: "Risk_Heatmap_v2.pdf", size: "1.1 MB" }
-        ]
-      }
-    ]
-  },
-  {
-    requestId: "AP-2026-209",
-    projectId: "PRJ-2026-018",
-    projectName: "Aadhaar Authentication API v3.0 Upgrade",
-    activity: {
-      id: "A3.1",
-      name: "Production Deployment Runbook",
-      owner: "TMD2",
-      vendor: "TechSolutions India Pvt Ltd",
-      consentDivisions: ["TMD1", "PMO", "ECMD"],
-      plannedDates: "2026-08-15 to 2026-08-30",
-      description:
-        "Deployment runbook — blue-green cut-over plan, canary gates, rollback triggers, error-budget thresholds and the war-room comms tree."
-    },
-    submittedAt: "2026-05-21T11:00:00",
-    divisionDecisions: [
-      { division: "TMD1", status: "approved" },
-      { division: "PMO", status: "approved" },
-      { division: "ECMD", status: "approved" }
-    ],
-    comments: [
-      {
-        kind: "user",
-        who: "TechSolutions India Pvt Ltd",
-        when: "2026-05-19T17:42:00",
-        text:
-          "Final runbook for the API v3.0 production deployment. Blue-green strategy with progressive canary gates (5/25/50/100%), rollback triggers and war-room comms tree. Validated against two dry-runs.",
-        attachments: [
-          { name: "Deployment_Runbook_v1.0.pdf", size: "2.4 MB" },
-          { name: "Rollback_Triggers.xlsx", size: "182 KB" }
-        ]
-      }
-    ]
-  },
-  {
-    requestId: "AP-2026-214",
-    projectId: "PRJ-2026-021",
-    projectName: "Aadhaar PVC Card Issuance Modernization",
-    activity: {
-      id: "A2.3",
-      name: "User Training Materials",
-      owner: "TMD2",
-      vendor: "Tata Elxsi Limited",
-      consentDivisions: ["PMO", "TMD1"],
-      plannedDates: "2026-05-25 to 2026-06-15",
-      description:
-        "Training kit for residents and operators — walkthrough videos, illustrated PDF guides, FAQs and quick-reference cards (English + Hindi)."
-    },
-    submittedAt: "2026-05-22T10:00:00",
-    divisionDecisions: [
-      { division: "PMO", status: "approved" },
-      { division: "TMD1", status: "approved" }
-    ],
-    comments: [
-      {
-        kind: "user",
-        who: "Tata Elxsi Limited",
-        when: "2026-05-20T19:18:00",
-        text:
-          "Training kit submitted — illustrated walkthrough PDF (EN + HI), 90-second walkthrough video, operator training deck and the FAQ library (49 entries).",
-        attachments: [
-          { name: "Resident_Walkthrough_EN_HI.pdf", size: "3.2 MB" },
-          { name: "Operator_Training_Deck.pptx", size: "4.1 MB" }
-        ]
-      }
-    ]
-  }
-];
+const CURRENT_ROLE = INBOX_ROLES.ACTIVITY_OWNER;
 
 function cap(s) {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
+function safeArr(v) {
+  return Array.isArray(v) ? v : [];
+}
 
-/* Activity Owner's decision IS the request's final status — they are the
-   final decision-maker. Pending until they act. */
-function getStatus(item, decisions) {
-  const local = decisions[item.requestId];
-  return local ? local.status : "pending";
+function pickUserDivision(user) {
+  if (!user) return "";
+  return user.division_label || user.divisionLabel || user.division || "";
+}
+function pickUserName(user) {
+  if (!user) return "";
+  const first = (user.first_name || user.firstName || "").trim();
+  const last = (user.last_name || user.lastName || "").trim();
+  const full = `${first} ${last}`.trim();
+  return full || user.full_name || user.fullName || user.login || user.email || "";
+}
+
+function mapDetail(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw.activity || {};
+  const p = raw.project || {};
+  const start = a.plannedStartDate ? String(a.plannedStartDate).slice(0, 10) : "";
+  const end = a.plannedEndDate ? String(a.plannedEndDate).slice(0, 10) : "";
+  return {
+    requestId: raw.businessId,
+    businessId: raw.businessId,
+    processInstanceId: raw.processInstanceId,
+    projectId: p.code || p.id || "",
+    projectName: p.name || "",
+    activity: {
+      id: a.displayCode || a.id || "",
+      apiId: a.id || "",
+      name: a.name || "",
+      owner: a.ownerDivision || "",
+      vendor: raw.organization || "",
+      consentDivisions: safeArr(a.consentDivisions),
+      plannedDates: start && end ? `${start} to ${end}` : "",
+      description: a.description || ""
+    },
+    submittedAt: raw.submittedAt || "",
+    status: raw.status || "pending",
+    divisionDecisions: safeArr(raw.divisionDecisions).map((d) => ({
+      division: d.division,
+      status: d.status || "pending",
+      decidedBy: d.decidedBy || "",
+      decidedAt: d.decidedAt || "",
+      reason: d.comment || ""
+    })),
+    ownerDecision: raw.ownerDecision
+      ? {
+          division: raw.ownerDecision.division,
+          status: raw.ownerDecision.status || "pending",
+          decidedBy: raw.ownerDecision.decidedBy || "",
+          decidedAt: raw.ownerDecision.decidedAt || "",
+          reason: raw.ownerDecision.comment || ""
+        }
+      : null,
+    comments: safeArr(raw.submission && raw.submission.comments).map((c) => ({
+      kind: "user",
+      who: c.who || "",
+      when: c.when || "",
+      text: c.text || "",
+      attachments: safeArr(c.attachments)
+    })),
+    myView: raw.myView || null
+  };
 }
 
 export default function ApprovalInboxActivityOwner() {
-  const [items] = useState(SEED_ITEMS);
-  const [decisions, setDecisions] = useState({});
+  const storedUser = tokenStore.getUser() || {};
+  const CURRENT_USER = useMemo(
+    () => ({
+      name: pickUserName(storedUser),
+      division: pickUserDivision(storedUser),
+      role: CURRENT_ROLE
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  const [items, setItems] = useState([]);
+  const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState("");
   const [filterText, setFilterText] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [activeId, setActiveId] = useState(null);
+  const [activeDetail, setActiveDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
   const [rejection, setRejection] = useState({
     open: false,
     reason: "",
@@ -184,76 +125,60 @@ export default function ApprovalInboxActivityOwner() {
     revertDivisions: []
   });
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const filtered = useMemo(() => {
-    const q = filterText.trim().toLowerCase();
-    return items.filter((it) => {
-      if (filterStatus !== "all" && getStatus(it, decisions) !== filterStatus) return false;
-      if (q) {
-        const hay = (
-          it.activity.id +
-          " " +
-          it.activity.name +
-          " " +
-          it.projectId +
-          " " +
-          it.projectName +
-          " " +
-          it.activity.vendor
-        ).toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [items, decisions, filterText, filterStatus]);
+  useEffect(() => {
+    let cancelled = false;
+    setListLoading(true);
+    setListError("");
+    const handle = setTimeout(() => {
+      listApprovalInbox({
+        role: CURRENT_ROLE,
+        status: filterStatus,
+        search: filterText
+      })
+        .then((rows) => {
+          if (cancelled) return;
+          setItems(rows.map(mapDetail));
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setListError(err && err.message ? err.message : "Failed to load inbox.");
+          setItems([]);
+        })
+        .finally(() => {
+          if (!cancelled) setListLoading(false);
+        });
+    }, filterText ? 220 : 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [filterStatus, filterText, reloadKey]);
 
-  const active = useMemo(
-    () => (activeId ? items.find((x) => x.requestId === activeId) || null : null),
-    [activeId, items]
-  );
-
-  function openReview(id) {
-    setActiveId(id);
+  async function openReview(businessId) {
+    setActiveId(businessId);
     setRejection({ open: false, reason: "", revertKind: "", revertDivisions: [] });
-    setError("");
+    setDetailError("");
+    setDetailLoading(true);
+    try {
+      const raw = await getApprovalInboxItem(businessId);
+      setActiveDetail(mapDetail(raw));
+    } catch (err) {
+      setDetailError(err && err.message ? err.message : "Failed to load review.");
+      setActiveDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function closeReview() {
     setActiveId(null);
+    setActiveDetail(null);
     setRejection({ open: false, reason: "", revertKind: "", revertDivisions: [] });
-    setError("");
-  }
-
-  async function fireTransition(item, action, comment) {
-    const businessId = item.activity && (item.activity.apiId || item.activity.id);
-    if (!businessId) return;
-    try {
-      await transitionActivity({ businessId, action, comment });
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn("[ApprovalInbox] transition call failed:", e);
-    }
-  }
-
-  async function approve() {
-    if (!active) return;
-    if (!window.confirm(`Approve "${active.activity.name}" and mark the activity Completed?`)) return;
-    setBusy(true);
-    setError("");
-    try {
-      await fireTransition(active, WORKFLOW_ACTIONS.APPROVE, "Activity Owner approved.");
-      const now = new Date().toISOString();
-      setDecisions((d) => ({
-        ...d,
-        [active.requestId]: { status: "approved", at: now, reason: "" }
-      }));
-    } catch (e) {
-      setError(e && e.message ? e.message : "Failed to approve.");
-    } finally {
-      setBusy(false);
-    }
+    setDetailError("");
+    setReloadKey((k) => k + 1);
   }
 
   function beginRejection() {
@@ -282,66 +207,82 @@ export default function ApprovalInboxActivityOwner() {
   }
 
   const canConfirmReject = (() => {
-    const reasonOk = rejection.reason.trim().length >= 10;
+    const reasonOk = rejection.reason.trim().length >= 1;
     let targetOk = false;
     if (rejection.revertKind === "vendor") targetOk = true;
     else if (rejection.revertKind === "divisions") targetOk = rejection.revertDivisions.length > 0;
     return reasonOk && targetOk;
   })();
 
-  async function confirmRejection() {
-    if (!active) return;
-    if (!canConfirmReject) return;
-    const targetLabel =
-      rejection.revertKind === "vendor"
-        ? `organization (${active.activity.vendor})`
-        : `${rejection.revertDivisions.join(", ")} for re-examination`;
-    if (!window.confirm(`Reject "${active.activity.name}" and revert to ${targetLabel}?`)) return;
+  async function approve() {
+    if (!activeDetail) return;
+    if (!window.confirm(`Approve "${activeDetail.activity.name}" and mark the activity Completed?`)) return;
     setBusy(true);
-    setError("");
+    setDetailError("");
     try {
-      await fireTransition(active, WORKFLOW_ACTIONS.REJECT, rejection.reason.trim());
-      const now = new Date().toISOString();
-      setDecisions((d) => ({
-        ...d,
-        [active.requestId]: {
-          status: "rejected",
-          at: now,
-          reason: rejection.reason.trim(),
-          revertKind: rejection.revertKind,
-          revertDivisions:
-            rejection.revertKind === "divisions" ? [...rejection.revertDivisions] : []
-        }
-      }));
-      setRejection({ open: false, reason: "", revertKind: "", revertDivisions: [] });
-    } catch (e) {
-      setError(e && e.message ? e.message : "Failed to reject.");
+      const refreshed = await transitionApprovalInbox(activeDetail.businessId, {
+        action: INBOX_ACTIONS.APPROVE,
+        comment: "Activity Owner approved."
+      });
+      setActiveDetail(mapDetail(refreshed));
+    } catch (err) {
+      setDetailError(err && err.message ? err.message : "Failed to approve.");
     } finally {
       setBusy(false);
     }
   }
 
+  async function confirmRejection() {
+    if (!activeDetail) return;
+    if (!canConfirmReject) return;
+    const reason = rejection.reason.trim();
+    /* Encode the revert target into the comment header so consumers can
+       parse it later — the backend doesn't have a structured field for
+       this yet. */
+    const targetLine =
+      rejection.revertKind === "vendor"
+        ? `Revert to Vendor (full restart)`
+        : `Revert to Concerned Divisions: ${rejection.revertDivisions.join(", ")}`;
+    const comment = `${targetLine} — ${reason}`;
+    if (!window.confirm(`Reject "${activeDetail.activity.name}"?`)) return;
+    setBusy(true);
+    setDetailError("");
+    try {
+      const refreshed = await transitionApprovalInbox(activeDetail.businessId, {
+        action: INBOX_ACTIONS.REJECT,
+        comment
+      });
+      setActiveDetail(mapDetail(refreshed));
+      setRejection({ open: false, reason: "", revertKind: "", revertDivisions: [] });
+    } catch (err) {
+      setDetailError(err && err.message ? err.message : "Failed to reject.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const visibleItems = items;
+  const totalCount = visibleItems.length;
+
   return (
     <div className="pmis-apinbox">
       <div className="pmis-apinbox-head">
         <h1>Approval Inbox</h1>
-        <div className="pmis-apinbox-sub">{CURRENT_USER.divisionLong}</div>
+        <div className="pmis-apinbox-sub">
+          Activity Owner{CURRENT_USER.division ? ` · ${CURRENT_USER.division}` : ""}
+        </div>
         <div className="pmis-apinbox-desc">
-          Activities awaiting your final decision as Activity Owner. All consent divisions have
+          Activities awaiting your final decision. All consent divisions have
           already approved.
         </div>
       </div>
 
       <div className="pmis-apinbox-card">
-        {!active && (
+        {!activeId && (
           <div className="pmis-apinbox-card-head">
             <h2 className="pmis-apinbox-card-title">
               All Approvals{" "}
-              <span className="pmis-apinbox-meta">
-                {filtered.length === items.length
-                  ? `(${items.length})`
-                  : `(${filtered.length} of ${items.length})`}
-              </span>
+              <span className="pmis-apinbox-meta">({totalCount})</span>
             </h2>
             <div className="pmis-apinbox-filters">
               <input
@@ -365,7 +306,7 @@ export default function ApprovalInboxActivityOwner() {
           </div>
         )}
 
-        {active && (
+        {activeId && (
           <div className="pmis-apinbox-card-head">
             <button type="button" className="pmis-apinbox-btn--back" onClick={closeReview}>
               <span aria-hidden="true">←</span> Back to Inbox
@@ -373,7 +314,7 @@ export default function ApprovalInboxActivityOwner() {
           </div>
         )}
 
-        {!active && (
+        {!activeId && (
           <div className="pmis-apinbox-table-wrap">
             <table className="pmis-apinbox-table">
               <thead>
@@ -387,23 +328,36 @@ export default function ApprovalInboxActivityOwner() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {listLoading ? (
+                  <tr>
+                    <td colSpan={6} className="pmis-apinbox-empty">
+                      Loading inbox…
+                    </td>
+                  </tr>
+                ) : listError ? (
+                  <tr>
+                    <td colSpan={6} className="pmis-apinbox-empty" style={{ color: "#9b1c1c" }}>
+                      {listError}
+                    </td>
+                  </tr>
+                ) : visibleItems.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="pmis-apinbox-empty">
                       No items match the current filters.
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((it) => {
-                    const st = getStatus(it, decisions);
+                  visibleItems.map((it) => {
+                    if (!it) return null;
+                    const st = it.status || "pending";
                     return (
-                      <tr key={it.requestId}>
+                      <tr key={it.businessId}>
                         <td>
                           <div className="pmis-apinbox-cell-id">{it.activity.id}</div>
                           <button
                             type="button"
                             className="pmis-apinbox-link pmis-apinbox-cell-name"
-                            onClick={() => openReview(it.requestId)}
+                            onClick={() => openReview(it.businessId)}
                           >
                             {it.activity.name}
                           </button>
@@ -423,7 +377,7 @@ export default function ApprovalInboxActivityOwner() {
                           <button
                             type="button"
                             className="pmis-apinbox-btn pmis-apinbox-btn--sm"
-                            onClick={() => openReview(it.requestId)}
+                            onClick={() => openReview(it.businessId)}
                           >
                             Review
                           </button>
@@ -437,13 +391,14 @@ export default function ApprovalInboxActivityOwner() {
           </div>
         )}
 
-        {active && (
+        {activeId && (
           <DetailView
-            item={active}
-            decision={decisions[active.requestId]}
-            busy={busy}
-            error={error}
+            loading={detailLoading}
+            error={detailError}
+            currentUser={CURRENT_USER}
+            item={activeDetail}
             rejection={rejection}
+            busy={busy}
             canConfirmReject={canConfirmReject}
             onSetReason={setReason}
             onSetRevertKind={setRevertKind}
@@ -461,11 +416,12 @@ export default function ApprovalInboxActivityOwner() {
 }
 
 function DetailView({
-  item,
-  decision,
-  busy,
+  loading,
   error,
+  currentUser,
+  item,
   rejection,
+  busy,
   canConfirmReject,
   onSetReason,
   onSetRevertKind,
@@ -476,8 +432,24 @@ function DetailView({
   onConfirmReject,
   onClose
 }) {
+  if (loading) {
+    return <div className="pmis-apinbox-empty">Loading review…</div>;
+  }
+  if (error && !item) {
+    return (
+      <div className="pmis-apinbox-empty" style={{ color: "#9b1c1c" }}>
+        {error}
+      </div>
+    );
+  }
+  if (!item) return null;
+
   const a = item.activity;
-  const status = decision ? decision.status : "pending";
+  const myView = item.myView || {};
+  const status = item.status || "pending";
+  const canApprove = myView.canApprove !== false;
+  const canReject = myView.canReject !== false;
+  const isDecided = status === "approved" || status === "rejected";
 
   return (
     <div className="pmis-apinbox-detail">
@@ -494,33 +466,23 @@ function DetailView({
         </div>
       </div>
 
-      {decision && decision.status === "approved" && (
+      {item.ownerDecision && item.ownerDecision.status === "approved" && (
         <div className="pmis-apinbox-decided pmis-apinbox-decided--approved">
           <div>
-            <b>You approved this request</b> on {formatDateTime(decision.at)}.
+            <b>You approved this request</b> on{" "}
+            {formatDateTime(item.ownerDecision.decidedAt)}.
           </div>
           <div>Activity has been marked as Completed.</div>
         </div>
       )}
-      {decision && decision.status === "rejected" && (
+      {item.ownerDecision && item.ownerDecision.status === "rejected" && (
         <div className="pmis-apinbox-decided pmis-apinbox-decided--rejected">
           <div>
-            <b>You rejected this request</b> on {formatDateTime(decision.at)}.
+            <b>You rejected this request</b> on{" "}
+            {formatDateTime(item.ownerDecision.decidedAt)}.
           </div>
           <div>
-            <b>Reverted to:</b>{" "}
-            {decision.revertKind === "vendor"
-              ? `Organization (${a.vendor}) — full restart`
-              : `${
-                  (decision.revertDivisions || []).length > 1
-                    ? "Concerned Divisions"
-                    : "Concerned Division"
-                } — ${(decision.revertDivisions || []).join(
-                  ", "
-                )} (re-examination only)`}
-          </div>
-          <div>
-            <b>Reason:</b> {decision.reason}
+            <b>Reason:</b> {item.ownerDecision.reason}
           </div>
         </div>
       )}
@@ -542,15 +504,15 @@ function DetailView({
         <div className="pmis-apinbox-kv">
           <div>
             <div className="pmis-apinbox-k">Organization</div>
-            <div className="pmis-apinbox-v pmis-apinbox-v--strong">{a.vendor}</div>
+            <div className="pmis-apinbox-v pmis-apinbox-v--strong">{a.vendor || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Activity Owner</div>
-            <div className="pmis-apinbox-v">{a.owner}</div>
+            <div className="pmis-apinbox-v">{a.owner || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Planned Dates</div>
-            <div className="pmis-apinbox-v">{a.plannedDates}</div>
+            <div className="pmis-apinbox-v">{a.plannedDates || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Submitted</div>
@@ -558,64 +520,70 @@ function DetailView({
           </div>
           <div className="pmis-apinbox-kv-full">
             <div className="pmis-apinbox-k">Consent Divisions</div>
-            <div className="pmis-apinbox-v">{a.consentDivisions.join(", ")}</div>
+            <div className="pmis-apinbox-v">{a.consentDivisions.join(", ") || "—"}</div>
           </div>
           <div className="pmis-apinbox-kv-full">
             <div className="pmis-apinbox-k">Description</div>
-            <div className="pmis-apinbox-v pmis-apinbox-desc-text">{a.description}</div>
+            <div className="pmis-apinbox-v pmis-apinbox-desc-text">{a.description || "—"}</div>
           </div>
         </div>
       </div>
 
-      <div className="pmis-apinbox-section">
-        <div className="pmis-apinbox-section-head">
-          <h3>Organization Submission</h3>
-        </div>
-        {item.comments.map((c, i) => (
-          <div key={i} className="pmis-apinbox-cmt">
-            <div className="pmis-apinbox-cmt-meta">
-              <span className="pmis-apinbox-who">{c.who}</span>
-              <span>{formatDateTime(c.when)}</span>
-            </div>
-            <div className="pmis-apinbox-cmt-text">{c.text}</div>
-            {Array.isArray(c.attachments) && c.attachments.length > 0 && (
-              <div className="pmis-apinbox-cmt-atts">
-                {c.attachments.map((att, j) => (
-                  <span key={j} className="pmis-apinbox-att" title={att.name}>
-                    📎 {att.name}{" "}
-                    <span className="pmis-apinbox-att-size">{att.size}</span>
-                  </span>
-                ))}
-              </div>
-            )}
+      {item.comments.length > 0 && (
+        <div className="pmis-apinbox-section">
+          <div className="pmis-apinbox-section-head">
+            <h3>Organization Submission</h3>
           </div>
-        ))}
-      </div>
+          {item.comments.map((c, i) => (
+            <div key={i} className="pmis-apinbox-cmt">
+              <div className="pmis-apinbox-cmt-meta">
+                <span className="pmis-apinbox-who">{c.who || "Vendor"}</span>
+                <span>{formatDateTime(c.when)}</span>
+              </div>
+              <div className="pmis-apinbox-cmt-text">{c.text}</div>
+              {c.attachments.length > 0 && (
+                <div className="pmis-apinbox-cmt-atts">
+                  {c.attachments.map((att, j) => (
+                    <span key={j} className="pmis-apinbox-att" title={att.name || ""}>
+                      📎 {att.name || "attachment"}{" "}
+                      {att.size && (
+                        <span className="pmis-apinbox-att-size">{att.size}</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="pmis-apinbox-section">
         <div className="pmis-apinbox-section-head">
           <h3>Division Status</h3>
         </div>
         <div className="pmis-apinbox-div-status">
-          {item.divisionDecisions.map((d) => (
-            <div key={d.division} className="pmis-apinbox-ds">
-              <span className="pmis-apinbox-nm">{d.division}</span>
-              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${d.status}`}>
-                {cap(d.status)}
-              </span>
-            </div>
-          ))}
-          {!item.divisionDecisions.some((d) => d.division === CURRENT_USER.division) && (
-            <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
-              <span className="pmis-apinbox-nm">
-                {CURRENT_USER.division}{" "}
-                <span className="pmis-apinbox-you">YOU · OWNER</span>
-              </span>
-              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>
-                {cap(status)}
-              </span>
-            </div>
+          {item.divisionDecisions.length === 0 ? (
+            <div className="pmis-apinbox-empty">No division decisions yet.</div>
+          ) : (
+            item.divisionDecisions.map((d) => (
+              <div key={d.division} className="pmis-apinbox-ds">
+                <span className="pmis-apinbox-nm">{d.division}</span>
+                <span className={`pmis-apinbox-pill pmis-apinbox-pill--${d.status}`}>
+                  {cap(d.status)}
+                </span>
+              </div>
+            ))
           )}
+          <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
+            <span className="pmis-apinbox-nm">
+              {currentUser.division || a.owner || "Owner"}{" "}
+              <span className="pmis-apinbox-you">YOU · OWNER</span>
+            </span>
+            <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>
+              {cap(status)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -634,7 +602,7 @@ function DetailView({
         </div>
       )}
 
-      {decision ? (
+      {isDecided ? (
         <div className="pmis-apinbox-actions">
           <button
             type="button"
@@ -776,7 +744,7 @@ function DetailView({
             type="button"
             className="pmis-apinbox-btn pmis-apinbox-btn--danger"
             onClick={onBeginReject}
-            disabled={busy}
+            disabled={busy || !canReject}
           >
             Reject
           </button>
@@ -784,7 +752,7 @@ function DetailView({
             type="button"
             className="pmis-apinbox-btn"
             onClick={onApprove}
-            disabled={busy}
+            disabled={busy || !canApprove}
           >
             {busy ? "Submitting…" : "Approve & Complete"}
           </button>

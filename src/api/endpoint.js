@@ -224,6 +224,12 @@ export const ENDPOINTS = {
       teamPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-page`,
   },
 
+  approvalInbox: {
+    list: '/activity-workflow/api/v3/approval-inbox',
+    detail: (id) => `/activity-workflow/api/v3/approval-inbox/${enc(id)}`,
+    transition: (id) => `/activity-workflow/api/v3/approval-inbox/${enc(id)}/_transition`,
+  },
+
   milestones: {
     update: (id) => `/projects/api/v3/milestones/${enc(id)}`,
     remove: (id) => `/projects/api/v3/milestones/${enc(id)}`,
