@@ -189,18 +189,19 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
     });
   }
 
-  async function handleRequestDivision() {
+  function handleRequestDivision() {
+    /* Local-only transition: ready_for_approval → pending_division. No
+       API fires here — Mark Ready already SUBMITted the activity to the
+       backend, and the Concerned Division's APPROVE/REJECT calls drive
+       the next state changes. This click just routes the local UI to
+       the per-division decision rows. */
     if (!consentDivisions.length) {
       setError(
         "Add at least one Concerned Division to the activity before submitting."
       );
       return;
     }
-    await runTransition({
-      action: WORKFLOW_ACTIONS.SUBMIT,
-      comment: "Activity submitted for Concerned Division approval.",
-      transform: () => requestDivisionApproval(form, consentDivisions)
-    });
+    apply(requestDivisionApproval(form, consentDivisions));
   }
 
   function handleRequestOwner() {
@@ -295,7 +296,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange }) {
           disabled={busy || !consentDivisions.length}
           onClick={handleRequestDivision}
         >
-          {busy ? "Submitting…" : "Request Division Approval"}
+          Request Division Approval
         </button>
       );
     } else if (state === "rejected_to_vendor") {
