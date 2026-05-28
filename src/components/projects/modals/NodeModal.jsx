@@ -15,7 +15,6 @@ import {
   NODE_TYPE_OPTIONS,
   RESOURCE_TYPE_CODES,
   DIVISION_OPTIONS,
-  CATEGORY_OPTIONS,
   MAX_ATTACHMENT_BYTES,
   ALLOWED_FILE_EXTENSIONS,
   ALLOWED_FILE_ACCEPT,
@@ -32,10 +31,7 @@ import {
 } from "../../../utils/project/nodeUtils";
 import {
   formatDateDisplay,
-  formatDateTime,
-  formatINR,
-  getCCNCapAmount,
-  computeCCNUsage
+  formatDateTime
 } from "../../../utils/project/helpers";
 import { useCan } from "../../../auth/permissions";
 import {
@@ -369,18 +365,6 @@ export default function NodeModal({
     if (code) setForm((f) => (f.priority ? f : { ...f, priority: code }));
   }, [mode, priorities, form.priority]);
 
-  /* In ADD mode post-publish, the Category dropdown defaults to ASG (since
-     'original' is reserved for items created before publish). Flip the form
-     value once on open so save() picks up the right code without relying on
-     a render-time fallback. */
-  useEffect(() => {
-    if (!open || mode !== "add") return;
-    if (kind !== "milestone" && kind !== "activity") return;
-    if (!project || project.status !== "PUBLISHED") return;
-    setForm((f) => (f.category === "original" ? { ...f, category: "asg" } : f));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, mode, kind, project && project.status]);
-
   /* Older records may have stored Concerned Division as labels ("TMD1") instead
      of codes ("tmd1"). Once the divisions list arrives, rewrite any label-form
      values in the form to their canonical code so we always send the code. */
@@ -626,22 +610,6 @@ export default function NodeModal({
         setSaveError("Please specify the concerned division.");
         return;
       }
-      if (form.linkedToPayment && !(Number(form.activityPaymentPercent) > 0)) {
-        setSaveError(
-          "Activity Payment Value must be greater than 0 when Linked to Payment is Yes."
-        );
-        return;
-      }
-    }
-    if (
-      (kind === "milestone" || kind === "activity") &&
-      form.category === "ccn" &&
-      !(Number(form.ccnValue) > 0)
-    ) {
-      setSaveError(
-        "CCN Value must be greater than 0 for items categorised as CCN."
-      );
-      return;
     }
     setSaveError("");
 
@@ -969,110 +937,6 @@ export default function NodeModal({
             </div>
           )}
 
-          {(kind === "milestone" || kind === "activity") && (() => {
-            /* Category — only relevant once a project has been published, OR
-               when the node already carries a non-original category (legacy /
-               reverted projects). Editable only on ADD post-publish; locked
-               on EDIT so categories don't drift after the fact. */
-            const projectStatus = project.status || "";
-            const isPostPublish = projectStatus === "PUBLISHED";
-            const currentCat = form.category || "original";
-            const showCategoryUI =
-              isPostPublish || (currentCat && currentCat !== "original");
-            if (!showCategoryUI) return null;
-            const catEditable = editable && isAdd && isPostPublish;
-            const effectiveCat =
-              catEditable && currentCat === "original" ? "asg" : currentCat;
-            const tpv = Number(project.totalProjectValue) || 0;
-            const ccnCap = getCCNCapAmount(project);
-            const ccnUsed = computeCCNUsage(project);
-            const ownContribution =
-              currentCat === "ccn" && !isAdd ? Number(form.ccnValue) || 0 : 0;
-            const headroom = Math.max(0, ccnCap - (ccnUsed - ownContribution));
-            const showCcnRow = effectiveCat === "ccn" || currentCat === "ccn";
-            const catLabel =
-              currentCat === "asg"
-                ? "ASG — Annual Strategic Goal"
-                : currentCat === "ccn"
-                ? "CCN — Change Control Note"
-                : "Original Contract";
-            return (
-              <>
-                <div className="uidai-field">
-                  <label className="uidai-field__label">Category</label>
-                  {catEditable ? (
-                    <>
-                      <select
-                        className="uidai-select"
-                        value={effectiveCat}
-                        onChange={(e) =>
-                          updateField({
-                            category: e.target.value,
-                            ccnValue:
-                              e.target.value === "ccn" ? form.ccnValue : 0
-                          })
-                        }
-                      >
-                        {CATEGORY_OPTIONS.filter((c) => c.code !== "original").map(
-                          (c) => (
-                            <option key={c.code} value={c.code}>
-                              {c.label}
-                            </option>
-                          )
-                        )}
-                      </select>
-                      <div className="uidai-auto-hint">
-                        ASG: extension within the project's strategic goals.
-                        CCN: change control consuming the CCN cap.
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <input
-                        className="uidai-input"
-                        value={catLabel}
-                        disabled
-                      />
-                      {isPostPublish && (
-                        <div className="uidai-auto-hint">
-                          Category is locked after the item is saved.
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-                {showCcnRow && (
-                  <div className="uidai-field">
-                    <label className="uidai-field__label">
-                      CCN Value (₹){" "}
-                      <span className="uidai-required-project">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      className="uidai-input"
-                      value={form.ccnValue || 0}
-                      onChange={(e) =>
-                        updateField({
-                          ccnValue: Math.max(0, Number(e.target.value) || 0)
-                        })
-                      }
-                      disabled={dis || (!catEditable && currentCat !== "ccn")}
-                    />
-                    <div className="uidai-auto-hint">
-                      Preview: {formatINR(form.ccnValue || 0)}. Cap headroom
-                      available: <b>{formatINR(headroom)}</b> of total CCN cap{" "}
-                      {formatINR(ccnCap)} (project value{" "}
-                      {formatINR(tpv)}). Exceeding the cap will warn but
-                      allow save.
-                    </div>
-                  </div>
-                )}
-              </>
-            );
-          })()}
-
           {showActivityFields && (() => {
             const divList = safeArray(divisions);
 
@@ -1200,66 +1064,6 @@ export default function NodeModal({
                   </div>
                 )}
 
-                {/* Payment linkage — Activity-only. When linked, the activity
-                    carries a % of the contract value as its Activity Payment
-                    Value (used downstream for LD computation). */}
-                <div className="uidai-field">
-                  <label className="uidai-field__label">Linked to Payment</label>
-                  <select
-                    className="uidai-select"
-                    value={form.linkedToPayment ? "yes" : "no"}
-                    onChange={(e) =>
-                      updateField({
-                        linkedToPayment: e.target.value === "yes",
-                        activityPaymentPercent:
-                          e.target.value === "yes"
-                            ? form.activityPaymentPercent
-                            : 0
-                      })
-                    }
-                    disabled={dis}
-                  >
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                  <div className="uidai-auto-hint">
-                    Flag this activity if a payment milestone is tied to it.
-                  </div>
-                </div>
-                {form.linkedToPayment && (() => {
-                  const tpv = Number(project.totalProjectValue) || 0;
-                  const pct = Number(form.activityPaymentPercent) || 0;
-                  const derived = (tpv * pct) / 100;
-                  return (
-                    <div className="uidai-field">
-                      <label className="uidai-field__label">
-                        Activity Payment Value (% of contract value){" "}
-                        <span className="uidai-required-project">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        className="uidai-input"
-                        value={form.activityPaymentPercent || 0}
-                        onChange={(e) => {
-                          const raw = Number(e.target.value);
-                          const clamped = isFinite(raw)
-                            ? Math.max(0, Math.min(100, raw))
-                            : 0;
-                          updateField({ activityPaymentPercent: clamped });
-                        }}
-                        disabled={dis}
-                      />
-                      <div className="uidai-auto-hint">
-                        = {formatINR(derived)} of {formatINR(tpv)}. LD will be
-                        computed against this value in case of SLA breach
-                        (computation rule pending finalisation).
-                      </div>
-                    </div>
-                  );
-                })()}
               </>
             );
           })()}
