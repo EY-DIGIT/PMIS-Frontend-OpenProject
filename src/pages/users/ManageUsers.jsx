@@ -798,7 +798,18 @@ export default function ManageTeam() {
 
       {/* ─── PROJECT OWNER (static roles) ─── */}
       <div className="mt-card">
-        <h2 className="mt-card-title">Project Owner</h2>
+        <h2 className="mt-card-title">
+          Project Owner
+          {ownerDivision && (ownerDivision.name || ownerDivision.code) && (
+            <span
+              className="mt-division-tag"
+              style={{ marginLeft: 10, fontSize: 12 }}
+              title="Owner Division for this project"
+            >
+              {ownerDivision.name || ownerDivision.code}
+            </span>
+          )}
+        </h2>
         <div className="mt-table-wrap">
           <table className="mt-team-table">
             <thead>
