@@ -167,7 +167,7 @@ export const ENDPOINTS = {
     update: (id) => `/users/api/v3/users/${enc(id)}`,
     updatePassword: (id) => `/users/api/v3/users/${enc(id)}/password`,
     remove: (id) => `/users/api/v3/users/${enc(id)}`,
-    associated: '/users/api/v3/associated-users',
+    associated: '/projects/api/v3/associated-users',
   },
 
   vendors: {
