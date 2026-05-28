@@ -229,9 +229,21 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
 
   async function submitRequestPopup(payloads) {
     if (requestPopup.kind === "division") {
-      /* Local-only — no API call here per the workflow spec. */
-      apply(requestDivisionApproval(form, consentDivisions, payloads));
-      closeRequestPopup();
+      /* Request Division Approval → SUBMIT API + local transition.
+         Per-target popup messages are concatenated into the comment so
+         the backend's audit captures every note. */
+      const combined = payloads
+        .map((p) =>
+          p && p.text && p.text.trim() ? `[${p.label}] ${p.text.trim()}` : ""
+        )
+        .filter(Boolean)
+        .join(" | ");
+      const ok = await runTransition({
+        action: WORKFLOW_ACTIONS.SUBMIT,
+        comment: combined || "Activity submitted for Concerned Division approval.",
+        transform: () => requestDivisionApproval(form, consentDivisions, payloads)
+      });
+      if (ok) closeRequestPopup();
     } else if (requestPopup.kind === "owner") {
       const p = payloads[0] || {};
       apply(requestOwnerApproval(form, ownerName, p));
@@ -410,7 +422,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
           disabled={busy || !consentDivisions.length}
           onClick={handleRequestDivision}
         >
-          Request Division Approval
+          {busy ? "Submitting…" : "Request Division Approval"}
         </button>
       );
     } else if (state === "rejected_to_vendor") {
