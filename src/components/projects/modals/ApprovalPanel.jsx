@@ -407,7 +407,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
           key="req-div"
           type="button"
           className="pmis-awf-toolbar__btn"
-          disabled={busy || !consentDivisions.length}
+          disabled={busy}
           onClick={handleRequestDivision}
         >
           Request Division Approval
@@ -419,7 +419,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
           key="resubmit"
           type="button"
           className="pmis-awf-toolbar__btn"
-          disabled={busy || !consentDivisions.length}
+          disabled={busy}
           onClick={handleResubmit}
         >
           {busy ? "Submitting…" : "Resend for Approval"}
