@@ -863,53 +863,6 @@ export default function ManageTeam() {
   return (
     <div className="mt-page">
 
-      {/* ─── TOP TOOLBAR — Back + Edit/Cancel/Submit ─── */}
-      <div className="mt-top-toolbar">
-        <button
-          type="button"
-          className="mt-btn mt-btn-cancel"
-          onClick={goBack}
-          disabled={saving}
-        >
-          ← Back
-        </button>
-        <div style={{ flex: 1 }} />
-        {!editMode ? (
-          <button
-            type="button"
-            className="mt-btn"
-            onClick={() => setEditMode(true)}
-            disabled={saving}
-          >
-            ✎ Edit
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              className="mt-btn mt-btn-cancel"
-              onClick={() => {
-                setEditMode(false);
-                /* Re-fetch team-page so any in-progress edits are
-                   discarded — gives the user a clean revert. */
-                setReloadKey((k) => k + 1);
-              }}
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="mt-btn"
-              onClick={submitTeam}
-              disabled={saving}
-            >
-              {saving ? 'Saving…' : 'Submit'}
-            </button>
-          </>
-        )}
-      </div>
-
       {/* ─── ORGANIZATION USER + PROJECT OWNER side-by-side row ─── */}
       <div className="mt-two-col">
       <div className="mt-card">
@@ -1220,18 +1173,50 @@ export default function ManageTeam() {
         </div>
       </div>
 
-      {/* ─── PAGE FOOTER ACTIONS ─── Back lives in the top toolbar
-           now; bottom keeps Submit only while editing so users on
-           long pages don't have to scroll back up. */}
-      <div style={{gap:"10px",display:"flex",justifyContent:"center"}}>
-        {editMode && (
+      {/* ─── PAGE FOOTER ACTIONS ─── Back is always available; Edit
+           unlocks the dropdowns and swaps in Cancel + Submit. */}
+      <div className="mt-page-footer-actions">
         <button
-          className="mt-btn"
-          onClick={submitTeam}
+          type="button"
+          className="mt-btn mt-btn-cancel"
+          onClick={goBack}
           disabled={saving}
         >
-          {saving ? 'Saving…' : 'Submit'}
+          ← Back
         </button>
+        {!editMode ? (
+          <button
+            type="button"
+            className="mt-btn"
+            onClick={() => setEditMode(true)}
+            disabled={saving}
+          >
+            ✎ Edit
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="mt-btn mt-btn-cancel"
+              onClick={() => {
+                setEditMode(false);
+                /* Re-fetch team-page so any in-progress edits are
+                   discarded — gives the user a clean revert. */
+                setReloadKey((k) => k + 1);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="mt-btn"
+              onClick={submitTeam}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Submit'}
+            </button>
+          </>
         )}
       </div>
 
