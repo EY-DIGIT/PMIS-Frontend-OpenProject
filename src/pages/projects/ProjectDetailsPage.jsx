@@ -983,7 +983,8 @@ export default function ProjectDetailsPage() {
       label: "Remove",
       onClick: () => setDeleteOpen(true),
       visible: canDeleteProject,
-      variant: "danger"
+      variant: "danger",
+      primary: true
     },
     /* Primary actions — pinned inline so they stay one click away. */
     {
