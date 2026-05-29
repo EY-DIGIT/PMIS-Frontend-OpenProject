@@ -67,42 +67,29 @@
   min-width: 0;
 }
 
-/* ─── Project banner — sits between the global header and the
-   Org User / Project Owner cards. Surfaces project code + name now
-   that the navbar pill has been removed. */
-.mt-project-banner {
+/* ─── Project name pill — same visual language as the navbar pill
+   (gradient navy→cyan, white text, fully rounded) but positioned to
+   the right just under the global header. */
+.mt-project-pill-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  margin-bottom: 14px;
-  background: #ffffff;
-  border: 1px solid var(--mt-border-soft);
-  border-left: 4px solid var(--mt-cyan);
-  border-radius: 8px;
-  box-shadow: var(--mt-shadow-soft);
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
-.mt-project-banner__code {
-  font-family: 'Roboto Mono', ui-monospace, monospace;
-  font-weight: 700;
+.mt-project-pill {
+  display: inline-block;
+  max-width: 360px;
+  padding: 6px 16px;
+  background: linear-gradient(119.54deg, #000046 0%, #1cb5e0 100%);
+  color: #ffffff;
   font-size: 13px;
-  letter-spacing: 0.4px;
-  color: var(--mt-navy);
-  background: #eaf2fb;
-  padding: 3px 9px;
-  border-radius: 5px;
-  white-space: nowrap;
-}
-.mt-project-banner__name {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--mt-text);
+  font-weight: 600;
   letter-spacing: 0.2px;
-  min-width: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(28, 181, 224, 0.35);
+  box-shadow: 0 1px 3px rgba(11, 60, 136, 0.15);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mt-pm-title {

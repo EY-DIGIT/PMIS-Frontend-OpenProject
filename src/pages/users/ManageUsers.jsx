@@ -863,13 +863,14 @@ export default function ManageTeam() {
   return (
     <div className="mt-page">
 
-      {/* ─── Project banner — name + code under the global header.
-           Moved out of the navbar (project-name pill removed) so the
-           page can surface fuller project context without truncation. */}
-      {(projectName || projectCode) && (
-        <div className="mt-project-banner" title={projectName ? `Project: ${projectName}` : undefined}>
-          {projectCode && <span className="mt-project-banner__code">{projectCode}</span>}
-          {projectName && <span className="mt-project-banner__name">{projectName}</span>}
+      {/* ─── Project name pill — mirrors the look of the previous
+           navbar pill but pinned to the right just below the global
+           header, instead of inside the dark navbar. */}
+      {projectName && (
+        <div className="mt-project-pill-row">
+          <div className="mt-project-pill" title={`Project: ${projectName}`}>
+            {projectName}
+          </div>
         </div>
       )}
 
