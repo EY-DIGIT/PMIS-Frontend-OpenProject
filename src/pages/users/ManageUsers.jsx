@@ -992,7 +992,7 @@ export default function ManageTeam() {
                   >
                     {msCollapsed ? '▸' : '▾'}
                   </span>
-                  <span className="mt-milestone-icon" aria-hidden="true">📍</span>
+                  {/* <span className="mt-milestone-icon" aria-hidden="true">📍</span> */}
                   <span className="mt-milestone-label">Milestone</span>
                   {group.displayCode && (
                     <span className="mt-activity-id" style={{ marginRight: 6 }}>
