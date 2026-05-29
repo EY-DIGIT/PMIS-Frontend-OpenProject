@@ -790,12 +790,6 @@ export default function ManageTeam() {
   if (loading) {
     return (
       <div className="mt-page">
-        <div className="mt-page-header">
-          <div className="mt-page-header-text">
-            <div className="mt-pm-title">Manage Team</div>
-            <div className="mt-pm-subtitle">Loading…</div>
-          </div>
-        </div>
         <div className="mt-card">
           <div className="mt-no-activities">Loading team data…</div>
         </div>
@@ -806,13 +800,9 @@ export default function ManageTeam() {
   if (loadError) {
     return (
       <div className="mt-page">
-        <div className="mt-page-header">
-          <div className="mt-page-header-text">
-            <div className="mt-pm-title">Manage Team</div>
-            <div className="mt-pm-subtitle" style={{ color: 'var(--mt-red)' }}>
-              Could not load team data
-            </div>
-            <div className="mt-pm-description">{loadError}</div>
+        <div className="mt-card">
+          <div className="mt-no-activities" style={{ color: 'var(--mt-red)' }}>
+            Could not load team data — {loadError}
           </div>
         </div>
         <div className="mt-page-footer-actions">
@@ -825,17 +815,6 @@ export default function ManageTeam() {
 
   return (
     <div className="mt-page">
-      {/* ─── PAGE HEADER ─── */}
-      <div className="mt-page-header">
-        <div className="mt-page-header-text">
-          <div className="mt-pm-title">Manage Team</div>
-          <div className="mt-pm-subtitle">Roles set. People in.</div>
-          <div className="mt-pm-description">
-            Assign users to project roles, then configure ownership for each activity.
-            Click any activity below to set its Activity Owner and Concerned Divisions.
-          </div>
-        </div>
-      </div>
 
       {/* ─── PROJECT CONTEXT BANNER ─── */}
       <div className="mt-card" aria-label="Project context">

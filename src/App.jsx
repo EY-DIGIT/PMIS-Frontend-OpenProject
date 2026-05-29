@@ -90,6 +90,8 @@ function PageTitle() {
         title = "Organization Management";
     } else if (segments[0] === "users") {
         title = "User Management";
+    } else if (segments[0] === "manage-users") {
+        title = "Manage Team";
     } else if (segments[0] === "master") {
         if (segments[1] === "vendors") title = "Organization Data";
         else if (segments[1] === "users") title = "User Data";
@@ -128,7 +130,8 @@ function Breadcrumbs() {
         divisions: "Divisions",
         master: "Master Data",
         new: "New",
-        dashboard: "Dashboard"
+        dashboard: "Dashboard",
+        "manage-users": "Manage Team"
     };
 
     /* Some "new" routes are conceptually a single step from the Dashboard,
@@ -256,10 +259,19 @@ function Breadcrumbs() {
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so
        the breadcrumb stops at "Track Progress". */
-    const visibleSegments =
-        segments[0] === "projects" && segments[2] === "track" && segments.length > 3
-            ? segments.slice(0, 3)
-            : segments;
+    const visibleSegments = (() => {
+        // Track view: hide deep params under /projects/{id}/track/...
+        if (segments[0] === "projects" && segments[2] === "track" && segments.length > 3) {
+            return segments.slice(0, 3);
+        }
+        // Manage Team: /manage-users/:projectId — drop the id segment so
+        // the breadcrumb reads "Home › Manage Team" instead of dragging
+        // the raw UUID along.
+        if (segments[0] === "manage-users" && segments.length > 1) {
+            return segments.slice(0, 1);
+        }
+        return segments;
+    })();
 
     return (
         <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
