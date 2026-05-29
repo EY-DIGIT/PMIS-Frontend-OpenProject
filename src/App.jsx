@@ -86,7 +86,10 @@ function PageTitle() {
         else if (segments[2] === "config") title = "Milestone Configuration";
         else if (segments[2] === "track") title = "Track Progress";
         else if (segments[2] === "audit-logs") title = "Audit Logs";
-        else title = "Project Details";
+        // Project Details heading lives in the navbar (see Layout
+        // NavCenterTitle). Leave the body-level page title empty so it
+        // isn't duplicated above the breadcrumb.
+        else title = "";
     } else if (segments[0] === "vendors") {
         title = "Organization Management";
     } else if (segments[0] === "users") {

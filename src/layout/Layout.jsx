@@ -18,10 +18,35 @@ const NAV_TITLES = {
   }
 };
 
+/* Resolve a navbar centre entry for the current path. Pages whose first
+   segment is shared by multiple routes (e.g. /projects which covers the
+   list, detail, config, track, etc.) need finer-grained matching than a
+   plain NAV_TITLES lookup. Keep the routing logic local to the layout
+   so individual pages don't have to know about each other. */
+function resolveNavTitle(segments) {
+  const first = segments[0];
+  if (!first) return null;
+
+  /* /projects/:projectId is the project-detail route; sub-routes like
+     /config, /track, /audit-logs already have their own page-level
+     headings, so only the bare detail page surfaces in the navbar. */
+  if (first === "projects") {
+    if (segments.length === 2 && segments[1] !== "add") {
+      return {
+        label: "Project Details",
+        tooltip: "Project overview — edit project info, manage documents and review the activity timeline."
+      };
+    }
+    return null;
+  }
+
+  return NAV_TITLES[first] || null;
+}
+
 function NavCenterTitle() {
   const { pathname } = useLocation();
-  const seg = pathname.split("/").filter(Boolean)[0];
-  const entry = seg ? NAV_TITLES[seg] : null;
+  const segments = pathname.split("/").filter(Boolean);
+  const entry = resolveNavTitle(segments);
   if (!entry) return null;
   return (
     <div
