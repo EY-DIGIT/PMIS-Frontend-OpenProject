@@ -245,41 +245,19 @@ body {
 /* Route-aware navbar title (e.g. "Manage Team"). Left-aligned, sits
    immediately next to the Menu/Home block. Page-level subtitle /
    description is exposed as a native tooltip via the title attribute
-   so users can hover to see the full context.
-   A vertical divider on the left visually separates the title from
-   the Menu/Home block; a thin accent underline reinforces the
-   heading without competing with the gradient navbar. */
+   so users can hover to see the full context. */
 .pmis-navbar-title {
   flex: 1 1 auto;
   text-align: left;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.2px;
   color: #ffffff;
   cursor: help;
-  padding: 6px 22px;
-  margin-left: 4px;
-  border-left: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 0 20px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  position: relative;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
-  transition: color .18s ease;
-}
-.pmis-navbar-title::after {
-  content: "";
-  position: absolute;
-  left: 22px;
-  right: 22px;
-  bottom: 2px;
-  height: 2px;
-  background: linear-gradient(90deg, #1cb5e0 0%, rgba(28, 181, 224, 0) 100%);
-  border-radius: 2px;
-  opacity: 0.9;
-}
-.pmis-navbar-title:hover {
-  color: #e8f8ff;
 }
 
 /* Right-side project name pill in the navbar — sits between the
