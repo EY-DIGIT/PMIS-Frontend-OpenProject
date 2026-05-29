@@ -686,25 +686,47 @@ export default function NodeModal({
     ? {
         position: "relative",
         width: "min(1400px, 100%)",
-        maxWidth: "min(1400px, 100%)"
+        maxWidth: "min(1400px, 100%)",
+        /* Lock the modal to the viewport in activity-edit mode so the
+           outer box never scrolls. Header + footer stay fixed; the body
+           splits into two flex columns that each scroll independently. */
+        height: "92vh",
+        maxHeight: "92vh",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden"
       }
     : { position: "relative" };
 
-  /* CSS Grid template that lays out the activity-edit body:
-       row 1: form | panel   (panel spans both rows)
-       row 2: comments | (panel continues)
-     Items get their grid-area via inline style. Outside activity edit, the
-     wrapper renders as a plain block so milestone/task modals are unchanged. */
+  /* Body layout for activity-edit: a single flex row with two scrolling
+     columns. Left column stacks banner → form → comments; right column
+     holds the approval panel + audit trail. Outside activity edit, the
+     wrapper renders as a plain block so milestone/task modals are
+     unchanged. */
   const splitWrapperStyle = isActivityEdit
     ? {
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1.05fr) minmax(0, 1fr)",
-        gridTemplateAreas:
-          '"banner panel" "form panel" "comments panel"',
+        display: "flex",
         gap: 16,
-        alignItems: "flex-start"
+        alignItems: "stretch",
+        flex: "1 1 auto",
+        minHeight: 0
       }
     : undefined;
+  const leftColStyle = {
+    flex: "1.05 1 0",
+    minWidth: 0,
+    overflowY: "auto",
+    paddingRight: 6,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12
+  };
+  const rightColStyle = {
+    flex: "1 1 0",
+    minWidth: 0,
+    overflowY: "auto",
+    paddingRight: 6
+  };
 
   const iconBtnStyle = {
     position: "absolute",
@@ -746,8 +768,9 @@ export default function NodeModal({
         </div>
 
         <div style={splitWrapperStyle}>
+        <div style={isActivityEdit ? leftColStyle : undefined}>
         {isActivityEdit && (
-          <div style={{ gridArea: "banner", minWidth: 0 }}>
+          <div style={{ minWidth: 0 }}>
             <StartActivityBanner
               activity={node}
               form={form}
@@ -760,7 +783,7 @@ export default function NodeModal({
           className="uidai-grid"
           style={
             isActivityEdit
-              ? { gridArea: "form", minWidth: 0 }
+              ? { minWidth: 0 }
               : undefined
           }
         >
@@ -1158,8 +1181,25 @@ export default function NodeModal({
           )}
         </div>
 
+        {project.projectId && !isAdd && (
+          <CommentsPanel
+            comments={form.comments}
+            editable={editable}
+            commentText={commentText}
+            setCommentText={setCommentText}
+            commentFiles={commentFiles}
+            onFileChange={handleFileChange}
+            fileInputKey={fileInputKey}
+            attachError={attachError}
+            onPostComment={postCommentNow}
+            posting={posting}
+            postError={postError}
+          />
+        )}
+        </div>
+
         {isActivityEdit && (
-          <div style={{ gridArea: "panel", minWidth: 0 }}>
+          <div style={rightColStyle}>
             <ApprovalPanel
               activity={node}
               form={form}
@@ -1174,40 +1214,6 @@ export default function NodeModal({
               error={processError}
             />
           </div>
-        )}
-
-        {project.projectId && !isAdd && (
-          isActivityEdit ? (
-            <div style={{ gridArea: "comments", minWidth: 0 }}>
-              <CommentsPanel
-                comments={form.comments}
-                editable={editable}
-                commentText={commentText}
-                setCommentText={setCommentText}
-                commentFiles={commentFiles}
-                onFileChange={handleFileChange}
-                fileInputKey={fileInputKey}
-                attachError={attachError}
-                onPostComment={postCommentNow}
-                posting={posting}
-                postError={postError}
-              />
-            </div>
-          ) : (
-            <CommentsPanel
-              comments={form.comments}
-              editable={editable}
-              commentText={commentText}
-              setCommentText={setCommentText}
-              commentFiles={commentFiles}
-              onFileChange={handleFileChange}
-              fileInputKey={fileInputKey}
-              attachError={attachError}
-              onPostComment={postCommentNow}
-              posting={posting}
-              postError={postError}
-            />
-          )
         )}
         </div>
 
