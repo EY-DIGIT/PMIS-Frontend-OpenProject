@@ -328,12 +328,31 @@ export default function ManageTeam() {
           activities,
         });
 
-        /* Now fetch the user directories for each context in parallel:
-             • org users  — drive the Organization User section
-             • owner-division users — drive the Project Owner section +
-               every per-activity Owner / Approver dropdown
-             • each Concerned Division's users — drive the per-division
-               Users / Approver dropdowns inside an activity panel */
+        /* Render the page as soon as the team-page payload is in —
+           the user-directory fetches (org + each division) below fire
+           in the background and stream results into state as they
+           resolve. Previously everything was awaited in one
+           Promise.all, so the slowest dropdown blocked the whole
+           page from rendering. */
+        if (!cancelled) setLoading(false);
+
+        /* Background fetch — org users for the Organization User
+           section. Doesn't block render; dropdown shows whatever's
+           there until this resolves. */
+        listUsersByProjectOrg(projectId)
+          .then(normalizeUsersList)
+          .then((users) => {
+            if (!cancelled) setOrgUsers(users);
+          })
+          .catch((e) => {
+            // eslint-disable-next-line no-console
+            console.warn('[ManageTeam] org-user fetch failed:', e);
+          });
+
+        /* Background fetch — owner division + every Concerned Division
+           seen anywhere on the page. Each call resolves independently
+           and writes its slice into divisionUsersById, so dropdowns
+           light up as their division's data arrives. */
         const uniqueDivIds = new Set();
         if (owner && owner.id) uniqueDivIds.add(owner.id);
         activities.forEach((a) => {
@@ -345,26 +364,23 @@ export default function ManageTeam() {
         Object.values(codeMap).forEach((d) => {
           if (d && d.id) uniqueDivIds.add(d.id);
         });
-
-        const [orgResp, ...divResps] = await Promise.all([
-          listUsersByProjectOrg(projectId).then(normalizeUsersList),
-          ...Array.from(uniqueDivIds).map((id) =>
-            listUsersByDivision(id).then(normalizeUsersList).then((u) => [id, u])
-          )
-        ]);
-        if (cancelled) return;
-        setOrgUsers(orgResp);
-        const divMap = {};
-        divResps.forEach(([id, users]) => {
-          divMap[id] = users;
+        uniqueDivIds.forEach((id) => {
+          listUsersByDivision(id)
+            .then(normalizeUsersList)
+            .then((users) => {
+              if (cancelled) return;
+              setDivisionUsersById((prev) => ({ ...prev, [id]: users }));
+            })
+            .catch((e) => {
+              // eslint-disable-next-line no-console
+              console.warn(`[ManageTeam] div-${id} fetch failed:`, e);
+            });
         });
-        setDivisionUsersById(divMap);
       } catch (err) {
         if (!cancelled) {
           setLoadError(err?.message || 'Failed to load team page.');
+          setLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
