@@ -946,7 +946,7 @@ export default function ManageTeam() {
             activityGroups.map((group) => (
               <section key={group.milestone} className="mt-milestone-group">
                 <header className="mt-milestone-head">
-                  <span className="mt-milestone-icon" aria-hidden="true">📍</span>
+                  {/* <span className="mt-milestone-icon" aria-hidden="true">📍</span> */}
                   <span className="mt-milestone-label">Milestone</span>
                   {group.displayCode && (
                     <span className="mt-activity-id" style={{ marginRight: 6 }}>

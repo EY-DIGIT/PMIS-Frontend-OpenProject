@@ -35,7 +35,7 @@
   -moz-osx-font-smoothing: grayscale;
   background: var(--mt-light);
   color: var(--mt-text);
-  padding: 14px 20px 24px;
+  padding: 14px 0px 24px;
   box-sizing: border-box;
   min-height: 100%;
 }
