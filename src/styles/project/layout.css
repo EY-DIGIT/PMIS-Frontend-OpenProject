@@ -223,47 +223,130 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-weight: 600;
 }
+.uidai-actions-menu__toggle[aria-expanded="true"] {
+  background: linear-gradient(180deg, #f4f8fd 0%, #eef3f9 100%);
+  border-color: #1cb5e0;
+  color: #0b3c88;
+  box-shadow: 0 0 0 2px rgba(28, 181, 224, 0.18);
+}
+
+@keyframes uidai-actions-menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
 .uidai-actions-menu__panel {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
-  min-width: 220px;
+  min-width: 240px;
   background: #ffffff;
-  border: 1px solid var(--uidai-border, #d3dbe6);
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(11, 60, 136, 0.12);
-  padding: 6px;
+  border: 1px solid #dbe5f1;
+  border-radius: 10px;
+  box-shadow:
+    0 12px 32px rgba(11, 60, 136, 0.16),
+    0 2px 6px rgba(11, 60, 136, 0.08);
+  padding: 8px;
   z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transform-origin: top right;
+  animation: uidai-actions-menu-in 140ms ease-out;
 }
+/* Top accent stripe — mirrors the page-header brand colors. */
+.uidai-actions-menu__panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #000046 0%, #1cb5e0 100%);
+  border-radius: 10px 10px 0 0;
+}
+/* Caret pointing back to the toggle. */
+.uidai-actions-menu__panel::after {
+  content: "";
+  position: absolute;
+  top: -7px;
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-left: 1px solid #dbe5f1;
+  border-top: 1px solid #dbe5f1;
+  transform: rotate(45deg);
+}
+
 .uidai-actions-menu__item {
   appearance: none;
   border: none;
   background: transparent;
   text-align: left;
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: 9px 12px 9px 14px;
+  border-radius: 7px;
   font: inherit;
   font-size: 14px;
+  font-weight: 500;
   color: #1e2a3a;
   cursor: pointer;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+  transition: background-color .12s ease, color .12s ease, transform .12s ease;
+}
+/* Tiny left bullet — picks up the brand cyan on hover. */
+.uidai-actions-menu__item::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #cbd6e4;
+  flex: 0 0 auto;
+  transition: background-color .12s ease, transform .12s ease;
 }
 .uidai-actions-menu__item:hover:not(:disabled) {
-  background: #eef3f9;
+  background: linear-gradient(90deg, #eef6fb 0%, #f4f8fd 100%);
+  color: #0b3c88;
+}
+.uidai-actions-menu__item:hover:not(:disabled)::before {
+  background: #1cb5e0;
+  transform: scale(1.25);
+}
+.uidai-actions-menu__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #1cb5e0 inset;
 }
 .uidai-actions-menu__item:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Group separator — render with className suffix `--separator` if a
+   group divider is ever needed. */
+.uidai-actions-menu__separator {
+  height: 1px;
+  background: #e9eef6;
+  margin: 6px 4px;
+}
+
 .uidai-actions-menu__item--danger {
   color: var(--uidai-red, #c0392b);
 }
+.uidai-actions-menu__item--danger::before {
+  background: #f5b8b0;
+}
 .uidai-actions-menu__item--danger:hover:not(:disabled) {
-  background: #fdecec;
+  background: linear-gradient(90deg, #fdecec 0%, #fbe4e1 100%);
+  color: var(--uidai-red, #c0392b);
+}
+.uidai-actions-menu__item--danger:hover:not(:disabled)::before {
+  background: var(--uidai-red, #c0392b);
 }
 
 /* Responsive */
