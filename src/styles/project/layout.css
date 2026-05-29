@@ -212,9 +212,10 @@
 }
 
 /* ─── Project-detail "More ▾" overflow menu ───
-   Anchored to its toggle; the panel is absolutely positioned so it
-   doesn't disturb the surrounding flex layout. Keep this block in
-   sync with the actions[] config in ProjectDetailsPage.jsx. */
+   Standard dropdown styling — white panel, subtle border + shadow,
+   plain hover state. Matches conventional menu patterns (Material,
+   Bootstrap). Keep in sync with the actions[] config in
+   ProjectDetailsPage.jsx. */
 .uidai-actions-menu {
   position: relative;
   display: inline-flex;
@@ -223,130 +224,55 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
 }
-.uidai-actions-menu__toggle[aria-expanded="true"] {
-  background: linear-gradient(180deg, #f4f8fd 0%, #eef3f9 100%);
-  border-color: #1cb5e0;
-  color: #0b3c88;
-  box-shadow: 0 0 0 2px rgba(28, 181, 224, 0.18);
-}
-
-@keyframes uidai-actions-menu-in {
-  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-
 .uidai-actions-menu__panel {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 4px);
   right: 0;
-  min-width: 240px;
+  min-width: 200px;
   background: #ffffff;
-  border: 1px solid #dbe5f1;
-  border-radius: 10px;
-  box-shadow:
-    0 12px 32px rgba(11, 60, 136, 0.16),
-    0 2px 6px rgba(11, 60, 136, 0.08);
-  padding: 8px;
+  border: 1px solid #e0e6ed;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 4px;
   z-index: 30;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  transform-origin: top right;
-  animation: uidai-actions-menu-in 140ms ease-out;
 }
-/* Top accent stripe — mirrors the page-header brand colors. */
-.uidai-actions-menu__panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, #000046 0%, #1cb5e0 100%);
-  border-radius: 10px 10px 0 0;
-}
-/* Caret pointing back to the toggle. */
-.uidai-actions-menu__panel::after {
-  content: "";
-  position: absolute;
-  top: -7px;
-  right: 18px;
-  width: 12px;
-  height: 12px;
-  background: #ffffff;
-  border-left: 1px solid #dbe5f1;
-  border-top: 1px solid #dbe5f1;
-  transform: rotate(45deg);
-}
-
 .uidai-actions-menu__item {
   appearance: none;
   border: none;
   background: transparent;
   text-align: left;
-  padding: 9px 12px 9px 14px;
-  border-radius: 7px;
+  padding: 8px 12px;
+  border-radius: 4px;
   font: inherit;
   font-size: 14px;
-  font-weight: 500;
-  color: #1e2a3a;
+  color: #1f2937;
   cursor: pointer;
   white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  position: relative;
-  transition: background-color .12s ease, color .12s ease, transform .12s ease;
-}
-/* Tiny left bullet — picks up the brand cyan on hover. */
-.uidai-actions-menu__item::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #cbd6e4;
-  flex: 0 0 auto;
-  transition: background-color .12s ease, transform .12s ease;
 }
 .uidai-actions-menu__item:hover:not(:disabled) {
-  background: linear-gradient(90deg, #eef6fb 0%, #f4f8fd 100%);
-  color: #0b3c88;
-}
-.uidai-actions-menu__item:hover:not(:disabled)::before {
-  background: #1cb5e0;
-  transform: scale(1.25);
+  background: #f3f4f6;
 }
 .uidai-actions-menu__item:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #1cb5e0 inset;
+  background: #f3f4f6;
 }
 .uidai-actions-menu__item:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
-
-/* Group separator — render with className suffix `--separator` if a
-   group divider is ever needed. */
 .uidai-actions-menu__separator {
   height: 1px;
-  background: #e9eef6;
-  margin: 6px 4px;
+  background: #e5e7eb;
+  margin: 4px 0;
 }
-
 .uidai-actions-menu__item--danger {
-  color: var(--uidai-red, #c0392b);
-}
-.uidai-actions-menu__item--danger::before {
-  background: #f5b8b0;
+  color: var(--uidai-red, #dc2626);
 }
 .uidai-actions-menu__item--danger:hover:not(:disabled) {
-  background: linear-gradient(90deg, #fdecec 0%, #fbe4e1 100%);
-  color: var(--uidai-red, #c0392b);
-}
-.uidai-actions-menu__item--danger:hover:not(:disabled)::before {
-  background: var(--uidai-red, #c0392b);
+  background: #fef2f2;
 }
 
 /* Responsive */
