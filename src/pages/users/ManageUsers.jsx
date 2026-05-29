@@ -6,6 +6,7 @@ import {
   listUsersByProjectOrg,
   listUsersByDivision
 } from '../../api/teamPage';
+import { setPageContext, clearPageContext } from '../../utils/pageContext';
 import './ManageTeam.css';
 
 /* Build a {id, name} record the MultiSelect understands from a raw
@@ -318,6 +319,15 @@ export default function ManageTeam() {
         setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
+        /* Publish project identity to the global page context so the
+           navbar (right-side project name) and the breadcrumb
+           (project code as the :id segment) can render it without
+           refetching team-page themselves. */
+        setPageContext({
+          projectId: data?.projectId || projectId || '',
+          projectCode: data?.projectCode || '',
+          projectName: data?.projectName || ''
+        });
         const owner = data?.ownerDivision || null;
         setOwnerDivision(owner);
         /* Map code → { id, name } so activity rows that only carry the
@@ -410,6 +420,11 @@ export default function ManageTeam() {
     })();
     return () => { cancelled = true; };
   }, [projectId, reloadKey]);
+
+  /* Drop the published project identity when leaving the page so the
+     navbar / breadcrumb don't keep showing stale info on the next
+     route. */
+  useEffect(() => () => clearPageContext(), []);
 
   /* Close dropdowns on outside click */
   useEffect(() => {
@@ -840,20 +855,6 @@ export default function ManageTeam() {
 
   return (
     <div className="mt-page">
-
-      {/* ─── PROJECT CONTEXT BANNER ─── */}
-      <div className="mt-card" aria-label="Project context">
-        <div className="mt-project-context">
-          <div>
-            <span className="mt-context-label">Project ID</span>
-            <span className="mt-context-id-value">{projectCode || '—'}</span>
-          </div>
-          <div>
-            <span className="mt-context-label">Project Name</span>
-            <span className="mt-context-name-value">{projectName || '—'}</span>
-          </div>
-        </div>
-      </div>
 
       {/* ─── ORGANIZATION USER + PROJECT OWNER side-by-side row ─── */}
       <div className="mt-two-col">
