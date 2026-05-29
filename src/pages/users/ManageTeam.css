@@ -221,7 +221,7 @@
 .mt-team-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 640px;
+  /* min-width: 640px; */
   background: #fff;
 }
 .mt-team-table th {

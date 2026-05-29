@@ -1175,7 +1175,8 @@ export default function ManageTeam() {
 
       {/* ─── PAGE FOOTER ACTIONS ─── Back is always available; Edit
            unlocks the dropdowns and swaps in Cancel + Submit. */}
-      <div className="mt-page-footer-actions">
+      <div 
+      style={{ display: 'flex',justifyContent:"center", gap: 8, marginTop: 20 }}>
         <button
           type="button"
           className="mt-btn mt-btn-cancel"
