@@ -851,7 +851,8 @@ export default function ManageTeam() {
         </div>
       </div>
 
-      {/* ─── ORGANIZATION USER (static roles) ─── */}
+      {/* ─── ORGANIZATION USER + PROJECT OWNER side-by-side row ─── */}
+      <div className="mt-two-col">
       <div className="mt-card">
         <h2 className="mt-card-title">Organization User</h2>
         <div className="mt-table-wrap">
@@ -942,6 +943,7 @@ export default function ManageTeam() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
 
       {/* ─── ACTIVITIES (inline expand/collapse — accordion) ─── */}
