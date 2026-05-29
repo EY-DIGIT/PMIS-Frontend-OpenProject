@@ -1076,7 +1076,10 @@
 .mt-milestone-head--clickable:hover {
   background: linear-gradient(90deg, #e2ecf8 0%, #eef5ff 100%);
 }
-.mt-ms-toggle {
+/* Milestone collapse arrow (NOT the same as the MultiSelect button —
+   that one already owns the .mt-ms-toggle class, so we use a
+   different name here to avoid clobbering it). */
+.mt-milestone-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1092,8 +1095,8 @@
   flex: 0 0 auto;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-.mt-milestone-head--clickable:hover .mt-ms-toggle,
-.mt-ms-toggle-open {
+.mt-milestone-head--clickable:hover .mt-milestone-toggle,
+.mt-milestone-toggle-open {
   color: #0b3c88;
   border-color: #b6d0ee;
   background: #f4f8fd;

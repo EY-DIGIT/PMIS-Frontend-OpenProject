@@ -986,7 +986,7 @@ export default function ManageTeam() {
                   aria-expanded={!msCollapsed}
                 >
                   <span
-                    className={`mt-ms-toggle${msCollapsed ? '' : ' mt-ms-toggle-open'}`}
+                    className={`mt-milestone-toggle${msCollapsed ? '' : ' mt-milestone-toggle-open'}`}
                     aria-hidden="true"
                   >
                     {msCollapsed ? '▸' : '▾'}
