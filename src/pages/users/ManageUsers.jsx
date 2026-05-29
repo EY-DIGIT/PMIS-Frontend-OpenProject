@@ -987,7 +987,10 @@ export default function ManageTeam() {
                                 {ownerDivision && (
                                   <div className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      {ownerDivision.name || ownerDivision.code}
+                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span className="mt-div-type mt-div-type--owner">
+                                        Owner Division
+                                      </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:owner`}
@@ -1004,7 +1007,10 @@ export default function ManageTeam() {
                                 {concerned.map((code) => (
                                   <div key={code} className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      {labelForDivisionCode(code)}
+                                      <span>{labelForDivisionCode(code)}</span>
+                                      <span className="mt-div-type mt-div-type--concerned">
+                                        Concerned Division
+                                      </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:div:${code}`}
@@ -1025,7 +1031,10 @@ export default function ManageTeam() {
                                 {ownerDivision && (
                                   <div className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      {ownerDivision.name || ownerDivision.code}
+                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span className="mt-div-type mt-div-type--owner">
+                                        Owner Division
+                                      </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:ownerApprover`}
@@ -1042,7 +1051,10 @@ export default function ManageTeam() {
                                 {concerned.map((code) => (
                                   <div key={code} className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      {labelForDivisionCode(code)}
+                                      <span>{labelForDivisionCode(code)}</span>
+                                      <span className="mt-div-type mt-div-type--concerned">
+                                        Concerned Division
+                                      </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:divApprover:${code}`}

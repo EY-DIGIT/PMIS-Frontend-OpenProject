@@ -1026,6 +1026,33 @@
   color: #66788f;
   text-transform: uppercase;
   letter-spacing: 0.4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Division-type chip rendered next to the division name in each cell
+   row. Two variants: owner (amber) and concerned (cyan-tinted). */
+.mt-div-type {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  line-height: 1.2;
+}
+.mt-div-type--owner {
+  background: #fff7ea;
+  color: #8a6d10;
+  border-color: #f3d472;
+}
+.mt-div-type--concerned {
+  background: #e0f2fe;
+  color: #075985;
+  border-color: #7dd3fc;
 }
 .mt-activity-tr:hover {
   background: transparent;
