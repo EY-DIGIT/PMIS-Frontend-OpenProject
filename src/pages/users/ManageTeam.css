@@ -991,6 +991,21 @@
   font-size: 13px;
 }
 
+/* Side-by-side row for Organization User + Project Owner cards.
+   Each card stretches to fill its half; on narrower screens the
+   pair wraps so each card gets full width again. */
+.mt-two-col {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.mt-two-col > .mt-card {
+  flex: 1 1 360px;
+  min-width: 0;
+  margin-bottom: 14px;
+}
+
 /* Stacked per-division dropdowns inside a single Owner / Approver
    cell. Each row has a small division label + the MultiSelect that
    writes back into the activity's owner / divisionUsers / etc. */
