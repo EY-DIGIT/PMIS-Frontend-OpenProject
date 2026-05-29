@@ -323,14 +323,14 @@ export default function ManageTeam() {
         setUserDirectory(Array.isArray(data?.userDirectory) ? data.userDirectory : []);
         setProjectName(data?.projectName || '');
         setProjectCode(data?.projectCode || '');
-        /* Publish project identity to the global page context so the
-           navbar (right-side project name) and the breadcrumb
-           (project code as the :id segment) can render it without
-           refetching team-page themselves. */
+        /* Publish projectId + projectCode so the breadcrumb can swap
+           the :id segment for the friendlier projectCode. projectName
+           is intentionally NOT published so the navbar's right-side
+           pill stays hidden — the project name is rendered below the
+           page header instead (see <div class="mt-project-banner">). */
         setPageContext({
           projectId: data?.projectId || projectId || '',
-          projectCode: data?.projectCode || '',
-          projectName: data?.projectName || ''
+          projectCode: data?.projectCode || ''
         });
         const owner = data?.ownerDivision || null;
         setOwnerDivision(owner);
@@ -862,6 +862,16 @@ export default function ManageTeam() {
 
   return (
     <div className="mt-page">
+
+      {/* ─── Project banner — name + code under the global header.
+           Moved out of the navbar (project-name pill removed) so the
+           page can surface fuller project context without truncation. */}
+      {(projectName || projectCode) && (
+        <div className="mt-project-banner" title={projectName ? `Project: ${projectName}` : undefined}>
+          {projectCode && <span className="mt-project-banner__code">{projectCode}</span>}
+          {projectName && <span className="mt-project-banner__name">{projectName}</span>}
+        </div>
+      )}
 
       {/* ─── ORGANIZATION USER + PROJECT OWNER side-by-side row ─── */}
       <div className="mt-two-col">
