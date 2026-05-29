@@ -273,6 +273,31 @@ export default function ManageTeam() {
 
   const [openMsPath, setOpenMsPath] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  /* Milestone groups default to OPEN — collapse a group by clicking
+     its header. Tracked as a Set of milestone names that are CLOSED
+     (absence ⇒ open). */
+  const [collapsedMilestones, setCollapsedMilestones] = useState(() => new Set());
+  /* Activity rows default to COLLAPSED so the table reads compactly.
+     Click an activity to expand its Approver/Owner dropdowns. */
+  const [expandedActivities, setExpandedActivities] = useState(() => new Set());
+
+  const toggleMilestone = (m) => {
+    setCollapsedMilestones((prev) => {
+      const next = new Set(prev);
+      if (next.has(m)) next.delete(m);
+      else next.add(m);
+      return next;
+    });
+  };
+  const toggleActivity = (id) => {
+    setExpandedActivities((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setOpenMsPath(null);
+  };
   const [toast, setToast] = useState({ msg: '', type: '', show: false });
   const toastTimerRef = useRef(null);
 
@@ -943,10 +968,30 @@ export default function ManageTeam() {
           {activityGroups.length === 0 ? (
             <div className="mt-no-activities">No activities defined for this project.</div>
           ) : (
-            activityGroups.map((group) => (
+            activityGroups.map((group) => {
+              const msCollapsed = collapsedMilestones.has(group.milestone);
+              return (
               <section key={group.milestone} className="mt-milestone-group">
-                <header className="mt-milestone-head">
-                  {/* <span className="mt-milestone-icon" aria-hidden="true">📍</span> */}
+                <header
+                  className="mt-milestone-head mt-milestone-head--clickable"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleMilestone(group.milestone)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleMilestone(group.milestone);
+                    }
+                  }}
+                  aria-expanded={!msCollapsed}
+                >
+                  <span
+                    className={`mt-ms-toggle${msCollapsed ? '' : ' mt-ms-toggle-open'}`}
+                    aria-hidden="true"
+                  >
+                    {msCollapsed ? '▸' : '▾'}
+                  </span>
+                  <span className="mt-milestone-icon" aria-hidden="true">📍</span>
                   <span className="mt-milestone-label">Milestone</span>
                   {group.displayCode && (
                     <span className="mt-activity-id" style={{ marginRight: 6 }}>
@@ -958,13 +1003,14 @@ export default function ManageTeam() {
                     {group.items.length} {group.items.length === 1 ? 'activity' : 'activities'}
                   </span>
                 </header>
+                {!msCollapsed && (
                 <div className="mt-milestone-items">
                   <table className="mt-team-table mt-activity-table">
                     <thead>
                       <tr>
                         <th>Activity</th>
-                        <th>Activity Approver</th>
                         <th>Activity Owner</th>
+                        <th>Activity Approver</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -972,14 +1018,89 @@ export default function ManageTeam() {
                         const concerned = Array.isArray(act.concernedDivisions)
                           ? act.concernedDivisions
                           : [];
+                        const isExpanded = expandedActivities.has(act.id);
                         return (
                           <tr key={act.id} className="mt-activity-tr">
                             <td data-label="Activity">
-                              <div className="mt-activity-id-name">
+                              <div
+                                className="mt-activity-id-name mt-activity-id-name--toggle"
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => toggleActivity(act.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    toggleActivity(act.id);
+                                  }
+                                }}
+                                aria-expanded={isExpanded}
+                              >
+                                <span
+                                  className={`mt-act-toggle${isExpanded ? ' mt-act-toggle-open' : ''}`}
+                                  aria-hidden="true"
+                                >
+                                  {isExpanded ? '▾' : '▸'}
+                                </span>
                                 <span className="mt-activity-id">
                                   {act.displayCode || (act.id?.slice(0, 8) || '')}
                                 </span>
                                 <span className="mt-activity-name">{act.name}</span>
+                              </div>
+                            </td>
+                            {!isExpanded && (
+                              <>
+                                <td data-label="Activity Owner">
+                                  {renderCellRows(buildOwnerCellRows(act))}
+                                </td>
+                                <td data-label="Activity Approver">
+                                  {renderCellRows(buildApproverCellRows(act))}
+                                </td>
+                              </>
+                            )}
+                            {isExpanded && (
+                            <>
+                            <td data-label="Activity Owner">
+                              <div className="mt-cell-edit">
+                                {ownerDivision && (
+                                  <div className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span className="mt-div-type mt-div-type--owner">
+                                        Owner Division
+                                      </span>
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:owner`}
+                                      users={ownerDivisionUsers}
+                                      selectedIds={act.owner}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:owner`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
+                                      onChange={toggleActivityOwner(act.id)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                )}
+                                {concerned.map((code) => (
+                                  <div key={code} className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      <span>{labelForDivisionCode(code)}</span>
+                                      <span className="mt-div-type mt-div-type--concerned">
+                                        Concerned Division
+                                      </span>
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:div:${code}`}
+                                      users={usersForDivisionCode(code)}
+                                      selectedIds={(act.divisionUsers || {})[code] || []}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
+                                      onChange={toggleActivityDivUser(act.id, code)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                ))}
                               </div>
                             </td>
                             <td data-label="Activity Approver">
@@ -1028,58 +1149,18 @@ export default function ManageTeam() {
                                 ))}
                               </div>
                             </td>
-                            <td data-label="Activity Owner">
-                              <div className="mt-cell-edit">
-                                {ownerDivision && (
-                                  <div className="mt-cell-edit-row">
-                                    <div className="mt-cell-edit-label">
-                                      <span>{ownerDivision.name || ownerDivision.code}</span>
-                                      <span className="mt-div-type mt-div-type--owner">
-                                        Owner Division
-                                      </span>
-                                    </div>
-                                    <MultiSelect
-                                      path={`tbl:${act.id}:owner`}
-                                      users={ownerDivisionUsers}
-                                      selectedIds={act.owner}
-                                      single={false}
-                                      isOpen={openMsPath === `tbl:${act.id}:owner`}
-                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
-                                      onChange={toggleActivityOwner(act.id)}
-                                      disabled={saving}
-                                    />
-                                  </div>
-                                )}
-                                {concerned.map((code) => (
-                                  <div key={code} className="mt-cell-edit-row">
-                                    <div className="mt-cell-edit-label">
-                                      <span>{labelForDivisionCode(code)}</span>
-                                      <span className="mt-div-type mt-div-type--concerned">
-                                        Concerned Division
-                                      </span>
-                                    </div>
-                                    <MultiSelect
-                                      path={`tbl:${act.id}:div:${code}`}
-                                      users={usersForDivisionCode(code)}
-                                      selectedIds={(act.divisionUsers || {})[code] || []}
-                                      single={false}
-                                      isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
-                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
-                                      onChange={toggleActivityDivUser(act.id, code)}
-                                      disabled={saving}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
+                            </>
+                            )}
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
+                )}
               </section>
-            ))
+              );
+            })
           )}
         </div>
       </div>

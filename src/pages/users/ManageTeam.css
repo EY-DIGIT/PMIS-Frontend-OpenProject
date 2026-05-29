@@ -141,10 +141,14 @@
 
 /* ─── Project context banner ─── */
 .mt-project-context {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 16px 32px;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
+  gap: 16px 32px;
+  flex-wrap: wrap;
+}
+.mt-project-context > div:last-child {
+  text-align: right;
 }
 .mt-context-label {
   display: block;
@@ -1059,6 +1063,50 @@
   background: #e0f2fe;
   color: #075985;
   border-color: #7dd3fc;
+}
+
+/* Milestone + activity collapse/expand toggles. Clicking the
+   milestone header hides its table; clicking an activity row's
+   Activity cell swaps the dropdown editors for a compact summary. */
+.mt-milestone-head--clickable {
+  cursor: pointer;
+  user-select: none;
+}
+.mt-milestone-head--clickable:hover {
+  background: #eef6fb;
+}
+.mt-ms-toggle {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #66788f;
+  width: 16px;
+  text-align: center;
+  margin-right: 4px;
+  transition: color 0.12s;
+}
+.mt-ms-toggle-open {
+  color: #0b3c88;
+}
+.mt-activity-id-name--toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+.mt-activity-id-name--toggle:hover .mt-activity-name {
+  color: #0b3c88;
+}
+.mt-act-toggle {
+  font-size: 13px;
+  color: #66788f;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.mt-act-toggle-open {
+  color: #0b3c88;
 }
 .mt-activity-tr:hover {
   background: transparent;
