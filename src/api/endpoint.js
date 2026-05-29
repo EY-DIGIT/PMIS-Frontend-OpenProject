@@ -287,8 +287,8 @@ export const ENDPOINTS = {
      other prefix here.
      ────────────────────────────────────────────────────────────────── */
   approvalInbox: {
-    list: '/api/v3/approval-inbox',
-    detail: (id) => `/api/v3/approval-inbox/${enc(id)}`,
-    transition: (id) => `/api/v3/approval-inbox/${enc(id)}/_transition`,
+    list: '/projects/api/v3/approval-inbox',
+    detail: (id) => `/projects/api/v3/approval-inbox/${enc(id)}`,
+    transition: (id) => `/projects/api/v3/approval-inbox/${enc(id)}/_transition`,
   },
 };
