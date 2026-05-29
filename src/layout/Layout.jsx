@@ -7,37 +7,101 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { FiMenu, FiHome, FiUser } from "react-icons/fi";
 import { usePageContext } from "../utils/pageContext";
 
-/* Map of route prefix → { label, tooltip } for the navbar centre slot.
-   Keep small; pages that want a navbar title append their entry here
-   instead of mutating the layout component. */
+/* Map of simple route prefix → { label, tooltip } for the navbar centre
+   slot. Routes whose first segment is unambiguous (one page only) can
+   live here; URLs with sub-routes that need different titles per depth
+   are handled in resolveNavTitle below. */
 const NAV_TITLES = {
   "manage-users": {
     label: "Manage Team",
     tooltip:
       "Roles set. People in. Assign users to project roles, then configure ownership for each activity. Click any activity below to set its Activity Owner and Concerned Divisions."
+  },
+  "vendors": {
+    label: "Organization Management",
+    tooltip: "Browse, add and edit the organizations that participate in projects."
+  },
+  "users": {
+    label: "User Management",
+    tooltip: "Browse, add and edit users across the system."
   }
 };
 
 /* Resolve a navbar centre entry for the current path. Pages whose first
    segment is shared by multiple routes (e.g. /projects which covers the
    list, detail, config, track, etc.) need finer-grained matching than a
-   plain NAV_TITLES lookup. Keep the routing logic local to the layout
-   so individual pages don't have to know about each other. */
+   plain NAV_TITLES lookup. Single source of truth for body-level page
+   headings — keep this in lock-step with PageTitle in App.jsx (which is
+   now a no-op since the heading lives here). */
 function resolveNavTitle(segments) {
   const first = segments[0];
   if (!first) return null;
 
-  /* /projects/:projectId is the project-detail route; sub-routes like
-     /config, /track, /audit-logs already have their own page-level
-     headings, so only the bare detail page surfaces in the navbar. */
+  /* Pages that render their own in-page header (dashboard cards,
+     profile avatar block) opt out of the global navbar title. */
+  if (first === "dashboard" || first === "profile") return null;
+
   if (first === "projects") {
-    if (segments.length === 2 && segments[1] !== "add") {
+    // /projects                        → list
+    if (segments.length === 1) {
       return {
-        label: "Project Details",
-        tooltip: "Project overview — edit project info, manage documents and review the activity timeline."
+        label: "Project Management",
+        tooltip: "Browse and manage all projects."
       };
     }
-    return null;
+    // /projects/add                    → new project
+    // /projects/add/config             → milestone config for a new project
+    if (segments[1] === "add") {
+      if (segments[2] === "config") {
+        return {
+          label: "Milestone Configuration",
+          tooltip: "Configure milestones, activities and tasks for the project."
+        };
+      }
+      return {
+        label: "New Project",
+        tooltip: "Create a new project — fill in details, vendors and dates."
+      };
+    }
+    // /projects/:id/config             → milestone config for an existing project
+    if (segments[2] === "config") {
+      return {
+        label: "Milestone Configuration",
+        tooltip: "Configure milestones, activities and tasks for the project."
+      };
+    }
+    // /projects/:id/track              → live progress
+    if (segments[2] === "track") {
+      return {
+        label: "Track Progress",
+        tooltip: "Track the project's milestones, activities and approvals in real time."
+      };
+    }
+    // /projects/:id/audit-logs         → audit trail
+    if (segments[2] === "audit-logs") {
+      return {
+        label: "Audit Logs",
+        tooltip: "Chronological audit trail of every change made to this project."
+      };
+    }
+    // /projects/:id                    → detail
+    return {
+      label: "Project Details",
+      tooltip: "Project overview — edit project info, manage documents and review the activity timeline."
+    };
+  }
+
+  if (first === "master") {
+    if (segments[1] === "vendors") {
+      return { label: "Organization Data", tooltip: "Reference data — organizations and their attributes." };
+    }
+    if (segments[1] === "users") {
+      return { label: "User Data", tooltip: "Reference data — users and their attributes." };
+    }
+    if (segments[1] === "divisions") {
+      return { label: "Division Data", tooltip: "Reference data — divisions and their attributes." };
+    }
+    return { label: "Master Data", tooltip: "Reference data used across the platform." };
   }
 
   return NAV_TITLES[first] || null;

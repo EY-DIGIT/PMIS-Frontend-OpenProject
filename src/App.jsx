@@ -70,47 +70,14 @@ import ManageTeam from "./pages/users/ManageUsers";
 import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
 import { usePageContext } from "./utils/pageContext";
 /* ─────────────────────────────────────────────────────────────
-   PageTitle — route-driven page heading. Rendered above the
-   breadcrumb so the heading sits at the very top of every page.
+   PageTitle — kept as a no-op stub. All route-driven page headings
+   now live in the global navbar (see resolveNavTitle in Layout.jsx)
+   so they appear once, in the top bar, instead of above the
+   breadcrumb. Left in place so existing render trees that mount
+   <PageTitle /> don't need to be touched.
    ───────────────────────────────────────────────────────────── */
 function PageTitle() {
-    const { pathname } = useLocation();
-    const segments = pathname.split("/").filter(Boolean);
-    if (segments.length === 0) return null; // hide on Dashboard
-
-    let title = "";
-    if (segments[0] === "projects") {
-        if (segments.length === 1) title = "Project Management";
-        else if (segments[1] === "add" && segments[2] === "config") title = "Milestone Configuration";
-        else if (segments[1] === "add") title = "Project Management";
-        else if (segments[2] === "config") title = "Milestone Configuration";
-        else if (segments[2] === "track") title = "Track Progress";
-        else if (segments[2] === "audit-logs") title = "Audit Logs";
-        // Project Details heading lives in the navbar (see Layout
-        // NavCenterTitle). Leave the body-level page title empty so it
-        // isn't duplicated above the breadcrumb.
-        else title = "";
-    } else if (segments[0] === "vendors") {
-        title = "Organization Management";
-    } else if (segments[0] === "users") {
-        title = "User Management";
-    } else if (segments[0] === "manage-users") {
-        // Manage Team heading lives in the navbar (see Layout NavCenterTitle).
-        // Leave the body-level page title empty so it isn't duplicated.
-        title = "";
-    } else if (segments[0] === "master") {
-        if (segments[1] === "vendors") title = "Organization Data";
-        else if (segments[1] === "users") title = "User Data";
-        else if (segments[1] === "divisions") title = "Division Data";
-        else title = "Master Data";
-    } else if (segments[0] === "dashboard" || segments[0] === "profile") {
-        // These pages render their own in-page header; leave the
-        // route-driven page title empty so the heading isn't doubled.
-        title = "";
-    }
-
-    if (!title) return null;
-    return <div className="uidai-page-title">{title}</div>;
+    return null;
 }
 
 /* ─────────────────────────────────────────────────────────────
