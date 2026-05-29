@@ -91,7 +91,9 @@ function PageTitle() {
     } else if (segments[0] === "users") {
         title = "User Management";
     } else if (segments[0] === "manage-users") {
-        title = "Manage Team";
+        // Manage Team heading lives in the navbar (see Layout NavCenterTitle).
+        // Leave the body-level page title empty so it isn't duplicated.
+        title = "";
     } else if (segments[0] === "master") {
         if (segments[1] === "vendors") title = "Organization Data";
         else if (segments[1] === "users") title = "User Data";
