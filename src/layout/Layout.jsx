@@ -3,8 +3,36 @@
 //                Routes ke liye children prop use hoga
 // ============================================================
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { FiMenu, FiHome, FiUser } from "react-icons/fi";
+
+/* Map of route prefix → { label, tooltip } for the navbar centre slot.
+   Keep small; pages that want a navbar title append their entry here
+   instead of mutating the layout component. */
+const NAV_TITLES = {
+  "manage-users": {
+    label: "Manage Team",
+    tooltip:
+      "Roles set. People in. Assign users to project roles, then configure ownership for each activity. Click any activity below to set its Activity Owner and Concerned Divisions."
+  }
+};
+
+function NavCenterTitle() {
+  const { pathname } = useLocation();
+  const seg = pathname.split("/").filter(Boolean)[0];
+  const entry = seg ? NAV_TITLES[seg] : null;
+  if (!entry) return null;
+  return (
+    <div
+      className="pmis-navbar-title"
+      title={entry.tooltip}
+      role="heading"
+      aria-level={1}
+    >
+      {entry.label}
+    </div>
+  );
+}
 
 import { useProjects } from "../store/Projectstore";
 import * as auth from "../api/auth";
@@ -143,6 +171,7 @@ export default function Layout({ children }) {
             <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
           </span>
         </div>
+        <NavCenterTitle />
         <div
           className="pmis-profile"
           onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}
