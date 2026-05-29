@@ -946,6 +946,12 @@
 .mt-activity-table {
   table-layout: auto;
 }
+/* Vertical separators between Activity / Approver / Owner columns
+   so the eye can scan each cell as its own grouping. */
+.mt-activity-table th + th,
+.mt-activity-table td + td {
+  border-left: 1px solid #d6e0ee;
+}
 .mt-activity-tr {
   cursor: pointer;
   transition: background 0.12s;
