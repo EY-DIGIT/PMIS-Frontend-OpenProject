@@ -211,6 +211,61 @@
   align-items: center;
 }
 
+/* ─── Project-detail "More ▾" overflow menu ───
+   Anchored to its toggle; the panel is absolutely positioned so it
+   doesn't disturb the surrounding flex layout. Keep this block in
+   sync with the actions[] config in ProjectDetailsPage.jsx. */
+.uidai-actions-menu {
+  position: relative;
+  display: inline-flex;
+}
+.uidai-actions-menu__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.uidai-actions-menu__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid var(--uidai-border, #d3dbe6);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(11, 60, 136, 0.12);
+  padding: 6px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.uidai-actions-menu__item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  color: #1e2a3a;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.uidai-actions-menu__item:hover:not(:disabled) {
+  background: #eef3f9;
+}
+.uidai-actions-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.uidai-actions-menu__item--danger {
+  color: var(--uidai-red, #c0392b);
+}
+.uidai-actions-menu__item--danger:hover:not(:disabled) {
+  background: #fdecec;
+}
+
 /* Responsive */
 @media (max-width: 960px) {
   .uidai-header {

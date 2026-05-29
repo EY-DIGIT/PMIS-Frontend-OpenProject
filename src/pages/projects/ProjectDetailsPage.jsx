@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { projectsStore, useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -182,6 +182,25 @@ export default function ProjectDetailsPage() {
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  /* Overflow ("More ▾") menu for the page-header actions. Anything that
+     isn't a primary action (Edit/Save, Back) collapses in here so the
+     header stays readable as new actions get added. */
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const actionsMenuRef = useRef(null);
+  useEffect(() => {
+    if (!actionsMenuOpen) return;
+    const onDocClick = (e) => {
+      if (!actionsMenuRef.current) return;
+      if (!actionsMenuRef.current.contains(e.target)) setActionsMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === "Escape") setActionsMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [actionsMenuOpen]);
 
   // Edit-mode document state. Files upload immediately on pick via
   // POST /projects/{id}/attachments, so we don't stage them — only
@@ -887,126 +906,160 @@ export default function ProjectDetailsPage() {
     (c) => Array.isArray(c.attachments) && c.attachments.length > 0
   );
 
+  /* ─── Page-header action config ───────────────────────────────────
+     Every header action lives in this array. To add a new action,
+     append one entry and (if needed) bump its `primary` flag so it
+     shows inline. Anything left as `primary: false` collapses into
+     the "More ▾" overflow menu — keeping the header readable as the
+     action set grows.
+
+     Fields:
+       key       unique id (used for React keys)
+       label     button / menu-item text
+       onClick   click handler
+       visible   show this action at all? (role/state gate)
+       primary   render inline (true) or under "More ▾" (false/omitted)
+       variant   "default" | "danger" | "cancel"  (uidai-btn modifier)
+       disabled  per-action disable (defaults to `editing` for safety)
+  */
+  const manageUsersTarget = (() => {
+    // "Manage Users" routes per role:
+    //   - org_admin → their own organization (they never browse the list)
+    //   - super/PMIS admin → for now, the first linked org
+    //   - project_member → hidden; members never manage users.
+    if (currentRole === "project_member") return "";
+    const own =
+      tokenStore.getUser()?.vendor_id ||
+      tokenStore.getUser()?.vendorId ||
+      "";
+    const firstVendor = safeArray(form.vendors)[0];
+    const firstVendorId = firstVendor
+      ? (projectVendorIndex[firstVendor]?.id ||
+        vendorMasterIndex[firstVendor]?.id ||
+        "")
+      : "";
+    return currentRole === "org_admin" ? own || firstVendorId : firstVendorId;
+  })();
+
+  const actions = [
+    {
+      key: "view-documents",
+      label: "View Documents",
+      onClick: () => setDocumentsOpen(true),
+      visible: canViewDocuments
+    },
+    {
+      key: "audit-log",
+      label: "Audit Log",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/audit-logs`),
+      visible: isPubBase
+    },
+    {
+      key: "manage-teams",
+      label: "Manage Teams",
+      onClick: () => navigate(`/manage-users/${project.projectId}`),
+      visible: !!manageUsersTarget
+    },
+    {
+      key: "critical-path",
+      label: "Critical Path Analysis",
+      onClick: () => navigate(`/CriticalPathAnalysis/${project.projectId}`),
+      visible: canPublishProject && project.status === "PUBLISHED"
+    },
+    {
+      key: "publish",
+      label: "Publish",
+      onClick: () => setPublishOpen(true),
+      visible: canPublishProject && project.status !== "PUBLISHED"
+    },
+    {
+      key: "configure",
+      label: "Configure",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/config`),
+      visible: true
+    },
+    {
+      key: "remove",
+      label: "Remove",
+      onClick: () => setDeleteOpen(true),
+      visible: canDeleteProject,
+      variant: "danger"
+    },
+    /* Primary actions — pinned inline so they stay one click away. */
+    {
+      key: "edit",
+      label: editing ? "Save" : "Edit",
+      onClick: toggleEdit,
+      visible: canEditProject,
+      primary: true,
+      // Edit/Save is the one action that's allowed while `editing`.
+      disabled: false
+    },
+    {
+      key: "back",
+      label: "Back",
+      onClick: () => navigate(-1),
+      visible: true,
+      primary: true,
+      variant: "cancel",
+      disabled: false
+    }
+  ];
+
+  const visibleActions = actions.filter((a) => a.visible);
+  const primaryActions = visibleActions.filter((a) => a.primary);
+  const overflowActions = visibleActions.filter((a) => !a.primary);
+
+  const variantClass = (v) =>
+    v === "danger" ? " uidai-btn--delete"
+    : v === "cancel" ? " uidai-btn--cancel"
+    : "";
+
   return (
     <div>
-      <div className="uidai-page-header" style={{ justifyContent: "space-between" }}>
+      <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
-          {canViewDocuments && (
+          {overflowActions.length > 0 && (
+            <div className="uidai-actions-menu" ref={actionsMenuRef}>
+              <button
+                type="button"
+                className="uidai-btn uidai-btn--cancel uidai-actions-menu__toggle"
+                disabled={editing}
+                aria-haspopup="menu"
+                aria-expanded={actionsMenuOpen}
+                onClick={() => setActionsMenuOpen((o) => !o)}
+              >
+                More <span aria-hidden="true">▾</span>
+              </button>
+              {actionsMenuOpen && (
+                <div className="uidai-actions-menu__panel" role="menu">
+                  {overflowActions.map((a) => (
+                    <button
+                      key={a.key}
+                      type="button"
+                      role="menuitem"
+                      className={`uidai-actions-menu__item${a.variant === "danger" ? " uidai-actions-menu__item--danger" : ""}`}
+                      disabled={a.disabled === undefined ? editing : a.disabled}
+                      onClick={() => { setActionsMenuOpen(false); a.onClick(); }}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {primaryActions.map((a) => (
             <button
-              className="uidai-btn"
-              disabled={editing}
-              onClick={() => setDocumentsOpen(true)}
+              key={a.key}
+              type="button"
+              className={`uidai-btn${variantClass(a.variant)}`}
+              disabled={a.disabled === undefined ? editing : a.disabled}
+              onClick={a.onClick}
             >
-              View Documents
+              {a.label}
             </button>
-          )}
-          {isPubBase && (
-            <button
-              className="uidai-btn"
-              disabled={editing}
-              onClick={() =>
-                navigate(`/projects/${encodeURIComponent(project.projectId)}/audit-logs`)
-              }
-            >
-              Audit Log
-            </button>
-          )}
-        </div>
-        <div className="uidai-page-header__actions">
-          {(() => {
-            // "Manage Users" routes per role:
-            //   - org_admin → straight to their own organization edit page
-            //     (they only manage their own org, never browse the list)
-            //   - super/PMIS admin → for now, jump to the first linked org's
-            //     edit page (TODO: change to /vendors with the project's
-            //     orgs preselected once VendorList supports a multi-select
-            //     filter via location state)
-            //   - project_member → hidden; members never manage users.
-            const userRole = currentRole;
-            if (userRole === "project_member") return null;
-            const own =
-              tokenStore.getUser()?.vendor_id ||
-              tokenStore.getUser()?.vendorId ||
-              "";
-            const firstVendor = safeArray(form.vendors)[0];
-            const firstVendorId = firstVendor
-              ? (projectVendorIndex[firstVendor]?.id ||
-                vendorMasterIndex[firstVendor]?.id ||
-                "")
-              : "";
-            const targetOrgId =
-              userRole === "org_admin" ? own || firstVendorId : firstVendorId;
-            if (!targetOrgId) return null;
-            return (
-              <>
-                {/* <button
-                  className="uidai-btn"
-                  disabled={editing}
-                  onClick={() =>
-                    navigate(`/vendors/${targetOrgId}`, {
-                      state: { from: `/projects/${project.projectId}` },
-                    })
-                  }
-                >
-                  Manage Teams
-                </button> */}
-
-                  <button
-                  className="uidai-btn"
-                  disabled={editing}
-                  onClick={() =>navigate(`/manage-users/${project.projectId}`)}
-                >
-                  Manage Teams
-                </button>
-               
-              </>
-            );
-          })()}
-           {canPublishProject && project.status === "PUBLISHED" && (
-            <button
-                  className="uidai-btn"
-                  disabled={editing}
-                  onClick={() => navigate(`/CriticalPathAnalysis/${project.projectId}`)}
-                >
-                  Critical Path Analysis
-                </button>
-           )}
-          {canEditProject && (
-            <button className="uidai-btn" onClick={toggleEdit}>
-              {editing ? "Save" : "Edit"}
-            </button>
-          )}
-          {canPublishProject && project.status !== "PUBLISHED" && (
-            <button
-              className="uidai-btn"
-              disabled={editing}
-              onClick={() => setPublishOpen(true)}
-            >
-              Publish
-            </button>
-          )}
-         
-          <button
-            className="uidai-btn"
-            disabled={editing}
-            onClick={() =>
-              navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
-            }
-          >
-            Configure
-          </button>
-          {canDeleteProject && (
-            <button
-              className="uidai-btn uidai-btn--delete"
-              disabled={editing}
-              onClick={() => setDeleteOpen(true)}
-            >
-              Remove
-            </button>
-          )}
-          <button className="uidai-btn uidai-btn--cancel" onClick={() => navigate(-1)}>
-            Back
-          </button>
+          ))}
         </div>
       </div>
 
