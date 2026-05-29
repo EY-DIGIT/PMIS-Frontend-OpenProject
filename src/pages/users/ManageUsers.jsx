@@ -984,65 +984,102 @@ export default function ManageTeam() {
                         <th>Activity</th>
                         <th>Activity Owner</th>
                         <th>Activity Approver</th>
-                        <th style={{ width: 36 }} aria-label="Toggle" />
                       </tr>
                     </thead>
                     <tbody>
                       {group.items.map((act) => {
-                        const isExpanded = expandedId === act.id;
-                        const ownerRows = buildOwnerCellRows(act);
-                        const approverRows = buildApproverCellRows(act);
+                        const concerned = Array.isArray(act.concernedDivisions)
+                          ? act.concernedDivisions
+                          : [];
                         return (
-                          <React.Fragment key={act.id}>
-                            <tr
-                              className={`mt-activity-tr${isExpanded ? ' mt-activity-tr-expanded' : ''}`}
-                              onClick={() => toggleExpand(act.id)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  toggleExpand(act.id);
-                                }
-                              }}
-                              aria-expanded={isExpanded}
-                              aria-controls={`mt-activity-panel-${act.id}`}
-                            >
-                              <td data-label="Activity">
-                                <div className="mt-activity-id-name">
-                                  <span className="mt-activity-id">
-                                    {act.displayCode || (act.id?.slice(0, 8) || '')}
-                                  </span>
-                                  <span className="mt-activity-name">{act.name}</span>
-                                </div>
-                              </td>
-                              <td data-label="Activity Owner">
-                                {renderCellRows(ownerRows)}
-                              </td>
-                              <td data-label="Activity Approver">
-                                {renderCellRows(approverRows)}
-                              </td>
-                              <td
-                                className="mt-activity-arrow-cell"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleExpand(act.id);
-                                }}
-                              >
-                                <span
-                                  className={`mt-activity-arrow${isExpanded ? ' mt-activity-arrow-open' : ''}`}
-                                  aria-hidden="true"
-                                >
-                                  {isExpanded ? '▾' : '›'}
+                          <tr key={act.id} className="mt-activity-tr">
+                            <td data-label="Activity">
+                              <div className="mt-activity-id-name">
+                                <span className="mt-activity-id">
+                                  {act.displayCode || (act.id?.slice(0, 8) || '')}
                                 </span>
-                              </td>
-                            </tr>
-                            {isExpanded && (
-                              <tr className="mt-activity-edit-tr">
-                                <td colSpan={4}>{renderActivityPanel(act)}</td>
-                              </tr>
-                            )}
-                          </React.Fragment>
+                                <span className="mt-activity-name">{act.name}</span>
+                              </div>
+                            </td>
+                            <td data-label="Activity Owner">
+                              <div className="mt-cell-edit">
+                                {ownerDivision && (
+                                  <div className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      {ownerDivision.name || ownerDivision.code}
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:owner`}
+                                      users={ownerDivisionUsers}
+                                      selectedIds={act.owner}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:owner`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
+                                      onChange={toggleActivityOwner(act.id)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                )}
+                                {concerned.map((code) => (
+                                  <div key={code} className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      {labelForDivisionCode(code)}
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:div:${code}`}
+                                      users={usersForDivisionCode(code)}
+                                      selectedIds={(act.divisionUsers || {})[code] || []}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
+                                      onChange={toggleActivityDivUser(act.id, code)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td data-label="Activity Approver">
+                              <div className="mt-cell-edit">
+                                {ownerDivision && (
+                                  <div className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      {ownerDivision.name || ownerDivision.code}
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:ownerApprover`}
+                                      users={ownerDivisionUsers}
+                                      selectedIds={act.ownerApprover}
+                                      single
+                                      isOpen={openMsPath === `tbl:${act.id}:ownerApprover`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:ownerApprover`)}
+                                      onChange={toggleActivityOwnerApprover(act.id)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                )}
+                                {concerned.map((code) => (
+                                  <div key={code} className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      {labelForDivisionCode(code)}
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:divApprover:${code}`}
+                                      users={usersForDivisionCode(code)}
+                                      selectedIds={(act.divisionApprovers || {})[code] || []}
+                                      single
+                                      isOpen={openMsPath === `tbl:${act.id}:divApprover:${code}`}
+                                      onToggleOpen={() =>
+                                        toggleMsOpen(`tbl:${act.id}:divApprover:${code}`)
+                                      }
+                                      onChange={toggleActivityDivApprover(act.id, code)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
                         );
                       })}
                     </tbody>
