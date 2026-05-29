@@ -307,6 +307,12 @@ export default function ManageTeam() {
 
         const activities = (data?.activities || []).map((a) => ({
           id: a?.id,
+          /* Server-assigned WBS codes — shown next to the activity name
+             and the milestone group header so users see the same labels
+             they see in Project Management instead of opaque UUIDs. */
+          displayCode: a?.displayCode || '',
+          milestoneDisplayCode: a?.milestoneDisplayCode || '',
+          milestoneId: a?.milestoneId || '',
           name: a?.name || '',
           milestone: a?.milestone || '(Unassigned)',
           concernedDivisions: Array.isArray(a?.concernedDivisions) ? a.concernedDivisions : [],
@@ -533,7 +539,10 @@ export default function ManageTeam() {
     state.activities.forEach((a) => {
       const m = a.milestone || '(Unassigned)';
       if (!groupMap.has(m)) {
-        const g = { milestone: m, items: [] };
+        /* First activity in this milestone bucket — capture the WBS
+           code (e.g. "M1") so the header can render it next to the
+           name. Subsequent activities in the same milestone reuse it. */
+        const g = { milestone: m, displayCode: a.milestoneDisplayCode || '', items: [] };
         groupMap.set(m, g);
         groups.push(g);
       }
@@ -871,6 +880,11 @@ export default function ManageTeam() {
                 <header className="mt-milestone-head">
                   <span className="mt-milestone-icon" aria-hidden="true">📍</span>
                   <span className="mt-milestone-label">Milestone</span>
+                  {group.displayCode && (
+                    <span className="mt-activity-id" style={{ marginRight: 6 }}>
+                      {group.displayCode}
+                    </span>
+                  )}
                   <span className="mt-milestone-name">{group.milestone}</span>
                   <span className="mt-milestone-count">
                     {group.items.length} {group.items.length === 1 ? 'activity' : 'activities'}
@@ -900,7 +914,9 @@ export default function ManageTeam() {
                           aria-label={`${isExpanded ? 'Collapse' : 'Expand'} activity ${act.name}`}
                         >
                           <div className="mt-activity-id-name">
-                            <span className="mt-activity-id">{act.id?.slice(0, 8) || ''}</span>
+                            <span className="mt-activity-id">
+                              {act.displayCode || (act.id?.slice(0, 8) || '')}
+                            </span>
                             <span className="mt-activity-name">{act.name}</span>
                           </div>
                           <span
