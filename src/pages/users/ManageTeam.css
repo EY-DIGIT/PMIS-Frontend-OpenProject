@@ -79,8 +79,8 @@
   display: inline-block;
   max-width: 360px;
   padding: 6px 16px;
-  background: linear-gradient(119.54deg, #000046 0%, #1cb5e0 100%);
-  color: #ffffff;
+  color:  #000046;
+  background-color: #ffffff;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.2px;
