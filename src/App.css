@@ -242,18 +242,19 @@ body {
   background: #eef6fb;
 }
 
-/* Route-aware navbar centre title (e.g. "Manage Team"). Page-level
-   subtitle / description is exposed as a native tooltip via the
-   title attribute so users can hover to see the full context. */
+/* Route-aware navbar title (e.g. "Manage Team"). Left-aligned, sits
+   immediately next to the Menu/Home block. Page-level subtitle /
+   description is exposed as a native tooltip via the title attribute
+   so users can hover to see the full context. */
 .pmis-navbar-title {
   flex: 1 1 auto;
-  text-align: center;
+  text-align: left;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.2px;
   color: #ffffff;
   cursor: help;
-  padding: 0 16px;
+  padding: 0 20px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
