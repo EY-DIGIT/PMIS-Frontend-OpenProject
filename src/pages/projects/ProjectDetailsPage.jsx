@@ -22,6 +22,7 @@ import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { hydrateProjects } from "../../store/project/apiSync";
 import { useCan, useCurrentRole } from "../../auth/permissions";
+import { setPageContext, clearPageContext } from "../../utils/pageContext";
 
 /* IST-aware: backend stores IST midnight as UTC 18:30 of the prior day,
    so naive "T"-chopping returns yesterday's date. Project to IST then
@@ -380,6 +381,23 @@ export default function ProjectDetailsPage() {
     fetchProjectDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  /* Publish project identity to the global page context so the navbar's
+     right-side project name pill renders without prop-drilling. Same
+     pattern as ManageTeam. */
+  useEffect(() => {
+    if (!project) return;
+    setPageContext({
+      projectId: project.projectId || projectId || "",
+      projectCode: project.projectCode || "",
+      projectName: project.projectName || ""
+    });
+  }, [project && project.projectId, project && project.projectCode, project && project.projectName, projectId]);
+
+  /* Drop the published project identity when leaving the page so the
+     navbar / breadcrumb don't keep showing stale info on the next
+     route. */
+  useEffect(() => () => clearPageContext(), []);
 
   useEffect(() => {
     if (!project) return;
