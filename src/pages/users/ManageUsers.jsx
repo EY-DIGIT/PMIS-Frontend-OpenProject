@@ -1009,8 +1009,8 @@ export default function ManageTeam() {
                     <thead>
                       <tr>
                         <th>Activity</th>
-                        <th>Activity Approver</th>
                         <th>Activity Owner</th>
+                        <th>Activity Approver</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1049,16 +1049,60 @@ export default function ManageTeam() {
                             </td>
                             {!isExpanded && (
                               <>
-                                <td data-label="Activity Approver">
-                                  {renderCellRows(buildApproverCellRows(act))}
-                                </td>
                                 <td data-label="Activity Owner">
                                   {renderCellRows(buildOwnerCellRows(act))}
+                                </td>
+                                <td data-label="Activity Approver">
+                                  {renderCellRows(buildApproverCellRows(act))}
                                 </td>
                               </>
                             )}
                             {isExpanded && (
                             <>
+                            <td data-label="Activity Owner">
+                              <div className="mt-cell-edit">
+                                {ownerDivision && (
+                                  <div className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span className="mt-div-type mt-div-type--owner">
+                                        Owner Division
+                                      </span>
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:owner`}
+                                      users={ownerDivisionUsers}
+                                      selectedIds={act.owner}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:owner`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
+                                      onChange={toggleActivityOwner(act.id)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                )}
+                                {concerned.map((code) => (
+                                  <div key={code} className="mt-cell-edit-row">
+                                    <div className="mt-cell-edit-label">
+                                      <span>{labelForDivisionCode(code)}</span>
+                                      <span className="mt-div-type mt-div-type--concerned">
+                                        Concerned Division
+                                      </span>
+                                    </div>
+                                    <MultiSelect
+                                      path={`tbl:${act.id}:div:${code}`}
+                                      users={usersForDivisionCode(code)}
+                                      selectedIds={(act.divisionUsers || {})[code] || []}
+                                      single={false}
+                                      isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
+                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
+                                      onChange={toggleActivityDivUser(act.id, code)}
+                                      disabled={saving}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
                             <td data-label="Activity Approver">
                               <div className="mt-cell-edit">
                                 {ownerDivision && (
@@ -1099,50 +1143,6 @@ export default function ManageTeam() {
                                         toggleMsOpen(`tbl:${act.id}:divApprover:${code}`)
                                       }
                                       onChange={toggleActivityDivApprover(act.id, code)}
-                                      disabled={saving}
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                            <td data-label="Activity Owner">
-                              <div className="mt-cell-edit">
-                                {ownerDivision && (
-                                  <div className="mt-cell-edit-row">
-                                    <div className="mt-cell-edit-label">
-                                      <span>{ownerDivision.name || ownerDivision.code}</span>
-                                      <span className="mt-div-type mt-div-type--owner">
-                                        Owner Division
-                                      </span>
-                                    </div>
-                                    <MultiSelect
-                                      path={`tbl:${act.id}:owner`}
-                                      users={ownerDivisionUsers}
-                                      selectedIds={act.owner}
-                                      single={false}
-                                      isOpen={openMsPath === `tbl:${act.id}:owner`}
-                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
-                                      onChange={toggleActivityOwner(act.id)}
-                                      disabled={saving}
-                                    />
-                                  </div>
-                                )}
-                                {concerned.map((code) => (
-                                  <div key={code} className="mt-cell-edit-row">
-                                    <div className="mt-cell-edit-label">
-                                      <span>{labelForDivisionCode(code)}</span>
-                                      <span className="mt-div-type mt-div-type--concerned">
-                                        Concerned Division
-                                      </span>
-                                    </div>
-                                    <MultiSelect
-                                      path={`tbl:${act.id}:div:${code}`}
-                                      users={usersForDivisionCode(code)}
-                                      selectedIds={(act.divisionUsers || {})[code] || []}
-                                      single={false}
-                                      isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
-                                      onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
-                                      onChange={toggleActivityDivUser(act.id, code)}
                                       disabled={saving}
                                     />
                                   </div>
