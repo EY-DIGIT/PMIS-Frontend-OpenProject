@@ -685,8 +685,8 @@ export default function NodeModal({
     : isActivityEdit
     ? {
         position: "relative",
-        width: "min(1280px, 100%)",
-        maxWidth: "min(1280px, 100%)"
+        width: "min(1400px, 100%)",
+        maxWidth: "min(1400px, 100%)"
       }
     : { position: "relative" };
 
@@ -760,7 +760,7 @@ export default function NodeModal({
           className="uidai-grid"
           style={
             isActivityEdit
-              ? { gridArea: "form", gridTemplateColumns: "1fr", minWidth: 0 }
+              ? { gridArea: "form", minWidth: 0 }
               : undefined
           }
         >
