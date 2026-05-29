@@ -226,33 +226,41 @@
   gap: 6px;
 }
 /* Icon-only triple-dot variant — sits on the right edge of the page
-   header. Borderless square button that mimics a Material-style
-   menu trigger. */
+   header. Filled square button using the brand navy→cyan gradient so
+   it reads as a primary action trigger. */
 .uidai-actions-menu__toggle--icon {
   appearance: none;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid rgba(11, 60, 136, 0.18);
+  background: linear-gradient(119.54deg, #000046 0%, #1cb5e0 100%);
   width: 36px;
   height: 36px;
   padding: 0;
   border-radius: 8px;
   cursor: pointer;
-  color: #1f2937;
+  color: #ffffff;
   font-size: 22px;
   line-height: 1;
   justify-content: center;
+  box-shadow: 0 1px 3px rgba(11, 60, 136, 0.18);
+  transition: filter .15s ease, box-shadow .15s ease, transform .15s ease;
 }
 .uidai-actions-menu__toggle--icon:hover:not(:disabled) {
-  background: #f3f4f6;
+  filter: brightness(1.08);
+  box-shadow: 0 4px 10px rgba(11, 60, 136, 0.25);
 }
 .uidai-actions-menu__toggle--icon[aria-expanded="true"] {
-  background: #e5e7eb;
-  border-color: #d1d5db;
+  filter: brightness(0.95);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 .uidai-actions-menu__toggle--icon:focus-visible {
   outline: none;
-  background: #f3f4f6;
-  border-color: #9ca3af;
+  box-shadow: 0 0 0 3px rgba(28, 181, 224, 0.35);
+}
+.uidai-actions-menu__toggle--icon:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+  box-shadow: none;
 }
 .uidai-actions-menu__panel {
   position: absolute;
