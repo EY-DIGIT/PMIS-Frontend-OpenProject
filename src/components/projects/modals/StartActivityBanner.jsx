@@ -20,8 +20,18 @@ export default function StartActivityBanner({ activity, form, editable, onChange
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const startedDate = form.actualStartDate || activity.actualStartDate || "";
-  const isStarted = !!startedDate;
+  /* Backend ships an explicit `activityStarted` boolean — trust it
+     first so a refresh of an already-started activity lands on the
+     green banner even if the local form lost its actualStartDate. */
+  const isStarted =
+    !!(form && form.activityStarted) ||
+    !!(activity && activity.activityStarted) ||
+    !!(form && form.actualStartDate) ||
+    !!(activity && activity.actualStartDate);
+  const startedDate =
+    (form && form.actualStartDate) ||
+    (activity && activity.actualStartDate) ||
+    "";
   const businessId = activity.apiId || "";
 
   async function handleStart() {
@@ -37,7 +47,11 @@ export default function StartActivityBanner({ activity, form, editable, onChange
         activityStarted: true,
         actualStartDate: nowIso
       });
-      onChange(startActivity(form));
+      /* Apply the local start-activity transition AND flip the
+         activityStarted flag so the banner immediately mirrors the
+         backend state without waiting for a re-fetch. */
+      const next = startActivity(form);
+      onChange({ ...next, activityStarted: true });
     } catch (err) {
       setError(err && err.message ? err.message : "Failed to start activity.");
     } finally {
