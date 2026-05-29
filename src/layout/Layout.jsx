@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { FiMenu, FiHome, FiUser } from "react-icons/fi";
+import { usePageContext } from "../utils/pageContext";
 
 /* Map of route prefix → { label, tooltip } for the navbar centre slot.
    Keep small; pages that want a navbar title append their entry here
@@ -30,6 +31,24 @@ function NavCenterTitle() {
       aria-level={1}
     >
       {entry.label}
+    </div>
+  );
+}
+
+/* Right-side project name pill — fed by the global page context so
+   pages that hold project state (currently only ManageTeam) can
+   surface the project name in the top header. Hidden when no
+   project is published. */
+function NavProjectName() {
+  const ctx = usePageContext();
+  const name = (ctx && ctx.projectName) || "";
+  if (!name) return null;
+  return (
+    <div
+      className="pmis-navbar-project"
+      title={`Project: ${name}`}
+    >
+      {name}
     </div>
   );
 }
@@ -172,6 +191,7 @@ export default function Layout({ children }) {
           </span>
         </div>
         <NavCenterTitle />
+        <NavProjectName />
         <div
           className="pmis-profile"
           onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}

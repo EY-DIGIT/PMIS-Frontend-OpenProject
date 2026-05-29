@@ -68,6 +68,7 @@ import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
 import ManageTeam from "./pages/users/ManageUsers";
 import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
+import { usePageContext } from "./utils/pageContext";
 /* ─────────────────────────────────────────────────────────────
    PageTitle — route-driven page heading. Rendered above the
    breadcrumb so the heading sits at the very top of every page.
@@ -117,6 +118,7 @@ function Breadcrumbs() {
     const { pathname } = useLocation();
     const projects = useProjectsList();
     const { users, vendors } = useData();
+    const pageCtx = usePageContext();
     const segments = pathname.split("/").filter(Boolean);
 
     /* Static segment → pretty label. Dynamic params (IDs, UIDs) fall
@@ -266,12 +268,6 @@ function Breadcrumbs() {
         if (segments[0] === "projects" && segments[2] === "track" && segments.length > 3) {
             return segments.slice(0, 3);
         }
-        // Manage Team: /manage-users/:projectId — drop the id segment so
-        // the breadcrumb reads "Home › Manage Team" instead of dragging
-        // the raw UUID along.
-        if (segments[0] === "manage-users" && segments.length > 1) {
-            return segments.slice(0, 1);
-        }
         return segments;
     })();
 
@@ -302,15 +298,27 @@ function Breadcrumbs() {
                 const isVendorIdSeg = vendorIdSeg && i === 1 && visibleSegments[0] === "vendors";
                 const isDashboardSub = visibleSegments[0] === "dashboard" && i === 1;
                 const DASH_SUB_LABELS = { summary: "Summary", project: "Project View", org: "Organization View" };
+                /* /manage-users/:projectId — second segment is the project
+                   uuid; swap to projectCode published by ManageUsers into
+                   pageContext. Falls back to the cached projects store,
+                   then the raw segment. */
+                const isMtProjectIdSeg = i === 1 && visibleSegments[0] === "manage-users";
+                const mtProjectCode = isMtProjectIdSeg
+                    ? (pageCtx && pageCtx.projectCode) ||
+                      (projects.find((p) => p.projectId === decodeURIComponent(seg))?.projectCode) ||
+                      ""
+                    : "";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
                     : isUserIdSeg && userCode
                         ? userCode
                         : isVendorIdSeg && vendorCode
                             ? vendorCode
-                            : isDashboardSub && DASH_SUB_LABELS[seg]
-                                ? DASH_SUB_LABELS[seg]
-                                : (LABELS[seg] || decodeURIComponent(seg));
+                            : isMtProjectIdSeg && mtProjectCode
+                                ? mtProjectCode
+                                : isDashboardSub && DASH_SUB_LABELS[seg]
+                                    ? DASH_SUB_LABELS[seg]
+                                    : (LABELS[seg] || decodeURIComponent(seg));
                 return (
                     <span key={to} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#999" }}>›</span>
