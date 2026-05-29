@@ -203,6 +203,13 @@ function Breadcrumbs() {
 
     if (segments.length === 0) return null; // hide on Dashboard
 
+    // Project Details (/projects/:projectId) has no sub-pages reachable
+    // from the breadcrumb yet — the heading already lives in the navbar,
+    // so the lone "Projects › <code>" trail is noise. Hide it for now.
+    if (segments[0] === "projects" && segments.length === 2 && segments[1] !== "add") {
+        return null;
+    }
+
     if (criticalPathProjectIdSeg) {
         const projectUrl = `/projects/${encodeURIComponent(criticalPathProjectIdSeg)}`;
         return (

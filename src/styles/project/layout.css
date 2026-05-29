@@ -225,6 +225,35 @@
   align-items: center;
   gap: 6px;
 }
+/* Icon-only triple-dot variant — sits on the right edge of the page
+   header. Borderless square button that mimics a Material-style
+   menu trigger. */
+.uidai-actions-menu__toggle--icon {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #1f2937;
+  font-size: 22px;
+  line-height: 1;
+  justify-content: center;
+}
+.uidai-actions-menu__toggle--icon:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+.uidai-actions-menu__toggle--icon[aria-expanded="true"] {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+}
+.uidai-actions-menu__toggle--icon:focus-visible {
+  outline: none;
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
 .uidai-actions-menu__panel {
   position: absolute;
   top: calc(100% + 4px);

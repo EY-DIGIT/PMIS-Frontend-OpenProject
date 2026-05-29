@@ -979,31 +979,20 @@ export default function ProjectDetailsPage() {
       visible: true
     },
     {
-      key: "remove",
-      label: "Remove",
-      onClick: () => setDeleteOpen(true),
-      visible: canDeleteProject,
-      variant: "danger",
-      primary: true
-    },
-    /* Primary actions — pinned inline so they stay one click away. */
-    {
       key: "edit",
       label: editing ? "Save" : "Edit",
       onClick: toggleEdit,
       visible: canEditProject,
-      primary: true,
-      // Edit/Save is the one action that's allowed while `editing`.
+      // Edit/Save is the one action that stays clickable while `editing`,
+      // so the user can finish saving from inside the dropdown.
       disabled: false
     },
     {
-      key: "back",
-      label: "Back",
-      onClick: () => navigate(-1),
-      visible: true,
-      primary: true,
-      variant: "cancel",
-      disabled: false
+      key: "remove",
+      label: "Remove",
+      onClick: () => setDeleteOpen(true),
+      visible: canDeleteProject,
+      variant: "danger"
     }
   ];
 
@@ -1020,17 +1009,28 @@ export default function ProjectDetailsPage() {
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
         <div className="uidai-page-header__actions">
+          {primaryActions.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              className={`uidai-btn${variantClass(a.variant)}`}
+              disabled={a.disabled === undefined ? editing : a.disabled}
+              onClick={a.onClick}
+            >
+              {a.label}
+            </button>
+          ))}
           {overflowActions.length > 0 && (
             <div className="uidai-actions-menu" ref={actionsMenuRef}>
               <button
                 type="button"
-                className="uidai-btn uidai-btn--cancel uidai-actions-menu__toggle"
-                disabled={editing}
+                className="uidai-actions-menu__toggle uidai-actions-menu__toggle--icon"
                 aria-haspopup="menu"
+                aria-label="More actions"
                 aria-expanded={actionsMenuOpen}
                 onClick={() => setActionsMenuOpen((o) => !o)}
               >
-                More <span aria-hidden="true">▾</span>
+                <span aria-hidden="true">⋮</span>
               </button>
               {actionsMenuOpen && (
                 <div className="uidai-actions-menu__panel" role="menu">
@@ -1050,17 +1050,6 @@ export default function ProjectDetailsPage() {
               )}
             </div>
           )}
-          {primaryActions.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              className={`uidai-btn${variantClass(a.variant)}`}
-              disabled={a.disabled === undefined ? editing : a.disabled}
-              onClick={a.onClick}
-            >
-              {a.label}
-            </button>
-          ))}
         </div>
       </div>
 
