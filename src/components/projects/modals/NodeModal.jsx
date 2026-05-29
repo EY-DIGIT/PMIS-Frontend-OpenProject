@@ -1653,22 +1653,26 @@ function CommentsPanel({
   // month-of-year regardless of year so the user can pick any month.
   const [commentFilter, setCommentFilter] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
-  const total = comments.length;
+  /* Workflow-driven entries (kind === "system") belong in the Activity
+     Audit Trail panel — exclude them here so they don't double up under
+     the Comments list on the left. */
+  const userComments = safeArray(comments).filter((c) => c && c.kind !== "system");
+  const total = userComments.length;
   const MONTH_NAMES_SHORT = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
   ];
   const visibleComments = (() => {
-    if (commentFilter === "all") return comments;
+    if (commentFilter === "all") return userComments;
     if (commentFilter === "week") {
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      return comments.filter((c) => {
+      return userComments.filter((c) => {
         const t = c?.when ? new Date(c.when).getTime() : NaN;
         return Number.isFinite(t) && t >= cutoff;
       });
     }
     // commentFilter === "month"
-    return comments.filter((c) => {
+    return userComments.filter((c) => {
       const t = c?.when ? new Date(c.when) : null;
       if (!t || Number.isNaN(t.getTime())) return false;
       return t.getMonth() === selectedMonth;
