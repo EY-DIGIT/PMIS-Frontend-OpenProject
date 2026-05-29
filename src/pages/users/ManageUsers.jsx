@@ -271,6 +271,10 @@ export default function ManageTeam() {
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  /* The page is read-only by default — clicking Edit unlocks every
+     MultiSelect and surfaces the Submit button. Cancel re-fetches
+     team-page so any in-progress edits are dropped. */
+  const [editMode, setEditMode] = useState(false);
 
   const [openMsPath, setOpenMsPath] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
@@ -576,6 +580,9 @@ export default function ManageTeam() {
         activities: state.activities,
       });
       showToast('Team saved successfully.', 'success');
+      /* Drop edit mode on a successful save — the dropdowns lock and
+         the Submit/Cancel toolbar collapses back to just Edit. */
+      setEditMode(false);
     } catch (err) {
       showToast(err?.message || 'Failed to save team.', 'error');
     } finally {
@@ -856,6 +863,53 @@ export default function ManageTeam() {
   return (
     <div className="mt-page">
 
+      {/* ─── TOP TOOLBAR — Back + Edit/Cancel/Submit ─── */}
+      <div className="mt-top-toolbar">
+        <button
+          type="button"
+          className="mt-btn mt-btn-cancel"
+          onClick={goBack}
+          disabled={saving}
+        >
+          ← Back
+        </button>
+        <div style={{ flex: 1 }} />
+        {!editMode ? (
+          <button
+            type="button"
+            className="mt-btn"
+            onClick={() => setEditMode(true)}
+            disabled={saving}
+          >
+            ✎ Edit
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="mt-btn mt-btn-cancel"
+              onClick={() => {
+                setEditMode(false);
+                /* Re-fetch team-page so any in-progress edits are
+                   discarded — gives the user a clean revert. */
+                setReloadKey((k) => k + 1);
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="mt-btn"
+              onClick={submitTeam}
+              disabled={saving}
+            >
+              {saving ? 'Saving…' : 'Submit'}
+            </button>
+          </>
+        )}
+      </div>
+
       {/* ─── ORGANIZATION USER + PROJECT OWNER side-by-side row ─── */}
       <div className="mt-two-col">
       <div className="mt-card">
@@ -887,7 +941,7 @@ export default function ManageTeam() {
                         isOpen={openMsPath === path}
                         onToggleOpen={() => toggleMsOpen(path)}
                         onChange={handleSectionChange('orgUser', idx, row)}
-                        disabled={saving}
+                        disabled={!editMode || saving}
                       />
                     </td>
                   </tr>
@@ -939,7 +993,7 @@ export default function ManageTeam() {
                         isOpen={openMsPath === path}
                         onToggleOpen={() => toggleMsOpen(path)}
                         onChange={handleSectionChange('projectOwner', idx, row)}
-                        disabled={saving}
+                        disabled={!editMode || saving}
                       />
                     </td>
                   </tr>
@@ -1078,7 +1132,7 @@ export default function ManageTeam() {
                                       isOpen={openMsPath === `tbl:${act.id}:owner`}
                                       onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:owner`)}
                                       onChange={toggleActivityOwner(act.id)}
-                                      disabled={saving}
+                                      disabled={!editMode || saving}
                                     />
                                   </div>
                                 )}
@@ -1098,7 +1152,7 @@ export default function ManageTeam() {
                                       isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
                                       onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:div:${code}`)}
                                       onChange={toggleActivityDivUser(act.id, code)}
-                                      disabled={saving}
+                                      disabled={!editMode || saving}
                                     />
                                   </div>
                                 ))}
@@ -1122,7 +1176,7 @@ export default function ManageTeam() {
                                       isOpen={openMsPath === `tbl:${act.id}:ownerApprover`}
                                       onToggleOpen={() => toggleMsOpen(`tbl:${act.id}:ownerApprover`)}
                                       onChange={toggleActivityOwnerApprover(act.id)}
-                                      disabled={saving}
+                                      disabled={!editMode || saving}
                                     />
                                   </div>
                                 )}
@@ -1144,7 +1198,7 @@ export default function ManageTeam() {
                                         toggleMsOpen(`tbl:${act.id}:divApprover:${code}`)
                                       }
                                       onChange={toggleActivityDivApprover(act.id, code)}
-                                      disabled={saving}
+                                      disabled={!editMode || saving}
                                     />
                                   </div>
                                 ))}
@@ -1166,15 +1220,11 @@ export default function ManageTeam() {
         </div>
       </div>
 
-      {/* ─── PAGE FOOTER ACTIONS (Back / Submit) ─── */}
+      {/* ─── PAGE FOOTER ACTIONS ─── Back lives in the top toolbar
+           now; bottom keeps Submit only while editing so users on
+           long pages don't have to scroll back up. */}
       <div style={{gap:"10px",display:"flex",justifyContent:"center"}}>
-        <button
-          className="mt-btn mt-btn-cancel"
-          onClick={goBack}
-          disabled={saving}
-        >
-          ← Back
-        </button>
+        {editMode && (
         <button
           className="mt-btn"
           onClick={submitTeam}
@@ -1182,6 +1232,7 @@ export default function ManageTeam() {
         >
           {saving ? 'Saving…' : 'Submit'}
         </button>
+        )}
       </div>
 
       {/* ─── TOAST ─── */}
