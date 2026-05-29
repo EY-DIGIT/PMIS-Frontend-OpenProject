@@ -1071,42 +1071,64 @@
 .mt-milestone-head--clickable {
   cursor: pointer;
   user-select: none;
+  transition: background 0.12s;
 }
 .mt-milestone-head--clickable:hover {
-  background: #eef6fb;
+  background: linear-gradient(90deg, #e2ecf8 0%, #eef5ff 100%);
 }
 .mt-ms-toggle {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   font-size: 14px;
   font-weight: 700;
   color: #66788f;
-  width: 16px;
-  text-align: center;
-  margin-right: 4px;
-  transition: color 0.12s;
+  background: #fff;
+  border: 1px solid #d6e0ee;
+  border-radius: 4px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
+.mt-milestone-head--clickable:hover .mt-ms-toggle,
 .mt-ms-toggle-open {
   color: #0b3c88;
+  border-color: #b6d0ee;
+  background: #f4f8fd;
 }
+
 .mt-activity-id-name--toggle {
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
   user-select: none;
+  /* Inherits display:flex, gap, align-items, flex:1 from the base
+     .mt-activity-id-name rule above — don't redeclare and accidentally
+     shrink the gap. */
 }
 .mt-activity-id-name--toggle:hover .mt-activity-name {
   color: #0b3c88;
 }
 .mt-act-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   font-size: 13px;
   color: #66788f;
-  width: 14px;
-  text-align: center;
-  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid #d6e0ee;
+  border-radius: 4px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
+.mt-activity-id-name--toggle:hover .mt-act-toggle,
 .mt-act-toggle-open {
   color: #0b3c88;
+  border-color: #b6d0ee;
+  background: #f4f8fd;
 }
 .mt-activity-tr:hover {
   background: transparent;
