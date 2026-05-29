@@ -939,3 +939,54 @@
   .mt-milestone-name { font-size: 13.5px; }
   .mt-page-footer-actions .mt-btn { font-size: 13px; padding: 9px 12px; }
 }
+
+/* Activity table — replaces the legacy card list inside each milestone
+   group. Owner + Approver columns stack one line per assigned
+   division so users can scan assignments at a glance. */
+.mt-activity-table {
+  table-layout: auto;
+}
+.mt-activity-tr {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.mt-activity-tr:hover,
+.mt-activity-tr-expanded {
+  background: #f4f8fd;
+}
+.mt-activity-arrow-cell {
+  text-align: right;
+  vertical-align: middle;
+}
+.mt-activity-edit-tr td {
+  background: #f8fafc;
+  padding: 0 !important;
+  border-top: 1px solid #d6e0ee;
+}
+.mt-activity-edit-tr .mt-activity-panel {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.mt-cell-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mt-cell-row {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #1f2a44;
+  word-break: break-word;
+}
+.mt-cell-row-div {
+  color: #66788f;
+  font-weight: 500;
+  margin-left: 6px;
+  font-size: 12px;
+}
+.mt-cell-empty {
+  color: #9aa5b1;
+  font-style: italic;
+  font-size: 13px;
+}

@@ -597,6 +597,77 @@ export default function ManageTeam() {
     return (d && (d.name || d.code)) || code;
   };
 
+  /* Look up a user's friendly name in a directory; falls back to a
+     short id slice so unknown ids still render something readable. */
+  const findUserName = (uid, dirArr) => {
+    const u = (Array.isArray(dirArr) ? dirArr : []).find((x) => x.id === uid);
+    if (u) return u.name;
+    return String(uid || '').slice(0, 8);
+  };
+
+  /* Build the per-division rows that go into an activity's Owner or
+     Approver cell. Each entry is `{ division, names }` where division
+     is the friendly label and names is a comma-joined list. Empty
+     groups (no assigned users for that division) are skipped so the
+     cell only shows divisions that actually have assignees. */
+  const buildOwnerCellRows = (act) => {
+    const rows = [];
+    if (ownerDivision && Array.isArray(act.owner) && act.owner.length > 0) {
+      rows.push({
+        division: ownerDivision.name || ownerDivision.code || 'Owner',
+        names: act.owner.map((uid) => findUserName(uid, ownerDivisionUsers)).join(', ')
+      });
+    }
+    (act.concernedDivisions || []).forEach((code) => {
+      const users = (act.divisionUsers || {})[code] || [];
+      if (!users.length) return;
+      const divUsers = usersForDivisionCode(code);
+      rows.push({
+        division: labelForDivisionCode(code),
+        names: users.map((uid) => findUserName(uid, divUsers)).join(', ')
+      });
+    });
+    return rows;
+  };
+
+  const buildApproverCellRows = (act) => {
+    const rows = [];
+    if (ownerDivision && Array.isArray(act.ownerApprover) && act.ownerApprover.length > 0) {
+      rows.push({
+        division: ownerDivision.name || ownerDivision.code || 'Owner',
+        names: act.ownerApprover.map((uid) => findUserName(uid, ownerDivisionUsers)).join(', ')
+      });
+    }
+    (act.concernedDivisions || []).forEach((code) => {
+      const approvers = (act.divisionApprovers || {})[code] || [];
+      if (!approvers.length) return;
+      const divUsers = usersForDivisionCode(code);
+      rows.push({
+        division: labelForDivisionCode(code),
+        names: approvers.map((uid) => findUserName(uid, divUsers)).join(', ')
+      });
+    });
+    return rows;
+  };
+
+  /* Single-cell renderer used for both Owner and Approver columns —
+     stacks one "name1, name2 (Division)" line per division. */
+  const renderCellRows = (rows) => {
+    if (!rows || rows.length === 0) {
+      return <span className="mt-cell-empty">—</span>;
+    }
+    return (
+      <div className="mt-cell-rows">
+        {rows.map((r, i) => (
+          <div key={i} className="mt-cell-row">
+            <span>{r.names}</span>
+            <span className="mt-cell-row-div">({r.division})</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   /* ─── Inline editor for one activity (no Save/Cancel — persists immediately) ─── */
   const renderActivityPanel = (act) => {
     const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
@@ -907,45 +978,75 @@ export default function ManageTeam() {
                   </span>
                 </header>
                 <div className="mt-milestone-items">
-                  {group.items.map((act) => {
-                    const isExpanded = expandedId === act.id;
-                    return (
-                      <div
-                        key={act.id}
-                        className={`mt-activity-row${isExpanded ? ' mt-activity-row-expanded' : ''}`}
-                      >
-                        <div
-                          className={`mt-activity-item${isExpanded ? ' mt-activity-item-active' : ''}`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => toggleExpand(act.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              toggleExpand(act.id);
-                            }
-                          }}
-                          aria-expanded={isExpanded}
-                          aria-controls={`mt-activity-panel-${act.id}`}
-                          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} activity ${act.name}`}
-                        >
-                          <div className="mt-activity-id-name">
-                            <span className="mt-activity-id">
-                              {act.displayCode || (act.id?.slice(0, 8) || '')}
-                            </span>
-                            <span className="mt-activity-name">{act.name}</span>
-                          </div>
-                          <span
-                            className={`mt-activity-arrow${isExpanded ? ' mt-activity-arrow-open' : ''}`}
-                            aria-hidden="true"
-                          >
-                            {isExpanded ? '▾' : '›'}
-                          </span>
-                        </div>
-                        {isExpanded && renderActivityPanel(act)}
-                      </div>
-                    );
-                  })}
+                  <table className="mt-team-table mt-activity-table">
+                    <thead>
+                      <tr>
+                        <th>Activity</th>
+                        <th>Activity Owner</th>
+                        <th>Activity Approver</th>
+                        <th style={{ width: 36 }} aria-label="Toggle" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.items.map((act) => {
+                        const isExpanded = expandedId === act.id;
+                        const ownerRows = buildOwnerCellRows(act);
+                        const approverRows = buildApproverCellRows(act);
+                        return (
+                          <React.Fragment key={act.id}>
+                            <tr
+                              className={`mt-activity-tr${isExpanded ? ' mt-activity-tr-expanded' : ''}`}
+                              onClick={() => toggleExpand(act.id)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  toggleExpand(act.id);
+                                }
+                              }}
+                              aria-expanded={isExpanded}
+                              aria-controls={`mt-activity-panel-${act.id}`}
+                            >
+                              <td data-label="Activity">
+                                <div className="mt-activity-id-name">
+                                  <span className="mt-activity-id">
+                                    {act.displayCode || (act.id?.slice(0, 8) || '')}
+                                  </span>
+                                  <span className="mt-activity-name">{act.name}</span>
+                                </div>
+                              </td>
+                              <td data-label="Activity Owner">
+                                {renderCellRows(ownerRows)}
+                              </td>
+                              <td data-label="Activity Approver">
+                                {renderCellRows(approverRows)}
+                              </td>
+                              <td
+                                className="mt-activity-arrow-cell"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleExpand(act.id);
+                                }}
+                              >
+                                <span
+                                  className={`mt-activity-arrow${isExpanded ? ' mt-activity-arrow-open' : ''}`}
+                                  aria-hidden="true"
+                                >
+                                  {isExpanded ? '▾' : '›'}
+                                </span>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr className="mt-activity-edit-tr">
+                                <td colSpan={4}>{renderActivityPanel(act)}</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             ))
