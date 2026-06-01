@@ -985,7 +985,10 @@ export default function ProjectDetailsPage() {
       visible: canEditProject,
       // Edit/Save is the one action that stays clickable while `editing`,
       // so the user can finish saving from inside the dropdown.
-      disabled: false
+      disabled: false,
+      // Pin to the header (outside the ⋮ overflow) so the primary
+      // edit/save action is always one click away.
+      primary: true
     },
     {
       key: "remove",
