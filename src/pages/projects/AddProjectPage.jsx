@@ -119,7 +119,17 @@ export default function AddProjectPage() {
   // Always initialize with a fully-shaped object — prevents blank-page crashes
   // when a partial/stale draft arrives (e.g. restored from localStorage with
   // description undefined).
-  const [form, setForm] = useState(() => normalizeFormShape(existingDraft));
+  // If a draft with projectId is in play, the user has already gone through
+  // "Save & Next" — landing here again means they're starting a brand-new
+  // project, not editing the saved one. Drop the cached draft and render an
+  // empty form so the inputs aren't pre-filled with the previous submission.
+  const [form, setForm] = useState(() => {
+    if (existingDraft && existingDraft.projectId) {
+      draftStore.clear();
+      return makeEmpty();
+    }
+    return normalizeFormShape(existingDraft);
+  });
   const [submitting, setSubmitting] = useState(false);
 
   const [vendorOptions, setVendorOptions] = useState(() => safeArray(VENDOR_MASTER));
