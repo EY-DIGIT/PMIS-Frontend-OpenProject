@@ -337,6 +337,25 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
         : null) ||
       (payload && typeof payload.error === 'string' ? payload.error : null);
     const flat = payload && typeof payload === 'object' ? payload.message : null;
+    // Render a FastAPI-style validation array ([{loc, msg}, ...]) as a
+    // multi-line "field: msg" string. Used both for the top-level
+    // `detail` field and for the embedded errors[] our backend nests
+    // under error._embedded.details.errors.
+    const renderValidationList = (arr) => {
+      if (!Array.isArray(arr)) return null;
+      const parts = arr
+        .map((item) => {
+          if (!item || typeof item !== 'object') return null;
+          const field = Array.isArray(item.loc)
+            ? item.loc.filter((p) => p !== 'body').join('.')
+            : '';
+          const m = typeof item.msg === 'string' ? item.msg : '';
+          if (!m) return null;
+          return field ? `${field}: ${m}` : m;
+        })
+        .filter(Boolean);
+      return parts.length ? parts.join('\n') : null;
+    };
     // FastAPI validation errors come back as { detail: [{ loc, msg, ... }] }
     // or sometimes a plain { detail: "string" }. Surface the human-readable
     // message(s) so forms see "value is not a valid email address ..." instead
@@ -344,26 +363,22 @@ async function request(method, path, { body, query, auth = true, signal } = {}) 
     const fastapiDetail = (() => {
       const d = payload && typeof payload === 'object' ? payload.detail : null;
       if (typeof d === 'string') return d;
-      if (Array.isArray(d)) {
-        const parts = d
-          .map((item) => {
-            if (!item || typeof item !== 'object') return null;
-            const field = Array.isArray(item.loc)
-              ? item.loc.filter((p) => p !== 'body').join('.')
-              : '';
-            const m = typeof item.msg === 'string' ? item.msg : '';
-            if (!m) return null;
-            return field ? `${field}: ${m}` : m;
-          })
-          .filter(Boolean);
-        if (parts.length) return parts.join('\n');
-      }
-      return null;
+      return renderValidationList(d);
+    })();
+    // Backend's wrapped error shape:
+    //   { error: { message: "Validation failed",
+    //              _embedded: { details: { errors: [{ loc, msg, ... }] } } } }
+    // The outer `error.message` is intentionally generic ("Validation failed"),
+    // so prefer the field-level errors when they're present.
+    const embeddedValidation = (() => {
+      const errs = payload?.error?._embedded?.details?.errors;
+      return renderValidationList(errs);
     })();
     const msg =
+      (typeof embeddedValidation === 'string' && embeddedValidation) ||
+      (typeof fastapiDetail === 'string' && fastapiDetail) ||
       (typeof nested === 'string' && nested) ||
       (typeof flat === 'string' && flat) ||
-      (typeof fastapiDetail === 'string' && fastapiDetail) ||
       (typeof payload === 'string' && payload) ||
       `${method} ${path} failed (${res.status})`;
     throw new ApiError(msg, { status: res.status, body: payload });
