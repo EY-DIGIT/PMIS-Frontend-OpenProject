@@ -16,7 +16,7 @@ import {
 } from "../../api/dashboard";
 import {
   API_BUCKETS, LABELS, COLORS,
-  Donut, Legend, Kpi, DelayList, SignalCards, DelayFilter, ProjectCardGrid,
+  Donut, BarChart, Legend, Kpi, DelayList, SignalCards, DelayFilter, ProjectCardGrid,
   itemRowToTrackRow, extractItemsPayload,
   countsForProjects,
   range, todayDate,
@@ -97,6 +97,7 @@ export default function SummaryView() {
     // already have (from the summary response or a sub-view list) so
     // the items view doesn't need its own project-lookup call.
     setSubView({ kind: "project-items", project, status: opts.status || null });
+
   }
   function backToSummary() { setSubView(null); }
 
@@ -172,6 +173,7 @@ function SummaryContent({
     completed: t.completed ?? 0,
     ontrack: t.ontrack ?? 0,
     delayed: t.delayed ?? 0,
+    pendingApprovalCount: t.pendingApprovalCount ?? 0,
   };
 
   // Each card expands inline — no navigation, no extra fetch.
@@ -214,75 +216,79 @@ function SummaryContent({
 
   return (
     <>
-      <div className="dash-kpi-grid" >
-        <Kpi cls="total" label="Total Projects" value={counts.total}
-          foot={`${orgs.length} organizations / ${divs.length} divisions`}
-          onClick={() => onOpenProjectList("total")} />
-        <Kpi cls="total" label="Active Projects" value={counts.active}
-          foot="open project list" onClick={() => onOpenProjectList("active")} />
-        <Kpi cls="completed" label="Completed Projects" value={counts.completed}
-          foot="delivered projects" onClick={() => onOpenProjectList("completed")} />
-        <Kpi cls="ontrack" label="In Progress" value={counts.ontrack}
-          foot="within schedule" onClick={() => onOpenProjectList("ontrack")} />
-        <Kpi cls="delayed" label="Delayed" value={counts.delayed}
-          foot="open project list" onClick={() => onOpenProjectList("delayed")} />
-      </div>
+      <div>
+        <div className="dash-kpi-grid">
+          <Kpi cls="total" label="Total Projects" value={counts.total}
+            foot={`${orgs.length} organizations / ${divs.length} divisions`} onClick={() => onOpenProjectList("total")} />
+          <Kpi cls="total" label="Active Projects" value={counts.active}
+            foot="open project list" onClick={() => onOpenProjectList("active")} />
+          <Kpi cls="completed" label="Completed Projects" value={counts.completed}
+            foot="delivered projects" onClick={() => onOpenProjectList("completed")} />
+          <Kpi cls="pendingApproval" label="Pending for Approval" value={counts.pendingApprovalCount}
+            foot="Pending for Approval" onClick={() => onOpenProjectList("pendingApproval")} />
+        </div>
+        <div className="dash-grid-2">
 
-      <div className="dash-grid-2" >
-        <div className="dash-card">
-          <div className="dash-card-title">Pie Chart<span className="dash-card-sub">Project status</span></div>
-          <div className="dash-donut-wrap">
-            <Donut counts={counts} keys={["completed", "ontrack", "delayed"]} />
-            <Legend counts={counts} keys={["completed", "ontrack", "delayed"]} />
-          </div>
-        </div>
-        <div className="dash-card">
-          <div className="dash-card-title">
-            Delayed Track
-            <DelayFilter value={delayFilter} onChange={setDelayFilter} />
-            <span className="dash-card-sub">
-              {delays.length} project{delays.length === 1 ? "" : "s"} / {totalDelayedItems} item{totalDelayedItems === 1 ? "" : "s"} delayed by {delayFilter}+ days
-            </span>
-          </div>
-          <DelayList rows={delays} mode="project"
-            limit={delaysExpanded ? undefined : VIS}
-            onOpenProject={(p, df) => onOpenProjectItems(p, { status: "delayed", minDelay: df })}
-            delayFilter={delayFilter} />
-          {delays.length > VIS && (
-            <div className="dash-actions">
-              <button type="button" className="dash-more-btn"
-                onClick={() => setDelaysExpanded((v) => !v)}>
-                {delaysExpanded ? "Show less" : `+${delays.length - VIS} More`}
-              </button>
+          <div className="dash-card">
+            <div className="dash-card-title">Pie Chart<span className="dash-card-sub">Project status</span></div>
+            <div className="dash-donut-wrap">
+              <Donut counts={counts} keys={["completed", "ontrack", "delayed"]} />
+              <Legend counts={counts} keys={["completed", "ontrack", "delayed"]} />
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+          <div className="dash-card">
+            <div className="dash-card-title">Bar Chart<span className="dash-card-sub">Project status</span></div>
+            <div className="dash-donut-wrap">
+              <BarChart counts={counts} keys={["completed", "ontrack", "delayed"]} />
+              <Legend counts={counts} keys={["completed", "ontrack", "delayed"]} />
+            </div>
+          </div>
+          <div className="dash-card">
+            <div className="dash-card-title">
+              Delayed Track
+              <DelayFilter value={delayFilter} onChange={setDelayFilter} />
+              <span className="dash-card-sub">
+                {delays.length} project{delays.length === 1 ? "" : "s"} / {totalDelayedItems} item{totalDelayedItems === 1 ? "" : "s"} delayed by {delayFilter}+ days
+              </span>
+            </div>
+            <DelayList rows={delays} mode="project"
+              limit={delaysExpanded ? undefined : VIS}
+              onOpenProject={(p, df) => onOpenProjectItems(p, { status: "delayed", minDelay: df })}
+              delayFilter={delayFilter} />
+            {delays.length > VIS && (
+              <div className="dash-actions">
+                <button type="button" className="dash-more-btn"
+                  onClick={() => setDelaysExpanded((v) => !v)}>
+                  {delaysExpanded ? "Show less" : `+${delays.length - VIS} More`}
+                </button>
+              </div>
+            )}
+          </div>
 
-      <div className="dash-grid-2" >
-        <div className="dash-card">
-          <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
-          <SignalCards groups={orgs} limit={orgsExpanded ? undefined : VIS_GROUPS} onClick={onOpenOrg} />
-          {orgs.length > VIS_GROUPS && (
-            <div className="dash-actions">
-              <button type="button" className="dash-more-btn"
-                onClick={() => setOrgsExpanded((v) => !v)}>
-                {orgsExpanded ? "Show less" : `+${orgs.length - VIS_GROUPS} More`}
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="dash-card">
-          <div className="dash-card-title">Division View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
-          <SignalCards groups={divs} limit={divsExpanded ? undefined : VIS_GROUPS} onClick={onOpenDivision} />
-          {divs.length > VIS_GROUPS && (
-            <div className="dash-actions">
-              <button type="button" className="dash-more-btn"
-                onClick={() => setDivsExpanded((v) => !v)}>
-                {divsExpanded ? "Show less" : `+${divs.length - VIS_GROUPS} More`}
-              </button>
-            </div>
-          )}
+          <div className="dash-card">
+            <div className="dash-card-title">Organization View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
+            <SignalCards groups={orgs} limit={orgsExpanded ? undefined : VIS_GROUPS} onClick={onOpenOrg} />
+            {orgs.length > VIS_GROUPS && (
+              <div className="dash-actions">
+                <button type="button" className="dash-more-btn"
+                  onClick={() => setOrgsExpanded((v) => !v)}>
+                  {orgsExpanded ? "Show less" : `+${orgs.length - VIS_GROUPS} More`}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="dash-card">
+            <div className="dash-card-title">Division View<span className="dash-card-sub">Total / Completed / In Progress / Delayed</span></div>
+            <SignalCards groups={divs} limit={divsExpanded ? undefined : VIS_GROUPS} onClick={onOpenDivision} />
+            {divs.length > VIS_GROUPS && (
+              <div className="dash-actions">
+                <button type="button" className="dash-more-btn"
+                  onClick={() => setDivsExpanded((v) => !v)}>
+                  {divsExpanded ? "Show less" : `+${divs.length - VIS_GROUPS} More`}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>
@@ -346,6 +352,7 @@ function deriveSummary(payload) {
     ontrack: beCounts.ontrack ?? 0,
     delayed: beCounts.delayed ?? 0,
     active: beCounts.active ?? Math.max(totalProjects - completed, 0),
+    pendingApprovalCount: beCounts.pendingApprovalCount ?? 0,
   };
 
   return {
@@ -421,11 +428,22 @@ function ProjectListView({ mode, searchText, onSearch, onBack, onOpenProject }) 
           <button type="button" className="dash-ghost-btn" onClick={onBack}>Back</button>
         </div>
       </div>
-      <div className="dash-card">
-        <div className="dash-card-title">Pie Chart<span className="dash-card-sub">{title} status distribution</span></div>
-        <div className="dash-donut-wrap">
-          <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
-          <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
+      <div className="dash-grid-2">
+        <div className="dash-card">
+          <div className="dash-card-title">Pie Chart<span className="dash-card-sub">{title} status distribution</span></div>
+          <div className="dash-donut-wrap">
+            <Donut counts={c} keys={["completed", "ontrack", "delayed"]} />
+            <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
+          </div>
+        </div>
+        <div className="dash-card">
+
+
+          <div className="dash-card-title">Bar Chart<span className="dash-card-sub">{title} status distribution</span></div>
+          <div className="dash-donut-wrap">
+            <BarChart counts={c} keys={["completed", "ontrack", "delayed"]} />
+            <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
+          </div>
         </div>
       </div>
       <div className="dash-card">
@@ -498,7 +516,7 @@ function DivisionDetail({ name, onBack, onOpenProject }) {
               <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
             </div>
           </div>
-          <div className="dash-card" style={{marginTop:"20px"}}>
+          <div className="dash-card" style={{ marginTop: "20px" }}>
             <div className="dash-card-title">Projects<span className="dash-card-sub">Click project to open Project View</span></div>
             <ProjectCardGrid projects={list} onOpenProject={onOpenProject} />
           </div>

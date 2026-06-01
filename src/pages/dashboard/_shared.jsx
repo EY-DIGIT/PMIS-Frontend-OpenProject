@@ -374,7 +374,7 @@ export function projectCardToLegacy(card) {
   };
 }
 
-/* ─── Donut + Legend ───────────────────────────────────────── */
+/* ─── Donut + bar + Legend ───────────────────────────────────────── */
 
 export function Donut({ counts, keys }) {
   keys = keys || Object.keys(counts).filter((k) => k !== "total");
@@ -408,6 +408,74 @@ export function Donut({ counts, keys }) {
       {rings}
       <text x="100" y="92" textAnchor="middle" fontSize="34" fontWeight="900" fill="#0b3c88">{total}</text>
       <text x="100" y="116" textAnchor="middle" fontSize="12" fill="#7a869a">items</text>
+    </svg>
+  );
+}
+
+export function BarChart({ counts, keys }) {
+  keys = keys || Object.keys(counts).filter((k) => k !== "total");
+  const total = keys.reduce((s, k) => s + (counts[k] || 0), 0);
+
+  if (!total) {
+    return (
+      <svg className="dash-donut" viewBox="0 0 200 200">
+        <rect x="20" y="20" width="160" height="160" fill="none" stroke="#eef3fa" strokeWidth="2" rx="4" />
+        <text x="100" y="104" textAnchor="middle" fill="#7a869a" fontSize="13">No data</text>
+      </svg>
+    );
+  }
+
+  const maxVal = Math.max(...keys.map((k) => counts[k] || 0));
+  const svgW = 200, svgH = 200;
+  const padL = 28, padR = 10, padT = 16, padB = 36;
+  const chartW = svgW - padL - padR;
+  const chartH = svgH - padT - padB;
+  const barW = chartW / keys.length;
+  const BAR_GAP = barW * 0.25;
+
+  return (
+    <svg className="dash-donut" viewBox={`0 0 ${svgW} ${svgH}`}>
+      {/* Y-axis gridlines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+        const y = padT + chartH * (1 - frac);
+        return (
+          <g key={frac}>
+            <line x1={padL} x2={padL + chartW} y1={y} y2={y}
+              stroke="#eef3fa" strokeWidth="1" />
+            <text x={padL - 4} y={y + 4} textAnchor="end"
+              fontSize="8" fill="#7a869a">
+              {Math.round(maxVal * frac)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Bars */}
+      {keys.map((k, i) => {
+        const val = counts[k] || 0;
+        const barH = (val / maxVal) * chartH;
+        const x = padL + i * barW + BAR_GAP / 2;
+        const y = padT + chartH - barH;
+        const w = barW - BAR_GAP;
+        return (
+          <g key={k}>
+            <rect x={x} y={y} width={w} height={barH}
+              fill={COLORS[k] || "#9aa6bd"} rx="2" />
+            <text x={x + w / 2} y={y - 3} textAnchor="middle"
+              fontSize="8" fontWeight="700" fill={COLORS[k] || "#9aa6bd"}>
+              {val}
+            </text>
+            <text x={x + w / 2} y={padT + chartH + 10} textAnchor="middle"
+              fontSize="7.5" fill="#7a869a">
+              {(LABELS[k] || k).slice(0, 6)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* X axis baseline */}
+      <line x1={padL} x2={padL + chartW} y1={padT + chartH} y2={padT + chartH}
+        stroke="#c8d3e8" strokeWidth="1.5" />
     </svg>
   );
 }

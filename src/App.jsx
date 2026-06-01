@@ -53,6 +53,7 @@ import ProjectDetailsPage from "./pages/projects/ProjectDetailsPage";
 import MilestoneConfigPage from "./pages/projects/MilestoneConfigPage";
 import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import AuditLogsPage from "./pages/projects/AuditLogsPage";
+import SeverityPage from "./pages/severity/severity";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
 import * as vendorsApi from './api/vendors';
@@ -426,6 +427,7 @@ export default function MainApp() {
                                                     path="/projects/:projectId/audit-logs"
                                                     element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
                                                 />
+                                                <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
 
 
                                                 {/* Vendors */}

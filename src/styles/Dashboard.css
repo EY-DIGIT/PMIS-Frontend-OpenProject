@@ -37,6 +37,7 @@
   font-size: 22px; font-weight: 900; color: var(--dash-navy);
   padding-left: 14px; position: relative;
 }
+
 .dashboard-wrap .dash-page-title::before {
   content: ""; position: absolute; left: 0; top: 5px; bottom: 5px;
   width: 5px; border-radius: 3px; background: var(--dash-stripe);

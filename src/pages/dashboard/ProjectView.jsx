@@ -17,6 +17,7 @@ import {
   itemRowToTrackRow, extractItemsPayload,
   kpisForProject, projectCardToLegacy,
   range, COLORS, LABELS,
+  BarChart,
 } from "./_shared";
 import "../../styles/Dashboard.css";
 
@@ -280,6 +281,17 @@ function ProjectDetail({ p, navigate }) {
           {!itemsLoading && !itemsError && (
             <div className="dash-donut-wrap">
               <Donut counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
+              <Legend counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
+            </div>
+          )}
+        </div>
+        <div className="dash-card">
+          <div className="dash-card-title">Project Bar Chart<span className="dash-card-sub">{itemsFilter ? `Filtered by ${filterLabel(itemsFilter)}` : "Milestones and activities"}</span></div>
+          {itemsLoading && <div className="dash-empty">Loading items…</div>}
+          {!itemsLoading && itemsError && <div className="dash-empty" style={{ color: "#d4440e" }}>{itemsError}</div>}
+          {!itemsLoading && !itemsError && (
+            <div className="dash-donut-wrap">
+              <BarChart counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
               <Legend counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
             </div>
           )}
