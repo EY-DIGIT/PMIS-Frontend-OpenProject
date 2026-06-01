@@ -745,7 +745,7 @@ export default function ProjectDetailsPage() {
 
       uiStore.hideLoader();
       uiStore.showMessage("Project published successfully", () =>
-        navigate(`/projects/${encodeURIComponent(project.projectId)}/config`)
+        navigate(`/manage-users/${encodeURIComponent(project.projectId)}`)
       );
     };
 
