@@ -52,6 +52,7 @@ export function fromApi(u) {
     vendorId,
     vendorName,
     division: u.division || '',
+    divisionLabel: u.division_label || u.divisionLabel || '',
     divisionOther: u.division_other || u.divisionOther || '',
     phone: u.phoneNumber || u.phone_number || u.phone || '',
     projectMapping,

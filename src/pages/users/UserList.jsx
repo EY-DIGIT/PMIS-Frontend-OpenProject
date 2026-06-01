@@ -261,7 +261,7 @@ export default function UserList() {
                   <td>{u.email}</td>
                   <td>{getRoleMeta(u.orgRole)?.label || u.orgRole || '—'}</td>
                   <td>{u.vendorName}</td>
-                  <td>{u.division}</td>
+                  <td>{u.divisionLabel || u.division}</td>
                   <td>{renderMappingText(u.projectMapping)}</td>
                   <td>
                     <span className={`uidai-pmis-badge ${u.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>
