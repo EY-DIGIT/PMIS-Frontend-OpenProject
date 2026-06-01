@@ -528,8 +528,42 @@ export default function MilestoneConfigPage({ mode }) {
     setCurrentPage(1);
   }
 
-  function toggleEdit() {
-    setEditingConfig((prev) => !prev);
+  async function toggleEdit() {
+    // Entering edit mode — just flip the flag.
+    if (!editingConfig) {
+      setEditingConfig(true);
+      return;
+    }
+
+    // Exiting edit mode (Save click). If the project is still in NEW
+    // (just created, never persisted), promote it to DRAFT using the
+    // same /projects/{id}/save endpoint the first-time onboarding flow
+    // hits. Mirrors finalizeOnboarding's "p.status = DRAFT" step.
+    const currentStatus = String(project?.status || "").toUpperCase();
+    if (currentStatus === "NEW" && project?.projectId && getToken()) {
+      uiStore.showLoader("Saving project...");
+      try {
+        await saveProjectApi(project.projectId);
+        const target =
+          (projectsStore.find ? projectsStore.find(project.projectId) : null) ||
+          apiProjectLocal;
+        if (target) {
+          target.status = "DRAFT";
+          commitUpdate(target);
+        }
+        try { hydrateProjects({ force: true }); } catch (e) {}
+        uiStore.hideLoader();
+        uiStore.showMessage("Project saved as draft.");
+      } catch (err) {
+        uiStore.hideLoader();
+        if (err?.isAuth) return handleAuthError(err);
+        uiStore.showError(err?.message || "Failed to save project");
+        // Stay in edit mode so the user can retry.
+        return;
+      }
+    }
+
+    setEditingConfig(false);
   }
 
   function openNodeModal(kind, modeAction, parentUid, nodeUid) {

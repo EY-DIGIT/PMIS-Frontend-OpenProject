@@ -41,6 +41,7 @@ function mapApiProjectToRow(p) {
     endDate: stripTime(p.endDate),
     actualEndDate: stripTime(p.actualEndDate),
     owner: p.owner || "",
+    ownerLabel: p.ownerLabel || p.owner_label || "",
     vendors: Array.isArray(p.vendors) ? p.vendors : []
   };
 }
@@ -133,6 +134,7 @@ export default function ProjectsListPage() {
         p.description,
         p.status,
         p.owner,
+        p.ownerLabel,
         p.actualEndDate
       ].some((v) => String(v ?? "").toLowerCase().includes(q))
     );
@@ -262,7 +264,7 @@ export default function ProjectsListPage() {
                     <td>{formatDateDisplay(p.startDate)}</td>
                     <td>{formatDateDisplay(p.endDate)}</td>
                     <td>{p.actualEndDate ? formatDateDisplay(p.actualEndDate) : "-"}</td>
-                    <td>{p.owner}</td>
+                    <td>{p.ownerLabel || p.owner}</td>
                   </tr>
                 ))
               )}

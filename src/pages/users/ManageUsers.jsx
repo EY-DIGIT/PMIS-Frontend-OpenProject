@@ -583,6 +583,14 @@ export default function ManageTeam() {
       /* Drop edit mode on a successful save — the dropdowns lock and
          the Submit/Cancel toolbar collapses back to just Edit. */
       setEditMode(false);
+      /* After a successful team save, send the user to milestone config
+         so they can continue configuring the project. Short delay so the
+         success toast is visible before the route changes. */
+      if (projectId) {
+        setTimeout(() => {
+          navigate(`/projects/${encodeURIComponent(projectId)}/config`);
+        }, 1200);
+      }
     } catch (err) {
       showToast(err?.message || 'Failed to save team.', 'error');
     } finally {

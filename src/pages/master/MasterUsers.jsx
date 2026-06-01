@@ -41,7 +41,7 @@ export default function MasterUsers() {
                   <td>{u.email}</td>
                   <td>{u.role}</td>
                   <td>{u.vendorName}</td>
-                  <td>{u.division}</td>
+                  <td>{u.divisionLabel || u.division}</td>
                   <td>{renderMappingText(u.projectMapping)}</td>
                   <td>
                     <span className={`uidai-pmis-badge ${u.status === 'Active' ? 'uidai-pmis-badge-green' : 'uidai-pmis-badge-red'}`}>
