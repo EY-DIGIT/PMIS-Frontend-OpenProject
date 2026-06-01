@@ -120,46 +120,46 @@ const ResetPassword = () => {
   return (
     <div className="uidai-rp-page">
       {/* HEADER */}
-      <header className="uidai-rp-site-header" role="banner">
-        <div className="uidai-rp-a11y-strip">
-          <span className="uidai-rp-a11y-label" aria-hidden="true">Text Size:</span>
-          <div className="uidai-rp-font-resizer" role="group" aria-label="Adjust text size">
+      <header className="site-header" role="banner">
+        <div className="header-accessibility-strip">
+          <span className="a11y-label" aria-hidden="true">Text Size:</span>
+          <div className="font-resizer" role="group" aria-label="Adjust text size">
             <button
               type="button"
+              className="fr-plus"
               aria-label="Increase text size"
               title="Increase text size"
               aria-pressed={zoomIdx === STEPS.length - 1}
               onClick={() => setZoomIdx((i) => Math.min(STEPS.length - 1, i + 1))}
-              style={{ fontSize: 15 }}
             >+A</button>
             <button
               type="button"
+              className="fr-reset"
               aria-label="Reset text size to default"
               title="Reset text size"
               aria-pressed={zoomIdx === DEFAULT_IDX}
               onClick={() => setZoomIdx(DEFAULT_IDX)}
-              style={{ fontSize: 13 }}
             >A</button>
             <button
               type="button"
+              className="fr-minus"
               aria-label="Decrease text size"
               title="Decrease text size"
               aria-pressed={zoomIdx === 0}
               onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}
-              style={{ fontSize: 11 }}
             >-A</button>
           </div>
         </div>
-        <div className="uidai-rp-header-main">
-          <div className="uidai-rp-header-brand">
+        <div className="header-main">
+          <div className="header-brand">
             <img src={aadhaarLogo} alt="Aadhaar logo" />
-            <div className="uidai-rp-header-brand-text">
-              <span className="uidai-rp-header-brand-hi-1" lang="hi">मेरा आधार</span>
-              <span className="uidai-rp-header-brand-hi-2" lang="hi">मेरी पहचान</span>
+            <div className="header-brand-text">
+              <span className="header-brand-hi-1" lang="hi">मेरा आधार</span>
+              <span className="header-brand-hi-2" lang="hi">मेरी पहचान</span>
             </div>
           </div>
-          <h1 className="uidai-rp-header-title">UIDAI Automation Governance Tool</h1>
-          <div className="uidai-rp-header-authority">
+          <h1 className="header-title">UIDAI Automation Governance Tool</h1>
+          <div className="header-authority">
             Unique Identification<br />Authority of India
           </div>
         </div>
