@@ -528,22 +528,6 @@ function ResultsSection({ analysisData }) {
       </p>
       <FormulaCards totalDays={metadata.totalProjectDays} />
 
-      <h4 className="cpa-section-title cpa-subhead">Activity Schedule</h4>
-      <p className="cpa-section-hint">
-        Each row shows one activity with its planned duration, its effective duration including delays, and the four day-numbers plus slack from the formulas above.
-      </p>
-      <ScheduleTable activitySchedule={activitySchedule} />
-
-      <h4 className="cpa-section-title cpa-subhead">Calculation Steps — Activity by Activity</h4>
-      <p className="cpa-section-hint">
-        For each activity the formulas are shown with actual values substituted in. Red boxes are on the critical path (slack = 0).
-      </p>
-      <div className="cpa-calc-grid">
-        {activitySchedule.map(a => (
-          <CalculationCard key={a.activityId} a={a} />
-        ))}
-      </div>
-
       <h4 className="cpa-section-title cpa-subhead">Flow Diagram</h4>
       <p className="cpa-section-hint">
         Each box is one activity. Arrows show what depends on what. Red boxes are on the critical path.
@@ -560,6 +544,22 @@ function ResultsSection({ analysisData }) {
           <span className="cpa-legend-swatch cpa-legend-critical"></span>
           On critical path — must finish on time (slack = 0)
         </span>
+      </div>
+
+      <h4 className="cpa-section-title cpa-subhead">Activity Schedule</h4>
+      <p className="cpa-section-hint">
+        Each row shows one activity with its planned duration, its effective duration including delays, and the four day-numbers plus slack from the formulas above.
+      </p>
+      <ScheduleTable activitySchedule={activitySchedule} />
+
+      <h4 className="cpa-section-title cpa-subhead">Calculation Steps — Activity by Activity</h4>
+      <p className="cpa-section-hint">
+        For each activity the formulas are shown with actual values substituted in. Red boxes are on the critical path (slack = 0).
+      </p>
+      <div className="cpa-calc-grid">
+        {activitySchedule.map(a => (
+          <CalculationCard key={a.activityId} a={a} />
+        ))}
       </div>
     </div>
   );
