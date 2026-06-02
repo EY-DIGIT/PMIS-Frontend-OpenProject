@@ -121,7 +121,7 @@ export default function ProjectView() {
   return (
     <div className="dashboard-wrap">
       <div className="dash-page-head">
-        <div className="dash-page-title">Project View</div>
+        <div />
         <button type="button" className="dash-primary-btn" onClick={handleRefresh}>Refresh</button>
       </div>
 

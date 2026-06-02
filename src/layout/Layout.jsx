@@ -41,9 +41,21 @@ function resolveNavTitle(segments) {
   const first = segments[0];
   if (!first) return null;
 
-  /* Pages that render their own in-page header (dashboard cards,
-     profile avatar block) opt out of the global navbar title. */
-  if (first === "dashboard" || first === "profile") return null;
+  /* Profile page renders its own avatar/header block — opt out. */
+  if (first === "profile") return null;
+
+  /* Dashboard now uses the global navbar title instead of an in-page
+     heading. Sub-routes (summary / project / org) get their own
+     label so users always know which view they're on. */
+  if (first === "dashboard") {
+    if (segments[1] === "project") {
+      return { label: "Project View", tooltip: "Per-project dashboard rollups." };
+    }
+    if (segments[1] === "org") {
+      return { label: "Organization View", tooltip: "Per-organization dashboard rollups." };
+    }
+    return { label: "Dashboard", tooltip: "Cross-project KPIs, delays and rollups." };
+  }
 
   if (first === "projects") {
     // /projects                        → list
@@ -297,7 +309,15 @@ export default function Layout({ children }) {
         <div
           className="pmis-profile"
           onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}
-          style={{ display: "flex", alignItems: "center", gap: "10px" }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            /* When the left menu/home block is hidden (director_admin)
+               there's no flex sibling to push the profile to the
+               far right via space-between — pin it explicitly. */
+            marginLeft: isDashboardOnly ? "auto" : undefined
+          }}
         >
           <FiUser size={ICON_SIZE} aria-hidden="true" />
           <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>

@@ -107,7 +107,10 @@ export default function SummaryView() {
   return (
     <div className="dashboard-wrap">
       <div className="dash-page-head">
-        <div className="dash-page-title">Dashboard</div>
+        {/* Title moved to the global navbar (see resolveNavTitle in
+            Layout.jsx). Empty spacer keeps Refresh right-aligned via
+            the existing .dash-page-head space-between rule. */}
+        <div />
         <button type="button" className="dash-primary-btn" onClick={handleRefresh}>Refresh</button>
       </div>
 

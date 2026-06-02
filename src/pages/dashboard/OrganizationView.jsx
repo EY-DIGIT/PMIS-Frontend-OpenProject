@@ -38,7 +38,7 @@ export default function OrganizationView() {
   return (
     <div className="dashboard-wrap">
       <div className="dash-page-head">
-        <div className="dash-page-title">Organization View</div>
+        <div />
         <button type="button" className="dash-primary-btn" onClick={handleRefresh}>Refresh</button>
       </div>
 
