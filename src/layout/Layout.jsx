@@ -276,24 +276,22 @@ export default function Layout({ children }) {
 
       {/* ── Navbar ── */}
       <div className="pmis-navbar">
-        <div className="pmis-menu-home-block">
-          {!isDashboardOnly && (
-            <>
-              <span
-                onClick={() => setCollapsed((c) => !c)}
-                style={{ display: "flex", alignItems: "center", gap: "10px" }}
-              >
-                <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
-              </span>
-              <span
-                onClick={() => navigate("/")}
-                style={{ display: "flex", alignItems: "center", gap: "10px" }}
-              >
-                <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
-              </span>
-            </>
-          )}
-        </div>
+        {!isDashboardOnly && (
+          <div className="pmis-menu-home-block">
+            <span
+              onClick={() => setCollapsed((c) => !c)}
+              style={{ display: "flex", alignItems: "center", gap: "10px" }}
+            >
+              <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
+            </span>
+            <span
+              onClick={() => navigate("/")}
+              style={{ display: "flex", alignItems: "center", gap: "10px" }}
+            >
+              <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
+            </span>
+          </div>
+        )}
         <NavCenterTitle />
         <NavProjectName />
         <div
