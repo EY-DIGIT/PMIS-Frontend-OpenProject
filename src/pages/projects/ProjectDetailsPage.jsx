@@ -958,7 +958,10 @@ export default function ProjectDetailsPage() {
       key: "manage-teams",
       label: "Manage Teams",
       onClick: () => navigate(`/manage-users/${project.projectId}`),
-      visible: !!manageUsersTarget
+      /* Team assignment is only meaningful once the project is
+         PUBLISHED — milestones/activities don't exist as a stable team
+         surface until then. Hide the entry point on drafts. */
+      visible: isPubBase && !!manageUsersTarget
     },
     {
       key: "critical-path",
