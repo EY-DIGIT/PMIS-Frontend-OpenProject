@@ -19,6 +19,7 @@
 
 import { API_BASE, tokenStore, ApiError } from "./client";
 import { getToken } from "./auth";
+import { readRoleFromUser } from "../auth/roleNormalize";
 
 const PATH = "/activity-workflow/activities/process/_transition";
 
@@ -37,29 +38,17 @@ function roleLabel(code) {
 /* Pick the SINGLE current role of the logged-in user. Backend wants
    exactly one entry — the role they signed in with — not every elevation
    flag the user object happens to carry. Priority order:
-     1. First entry of `user.roles` (array, if login supplied one)
-     2. user.role / org_role / orgRole / roleCode string field
-     3. is_super_admin boolean → "super_admin"
-     4. is_admin boolean → "admin"
+     1. orgRole / org_role / role / roles fields via readRoleFromUser
+        (tolerates string, array-of-strings, array-of-objects shapes).
+     2. roleCode legacy string field.
+     3. is_super_admin boolean → "super_admin".
+     4. is_admin boolean → "admin".
    Returns a one-element array, or [] if nothing resolves. */
 function deriveRoles(user) {
-  if (Array.isArray(user.roles) && user.roles.length > 0) {
-    const r = user.roles[0];
-    if (typeof r === "string") {
-      return [{ code: r, name: roleLabel(r) }];
-    }
-    if (r && typeof r === "object") {
-      const code = r.code || r.roleCode || r.role || "";
-      if (code) return [{ code, name: r.name || r.roleName || roleLabel(code) }];
-    }
-  }
-  const single =
-    (typeof user.role === "string" && user.role) ||
-    user.org_role ||
-    user.orgRole ||
-    user.roleCode ||
-    "";
-  if (single) return [{ code: single, name: roleLabel(single) }];
+  const normalized = readRoleFromUser(user);
+  if (normalized) return [{ code: normalized, name: roleLabel(normalized) }];
+  const legacy = (typeof user.roleCode === "string" && user.roleCode) || "";
+  if (legacy) return [{ code: legacy, name: roleLabel(legacy) }];
   if (user.is_super_admin || user.isSuperAdmin) {
     return [{ code: "super_admin", name: "Super Admin" }];
   }

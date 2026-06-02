@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import * as auth from "../api/auth";
 import * as usersApi from "../api/users";
 import { getRoleMeta } from "../auth/permissions";
+import { readRoleFromUser } from "../auth/roleNormalize";
 import "../styles/Profile.css";
 
 const DIVISION_OPTIONS = [
@@ -77,10 +78,11 @@ export default function Profile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Role shown on this page = whatever orgRole the backend returned on
-  // login / verifyOtp / me. Same source the User Details page uses, so
-  // the two screens stay in sync.
-  const orgRoleKey = user?.orgRole || "";
+  // Role shown on this page = whatever the backend returned on
+  // login / verifyOtp / me. The shape varies (string / array of
+  // role-assignment objects / single object) — readRoleFromUser
+  // collapses all of them to a single role key.
+  const orgRoleKey = readRoleFromUser(user) || "";
   const role = getRoleMeta(orgRoleKey)?.label || orgRoleKey || "—";
   const heroDivision = useMemo(() => {
     const d = (user?.division || "").toLowerCase();

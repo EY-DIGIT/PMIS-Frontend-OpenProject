@@ -1,5 +1,6 @@
 import { api } from './client';
 import { ENDPOINTS } from './endpoint';
+import { normalizeRoleValue } from '../auth/roleNormalize';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
@@ -48,7 +49,12 @@ export function fromApi(u) {
     employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',
     role: u.admin ? 'Admin' : (u.role || 'Viewer'),
-    orgRole: u.orgRole || u.org_role || '',
+    /* The backend can hand back org_role as a string OR an array of
+       {role_name, scope, role_id, ...} objects. Collapse to a single
+       string so the Users page can render / filter on it directly.
+       See src/auth/roleNormalize.js for precedence rules (global
+       scope beats project scope; rolesConfig.hierarchy breaks ties). */
+    orgRole: normalizeRoleValue(u.orgRole) || normalizeRoleValue(u.org_role) || '',
     vendorId,
     vendorName,
     division: u.division || '',

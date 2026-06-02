@@ -1,67 +1,20 @@
 import { useSyncExternalStore } from 'react';
 import rolesConfig from '../config/roles.json';
 import { tokenStore } from '../api/client';
+import { readRoleFromUser } from './roleNormalize';
 
 const listeners = new Set();
-
-// Pick the highest-priority role name out of an array of candidates,
-// using rolesConfig.hierarchy as the precedence order (strongest
-// first). Falls back to the first present name when none of the
-// candidates appear in the hierarchy, so we never silently drop a
-// brand-new role just because the config wasn't updated.
-function pickStrongest(names) {
-  if (!names || !names.length) return null;
-  for (const candidate of rolesConfig.hierarchy || []) {
-    if (names.includes(candidate)) return candidate;
-  }
-  return names[0];
-}
-
-// Normalize whatever the backend put on a role field into a single
-// string role name. Tolerates:
-//   - plain string                   → "director_admin"
-//   - array of strings               → ["director_admin", ...]
-//   - array of objects (login API)   → [{ role_name: "director_admin", ... }]
-//   - single object                  → { role_name: "director_admin", ... }
-function normalizeRoleValue(raw) {
-  if (!raw) return null;
-  if (typeof raw === 'string') return raw;
-  if (Array.isArray(raw)) {
-    const names = raw
-      .map((entry) => {
-        if (!entry) return null;
-        if (typeof entry === 'string') return entry;
-        return entry.role_name || entry.roleName || entry.name || null;
-      })
-      .filter(Boolean);
-    return pickStrongest(names);
-  }
-  if (typeof raw === 'object') {
-    return raw.role_name || raw.roleName || raw.name || null;
-  }
-  return null;
-}
 
 // Read the active role from the user object the backend returned on
 // login / verify-otp / refresh. Falls back to the configured default
 // when nobody is logged in.
 //
-// The role lives on different keys depending on which endpoint produced
-// the user object — login may emit `org_role` (snake_case) or `role`,
-// while the users-list endpoint normalizes to `orgRole`. As of the
-// new login response the role can also arrive as an *array* of role
-// assignments (e.g. [{role_name: "director_admin", scope: "global"}]);
-// normalizeRoleValue collapses all of these to a single string.
-//
-// Without this fallback, a director_admin logging in with the array
-// shape was silently bucketed into `defaultRole` (super_admin) and
-// saw the full sidebar instead of the dashboard-only chrome.
+// All shape tolerance (array of role-assignment objects, plain string,
+// scope precedence, etc.) lives in readRoleFromUser → see
+// src/auth/roleNormalize.js for the rules.
 function readRoleFromStore() {
   const user = tokenStore.getUser();
-  const role =
-    normalizeRoleValue(user?.orgRole) ||
-    normalizeRoleValue(user?.org_role) ||
-    normalizeRoleValue(user?.role);
+  const role = readRoleFromUser(user);
   if (role && rolesConfig.roles[role]) return role;
   return rolesConfig.defaultRole || 'project_member';
 }
