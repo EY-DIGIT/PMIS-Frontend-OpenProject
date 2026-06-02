@@ -16,6 +16,19 @@ function normalizeServerItems(payload) {
   }));
 }
 
+function normalizeLdBands(payload) {
+  if (!payload) return [];
+  const raw = payload.data ?? payload ?? {};
+  const elements = raw._embedded?.elements ?? raw.bands ?? raw.elements ?? raw;
+  const list = Array.isArray(elements) ? elements : [];
+  return list.map((it, idx) => ({
+    id: it.id ?? it.band_id ?? it.bandId ?? null,
+    points_threshold: Number(it.points_threshold ?? it.pointsThreshold ?? it.points ?? 0),
+    ld_percent: Number(it.ld_percent ?? it.ldPercent ?? it.ld ?? 0),
+    label: String(it.label ?? it.name ?? `Band ${idx}`),
+  }));
+}
+
 export default function SeverityPage() {
   const { projectId } = useParams();
   const [rows, setRows] = useState([{ level: 0, points: 0, label: 'Level 0' }]);
@@ -26,8 +39,16 @@ export default function SeverityPage() {
   const [lastStatus, setLastStatus] = useState(null);
   const [lastHeaders, setLastHeaders] = useState({});
   const [editMode, setEditMode] = useState(false);
+  // LD bands state
+  const [ldRows, setLdRows] = useState([]);
+  const [ldLoading, setLdLoading] = useState(false);
+  const [ldServerPresent, setLdServerPresent] = useState(false);
+  const [ldEditMode, setLdEditMode] = useState(false);
+  const [seedLoading, setSeedLoading] = useState(false);
+  const [seedResult, setSeedResult] = useState(null);
 
   const basePath = () => `/contracts/api/v3/projects/${encodeURIComponent(projectId)}/severity-master`;
+  const baseLdPath = () => `/contracts/api/v3/projects/${encodeURIComponent(projectId)}/ld-bands`;
 
   async function captureResponse(res) {
     const text = await res.text().catch(() => "");
@@ -76,8 +97,39 @@ export default function SeverityPage() {
     }
   }
 
+  async function loadLdBands() {
+    if (!projectId) return;
+    setLdLoading(true);
+    try {
+      const res = await authorizedFetch(baseLdPath(), { method: 'GET' });
+      const text = await captureResponse(res);
+      if (res.ok) {
+        const payload = text ? JSON.parse(text) : null;
+        const items = normalizeLdBands(payload?.data ?? payload ?? {});
+        setLdRows(items.length ? items : []);
+        setLdServerPresent(!!items.length);
+        setLdEditMode(false);
+        return;
+      }
+      if (res.status === 404) {
+        setLdRows([]);
+        setLdServerPresent(false);
+        setLdEditMode(false);
+        return;
+      }
+      const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
+      const msg = parsedErr?.message || parsedErr?.error?.message || `Request failed (${res.status})`;
+      uiStore.showError(msg);
+    } catch (err) {
+      uiStore.showError(err?.message || String(err));
+    } finally {
+      setLdLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadSeverity();
+    loadLdBands();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -177,6 +229,120 @@ export default function SeverityPage() {
     }
   }
 
+    // LD helpers and save
+    function updateLdRow(index, field, value) {
+      setLdRows((prev) => {
+        const copy = prev.map((r) => ({ ...r }));
+        copy[index][field] = field === 'points_threshold' || field === 'ld_percent' ? Number(value) : value;
+        return copy;
+      });
+    }
+
+    function addLdRow() {
+      setLdRows((prev) => [...prev, { id: null, points_threshold: 0, ld_percent: 100, label: `Band ${prev.length + 1}` }]);
+    }
+
+    function removeLdRow(index) {
+      setLdRows((prev) => prev.filter((_, i) => i !== index));
+    }
+
+    function validateLdRows() {
+      for (const item of ldRows) {
+        if (Number.isNaN(item.points_threshold)) return 'Points threshold must be a number.';
+        if (Number.isNaN(item.ld_percent) || item.ld_percent < 0 || item.ld_percent > 100) return 'LD percent must be 0–100.';
+        if (!item.label?.trim()) return 'Each LD band requires a label.';
+      }
+      return null;
+    }
+
+    async function doSaveLd() {
+      if (!projectId) return uiStore.showError('Missing project id');
+      const validationError = validateLdRows();
+      if (validationError) return uiStore.showError(validationError);
+
+      uiStore.showLoader('Saving LD bands');
+      try {
+        const normalized = ldRows.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: String(r.label) }));
+        if (!ldServerPresent) {
+          const res = await authorizedFetch(baseLdPath(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ bands: normalized }),
+          });
+          const text = await captureResponse(res);
+          if (res.ok) {
+            setLdServerPresent(true);
+            setLdEditMode(false);
+            uiStore.hideLoader();
+            uiStore.showMessage('LD bands saved successfully');
+            await loadLdBands();
+            return;
+          }
+          const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
+          const msg = parsedErr?.message || parsedErr?.error?.message || `Save failed (${res.status})`;
+          uiStore.hideLoader();
+          uiStore.showError(msg);
+          return;
+        }
+
+        const toPatch = [];
+        const toCreate = [];
+        for (const r of ldRows) {
+          if (r.id) toPatch.push(r);
+          else toCreate.push(r);
+        }
+
+        await Promise.all(toPatch.map(async (item) => {
+          const res = await authorizedFetch(`${baseLdPath()}/${item.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ points_threshold: Number(item.points_threshold), ld_percent: Number(item.ld_percent), label: item.label }),
+          });
+          await res.text().catch(() => '');
+        }));
+
+        if (toCreate.length) {
+          await authorizedFetch(baseLdPath(), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ bands: toCreate.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: r.label })) }) });
+        }
+
+        uiStore.hideLoader();
+        setLdEditMode(false);
+        uiStore.showMessage('LD bands saved successfully');
+        await loadLdBands();
+      } catch (err) {
+        uiStore.hideLoader();
+        uiStore.showError(err?.message || 'Failed to save LD bands');
+      }
+    }
+
+    async function seedMasterDefaults() {
+      if (!projectId) return uiStore.showError('Missing project id');
+      setSeedLoading(true);
+      setSeedResult(null);
+      try {
+        const res = await authorizedFetch(`/contracts/api/v3/projects/${encodeURIComponent(projectId)}/seed-master-defaults`, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        });
+        const text = await captureResponse(res);
+        const payload = text ? JSON.parse(text) : null;
+        if (res.ok) {
+          setSeedResult( payload ?? null);
+          uiStore.showMessage('Seed defaults completed successfully');
+          await loadSeverity();
+          await loadLdBands();
+          return;
+        }
+        const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
+        const msg = parsedErr?.message || parsedErr?.error?.message || `Seed failed (${res.status})`;
+        uiStore.showError(msg);
+      } catch (err) {
+        uiStore.showError(err?.message || 'Failed to seed master defaults');
+      } finally {
+        setSeedLoading(false);
+      }
+    }
+
   return (
     <div className="severity-page">
       <h1 className="severity-title">Severity</h1>
@@ -235,6 +401,82 @@ export default function SeverityPage() {
           </>
         )}
       </div>
+      
+      <div className="severity-card" style={{ marginTop: 20 }}>
+        <h3>LD Bands</h3>
+        {!ldEditMode ? (
+          <>
+            <div className="severity-table">
+              <div className="severity-header">
+                <div>Points Threshold</div>
+                <div>LD Percent</div>
+                <div>Label</div>
+              </div>
+              {ldRows.length === 0 && !ldLoading ? (
+                <div className="severity-row"><div colSpan={3}>No LD bands configured.</div></div>
+              ) : ldRows.map((b, i) => (
+                <div key={b.id || i} className="severity-row">
+                  <div>{b.points_threshold}</div>
+                  <div>{b.ld_percent}</div>
+                  <div>{b.label}</div>
+                </div>
+              ))}
+            </div>
+            <div className="severity-actions" style={{ marginTop: '20px' }}>
+              <button className="btn edit" onClick={() => setLdEditMode(true)} disabled={ldLoading}>Edit</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="severity-table">
+              <div className="severity-header">
+                <div>Points Threshold</div>
+                <div>LD Percent</div>
+                <div>Label</div>
+                <div></div>
+              </div>
+              {ldRows.map((b, i) => (
+                <div key={b.id || i} className="severity-row">
+                  <input type="number" value={b.points_threshold} onChange={(e) => updateLdRow(i, 'points_threshold', e.target.value)} />
+                  <input type="number" value={b.ld_percent} min={0} max={100} onChange={(e) => updateLdRow(i, 'ld_percent', e.target.value)} />
+                  <input type="text" value={b.label || ''} onChange={(e) => updateLdRow(i, 'label', e.target.value)} />
+                  <button className="remove" onClick={() => removeLdRow(i)}>×</button>
+                </div>
+              ))}
+              <button className="add" onClick={addLdRow}>+ Add Band</button>
+            </div>
+            <div className="severity-actions" style={{ marginTop: '20px' }}>
+              <button className="btn cancel" onClick={() => setLdEditMode(false)} disabled={ldLoading}>Cancel</button>
+              <button className="btn save" onClick={doSaveLd} disabled={ldLoading}>Save</button>
+            </div>
+          </>
+        )}
+      </div>
+{/* this is for severity and ld calculation for future use, currently hidden  */}
+      {/* <div className="severity-card" style={{ marginTop: 20 }}>
+        <h3>Seed Master Defaults</h3>
+        <p>Use this to create default severity levels and LD bands for the project.</p>
+        <div className="severity-actions" style={{ marginTop: '20px' }}>
+          <button className="btn save" onClick={seedMasterDefaults} disabled={seedLoading}>
+            {seedLoading ? 'Seeding…' : 'Seed Master Defaults'}
+          </button>
+        </div>
+        {seedResult && (
+          <div className="severity-table" style={{ marginTop: 16 }}>
+            <div className="severity-header">
+              <div>Severity Levels</div>
+              <div>LD Bands</div>
+              <div>Message</div>
+            </div>
+            <div className="severity-row">
+              <div>{seedResult?.data?.severity_levels ?? seedResult.severityLevels ?? '-'}</div>
+              <div>{seedResult?.data?.ld_bands ?? seedResult.ldBands ?? '-'}</div>
+              <div>{seedResult.message ?? seedResult.message ?? ''}</div>
+            </div>
+          </div>
+        )}
+      </div> */}
+
     </div>
   );
 }

@@ -1,5 +1,6 @@
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import DependencyPicker from "../DependencyPicker";
 import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
@@ -46,6 +47,7 @@ import {
   downloadAttachment
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
+import { authorizedFetch } from "../../../api/client";
 import { useData } from "../../../data/DataContext";
 
 const TITLE_MAP = {
@@ -652,6 +654,8 @@ export default function NodeModal({
     }
   }
 
+  const navigate = useNavigate();
+
   const dis = editable ? false : true;
   // Edit mode: disable Save until the user actually edits a non-comment
   // field. Add mode: leave Save enabled (the user is creating something
@@ -745,6 +749,17 @@ export default function NodeModal({
   return (
     <div className="uidai-modal">
       <div className="uidai-modal__box uidai-modal__box--wide" style={boxStyle}>
+        {kind === "activity" && node?.apiId && (
+          <button
+            type="button"
+            aria-label="SLA Mapping"
+            title="Manage SLA activity mappings"
+            onClick={() => navigate("/activity-slas")}
+            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 }}
+          >
+            SLA Mapping
+          </button>
+        )}
         <button
           type="button"
           aria-label={fullscreen ? "Exit full screen" : "Full screen"}
