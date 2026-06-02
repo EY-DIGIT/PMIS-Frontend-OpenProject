@@ -1,11 +1,9 @@
 /* ══════════════════════════════════════════════════════════════════
-   CreateMeetingPage.jsx — 2-step wizard ported from the HTML
-   reference (showStep1 + showStep2). The draft survives between the
-   two steps because both are rendered by this single component.
-
-   Step 1: pick a project (or General) + meeting type.
-   Step 2: title, agenda, date, start/end time, location, attendees,
-           external attendees.
+   CreateMeetingPage.jsx — single-page Create Meeting form. Project +
+   Activities sit at the top of the form (above Meeting Title), and
+   meeting type is no longer user-selectable; new meetings default to
+   "Steering" so the type field on the underlying model stays
+   populated for badges/filters elsewhere.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useMemo, useState } from "react";
@@ -13,38 +11,14 @@ import { useNavigate } from "react-router-dom";
 import {
   PROJECTS,
   USERS,
-  TYPE_META,
   activitiesOf,
   projectById,
   createMeeting
 } from "../../data/meetingsMock";
-import { TypeBadge, useToast } from "./_shared";
+import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
-function Stepper({ active }) {
-  const steps = [
-    [1, "Link & Type"],
-    [2, "Details"]
-  ];
-  return (
-    <div className="stepper">
-      {steps.map(([n, label], i) => {
-        const cls =
-          n < active ? "step done" : n === active ? "step active" : "step";
-        const inner = n < active ? "✓" : n;
-        return (
-          <React.Fragment key={n}>
-            {i > 0 && <span className="step-sep">›</span>}
-            <span className={cls}>
-              <span className="n">{inner}</span>
-              {label}
-            </span>
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-}
+const DEFAULT_TYPE = "Steering";
 
 /* Grouped checkbox multi-select used for Activities and Attendees. */
 function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }) {
@@ -213,12 +187,10 @@ export default function CreateMeetingPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
-  const [step, setStep] = useState(1);
   const [draft, setDraft] = useState({
     link: "project",
     projectId: "",
     activityIds: [],
-    type: "Steering",
     title: "",
     date: "",
     start: "",
@@ -234,7 +206,6 @@ export default function CreateMeetingPage() {
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
-  /* ───── Step 1 wiring ───── */
   const onLinkSelect = (v) => {
     if (v === "__general" || v === "") {
       updateDraft({ link: "general", projectId: "", activityIds: [] });
@@ -271,20 +242,6 @@ export default function CreateMeetingPage() {
     }));
   }, []);
 
-  const step1Continue = () => {
-    if (draft.link === "project" && !draft.projectId) {
-      show("Select a project, or choose General.", "warn");
-      return;
-    }
-    if (!draft.type) {
-      show("Choose a meeting type.", "warn");
-      return;
-    }
-    setStep(2);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  /* ───── Step 2 wiring ───── */
   const validateTimes = () => {
     const bad = !!(draft.start && draft.end && draft.end <= draft.start);
     setErrors((e) => ({ ...e, time: bad }));
@@ -308,6 +265,10 @@ export default function CreateMeetingPage() {
   const submit = () => {
     let ok = true;
     const nextErr = { date: false, time: false };
+    if (draft.link === "project" && !draft.projectId) {
+      show("Select a project, or choose General.", "warn");
+      ok = false;
+    }
     if (!draft.date) { nextErr.date = true; ok = false; }
     if (!validateTimes()) { nextErr.time = true; ok = false; }
     if (!draft.title.trim()) { show("Meeting Title is required.", "warn"); ok = false; }
@@ -320,7 +281,7 @@ export default function CreateMeetingPage() {
 
     const created = createMeeting({
       title: draft.title.trim(),
-      type: draft.type,
+      type: DEFAULT_TYPE,
       link: draft.link,
       projectId: draft.link === "project" ? draft.projectId : null,
       activityIds: draft.link === "project" ? draft.activityIds : [],
@@ -346,299 +307,254 @@ export default function CreateMeetingPage() {
           <div className="pm-title">Create a New Meeting</div>
         </div>
       </div>
-      <Stepper active={step} />
 
-      {step === 1 && (
-        <>
-          <div className="card">
-            <div className="grid">
-              <div className="field">
-                <label htmlFor="projSel">
-                  Project <span className="required">*</span>
-                </label>
-                <select
-                  id="projSel"
-                  value={
-                    draft.link === "general" ? "__general" : draft.projectId || ""
-                  }
-                  onChange={(e) => onLinkSelect(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Select…
-                  </option>
-                  <option value="__general">
-                    General — not linked to a project
-                  </option>
-                  <optgroup label="Projects">
-                    {PROJECTS.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.id} — {p.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </div>
-              {draft.link === "project" && draft.projectId && (
-                <div className="field">
-                  <label>
-                    Activities <span className="muted">(optional)</span>
-                  </label>
-                  <GroupedMultiSelect
-                    groups={activityGroups}
-                    selected={draft.activityIds}
-                    onChange={(sel) => updateDraft({ activityIds: sel })}
-                    placeholder="Select activities…"
-                  />
-                </div>
-              )}
-            </div>
+      <div className="card">
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            gap: 10,
+            alignItems: "center",
+            marginBottom: 16
+          }}
+        >
+          <div className="card-title" style={{ margin: 0 }}>
+            Create a New Meeting Invite
           </div>
+          {draft.link === "general" ? (
+            <span className="pill-link pill-general">General Meeting</span>
+          ) : draft.projectId ? (
+            <span className="pill-link">
+              {draft.projectId} — {projectForTag ? projectForTag.name : ""}
+            </span>
+          ) : null}
+        </div>
 
-          <div className="card">
-            <div className="card-title">
-              Meeting Type <span className="required">*</span>
-            </div>
-            <div className="type-seg">
-              {Object.entries(TYPE_META).map(([t, meta]) => (
-                <div
-                  key={t}
-                  className={`type-opt${draft.type === t ? " active" : ""}`}
-                  onClick={() => updateDraft({ type: t })}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      updateDraft({ type: t });
-                    }
-                  }}
-                >
-                  <span className="type-radio" />
-                  <span className="type-body">
-                    <span className="type-name">{t}</span>
-                    <span className="type-desc">{meta.desc}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-actions" style={{ padding: "0 14px" }}>
-            <button type="button" className="btn" onClick={step1Continue}>
-              Continue →
-            </button>
-            <button
-              type="button"
-              className="btn cancel"
-              onClick={() => navigate("/meetings")}
+        <div className="grid">
+          <div className="field">
+            <label htmlFor="projSel">
+              Project <span className="required">*</span>
+            </label>
+            <select
+              id="projSel"
+              value={
+                draft.link === "general" ? "__general" : draft.projectId || ""
+              }
+              onChange={(e) => onLinkSelect(e.target.value)}
             >
-              Cancel
-            </button>
+              <option value="" disabled>
+                Select…
+              </option>
+              <option value="__general">
+                General — not linked to a project
+              </option>
+              <optgroup label="Projects">
+                {PROJECTS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.id} — {p.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
           </div>
-        </>
-      )}
-
-      {step === 2 && (
-        <div className="card">
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-              gap: 10,
-              alignItems: "center",
-              marginBottom: 16
-            }}
-          >
-            <div className="card-title" style={{ margin: 0 }}>
-              Create a New Meeting Invite <TypeBadge type={draft.type} />
-            </div>
-            {draft.link === "general" ? (
-              <span className="pill-link pill-general">General Meeting</span>
-            ) : (
-              <span className="pill-link">
-                {draft.projectId} — {projectForTag ? projectForTag.name : ""}
+          <div className="field">
+            <label>
+              Activities{" "}
+              <span className="muted">
+                {draft.link === "project" ? "(optional)" : "(project required)"}
               </span>
+            </label>
+            {draft.link === "project" && draft.projectId ? (
+              <GroupedMultiSelect
+                groups={activityGroups}
+                selected={draft.activityIds}
+                onChange={(sel) => updateDraft({ activityIds: sel })}
+                placeholder="Select activities…"
+              />
+            ) : (
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "#f3f6fb",
+                  color: "var(--text-muted)",
+                  padding: "12px",
+                  fontSize: 13.5
+                }}
+              >
+                {draft.link === "general"
+                  ? "Not applicable for a General meeting."
+                  : "Select a project first…"}
+              </div>
             )}
           </div>
 
-          <div className="grid">
-            <div className="field">
-              <label htmlFor="mTitle">
-                Meeting Title <span className="required">*</span>
-              </label>
-              <input
-                id="mTitle"
-                type="text"
-                maxLength={120}
-                value={draft.title}
-                onChange={(e) => updateDraft({ title: e.target.value })}
-                placeholder="e.g. Q2 Steering Committee Review"
-              />
+          <div className="field">
+            <label htmlFor="mTitle">
+              Meeting Title <span className="required">*</span>
+            </label>
+            <input
+              id="mTitle"
+              type="text"
+              maxLength={120}
+              value={draft.title}
+              onChange={(e) => updateDraft({ title: e.target.value })}
+              placeholder="e.g. Q2 Steering Committee Review"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="mDate">
+              Meeting Date <span className="required">*</span>
+            </label>
+            <input
+              id="mDate"
+              type="date"
+              value={draft.date}
+              onChange={(e) => {
+                updateDraft({ date: e.target.value });
+                setErrors((er) => ({ ...er, date: false }));
+              }}
+            />
+            <div className={`field-err${errors.date ? " show" : ""}`}>
+              Please select a date.
             </div>
-            <div className="field">
-              <label htmlFor="mDate">
-                Meeting Date <span className="required">*</span>
-              </label>
-              <input
-                id="mDate"
-                type="date"
-                value={draft.date}
-                onChange={(e) => {
-                  updateDraft({ date: e.target.value });
-                  setErrors((er) => ({ ...er, date: false }));
-                }}
-              />
-              <div className={`field-err${errors.date ? " show" : ""}`}>
-                Please select a date.
+          </div>
+
+          <div className="field full">
+            <label htmlFor="mDesc">Meeting Description / Agenda</label>
+            <textarea
+              id="mDesc"
+              maxLength={1000}
+              value={draft.agenda}
+              onChange={(e) => updateDraft({ agenda: e.target.value })}
+              placeholder="Agenda and items to be discussed…"
+            />
+          </div>
+
+          <div className="field full">
+            <label>Attendees</label>
+            <GroupedMultiSelect
+              groups={attendeeGroups}
+              selected={draft.attendees}
+              onChange={(sel) => updateDraft({ attendees: sel })}
+              placeholder="Select attendees…"
+            />
+            {!showExt && (
+              <button
+                type="button"
+                className="btn ghost small-btn"
+                style={{ marginTop: 8 }}
+                onClick={() => setShowExt(true)}
+              >
+                + Add External Attendees
+              </button>
+            )}
+          </div>
+
+          {showExt && (
+            <div className="field full">
+              <label htmlFor="extInput">External Attendees</label>
+              <div className="attendee-chips" style={{ marginBottom: 6 }}>
+                {draft.external.length === 0 ? (
+                  <span className="muted">No external attendees added yet.</span>
+                ) : (
+                  draft.external.map((v) => (
+                    <span key={v} className="chip">
+                      {v}{" "}
+                      <button
+                        type="button"
+                        className="chip-remove"
+                        title="Remove"
+                        onClick={() => removeExt(v)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
-            </div>
-
-            <div className="field full">
-              <label htmlFor="mDesc">Meeting Description / Agenda</label>
-              <textarea
-                id="mDesc"
-                maxLength={1000}
-                value={draft.agenda}
-                onChange={(e) => updateDraft({ agenda: e.target.value })}
-                placeholder="Agenda and items to be discussed…"
-              />
-            </div>
-
-            <div className="field full">
-              <label>Attendees</label>
-              <GroupedMultiSelect
-                groups={attendeeGroups}
-                selected={draft.attendees}
-                onChange={(sel) => updateDraft({ attendees: sel })}
-                placeholder="Select attendees…"
-              />
-              {!showExt && (
+              <div className="ext-row">
+                <input
+                  id="extInput"
+                  type="text"
+                  placeholder="name@xyz.com, abc.com…"
+                  value={extInput}
+                  onChange={(e) => setExtInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === ",") {
+                      e.preventDefault();
+                      addExt();
+                    }
+                  }}
+                />
                 <button
                   type="button"
                   className="btn ghost small-btn"
-                  style={{ marginTop: 8 }}
-                  onClick={() => setShowExt(true)}
+                  onClick={addExt}
                 >
-                  + Add External Attendees
+                  Add
                 </button>
-              )}
-            </div>
-
-            {showExt && (
-              <div className="field full">
-                <label htmlFor="extInput">External Attendees</label>
-                <div
-                  className="attendee-chips"
-                  style={{ marginBottom: 6 }}
-                >
-                  {draft.external.length === 0 ? (
-                    <span className="muted">No external attendees added yet.</span>
-                  ) : (
-                    draft.external.map((v) => (
-                      <span key={v} className="chip">
-                        {v}{" "}
-                        <button
-                          type="button"
-                          className="chip-remove"
-                          title="Remove"
-                          onClick={() => removeExt(v)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
-                <div className="ext-row">
-                  <input
-                    id="extInput"
-                    type="text"
-                    placeholder="name@xyz.com, abc.com…"
-                    value={extInput}
-                    onChange={(e) => setExtInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === ",") {
-                        e.preventDefault();
-                        addExt();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn ghost small-btn"
-                    onClick={addExt}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="field">
-              <label htmlFor="mStart">
-                Start Time (IST) <span className="required">*</span>
-              </label>
-              <input
-                id="mStart"
-                type="time"
-                value={draft.start}
-                onChange={(e) => {
-                  updateDraft({ start: e.target.value });
-                  setErrors((er) => ({ ...er, time: false }));
-                }}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="mEnd">
-                End Time (IST) <span className="required">*</span>
-              </label>
-              <input
-                id="mEnd"
-                type="time"
-                value={draft.end}
-                onChange={(e) => updateDraft({ end: e.target.value })}
-                onBlur={validateTimes}
-              />
-              <div className={`field-err${errors.time ? " show" : ""}`}>
-                End time must be after start time.
               </div>
             </div>
+          )}
 
-            <div className="field full">
-              <label htmlFor="mLoc">Meeting Location / Link</label>
-              <input
-                id="mLoc"
-                type="text"
-                maxLength={300}
-                value={draft.location}
-                onChange={(e) => updateDraft({ location: e.target.value })}
-                placeholder="MS Teams / Google Meet link or location"
-              />
+          <div className="field">
+            <label htmlFor="mStart">
+              Start Time (IST) <span className="required">*</span>
+            </label>
+            <input
+              id="mStart"
+              type="time"
+              value={draft.start}
+              onChange={(e) => {
+                updateDraft({ start: e.target.value });
+                setErrors((er) => ({ ...er, time: false }));
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="mEnd">
+              End Time (IST) <span className="required">*</span>
+            </label>
+            <input
+              id="mEnd"
+              type="time"
+              value={draft.end}
+              onChange={(e) => updateDraft({ end: e.target.value })}
+              onBlur={validateTimes}
+            />
+            <div className={`field-err${errors.time ? " show" : ""}`}>
+              End time must be after start time.
             </div>
           </div>
 
-          <div className="form-actions">
-            <button type="button" className="btn" onClick={submit}>
-              Create Meeting
-            </button>
-            <button
-              type="button"
-              className="btn cancel"
-              onClick={() => setStep(1)}
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              className="btn cancel"
-              onClick={() => navigate("/meetings")}
-            >
-              Cancel
-            </button>
+          <div className="field full">
+            <label htmlFor="mLoc">Meeting Location / Link</label>
+            <input
+              id="mLoc"
+              type="text"
+              maxLength={300}
+              value={draft.location}
+              onChange={(e) => updateDraft({ location: e.target.value })}
+              placeholder="MS Teams / Google Meet link or location"
+            />
           </div>
         </div>
-      )}
+
+        <div className="form-actions">
+          <button type="button" className="btn" onClick={submit}>
+            Create Meeting
+          </button>
+          <button
+            type="button"
+            className="btn cancel"
+            onClick={() => navigate("/meetings")}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
       {toastNode}
     </div>
   );
