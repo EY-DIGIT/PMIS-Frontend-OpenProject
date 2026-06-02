@@ -341,6 +341,36 @@
   box-shadow: 0 0 0 3px rgba(10, 161, 192, .18);
   background: #fff;
 }
+/* Disabled state — page is read-only until the user clicks Edit (or
+   while a save is in flight). The button must look visually disabled
+   and must NOT switch the cursor to a pointer on hover. */
+.mt-ms-toggle:disabled,
+.mt-ms-toggle[disabled] {
+  cursor: not-allowed;
+  background: #f3f5f8;
+  border-color: #d8dee8;
+  color: var(--mt-text-muted);
+  opacity: .7;
+  box-shadow: none;
+}
+.mt-ms-toggle:disabled:hover,
+.mt-ms-toggle[disabled]:hover {
+  background: #f3f5f8;
+  border-color: #d8dee8;
+}
+.mt-ms-toggle:disabled .mt-ms-caret,
+.mt-ms-toggle[disabled] .mt-ms-caret {
+  color: var(--mt-text-muted);
+}
+.mt-ms-toggle:disabled .mt-ms-placeholder,
+.mt-ms-toggle[disabled] .mt-ms-placeholder {
+  color: #a0adc1;
+}
+.mt-ms-toggle:disabled .mt-ms-tag,
+.mt-ms-toggle[disabled] .mt-ms-tag {
+  background: linear-gradient(135deg, #8896b0 0%, #a0adc1 100%);
+  box-shadow: none;
+}
 .mt-ms-display {
   display: flex;
   flex-wrap: wrap;
