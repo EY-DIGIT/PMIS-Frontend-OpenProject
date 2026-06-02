@@ -143,28 +143,37 @@ export default function MilestoneConfigPage({ mode }) {
   const rows = useMemo(() => {
     if (!project) return [];
     const out = [];
-    function walk(node, kind, depth, milestoneUid, activityUid, parentTaskUid) {
+    function walk(node, kind, depth, milestoneUid, activityUid, parentTaskUid, activityStarted) {
       const kids = getChildren(node);
       const hasKids = kids.length > 0;
       const isExp = expandedRows.has(node.uid);
+      /* For activity rows the truth is on the node itself; for
+         task/subtask rows we inherit the parent activity's flag so the
+         grid can gate "+ Task" / "+ Sub Task" buttons on whether the
+         activity has actually been started. */
+      const rowActivityStarted =
+        kind === "activity"
+          ? !!(node && (node.activityStarted || node.actualStartDate))
+          : !!activityStarted;
       out.push({
         node, kind, depth, hasKids, isExpanded: isExp,
-        milestoneUid, activityUid, parentTaskUid
+        milestoneUid, activityUid, parentTaskUid,
+        activityStarted: rowActivityStarted
       });
       if (!isExp) return;
       if (kind === "milestone")
-        kids.forEach((k) => walk(k, "activity", depth + 1, node.uid, null, null));
+        kids.forEach((k) => walk(k, "activity", depth + 1, node.uid, null, null, false));
       else if (kind === "activity")
-        kids.forEach((k) => walk(k, "task", depth + 1, milestoneUid, node.uid, null));
+        kids.forEach((k) => walk(k, "task", depth + 1, milestoneUid, node.uid, null, rowActivityStarted));
       else if (kind === "task")
-        kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid));
+        kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid, rowActivityStarted));
       else
-        kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid));
+        kids.forEach((k) => walk(k, "subtask", depth + 1, milestoneUid, activityUid, node.uid, rowActivityStarted));
     }
     const allMs = safeArray(project.milestones);
     const startIdx = (page - 1) * effectivePageSize;
     const endIdx = Math.min(startIdx + effectivePageSize, allMs.length);
-    allMs.slice(startIdx, endIdx).forEach((m) => walk(m, "milestone", 0, m.uid, null, null));
+    allMs.slice(startIdx, endIdx).forEach((m) => walk(m, "milestone", 0, m.uid, null, null, false));
     return out;
   }, [project, expandedRows, page, effectivePageSize]);
 

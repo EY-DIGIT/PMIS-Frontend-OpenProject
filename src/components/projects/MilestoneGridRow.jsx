@@ -111,7 +111,7 @@ export default function MilestoneGridRow({
     perms[`edit${k.charAt(0).toUpperCase()}${k.slice(1)}`] !== false;
   const allowDelete = (k) =>
     perms[`delete${k.charAt(0).toUpperCase()}${k.slice(1)}`] !== false;
-  const { node, kind, depth, hasKids, isExpanded } = r;
+  const { node, kind, depth, hasKids, isExpanded, activityStarted } = r;
   const indent = 10 + depth * 28;
 
   const eff = effectiveStatus(node);
@@ -157,6 +157,14 @@ export default function MilestoneGridRow({
   const isProjectPublished = project && project.status === "PUBLISHED";
   const showTaskAdds = isOnboarding || isProjectPublished;
 
+  /* Gate task/subtask creation on the parent activity having been
+     started — until the user hits "▶ Start Activity" on the activity,
+     no task or sub-task can be added under it. */
+  const activityIsStarted =
+    kind === "activity"
+      ? !!(node && (node.activityStarted || node.actualStartDate))
+      : !!activityStarted;
+
   let addChildBtn = null;
   if (canMod) {
     if (kind === "milestone" && allowAdd("activity")) {
@@ -172,7 +180,7 @@ export default function MilestoneGridRow({
           + Activity
         </button>
       );
-    } else if (kind === "activity" && !isOnboarding && showTaskAdds && allowAdd("task")) {
+    } else if (kind === "activity" && !isOnboarding && showTaskAdds && allowAdd("task") && activityIsStarted) {
       addChildBtn = (
         <button
           type="button"
@@ -185,7 +193,7 @@ export default function MilestoneGridRow({
           + Task
         </button>
       );
-    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && showTaskAdds && allowAdd("subtask")) {
+    } else if ((kind === "task" || kind === "subtask") && !isOnboarding && showTaskAdds && allowAdd("subtask") && activityIsStarted) {
       addChildBtn = (
         <button
           type="button"
