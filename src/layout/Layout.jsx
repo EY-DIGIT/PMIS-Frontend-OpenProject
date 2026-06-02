@@ -24,6 +24,10 @@ const NAV_TITLES = {
   "users": {
     label: "User Management",
     tooltip: "Browse, add and edit users across the system."
+  },
+  "meetings": {
+    label: "Meeting Management",
+    tooltip: "Schedule meetings, capture MoMs and convert decisions into tasks."
   }
 };
 

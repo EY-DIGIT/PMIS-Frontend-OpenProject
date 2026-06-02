@@ -12,6 +12,7 @@ import {
   FiUsers,
   FiInbox,
   FiCheckCircle,
+  FiCalendar,
   FiChevronRight,
   FiChevronDown
 } from "react-icons/fi";
@@ -48,6 +49,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const [vmOpen, setVmOpen] = useState(false);
   const [umOpen, setUmOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [mmOpen, setMmOpen] = useState(false);
 
   // Helper: is the current URL inside a given section?
   const isUnder = (prefix) =>
@@ -78,6 +80,11 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const searchUserActive = isUnder("/users") && !addUserActive;
   const umActive = addUserActive || searchUserActive;
 
+  // Meeting Management — Create / All. No role gating yet.
+  const createMeetingActive = isUnder("/meetings/new");
+  const allMeetingsActive = isUnder("/meetings") && !createMeetingActive;
+  const mmActive = createMeetingActive || allMeetingsActive;
+
   // Approval Inbox routes. Two sub-items because role-based gating
   // isn't wired up yet — once the current user's role is known, hide
   // whichever doesn't apply.
@@ -93,8 +100,9 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
     if (masterActive) setMdOpen(true);
     if (vmActive) setVmOpen(true);
     if (umActive) setUmOpen(true);
+    if (mmActive) setMmOpen(true);
     if (inboxActive) setInboxOpen(true);
-  }, [dashActive, pmActive, masterActive, vmActive, umActive, inboxActive]);
+  }, [dashActive, pmActive, masterActive, vmActive, umActive, mmActive, inboxActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -182,6 +190,37 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </div>
           </>
         )}
+
+        {/* Meeting Management — ported from the Meeting_Management.html
+            reference. Sub-items: Create Meeting / All Meetings. Routes
+            (/meetings/new, /meetings) will need pages wired up in App.jsx;
+            until then the links resolve cleanly but render empty. */}
+        <a
+          className={mmActive ? "active" : ""}
+          onClick={() => setMmOpen(!mmOpen)}
+        >
+          <FiCalendar size={ICON_SIZE} />
+          <span className="pmis-text">Meeting Management</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={mmOpen} />
+          </span>
+        </a>
+        <div className={`pmis-submenu${mmOpen ? " open" : ""}`}>
+          <div
+            className={createMeetingActive ? "active" : ""}
+            onClick={() => navigate("/meetings/new")}
+          >
+            <FiPlus size={ICON_SIZE} />
+            <span className="pmis-text">Create Meeting</span>
+          </div>
+          <div
+            className={allMeetingsActive ? "active" : ""}
+            onClick={() => navigate("/meetings")}
+          >
+            <FiSearch size={ICON_SIZE} />
+            <span className="pmis-text">All Meetings</span>
+          </div>
+        </div>
 
         {/* Master Data */}
         {canViewMasterData && (

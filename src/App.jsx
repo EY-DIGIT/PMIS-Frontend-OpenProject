@@ -35,6 +35,9 @@ import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
 import ApprovalInboxConcernedDivision from './pages/approvals/ApprovalInboxConcernedDivision';
 import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityOwner';
+import MeetingsListPage from './pages/meetings/MeetingsListPage';
+import CreateMeetingPage from './pages/meetings/CreateMeetingPage';
+import MeetingDetailPage from './pages/meetings/MeetingDetailPage';
 import { DataProvider, useData } from './data/DataContext';
 import "./styles/global.css";
 
@@ -106,7 +109,8 @@ function Breadcrumbs() {
         master: "Master Data",
         new: "New",
         dashboard: "Dashboard",
-        "manage-users": "Manage Team"
+        "manage-users": "Manage Team",
+        meetings: "Meetings"
     };
 
     /* Some "new" routes are conceptually a single step from the Dashboard,
@@ -452,6 +456,12 @@ export default function MainApp() {
                                                     are visible because the role gating isn't wired up yet. */}
                                                 <Route path="approvals/concerned-division" element={<ApprovalInboxConcernedDivision />} />
                                                 <Route path="approvals/activity-owner" element={<ApprovalInboxActivityOwner />} />
+
+                                                {/* Meeting Management — ported from Meeting_Management.html.
+                                                    No role gating yet; everyone with auth can access. */}
+                                                <Route path="meetings" element={<MeetingsListPage />} />
+                                                <Route path="meetings/new" element={<CreateMeetingPage />} />
+                                                <Route path="meetings/:id" element={<MeetingDetailPage />} />
                                             </Routes>
                                         </Layout>
                                     </RequireAuth>
