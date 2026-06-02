@@ -20,7 +20,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 
 
 import { useSessionManager } from "./api/sessionManager";
-import { useCan } from "./auth/permissions";
+import { useCan, useCurrentRole } from "./auth/permissions";
 
 import VendorList from './pages/vendors/VendorList';
 import VendorForm from './pages/vendors/VendorForm';
@@ -338,6 +338,18 @@ function RequireAuth({ children }) {
     );
 }
 
+/* Director Admin only has the Dashboard — bounce them off the home
+   page (and any other landing path the navbar Home button might send
+   them to) straight into /dashboard/summary so the bare home shell
+   never flashes. */
+function HomeOrDashboard() {
+  const role = useCurrentRole();
+  if (role === "director_admin") {
+    return <Navigate to="/dashboard/summary" replace />;
+  }
+  return <HomePage />;
+}
+
 /* Gate a route by a single permission flag from src/config/roles.json.
    Renders the child when allowed; otherwise shows a small "no access"
    panel so users get an explanation instead of a silent redirect. */
@@ -374,7 +386,7 @@ export default function MainApp() {
                                             <PageTitle />
                                             <Breadcrumbs />
                                             <Routes>
-                                                <Route path="/" element={<HomePage />} />
+                                                <Route path="/" element={<HomeOrDashboard />} />
                                                 <Route path="/dashboard" element={<Navigate to="/dashboard/summary" replace />} />
                                                 <Route
                                                     path="/dashboard/summary"

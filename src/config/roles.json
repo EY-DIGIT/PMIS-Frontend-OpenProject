@@ -180,6 +180,51 @@
         "deleteDivision": false
       }
     },
+    "director_admin": {
+      "label": "Director Admin",
+      "description": "Read-only dashboard role. Only the Dashboard is visible — no sidebar, no project / user / vendor / master-data screens.",
+      "permissions": {
+        "viewDashboard": true,
+        "viewProjects": false,
+        "createProject": false,
+        "editProject": false,
+        "deleteProject": false,
+        "publishProject": false,
+        "manageProjectDocuments": false,
+        "viewProjectDocuments": false,
+        "createMilestone": false,
+        "editMilestone": false,
+        "deleteMilestone": false,
+        "createActivity": false,
+        "editActivity": false,
+        "deleteActivity": false,
+        "createTask": false,
+        "editTask": false,
+        "deleteTask": false,
+        "createSubtask": false,
+        "editSubtask": false,
+        "deleteSubtask": false,
+        "editPriority": false,
+        "viewUsers": false,
+        "createUser": false,
+        "editUser": false,
+        "deleteUser": false,
+        "createSuperAdmin": false,
+        "createAdmin": false,
+        "createOrgAdmin": false,
+        "createProjectAdmin": false,
+        "createProjectMember": false,
+        "viewVendors": false,
+        "createVendor": false,
+        "editVendor": false,
+        "deleteVendor": false,
+        "viewMasterData": false,
+        "viewDivisions": false,
+        "createDivision": false,
+        "editDivision": false,
+        "deleteDivision": false
+      }
+    },
     "project_member": {
       "label": "Project Member",
       "description": "Works only on projects assigned to them. Can add/edit/delete tasks and subtasks on those projects. Priority field is hidden — cannot edit. Cannot view other users.",
@@ -226,6 +271,6 @@
       }
     }
   },
-  "hierarchy": ["super_admin", "admin", "org_admin", "project_admin", "project_member"],
+  "hierarchy": ["super_admin", "admin", "org_admin", "director_admin", "project_admin", "project_member"],
   "defaultRole": "super_admin"
 }

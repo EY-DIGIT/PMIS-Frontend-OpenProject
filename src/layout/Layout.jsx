@@ -147,6 +147,7 @@ function NavProjectName() {
 }
 
 import { useProjects } from "../store/Projectstore";
+import { useCurrentRole } from "../auth/permissions";
 import * as auth from "../api/auth";
 import Sidebar from "../components/Sidebar";
 // import LoaderModal from "../components/LoaderModal";
@@ -165,6 +166,12 @@ export default function Layout({ children }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [fontMode, setFontMode] = useState("reset");
   const [signingOut, setSigningOut] = useState(false);
+
+  /* Director Admin is a dashboard-only role — they get the global
+     chrome (header, navbar, footer) but no left nav. Toggle is also
+     suppressed so the now-empty menu icon doesn't sit there idle. */
+  const currentRole = useCurrentRole();
+  const isDashboardOnly = currentRole === "director_admin";
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -270,12 +277,14 @@ export default function Layout({ children }) {
       {/* ── Navbar ── */}
       <div className="pmis-navbar">
         <div className="pmis-menu-home-block">
-          <span
-            onClick={() => setCollapsed((c) => !c)}
-            style={{ display: "flex", alignItems: "center", gap: "10px" }}
-          >
-            <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
-          </span>
+          {!isDashboardOnly && (
+            <span
+              onClick={() => setCollapsed((c) => !c)}
+              style={{ display: "flex", alignItems: "center", gap: "10px" }}
+            >
+              <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
+            </span>
+          )}
           <span
             onClick={() => navigate("/")}
             style={{ display: "flex", alignItems: "center", gap: "10px" }}
@@ -302,11 +311,13 @@ export default function Layout({ children }) {
 
       {/* ── Body ── */}
       <div className="pmis-layout">
-        <Sidebar
-          collapsed={collapsed}
-          onAddProject={(type) => navigate(`/onboard/${encodeURIComponent(type)}`)}
-          onSearchProject={() => navigate("/projects")}
-        />
+        {!isDashboardOnly && (
+          <Sidebar
+            collapsed={collapsed}
+            onAddProject={(type) => navigate(`/onboard/${encodeURIComponent(type)}`)}
+            onSearchProject={() => navigate("/projects")}
+          />
+        )}
         <div className="pmis-content">
           {children}
         </div>
