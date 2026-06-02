@@ -333,64 +333,6 @@ export default function CreateMeetingPage() {
 
         <div className="grid">
           <div className="field">
-            <label htmlFor="projSel">
-              Project <span className="required">*</span>
-            </label>
-            <select
-              id="projSel"
-              value={
-                draft.link === "general" ? "__general" : draft.projectId || ""
-              }
-              onChange={(e) => onLinkSelect(e.target.value)}
-            >
-              <option value="" disabled>
-                Select…
-              </option>
-              <option value="__general">
-                General — not linked to a project
-              </option>
-              <optgroup label="Projects">
-                {PROJECTS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id} — {p.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
-          <div className="field">
-            <label>
-              Activities{" "}
-              <span className="muted">
-                {draft.link === "project" ? "(optional)" : "(project required)"}
-              </span>
-            </label>
-            {draft.link === "project" && draft.projectId ? (
-              <GroupedMultiSelect
-                groups={activityGroups}
-                selected={draft.activityIds}
-                onChange={(sel) => updateDraft({ activityIds: sel })}
-                placeholder="Select activities…"
-              />
-            ) : (
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "#f3f6fb",
-                  color: "var(--text-muted)",
-                  padding: "12px",
-                  fontSize: 13.5
-                }}
-              >
-                {draft.link === "general"
-                  ? "Not applicable for a General meeting."
-                  : "Select a project first…"}
-              </div>
-            )}
-          </div>
-
-          <div className="field">
             <label htmlFor="mTitle">
               Meeting Title <span className="required">*</span>
             </label>
@@ -539,6 +481,64 @@ export default function CreateMeetingPage() {
               onChange={(e) => updateDraft({ location: e.target.value })}
               placeholder="MS Teams / Google Meet link or location"
             />
+          </div>
+
+          <div className="field">
+            <label htmlFor="projSel">
+              Project <span className="required">*</span>
+            </label>
+            <select
+              id="projSel"
+              value={
+                draft.link === "general" ? "__general" : draft.projectId || ""
+              }
+              onChange={(e) => onLinkSelect(e.target.value)}
+            >
+              <option value="" disabled>
+                Select…
+              </option>
+              <option value="__general">
+                General — not linked to a project
+              </option>
+              <optgroup label="Projects">
+                {PROJECTS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.id} — {p.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+          <div className="field">
+            <label>
+              Activities{" "}
+              <span className="muted">
+                {draft.link === "project" ? "(optional)" : "(project required)"}
+              </span>
+            </label>
+            {draft.link === "project" && draft.projectId ? (
+              <GroupedMultiSelect
+                groups={activityGroups}
+                selected={draft.activityIds}
+                onChange={(sel) => updateDraft({ activityIds: sel })}
+                placeholder="Select activities…"
+              />
+            ) : (
+              <div
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  background: "#f3f6fb",
+                  color: "var(--text-muted)",
+                  padding: "12px",
+                  fontSize: 13.5
+                }}
+              >
+                {draft.link === "general"
+                  ? "Not applicable for a General meeting."
+                  : "Select a project first…"}
+              </div>
+            )}
           </div>
         </div>
 
