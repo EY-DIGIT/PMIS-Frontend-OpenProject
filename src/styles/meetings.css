@@ -317,6 +317,36 @@
   color: var(--text-muted);
   margin-top: 1px;
 }
+.pmis-mtg .mt-loc-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+}
+.pmis-mtg .mt-loc-val > a,
+.pmis-mtg .mt-loc-val > span:not(.mt-copy-btn) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pmis-mtg .mt-copy-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-soft);
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--navy);
+  transition: background .12s, border-color .12s;
+}
+.pmis-mtg .mt-copy-btn:hover {
+  background: var(--light-cool);
+  border-color: var(--cyan);
+}
 .pmis-mtg .mt-attendance {
   border: 1px solid var(--border-soft);
   border-radius: 10px;

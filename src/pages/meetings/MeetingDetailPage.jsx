@@ -64,19 +64,40 @@ function InfoTile({ icon, label, value }) {
 }
 
 /* Render the location field as a clickable link when it looks like a
-   URL, otherwise as plain text. Keeps copy-on-click parity with the
-   prior plain-text rendering while making Teams / Meet links obvious. */
-function renderLocation(loc) {
+   URL, otherwise as plain text. A copy button sits at the end so the
+   user can grab the Teams / Meet link with one click. */
+function LocationValue({ loc, onCopy }) {
   const s = String(loc || "").trim();
   if (!s) return "—";
-  if (/^https?:\/\//i.test(s)) {
-    return (
-      <a href={s} target="_blank" rel="noopener noreferrer">
-        {s}
-      </a>
-    );
-  }
-  return s;
+  const isLink = /^https?:\/\//i.test(s);
+  const doCopy = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(s);
+      onCopy?.("ok");
+    } catch {
+      onCopy?.("err");
+    }
+  };
+  return (
+    <span className="mt-loc-val">
+      {isLink ? (
+        <a href={s} target="_blank" rel="noopener noreferrer">{s}</a>
+      ) : (
+        <span>{s}</span>
+      )}
+      <button
+        type="button"
+        className="mt-copy-btn"
+        title="Copy link"
+        aria-label="Copy link"
+        onClick={doCopy}
+      >
+        📋
+      </button>
+    </span>
+  );
 }
 
 export default function MeetingDetailPage() {
@@ -349,19 +370,28 @@ export default function MeetingDetailPage() {
           <InfoTile
             icon="🕐"
             label="Time (IST)"
-            value={`${meeting.start || "—"} – ${meeting.end || "—"}`}
+            value={
+              `${meeting.start || "—"} – ${meeting.end || "—"}` +
+              (fmtDuration(meeting.start, meeting.end)
+                ? ` (${fmtDuration(meeting.start, meeting.end)})`
+                : "")
+            }
           />
-          {fmtDuration(meeting.start, meeting.end) && (
-            <InfoTile
-              icon="⏱️"
-              label="Duration"
-              value={fmtDuration(meeting.start, meeting.end)}
-            />
-          )}
+
           <InfoTile
             icon="📍"
             label="Location / Link"
-            value={renderLocation(meeting.location)}
+            value={
+              <LocationValue
+                loc={meeting.location}
+                onCopy={(k) =>
+                  show(
+                    k === "ok" ? "Link copied." : "Copy failed.",
+                    k === "ok" ? "ok" : "warn"
+                  )
+                }
+              />
+            }
           />
         </div>
 
