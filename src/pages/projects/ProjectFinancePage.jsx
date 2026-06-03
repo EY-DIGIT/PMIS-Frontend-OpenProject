@@ -1025,11 +1025,39 @@ function PhasePanel({
                     <td style={{ textAlign: "center" }}>
                       <button
                         type="button"
-                        className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                        title="Edit payment term"
+                        aria-label="Edit payment term"
                         disabled={isLocked}
                         onClick={() => onEditTerm(t)}
+                        style={{
+                          width: 32, height: 32,
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          border: "1px solid var(--uidai-pmis-border)",
+                          background: "#fff",
+                          color: "#173e77",
+                          borderRadius: 6,
+                          cursor: isLocked ? "not-allowed" : "pointer",
+                          opacity: isLocked ? 0.5 : 1,
+                          padding: 0,
+                          transition: "background .15s, border-color .15s",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (isLocked) return;
+                          e.currentTarget.style.background = "#eaf4ff";
+                          e.currentTarget.style.borderColor = "#0aa1c0";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "#fff";
+                          e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
+                        }}
                       >
-                        Edit
+                        {/* Pencil icon (inline SVG so no new dep). */}
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="2"
+                          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                        </svg>
                       </button>
                     </td>
                   </tr>
