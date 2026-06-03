@@ -13,7 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
-import { getMeeting, saveMoM } from "../../api/meetings";
+import { getMeeting, saveMoM, updateMeeting } from "../../api/meetings";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
@@ -152,8 +152,9 @@ export default function MeetingDetailPage() {
   const [momRemote, setMomRemote] = useState(null);
   const [savingMom, setSavingMom] = useState(false);
 
-  /* Attendance is a local-only feature until the backend ships it. */
+  /* Attendance is tracked locally and persisted via PUT when Mark Present is clicked. */
   const [presentSelection, setPresentSelection] = useState([]);
+  const [updatingAttendance, setUpdatingAttendance] = useState(false);
   const taskSectionRef = useRef(null);
 
   /* Load users for attendee display + owner labels. */
@@ -318,14 +319,53 @@ export default function MeetingDetailPage() {
   const attendanceButtonLabel = noneSelected
     ? "Mark all present"
     : `Mark Present (${presentCount})`;
-  const onAttendanceButton = () => {
-    setPresentSelection(noneSelected ? allKeys : presentSelection);
-    show(
-      noneSelected
-        ? `${allKeys.length} marked present.`
-        : `${presentCount} marked present.`,
-      "ok"
-    );
+  const onAttendanceButton = async () => {
+    if (!meeting || updatingAttendance) return;
+    
+    /* Toggle selection. */
+    const newSelection = noneSelected ? allKeys : presentSelection;
+    setPresentSelection(newSelection);
+    
+    /* Build the payload with attendance updates. */
+    setUpdatingAttendance(true);
+    try {
+      const updatedAttendees = internalAttendees.map((a) => ({
+        userId: a.userId,
+        participantRole: a.participantRole || "Internal",
+        mandatory: a.mandatory ?? false,
+        isPresent: newSelection.includes(a.userId),
+      }));
+      
+      const updatedExternalAttendees = externalAttendees.map((e) => ({
+        email: e.email,
+        isPresent: newSelection.includes(e.email),
+      }));
+      
+      const payload = {
+        title: meeting.title,
+        meetingDate: meeting.meetingDate,
+        startTime: meeting.startTime,
+        endTime: meeting.endTime,
+        description: meeting.description,
+        meetingLink: meeting.meetingLink,
+        projectId: meeting.projectId,
+        attendees: updatedAttendees,
+        externalAttendees: updatedExternalAttendees,
+      };
+      
+      await updateMeeting(meeting.id, payload);
+      show(
+        noneSelected
+          ? `${allKeys.length} marked present.`
+          : `${presentCount} marked present.`,
+        "ok"
+      );
+    } catch (e) {
+      setPresentSelection(noneSelected ? [] : presentSelection);
+      show(e.message || "Failed to update attendance.", "warn");
+    } finally {
+      setUpdatingAttendance(false);
+    }
   };
 
   const decisions = momRemote?.decisions || [];
@@ -429,8 +469,9 @@ export default function MeetingDetailPage() {
                   type="button"
                   className="btn ghost small-btn is-emphasised"
                   onClick={onAttendanceButton}
+                  disabled={updatingAttendance}
                 >
-                  {attendanceButtonLabel}
+                  {updatingAttendance ? "Updating..." : attendanceButtonLabel}
                 </button>
               </div>
               <div className="mt-attendance__grid">

@@ -73,3 +73,8 @@ export async function getMeeting(id) {
 export async function saveMoM(meetingId, body) {
   return api.post(ENDPOINTS.meetings.mom(meetingId), body);
 }
+
+/* PUT /api/meetings/{id} — update meeting including attendance. */
+export async function updateMeeting(meetingId, payload) {
+  return api.put(ENDPOINTS.meetings.update(meetingId), payload);
+}
