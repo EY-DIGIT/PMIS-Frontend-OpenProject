@@ -59,7 +59,7 @@ const muted = { color: "var(--uidai-pmis-muted)" };
    where Milestone / Phase do not apply. The grey wash + dash makes it
    clear the field is intentionally inert (not just empty). */
 const disabledCell = {
-  background: "#f3f6fb",
+  background: "rgb(243, 246, 251)",
   color: "#a3afc1",
   borderRadius: 4,
   padding: "6px 10px",
@@ -784,23 +784,24 @@ export default function ProjectFinancePage() {
                     return (
                       <tr key={r.id}>
                         <td>{costTypeLabel(r.costTypeCode)}</td>
-                        <td>
+                        <td style={{background: isOneTime ? "rgb(243, 246, 251)" : "transparent"}}>
                           {isOneTime
-                            ? <span style={disabledCell}>—</span>
+                            ? <span style={disabledCell}></span>
                             : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
                         </td>
                         <td>{inr(r.cost)}</td>
-                        <td>
+                        <td style={{background: isOneTime ? "rgb(243, 246, 251)" : "transparent"}}>
                           {isOneTime
-                            ? <span style={disabledCell}>—</span>
+                            ? <span style={disabledCell}></span>
                             : (r.phase ?? "—")}
                         </td>
                         <td>
                           {taxPct == null ? "—" : (
                             <span>
-                              {taxPct} %
+                              
+                                 {inr(taxAmount)}
                               <span style={{ ...muted, marginLeft: 8, fontSize: 12 }}>
-                                ({inr(taxAmount)})
+                             ({taxPct} %)
                               </span>
                             </span>
                           )}
