@@ -312,7 +312,34 @@ export default function CreateMeetingPage() {
           ) : null}
         </div>
 
-        <div className="grid">
+        <div className="grid grid-3">
+          {/* Row 1 — Project | Title | Date */}
+          <div className="field">
+            <label htmlFor="projSel">
+              Project <span className="required">*</span>
+            </label>
+            <select
+              id="projSel"
+              value={
+                draft.link === "general" ? "__general" : draft.projectId || ""
+              }
+              onChange={(e) => onLinkSelect(e.target.value)}
+            >
+              <option value="" disabled>
+                Select…
+              </option>
+              <option value="__general">
+                General — not linked to a project
+              </option>
+              <optgroup label="Projects">
+                {PROJECTS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.id} — {p.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
           <div className="field">
             <label htmlFor="mTitle">
               Meeting Title <span className="required">*</span>
@@ -344,6 +371,49 @@ export default function CreateMeetingPage() {
             </div>
           </div>
 
+          {/* Row 2 — Start | End | Location */}
+          <div className="field">
+            <label htmlFor="mStart">
+              Start Time (IST) <span className="required">*</span>
+            </label>
+            <input
+              id="mStart"
+              type="time"
+              value={draft.start}
+              onChange={(e) => {
+                updateDraft({ start: e.target.value });
+                setErrors((er) => ({ ...er, time: false }));
+              }}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="mEnd">
+              End Time (IST) <span className="required">*</span>
+            </label>
+            <input
+              id="mEnd"
+              type="time"
+              value={draft.end}
+              onChange={(e) => updateDraft({ end: e.target.value })}
+              onBlur={validateTimes}
+            />
+            <div className={`field-err${errors.time ? " show" : ""}`}>
+              End time must be after start time.
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="mLoc">Meeting Location / Link</label>
+            <input
+              id="mLoc"
+              type="text"
+              maxLength={300}
+              value={draft.location}
+              onChange={(e) => updateDraft({ location: e.target.value })}
+              placeholder="MS Teams / Google Meet link or location"
+            />
+          </div>
+
+          {/* Full-width: Agenda, Attendees, External */}
           <div className="field full">
             <label htmlFor="mDesc">Agenda</label>
             <textarea
@@ -421,75 +491,6 @@ export default function CreateMeetingPage() {
               </div>
             </div>
           )}
-
-          <div className="field">
-            <label htmlFor="mStart">
-              Start Time (IST) <span className="required">*</span>
-            </label>
-            <input
-              id="mStart"
-              type="time"
-              value={draft.start}
-              onChange={(e) => {
-                updateDraft({ start: e.target.value });
-                setErrors((er) => ({ ...er, time: false }));
-              }}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="mEnd">
-              End Time (IST) <span className="required">*</span>
-            </label>
-            <input
-              id="mEnd"
-              type="time"
-              value={draft.end}
-              onChange={(e) => updateDraft({ end: e.target.value })}
-              onBlur={validateTimes}
-            />
-            <div className={`field-err${errors.time ? " show" : ""}`}>
-              End time must be after start time.
-            </div>
-          </div>
-
-          <div className="field full">
-            <label htmlFor="mLoc">Meeting Location / Link</label>
-            <input
-              id="mLoc"
-              type="text"
-              maxLength={300}
-              value={draft.location}
-              onChange={(e) => updateDraft({ location: e.target.value })}
-              placeholder="MS Teams / Google Meet link or location"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="projSel">
-              Project <span className="required">*</span>
-            </label>
-            <select
-              id="projSel"
-              value={
-                draft.link === "general" ? "__general" : draft.projectId || ""
-              }
-              onChange={(e) => onLinkSelect(e.target.value)}
-            >
-              <option value="" disabled>
-                Select…
-              </option>
-              <option value="__general">
-                General — not linked to a project
-              </option>
-              <optgroup label="Projects">
-                {PROJECTS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id} — {p.name}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
         </div>
 
         <div className="form-actions">

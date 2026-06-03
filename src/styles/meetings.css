@@ -51,6 +51,7 @@
 
 /* Forms */
 .pmis-mtg .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pmis-mtg .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pmis-mtg .full { grid-column: 1 / -1; }
 .pmis-mtg .field { min-width: 0; }
 .pmis-mtg .field label { font-weight: 600; display: block; margin-bottom: 5px; font-size: 14px; color: var(--text); }
