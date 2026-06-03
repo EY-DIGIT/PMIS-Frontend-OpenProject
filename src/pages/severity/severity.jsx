@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import { uiStore } from "../../store/project/uiStore";
-import "./Severity.css";
+import "../../styles/global.css";
 
 function normalizeServerItems(payload) {
   if (!payload) return [];
@@ -343,136 +343,170 @@ export default function SeverityPage() {
       }
     }
 
+  // Inline control styling for inputs that live inside table cells (matches
+  // the convention used by the other project pages, e.g. ActivitySlasPage).
+  const ctrl = {
+    width: "100%",
+    padding: "8px 10px",
+    border: "1px solid var(--uidai-pmis-border)",
+    borderRadius: 6,
+    background: "#fff",
+    color: "var(--uidai-pmis-text)",
+    font: "inherit",
+    fontSize: 13,
+    boxSizing: "border-box",
+  };
+  const sectionHead = { fontSize: 16, fontWeight: 800, color: "#173e77", marginBottom: 16 };
+  const muted = { color: "var(--uidai-pmis-muted)" };
+
   return (
-    <div className="severity-page">
-      <h1 className="severity-title">Severity</h1>
-      <p className="severity-sub">
+    <div className="uidai-pmis-content">
+      <div className="uidai-pmis-title">Severity</div>
+      <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
         Set severity levels, points, and labels below. Levels are 0–4, points are -100 to 100, and label text must be 1–100 characters.
-      </p>
-
-      <div className="severity-card">
-        <h3>Severity Levels & Points</h3>
-        
-        {!editMode ? (
-          <>
-            <div className="severity-table">
-              <div className="severity-header">
-                <div>Severity Level (SL)</div>
-                <div>Points</div>
-                <div>Label</div>
-              </div>
-              {rows.map((r, i) => (
-                <div key={i} className="severity-row">
-                  <div>{r.level}</div>
-                  <div>{r.points}</div>
-                  <div>{r.label}</div>
-                </div>
-              ))}
-            </div>
-            <div className="severity-actions" style={{ marginTop: '20px' }}>
-              <button className="btn edit" onClick={() => setEditMode(true)} disabled={loading}>Edit</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="severity-table">
-              <div className="severity-header">
-                <div>Severity Level (SL)</div>
-                <div>Points</div>
-                <div>Label</div>
-                <div></div>
-              </div>
-
-              {rows.map((r, i) => (
-                <div key={i} className="severity-row">
-                  <input type="number" min="0" max="4" value={r.level} onChange={(e) => updateRow(i, 'level', e.target.value)} />
-                  <input type="number" min="-100" max="100" value={r.points} onChange={(e) => updateRow(i, 'points', e.target.value)} />
-                  <input type="text" maxLength="100" value={r.label || ''} onChange={(e) => updateRow(i, 'label', e.target.value)} />
-                  <button className="remove" onClick={() => removeRow(i)}>×</button>
-                </div>
-              ))}
-
-              <button className="add" onClick={addRow}>+ Add Severity</button>
-            </div>
-            <div className="severity-actions" style={{ marginTop: '20px' }}>
-              <button className="btn cancel" onClick={() => setEditMode(false)} disabled={loading}>Cancel</button>
-              <button className="btn save" onClick={doSave} disabled={loading}>Save</button>
-            </div>
-          </>
-        )}
       </div>
-      
-      <div className="severity-card" style={{ marginTop: 20 }}>
-        <h3>LD Bands</h3>
-        {!ldEditMode ? (
-          <>
-            <div className="severity-table">
-              <div className="severity-header">
-                <div>Points Threshold</div>
-                <div>LD Percent</div>
-                <div>Label</div>
-              </div>
-              {ldRows.length === 0 && !ldLoading ? (
-                <div className="severity-row"><div colSpan={3}>No LD bands configured.</div></div>
+
+      {/* Severity levels & points */}
+      <div className="uidai-pmis-card">
+        <div style={sectionHead}>Severity Levels &amp; Points</div>
+        <div className="uidai-pmis-table-wrap">
+          <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ minWidth: 520, marginTop: 0 }}>
+            <thead>
+              <tr>
+                <th>Severity Level (SL)</th>
+                <th>Points</th>
+                <th>Label</th>
+                {editMode && <th style={{ textAlign: "center", width: 70 }}>Action</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={editMode ? 4 : 3} style={{ textAlign: "center", padding: 24, ...muted }}>Loading…</td></tr>
+              ) : rows.map((r, i) => (
+                <tr key={i}>
+                  {editMode ? (
+                    <>
+                      <td><input style={ctrl} type="number" min="0" max="4" value={r.level} onChange={(e) => updateRow(i, 'level', e.target.value)} /></td>
+                      <td><input style={ctrl} type="number" min="-100" max="100" value={r.points} onChange={(e) => updateRow(i, 'points', e.target.value)} /></td>
+                      <td><input style={ctrl} type="text" maxLength="100" value={r.label || ''} onChange={(e) => updateRow(i, 'label', e.target.value)} /></td>
+                      <td style={{ textAlign: "center" }}>
+                        <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Remove" onClick={() => removeRow(i)}>✕</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{r.level}</td>
+                      <td>{r.points}</td>
+                      <td>{r.label}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {editMode && (
+          <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 12 }} onClick={addRow}>
+            + Add Severity
+          </button>
+        )}
+
+        <div className="uidai-pmis-action-row">
+          {!editMode ? (
+            <button type="button" className="uidai-pmis-btn" onClick={() => setEditMode(true)} disabled={loading}>Edit</button>
+          ) : (
+            <>
+              <button type="button" className="uidai-pmis-btn" onClick={doSave} disabled={loading}>Save</button>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setEditMode(false)} disabled={loading}>Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* LD bands */}
+      <div className="uidai-pmis-card">
+        <div style={sectionHead}>LD Bands</div>
+        <div className="uidai-pmis-table-wrap">
+          <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ minWidth: 520, marginTop: 0 }}>
+            <thead>
+              <tr>
+                <th>Points Threshold</th>
+                <th>LD Percent</th>
+                <th>Label</th>
+                {ldEditMode && <th style={{ textAlign: "center", width: 70 }}>Action</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {ldLoading ? (
+                <tr><td colSpan={ldEditMode ? 4 : 3} style={{ textAlign: "center", padding: 24, ...muted }}>Loading…</td></tr>
+              ) : ldRows.length === 0 ? (
+                <tr><td colSpan={ldEditMode ? 4 : 3} style={{ textAlign: "center", padding: 24, ...muted }}>No LD bands configured.</td></tr>
               ) : ldRows.map((b, i) => (
-                <div key={b.id || i} className="severity-row">
-                  <div>{b.points_threshold}</div>
-                  <div>{b.ld_percent}</div>
-                  <div>{b.label}</div>
-                </div>
+                <tr key={b.id || i}>
+                  {ldEditMode ? (
+                    <>
+                      <td><input style={ctrl} type="number" value={b.points_threshold} onChange={(e) => updateLdRow(i, 'points_threshold', e.target.value)} /></td>
+                      <td><input style={ctrl} type="number" min={0} max={100} value={b.ld_percent} onChange={(e) => updateLdRow(i, 'ld_percent', e.target.value)} /></td>
+                      <td><input style={ctrl} type="text" value={b.label || ''} onChange={(e) => updateLdRow(i, 'label', e.target.value)} /></td>
+                      <td style={{ textAlign: "center" }}>
+                        <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Remove" onClick={() => removeLdRow(i)}>✕</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{b.points_threshold}</td>
+                      <td>{b.ld_percent}</td>
+                      <td>{b.label}</td>
+                    </>
+                  )}
+                </tr>
               ))}
-            </div>
-            <div className="severity-actions" style={{ marginTop: '20px' }}>
-              <button className="btn edit" onClick={() => setLdEditMode(true)} disabled={ldLoading}>Edit</button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="severity-table">
-              <div className="severity-header">
-                <div>Points Threshold</div>
-                <div>LD Percent</div>
-                <div>Label</div>
-                <div></div>
-              </div>
-              {ldRows.map((b, i) => (
-                <div key={b.id || i} className="severity-row">
-                  <input type="number" value={b.points_threshold} onChange={(e) => updateLdRow(i, 'points_threshold', e.target.value)} />
-                  <input type="number" value={b.ld_percent} min={0} max={100} onChange={(e) => updateLdRow(i, 'ld_percent', e.target.value)} />
-                  <input type="text" value={b.label || ''} onChange={(e) => updateLdRow(i, 'label', e.target.value)} />
-                  <button className="remove" onClick={() => removeLdRow(i)}>×</button>
-                </div>
-              ))}
-              <button className="add" onClick={addLdRow}>+ Add Band</button>
-            </div>
-            <div className="severity-actions" style={{ marginTop: '20px' }}>
-              <button className="btn cancel" onClick={() => setLdEditMode(false)} disabled={ldLoading}>Cancel</button>
-              <button className="btn save" onClick={doSaveLd} disabled={ldLoading}>Save</button>
-            </div>
-          </>
+            </tbody>
+          </table>
+        </div>
+
+        {ldEditMode && (
+          <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 12 }} onClick={addLdRow}>
+            + Add Band
+          </button>
         )}
+
+        <div className="uidai-pmis-action-row">
+          {!ldEditMode ? (
+            <button type="button" className="uidai-pmis-btn" onClick={() => setLdEditMode(true)} disabled={ldLoading}>Edit</button>
+          ) : (
+            <>
+              <button type="button" className="uidai-pmis-btn" onClick={doSaveLd} disabled={ldLoading}>Save</button>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setLdEditMode(false)} disabled={ldLoading}>Cancel</button>
+            </>
+          )}
+        </div>
       </div>
-{/* this is for severity and ld calculation for future use, currently hidden  */}
-      {/* <div className="severity-card" style={{ marginTop: 20 }}>
-        <h3>Seed Master Defaults</h3>
-        <p>Use this to create default severity levels and LD bands for the project.</p>
-        <div className="severity-actions" style={{ marginTop: '20px' }}>
-          <button className="btn save" onClick={seedMasterDefaults} disabled={seedLoading}>
+
+      {/* this is for severity and ld calculation for future use, currently hidden  */}
+      {/* <div className="uidai-pmis-card">
+        <div style={sectionHead}>Seed Master Defaults</div>
+        <p style={muted}>Use this to create default severity levels and LD bands for the project.</p>
+        <div className="uidai-pmis-action-row">
+          <button type="button" className="uidai-pmis-btn" onClick={seedMasterDefaults} disabled={seedLoading}>
             {seedLoading ? 'Seeding…' : 'Seed Master Defaults'}
           </button>
         </div>
         {seedResult && (
-          <div className="severity-table" style={{ marginTop: 16 }}>
-            <div className="severity-header">
-              <div>Severity Levels</div>
-              <div>LD Bands</div>
-              <div>Message</div>
-            </div>
-            <div className="severity-row">
-              <div>{seedResult?.data?.severity_levels ?? seedResult.severityLevels ?? '-'}</div>
-              <div>{seedResult?.data?.ld_bands ?? seedResult.ldBands ?? '-'}</div>
-              <div>{seedResult.message ?? seedResult.message ?? ''}</div>
-            </div>
+          <div className="uidai-pmis-table-wrap" style={{ marginTop: 16 }}>
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ minWidth: 520, marginTop: 0 }}>
+              <thead>
+                <tr><th>Severity Levels</th><th>LD Bands</th><th>Message</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{seedResult?.data?.severity_levels ?? seedResult.severityLevels ?? '-'}</td>
+                  <td>{seedResult?.data?.ld_bands ?? seedResult.ldBands ?? '-'}</td>
+                  <td>{seedResult.message ?? ''}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
       </div> */}

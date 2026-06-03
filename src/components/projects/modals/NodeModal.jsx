@@ -754,8 +754,8 @@ export default function NodeModal({
             type="button"
             aria-label="SLA Mapping"
             title="Manage SLA activity mappings"
-            onClick={() => navigate("/activity-slas")}
-            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 }}
+            onClick={() => navigate(`/activity-slas?activityId=${encodeURIComponent(node.serverDisplayCode || node.id)}`)}
+            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 12px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" }}
           >
             SLA Mapping
           </button>
