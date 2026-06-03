@@ -6,21 +6,45 @@ import MultiSelect from '../../components/MultiSelect';
 import { DIVISION_OPTIONS, PROJECT_OPTIONS } from '../../data/demoData';
 import * as usersApi from '../../api/users';
 import * as vendorsApi from '../../api/vendors';
+import * as rolesApi from '../../api/roles';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { uiStore } from '../../store/project/uiStore';
 import { useCan } from '../../auth/permissions';
 
-// Role-dropdown options keyed by the permission flag that must be true
-// for the option to appear. Filtered at render time against the current
-// user's role.
-const ORG_ROLE_OPTIONS = [
-  { value: 'super_admin', label: 'Super Admin', requires: 'createSuperAdmin' },
-  { value: 'admin', label: 'PMIS Admin', requires: 'createAdmin' },
-  { value: 'org_admin', label: 'Org Admin', requires: 'createOrgAdmin' },
-  { value: 'project_admin', label: 'Project Admin', requires: 'createProjectAdmin' },
-  { value: 'project_member', label: 'Project Member', requires: 'createProjectMember' },
-];
+// Friendly labels + permission-gate keys for roles the FE has hand-
+// tuned copy for. Anything the role-catalog API returns that isn't in
+// this map gets a titlecased label and is gated behind `createAdmin`
+// (most restrictive sane default) so a brand-new role still surfaces
+// for admins without forcing a FE deploy.
+const ROLE_OVERRIDES = {
+  super_admin:    { label: 'Super Admin',    requires: 'createSuperAdmin' },
+  admin:          { label: 'PMIS Admin',     requires: 'createAdmin' },
+  org_admin:      { label: 'Org Admin',      requires: 'createOrgAdmin' },
+  project_admin:  { label: 'Project Admin',  requires: 'createProjectAdmin' },
+  project_member: { label: 'Project Member', requires: 'createProjectMember' },
+};
+
+function titleCaseRole(name) {
+  return String(name || '')
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function buildRoleOption(role) {
+  const key = String(role?.name || '');
+  const override = ROLE_OVERRIDES[key];
+  return {
+    value: key,
+    label: override?.label || titleCaseRole(key) || key,
+    requires: override?.requires || 'createAdmin',
+    id: role?.id,
+    description: role?.description || '',
+    builtin: role?.builtin !== false,
+  };
+}
 
 export default function UserForm() {
   const { vendors, setVendors, refresh, setUsers, users } = useData();
@@ -57,9 +81,59 @@ export default function UserForm() {
     createProjectAdmin: canCreateProjectAdmin,
     createProjectMember: canCreateProjectMember,
   };
-  const allowedOrgRoles = ORG_ROLE_OPTIONS.filter(
-    (o) => orgRoleFlags[o.requires]
-  );
+
+  /* Role catalog comes from /users/api/v3/roles so newly-introduced
+     roles (director_admin, division_*, custom tenant roles) show up
+     without a frontend deploy. Empty while loading — the dropdown
+     surfaces a "Loading roles…" placeholder. */
+  const [rolesCatalog, setRolesCatalog] = useState([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  useEffect(() => {
+    if (!tokenStore.get()) {
+      setRolesLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await rolesApi.list();
+        if (!cancelled) setRolesCatalog(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setRolesCatalog([]);
+      } finally {
+        if (!cancelled) setRolesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const allowedOrgRoles = useMemo(() => {
+    const opts = rolesCatalog
+      .map(buildRoleOption)
+      .filter((o) => o.value && orgRoleFlags[o.requires]);
+    /* Stable display order: hierarchy first (super_admin → project_member),
+       then anything else alphabetically. */
+    const HIERARCHY = [
+      'super_admin',
+      'admin',
+      'org_admin',
+      'director_admin',
+      'division_owner',
+      'division_approver',
+      'division_member',
+      'project_admin',
+      'project_member',
+    ];
+    return opts.sort((a, b) => {
+      const ai = HIERARCHY.indexOf(a.value);
+      const bi = HIERARCHY.indexOf(b.value);
+      if (ai === -1 && bi === -1) return a.label.localeCompare(b.label);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rolesCatalog, canCreateSuperAdmin, canCreateAdmin, canCreateOrgAdmin, canCreateProjectAdmin, canCreateProjectMember]);
 
   const [fullName, setFullName] = useState('');
   const [employeeId, setEmployeeId] = useState('');
@@ -486,10 +560,19 @@ export default function UserForm() {
             <select
               value={orgRole}
               onChange={(e) => { setOrgRole(e.target.value); clearFieldError('orgRole'); }}
+              disabled={rolesLoading}
             >
-              <option value="" disabled>— Select —</option>
+              <option value="" disabled>
+                {rolesLoading
+                  ? 'Loading roles…'
+                  : allowedOrgRoles.length === 0
+                    ? 'No roles available'
+                    : '— Select —'}
+              </option>
               {allowedOrgRoles.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <option key={o.value} value={o.value} title={o.description}>
+                  {o.label}
+                </option>
               ))}
             </select>
             {errors.orgRole && <div className="uidai-pmis-field-error">{errors.orgRole}</div>}

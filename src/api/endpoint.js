@@ -201,7 +201,10 @@ export const ENDPOINTS = {
   },
 
   roles: {
-    list: '/master/api/v3/master/roles',
+    /* Role catalog used by the Add User form's Role dropdown. Backend
+       moved this off the /master tree onto /users — keep this path in
+       sync with what the curl in PR review uses. */
+    list: '/users/api/v3/roles',
   },
 
   projects: {
