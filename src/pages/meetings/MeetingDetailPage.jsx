@@ -19,7 +19,6 @@ import {
   getMeeting,
   updateMeeting,
   userById,
-  projectById,
   activitiesOf,
   activityName,
   USERS,
@@ -28,6 +27,7 @@ import {
   TODAY,
   fmtDate,
   fmtDateShort,
+  fmtDuration,
   initials,
   isOverdue,
   extractActionItems,
@@ -159,10 +159,17 @@ export default function MeetingDetailPage() {
     );
   }
 
-  const p = meeting.projectId ? projectById(meeting.projectId) : null;
-
   const updateMomField = (key, value) =>
     setMomForm((f) => ({ ...f, [key]: value }));
+
+  const togglePresent = (key) => {
+    const current = meeting.present || [];
+    const next = current.includes(key)
+      ? current.filter((x) => x !== key)
+      : current.concat(key);
+    const updated = updateMeeting(meeting.id, { present: next });
+    setMeeting(updated);
+  };
 
   const saveMoM = () => {
     const next = updateMeeting(meeting.id, { mom: momText });
@@ -344,17 +351,18 @@ export default function MeetingDetailPage() {
             label="Time (IST)"
             value={`${meeting.start || "—"} – ${meeting.end || "—"}`}
           />
+          {fmtDuration(meeting.start, meeting.end) && (
+            <InfoTile
+              icon="⏱️"
+              label="Duration"
+              value={fmtDuration(meeting.start, meeting.end)}
+            />
+          )}
           <InfoTile
             icon="📍"
             label="Location / Link"
             value={renderLocation(meeting.location)}
           />
-          {p && (
-            <>
-              <InfoTile icon="🏛️" label="Division" value={p.division || "—"} />
-              <InfoTile icon="🏢" label="Service Partner" value={p.org || "—"} />
-            </>
-          )}
         </div>
 
         {meeting.link === "project" && (
@@ -375,74 +383,82 @@ export default function MeetingDetailPage() {
           </>
         )}
 
-        <div className="mt-section-label">People</div>
-        <div className="mt-people-grid">
-          <div className="mt-people-card">
-            <div className="mt-people-card__head">
-              <span className="mt-people-card__title">Attendees</span>
-              <span className="mt-people-card__count">
-                {meeting.attendees.length}
-              </span>
-            </div>
-            <div className="mt-people-list">
-              {meeting.attendees.length === 0 ? (
-                <div className="mt-empty-people">No internal attendees.</div>
-              ) : (
-                meeting.attendees.map((uid) => {
-                  const u = userById(uid);
-                  return (
-                    <div key={uid} className="mt-people-row">
-                      <span className="mt-people-avatar">
-                        {initials(u ? u.name : uid)}
-                      </span>
-                      <span className="mt-people-body">
-                        <span className="mt-people-name">
-                          {u ? u.name : uid}
-                        </span>
-                        <span className="mt-people-sub">
-                          {u ? `${u.org}${u.division ? " · " + u.division : ""}` : ""}
-                        </span>
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          <div className="mt-people-card">
-            <div className="mt-people-card__head">
-              <span className="mt-people-card__title">External</span>
-              <span className="mt-people-card__count">
-                {(meeting.external || []).length}
-              </span>
-            </div>
-            <div className="mt-people-list">
-              {!meeting.external || meeting.external.length === 0 ? (
-                <div className="mt-empty-people">No external attendees.</div>
-              ) : (
-                meeting.external.map((v) => (
-                  <div key={v} className="mt-people-row">
-                    <span className="mt-people-avatar mt-people-avatar--ext">
-                      {initials(v)}
-                    </span>
-                    <span className="mt-people-body">
-                      <span className="mt-people-name">{v}</span>
-                      <span className="mt-people-sub">External</span>
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
         {meeting.agenda && (
           <>
             <div className="mt-section-label">Agenda</div>
             <div className="mt-agenda">{meeting.agenda}</div>
           </>
         )}
+
+        <div className="mt-section-label">
+          Attendance{" "}
+          <span className="muted" style={{ fontWeight: 500, fontSize: 12.5 }}>
+            (tick whoever was present)
+          </span>
+        </div>
+        <div className="mt-attendance">
+          {(() => {
+            const internal = (meeting.attendees || []).map((uid) => {
+              const u = userById(uid);
+              return {
+                key: uid,
+                label: u ? u.name : uid,
+                sub: u ? `${u.org}${u.division ? " · " + u.division : ""}` : "Internal",
+                kind: "int"
+              };
+            });
+            const external = (meeting.external || []).map((v) => ({
+              key: v,
+              label: v,
+              sub: "External",
+              kind: "ext"
+            }));
+            const rows = internal.concat(external);
+            const presentCount = rows.filter((r) =>
+              (meeting.present || []).includes(r.key)
+            ).length;
+            if (rows.length === 0) {
+              return <div className="mt-empty-people">No attendees added.</div>;
+            }
+            return (
+              <>
+                <div className="mt-attendance__head">
+                  <span>
+                    {presentCount}/{rows.length} present
+                  </span>
+                </div>
+                <div className="mt-attendance__grid">
+                  {rows.map((r) => {
+                    const checked = (meeting.present || []).includes(r.key);
+                    return (
+                      <label
+                        key={r.kind + ":" + r.key}
+                        className={`mt-attendance__row${checked ? " is-present" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => togglePresent(r.key)}
+                        />
+                        <span
+                          className={`mt-people-avatar${
+                            r.kind === "ext" ? " mt-people-avatar--ext" : ""
+                          }`}
+                        >
+                          {initials(r.label)}
+                        </span>
+                        <span className="mt-people-body">
+                          <span className="mt-people-name">{r.label}</span>
+                          <span className="mt-people-sub">{r.sub}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </div>
       </div>
 
       {/* ── Section 2: MoM editor ── */}

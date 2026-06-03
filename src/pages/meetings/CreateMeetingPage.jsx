@@ -2,7 +2,7 @@
    CreateMeetingPage.jsx — single-page Create Meeting form. The
    "Create a New Meeting" title sits in the global navbar. Activities
    selection was removed per request; new meetings default to type
-   "Steering" so the model field stays populated for badges/filters
+   "Governance" so the model field stays populated for badges/filters
    elsewhere.
    ══════════════════════════════════════════════════════════════════ */
 
@@ -17,7 +17,7 @@ import {
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
-const DEFAULT_TYPE = "Steering";
+const DEFAULT_TYPE = "Governance";
 
 /* Grouped checkbox multi-select used for Activities and Attendees. */
 function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }) {
@@ -350,7 +350,7 @@ export default function CreateMeetingPage() {
               maxLength={120}
               value={draft.title}
               onChange={(e) => updateDraft({ title: e.target.value })}
-              placeholder="e.g. Q2 Steering Committee Review"
+              placeholder="e.g. Q2 Governance Committee Review"
             />
           </div>
           <div className="field">

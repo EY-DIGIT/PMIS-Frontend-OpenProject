@@ -8,7 +8,7 @@
    resetMeetingsStore().
    ══════════════════════════════════════════════════════════════════ */
 
-const STORAGE_KEY = "pmis_mock_meetings";
+const STORAGE_KEY = "pmis_mock_meetings_v2";
 export const TODAY = "2026-05-12";
 
 /* ─── Seed: users, projects, type/status meta ─── */
@@ -147,7 +147,6 @@ export function activityName(pid, aid) {
 }
 
 export const TYPE_META = {
-  Steering: { cls: "b-steering", desc: "Steering Committee oversight & key decisions" },
   Governance: { cls: "b-governance", desc: "Routine status, risks & progress reviews" },
   Migration: { cls: "b-migration", desc: "Data/system migration & cutover briefs" },
   "Ad-hoc": { cls: "b-adhoc", desc: "One-off or unscheduled discussion" }
@@ -155,7 +154,6 @@ export const TYPE_META = {
 export const STATUS_META = {
   Draft: { cls: "st-draft" },
   Scheduled: { cls: "st-scheduled" },
-  "MoM Pending": { cls: "st-mom" },
   "Tasks Created": { cls: "st-tasks" },
   Completed: { cls: "st-completed" }
 };
@@ -171,19 +169,20 @@ function buildSeed() {
   return [
     {
       id: "MTG-2026-001",
-      title: "Q2 Steering Committee Review",
-      type: "Steering",
+      title: "Q2 Governance Committee Review",
+      type: "Governance",
       link: "project",
       projectId: "PRJ001",
       activityIds: ["A103", "A104"],
       date: "2026-05-06",
       start: "11:00",
       end: "12:00",
-      location: "MS Teams — Steering Channel",
+      location: "MS Teams — Governance Channel",
       agenda:
         "Review build progress, open risks on backend services, and sign-off readiness for UAT.",
       attendees: ["u1", "u6", "u7", "u8"],
       external: ["audit-observer@cag.gov.in"],
+      present: ["u1", "u6", "u8"],
       status: "Tasks Created",
       mom:
         "Decisions:\n- Backend Services activity to be re-baselined; UAT entry gate moved to 20-May.\n- PMC to publish a consolidated risk register for the Build stage.\nActions:\n- N. Rao to circulate the updated risk register by 14-May.\n- D. Mehta will fix the enrolment service latency issue by 18-May.\n- R. Kumar to confirm UAT environment readiness by 20-May.\nRisks:\n- Auth service load test slipped; may impact UAT start.",
@@ -260,7 +259,8 @@ function buildSeed() {
         "Walk through the production migration runbook, rollback plan and freeze window.",
       attendees: ["u4", "u6", "u8"],
       external: [],
-      status: "MoM Pending",
+      present: [],
+      status: "Scheduled",
       mom: "",
       actionItems: []
     },
@@ -278,6 +278,7 @@ function buildSeed() {
       agenda: "Cross-project status, blocker triage and SLA watch-list.",
       attendees: ["u1", "u2", "u5", "u6"],
       external: ["secretariat@meity.gov.in"],
+      present: [],
       status: "Scheduled",
       mom: "",
       actionItems: []
@@ -349,7 +350,8 @@ export function createMeeting(payload) {
     agenda: payload.agenda || "",
     attendees: payload.attendees || [],
     external: payload.external || [],
-    status: "MoM Pending",
+    present: [],
+    status: "Scheduled",
     mom: "",
     actionItems: []
   };
@@ -381,6 +383,18 @@ export function fmtDateShort(iso) {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+export function fmtDuration(start, end) {
+  if (!start || !end) return "";
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (!Number.isFinite(mins) || mins <= 0) return "";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
 }
 export function fmt12(hhmm) {
   if (!hhmm) return "";

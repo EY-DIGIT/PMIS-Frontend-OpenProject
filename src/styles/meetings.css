@@ -317,6 +317,48 @@
   color: var(--text-muted);
   margin-top: 1px;
 }
+.pmis-mtg .mt-attendance {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+}
+.pmis-mtg .mt-attendance__head {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 8px;
+}
+.pmis-mtg .mt-attendance__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px;
+}
+.pmis-mtg .mt-attendance__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.pmis-mtg .mt-attendance__row:hover {
+  background: var(--light-cool);
+}
+.pmis-mtg .mt-attendance__row.is-present {
+  background: #e9f7ef;
+  border-color: #9ed4b3;
+}
+.pmis-mtg .mt-attendance__row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex: 0 0 16px;
+}
 .pmis-mtg .mt-empty-people {
   color: var(--text-muted);
   font-size: 12.5px;
