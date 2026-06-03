@@ -1,10 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════
    CreateMeetingPage.jsx — single-page Create Meeting form.
 
-   POSTs to /api/meetings (see src/api/meetings.js). Projects, the
-   project's milestones, and the user roster are fetched live from the
-   existing project / user APIs; attachments are read as base64 and
-   shipped inside the same JSON body.
+   POSTs to /api/meetings (see src/api/meetings.js). Projects and the
+   user roster are fetched live from the existing project / user APIs;
+   attachments are read as base64 and shipped inside the same JSON
+   body.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -191,7 +191,6 @@ export default function CreateMeetingPage() {
 
   const [draft, setDraft] = useState({
     projectId: "",
-    milestoneId: "",
     title: "",
     date: "",
     start: "",
@@ -210,10 +209,8 @@ export default function CreateMeetingPage() {
   /* Master data fetched from existing APIs. */
   const [projects, setProjects] = useState([]);
   const [users, setUsers] = useState([]);
-  const [milestones, setMilestones] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [loadingMilestones, setLoadingMilestones] = useState(false);
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -223,7 +220,7 @@ export default function CreateMeetingPage() {
     setLoadingProjects(true);
     setLoadingUsers(true);
     projectsApi
-      .list({ pageSize: 200 })
+      .list()
       .then((rows) => { if (alive) setProjects(rows); })
       .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingProjects(false); });
@@ -234,29 +231,6 @@ export default function CreateMeetingPage() {
       .finally(() => { if (alive) setLoadingUsers(false); });
     return () => { alive = false; };
   }, [show]);
-
-  /* When project changes, fetch its tree → milestones. */
-  useEffect(() => {
-    if (!draft.projectId) {
-      setMilestones([]);
-      return undefined;
-    }
-    let alive = true;
-    setLoadingMilestones(true);
-    projectsApi
-      .getTree(draft.projectId)
-      .then((p) => { if (alive) setMilestones(p?.milestones || []); })
-      .catch((e) => {
-        if (alive) show(`Couldn't load milestones: ${e.message}`, "warn");
-      })
-      .finally(() => { if (alive) setLoadingMilestones(false); });
-    return () => { alive = false; };
-  }, [draft.projectId, show]);
-
-  /* Reset milestone when project changes. */
-  useEffect(() => {
-    setDraft((d) => ({ ...d, milestoneId: "" }));
-  }, [draft.projectId]);
 
   const attendeeGroups = useMemo(() => {
     const byVendor = {};
@@ -314,7 +288,6 @@ export default function CreateMeetingPage() {
     let ok = true;
     const nextErr = { date: false, time: false };
     if (!draft.projectId) { show("Select a project.", "warn"); ok = false; }
-    if (!draft.milestoneId) { show("Select a milestone.", "warn"); ok = false; }
     if (!draft.title.trim()) { show("Meeting Title is required.", "warn"); ok = false; }
     if (!draft.date) { nextErr.date = true; ok = false; }
     if (!draft.start || !draft.end) {
@@ -336,7 +309,6 @@ export default function CreateMeetingPage() {
         description: draft.agenda.trim(),
         meetingLink: draft.location.trim(),
         projectId: draft.projectId,
-        milestoneId: draft.milestoneId,
         attendees: draft.attendees.map((userId) => ({
           userId,
           participantRole: "attendee",
@@ -384,7 +356,7 @@ export default function CreateMeetingPage() {
         </div>
 
         <div className="grid grid-3">
-          {/* Row 1 — Project | Milestone | Title */}
+          {/* Row 1 — Project | Title | (spacer) */}
           <div className="field">
             <label htmlFor="projSel">
               Project <span className="required">*</span>
@@ -407,30 +379,6 @@ export default function CreateMeetingPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="msSel">
-              Milestone <span className="required">*</span>
-            </label>
-            <select
-              id="msSel"
-              value={draft.milestoneId}
-              onChange={(e) => updateDraft({ milestoneId: e.target.value })}
-              disabled={!draft.projectId || loadingMilestones}
-            >
-              <option value="" disabled>
-                {!draft.projectId
-                  ? "Select a project first"
-                  : loadingMilestones
-                    ? "Loading…"
-                    : "Select…"}
-              </option>
-              {milestones.map((m) => (
-                <option key={m.uuid} value={m.uuid}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
             <label htmlFor="mTitle">
               Meeting Title <span className="required">*</span>
             </label>
@@ -443,6 +391,7 @@ export default function CreateMeetingPage() {
               placeholder="e.g. Q2 Governance Committee Review"
             />
           </div>
+          <div aria-hidden="true" />
 
           {/* Row 2 — Date | Start | End */}
           <div className="field">
