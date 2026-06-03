@@ -413,8 +413,11 @@ export default function CreateMeetingPage() {
             />
           </div>
 
-          {/* Row 3 — Agenda (2 cols, multi-line) + Attendees (1 col) */}
-          <div className="field" style={{ gridColumn: "span 2" }}>
+          {/* Row 3 — Agenda | Attendees | (External slot, blank until
+              the user clicks "Add External Attendees"). All three
+              share the 3-col grid so the External panel slides in
+              alongside the others instead of pushing a new row. */}
+          <div className="field">
             <label htmlFor="mDesc">Agenda</label>
             <textarea
               id="mDesc"
@@ -445,8 +448,8 @@ export default function CreateMeetingPage() {
             )}
           </div>
 
-          {showExt && (
-            <div className="field full">
+          {showExt ? (
+            <div className="field">
               <label htmlFor="extInput">External Attendees</label>
               <div className="attendee-chips" style={{ marginBottom: 6 }}>
                 {draft.external.length === 0 ? (
@@ -490,6 +493,10 @@ export default function CreateMeetingPage() {
                 </button>
               </div>
             </div>
+          ) : (
+            /* Empty placeholder keeps the grid cell reserved so the
+               row visibly has its third column ready for External. */
+            <div aria-hidden="true" />
           )}
         </div>
 
