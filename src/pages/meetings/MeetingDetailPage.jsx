@@ -110,6 +110,12 @@ export default function MeetingDetailPage() {
      and serialized to the canonical block format when saved or fed to
      the AI extractor. */
   const [momForm, setMomForm] = useState(() => parseMoM(meeting?.mom || ""));
+  /* Attendance is staged locally — checkboxes update presentSelection
+     without saving; the "Mark Present" button commits it to
+     meeting.present. Initialised from whatever's already saved. */
+  const [presentSelection, setPresentSelection] = useState(
+    () => meeting?.present || []
+  );
   const [proposed, setProposed] = useState(null);
   const [run, setRun] = useState({ active: false, stepIdx: 0, done: false, count: 0 });
   const [openComments, setOpenComments] = useState({});
@@ -123,6 +129,7 @@ export default function MeetingDetailPage() {
     const m = getMeeting(id);
     setMeeting(m);
     setMomForm(parseMoM(m?.mom || ""));
+    setPresentSelection(m?.present || []);
     setProposed(null);
     setRun({ active: false, stepIdx: 0, done: false, count: 0 });
   }, [id]);
@@ -183,18 +190,22 @@ export default function MeetingDetailPage() {
   const updateMomField = (key, value) =>
     setMomForm((f) => ({ ...f, [key]: value }));
 
-  const togglePresent = (key) => {
-    const current = meeting.present || [];
-    const next = current.includes(key)
-      ? current.filter((x) => x !== key)
-      : current.concat(key);
-    const updated = updateMeeting(meeting.id, { present: next });
-    setMeeting(updated);
+  const toggleSelection = (key) => {
+    setPresentSelection((sel) =>
+      sel.includes(key) ? sel.filter((x) => x !== key) : sel.concat(key)
+    );
   };
 
-  const setAllPresent = (keys) => {
+  const commitPresent = (keys) => {
+    setPresentSelection(keys);
     const updated = updateMeeting(meeting.id, { present: keys });
     setMeeting(updated);
+    show(
+      keys.length === 0
+        ? "Attendance cleared."
+        : `${keys.length} marked present.`,
+      "ok"
+    );
   };
 
   const saveMoM = () => {
@@ -428,7 +439,7 @@ export default function MeetingDetailPage() {
         <div className="mt-section-label">
           Attendance{" "}
           <span className="muted" style={{ fontWeight: 500, fontSize: 12.5 }}>
-            (tick whoever was present)
+            (tick whoever was present, then click Mark Present)
           </span>
         </div>
         <div className="mt-attendance">
@@ -449,33 +460,49 @@ export default function MeetingDetailPage() {
               kind: "ext"
             }));
             const rows = internal.concat(external);
-            const presentCount = rows.filter((r) =>
-              (meeting.present || []).includes(r.key)
-            ).length;
             if (rows.length === 0) {
               return <div className="mt-empty-people">No attendees added.</div>;
             }
             const allKeys = rows.map((r) => r.key);
-            const allMarked = presentCount === rows.length;
+            const selectedCount = presentSelection.length;
+            const savedKeys = meeting.present || [];
+            const sameSorted = (a, b) =>
+              a.length === b.length &&
+              [...a].sort().join("|") === [...b].sort().join("|");
+            const dirty = !sameSorted(presentSelection, savedKeys);
+            const noneSelected = selectedCount === 0;
+            const buttonLabel = noneSelected
+              ? "Mark all present"
+              : `Mark Present (${selectedCount})`;
+            const onClickButton = () => {
+              if (noneSelected) commitPresent(allKeys);
+              else commitPresent(presentSelection);
+            };
             return (
               <>
                 <div className="mt-attendance__head">
                   <span>
-                    {presentCount}/{rows.length} present
+                    {savedKeys.length}/{rows.length} present
+                    {dirty && (
+                      <span className="mt-attendance__dirty">
+                        {" "}
+                        · unsaved
+                      </span>
+                    )}
                   </span>
                   <button
                     type="button"
-                    className="btn ghost small-btn"
-                    onClick={() =>
-                      setAllPresent(allMarked ? [] : allKeys)
-                    }
+                    className={`btn ghost small-btn${
+                      dirty || noneSelected ? " is-emphasised" : ""
+                    }`}
+                    onClick={onClickButton}
                   >
-                    {allMarked ? "Clear all" : "Mark all present"}
+                    {buttonLabel}
                   </button>
                 </div>
                 <div className="mt-attendance__grid">
                   {rows.map((r) => {
-                    const checked = (meeting.present || []).includes(r.key);
+                    const checked = presentSelection.includes(r.key);
                     return (
                       <label
                         key={r.kind + ":" + r.key}
@@ -484,7 +511,7 @@ export default function MeetingDetailPage() {
                         <input
                           type="checkbox"
                           checked={checked}
-                          onChange={() => togglePresent(r.key)}
+                          onChange={() => toggleSelection(r.key)}
                         />
                         <span
                           className={`mt-people-avatar${
