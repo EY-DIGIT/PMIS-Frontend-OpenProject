@@ -1,56 +1,80 @@
 /* ══════════════════════════════════════════════════════════════════
-   MeetingDetailPage.jsx — port of `showMeetingDetail()` in the HTML
-   reference. Three-section page:
-     1. Meeting info card (badges, attendees, agenda).
-     2. MoM editor with Save / Load Sample / Summarize → Tasks.
-        Summarize runs a simulated n8n workflow that scrolls through
-        4 progress steps, then proposes action items.
-     3. Task section:
-        - while proposed items exist, show the review table with edit
-          rows + Confirm/Discard buttons.
-        - else if confirmed action items exist, show the read-only list
-          with per-item status select + collapsible comments.
-        - else show an empty card.
+   MeetingDetailPage.jsx — meeting detail backed by:
+     GET  /api/meetings/{id}        meeting + linked activity + attendees
+     POST /api/meetings/{id}/mom    save MoM (decisions, actions, risks)
+
+   Layout (top → bottom):
+     1. Info card  — date, time (with duration), location/link (copy),
+        linked activity, agenda, attendance checkboxes.
+     2. MoM editor — three textareas; Save POSTs the structured payload.
+     3. Tasks      — table of action items returned by the MoM API.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  getMeeting,
-  updateMeeting,
-  userById,
-  activitiesOf,
-  activityName,
-  USERS,
-  ORG_OPTIONS,
-  AIS_META,
-  TODAY,
-  fmtDate,
-  fmtDateShort,
-  fmtDuration,
-  initials,
-  isOverdue,
-  extractActionItems,
-  sampleMoM,
-  parseMoM,
-  composeMoM
-} from "../../data/meetingsMock";
-import {
-  TypeBadge,
-  StatusBadge,
-  LinkPill,
-  useToast
-} from "./_shared";
+import * as usersApi from "../../api/users";
+import { getMeeting, saveMoM } from "../../api/meetings";
+import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
-const SUMM_STEPS = [
-  "Connecting to n8n workflow “MoM → Action Items”…",
-  "Aadhaar Genius parsing minutes (decisions, actions, risks)…",
-  "Identifying owners and target dates…",
-  "Mapping action items to PMIS tasks…"
-];
+/* ─── Small helpers (date / time / strings) ─── */
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+function trimTime(hms) {
+  return hms ? String(hms).slice(0, 5) : "";
+}
+function fmtDuration(start, end) {
+  const a = trimTime(start);
+  const b = trimTime(end);
+  if (!a || !b) return "";
+  const [sh, sm] = a.split(":").map(Number);
+  const [eh, em] = b.split(":").map(Number);
+  const mins = eh * 60 + em - (sh * 60 + sm);
+  if (!Number.isFinite(mins) || mins <= 0) return "";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+function initials(name) {
+  return (name || "?")
+    .split(/[\s@]+/)
+    .filter(Boolean)
+    .map((x) => x[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+function addDaysISO(iso, n) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
 
-/* Compact info tile used for date / time / location / division / partner. */
+/* ─── Status badge — DRAFT / SCHEDULED / COMPLETED / CANCELLED ─── */
+const STATUS_CLASS = {
+  DRAFT: "st-draft",
+  SCHEDULED: "st-scheduled",
+  COMPLETED: "st-completed",
+  CANCELLED: "st-mom",
+};
+function StatusBadge({ status }) {
+  const s = String(status || "").toUpperCase();
+  return <span className={`badge ${STATUS_CLASS[s] || "st-draft"}`}>{s || "—"}</span>;
+}
+
+/* ─── Info tile (date / time / location) ─── */
 function InfoTile({ icon, label, value }) {
   return (
     <div className="mt-info-tile">
@@ -63,9 +87,8 @@ function InfoTile({ icon, label, value }) {
   );
 }
 
-/* Render the location field as a clickable link when it looks like a
-   URL, otherwise as plain text. A copy button sits at the end so the
-   user can grab the Teams / Meet link with one click. */
+/* ─── Location field with a copy button. Renders as a link when the
+   value looks like a URL, otherwise plain text. ─── */
 function LocationValue({ loc, onCopy }) {
   const s = String(loc || "").trim();
   if (!s) return "—";
@@ -100,78 +123,163 @@ function LocationValue({ loc, onCopy }) {
   );
 }
 
+/* ─── Freeform MoM text ⇄ structured. Decisions and Risks are flat
+   description lists; ActionItems hold owner + due-date metadata. ─── */
+function parseLines(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean);
+}
+function joinLines(lines) {
+  return (lines || []).join("\n");
+}
+
 export default function MeetingDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
-  const [meeting, setMeeting] = useState(() => getMeeting(id));
-  /* MoM is captured as a structured form (Decisions / Actions / Risks)
-     and serialized to the canonical block format when saved or fed to
-     the AI extractor. */
-  const [momForm, setMomForm] = useState(() => parseMoM(meeting?.mom || ""));
-  /* Attendance is staged locally — checkboxes update presentSelection
-     without saving; the "Mark Present" button commits it to
-     meeting.present. Initialised from whatever's already saved. */
-  const [presentSelection, setPresentSelection] = useState(
-    () => meeting?.present || []
-  );
-  const [proposed, setProposed] = useState(null);
-  const [run, setRun] = useState({ active: false, stepIdx: 0, done: false, count: 0 });
-  const [openComments, setOpenComments] = useState({});
-  const [commentDraft, setCommentDraft] = useState({});
+  const [meeting, setMeeting] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState([]);
+
+  const [momForm, setMomForm] = useState({
+    decisions: "",
+    actions: "",
+    risks: "",
+  });
+  const [momRemote, setMomRemote] = useState(null);
+  const [savingMom, setSavingMom] = useState(false);
+
+  /* Attendance is a local-only feature until the backend ships it. */
+  const [presentSelection, setPresentSelection] = useState([]);
   const taskSectionRef = useRef(null);
 
-  const momText = useMemo(() => composeMoM(momForm), [momForm]);
-
-  /* Re-pull from store if the route param changes. */
+  /* Load users for attendee display + owner labels. */
   useEffect(() => {
-    const m = getMeeting(id);
-    setMeeting(m);
-    setMomForm(parseMoM(m?.mom || ""));
-    setPresentSelection(m?.present || []);
-    setProposed(null);
-    setRun({ active: false, stepIdx: 0, done: false, count: 0 });
-  }, [id]);
+    let alive = true;
+    usersApi
+      .list({ pageSize: 200 })
+      .then((rows) => { if (alive) setUsers(rows); })
+      .catch(() => { /* fall back to userId text */ });
+    return () => { alive = false; };
+  }, []);
 
-  /* Drive the simulated n8n progress. Each step is ~720ms. The effect
-     does nothing while `meeting` is null (route param doesn't match) so
-     it's safe to mount above the early-return. */
+  const userById = useMemo(() => {
+    const m = new Map();
+    users.forEach((u) => m.set(u.userId, u));
+    return (uid) => m.get(uid) || null;
+  }, [users]);
+
+  const labelFor = (uid) => {
+    const u = userById(uid);
+    return u ? u.fullName || u.email || uid : uid;
+  };
+
+  /* Fetch the meeting whenever the route param changes. */
   useEffect(() => {
-    if (!meeting || !run.active || run.done) return undefined;
-    if (run.stepIdx < SUMM_STEPS.length - 1) {
-      const t = setTimeout(
-        () => setRun((s) => ({ ...s, stepIdx: s.stepIdx + 1 })),
-        720
-      );
-      return () => clearTimeout(t);
+    let alive = true;
+    setLoading(true);
+    getMeeting(id)
+      .then((m) => {
+        if (!alive) return;
+        setMeeting(m);
+        setPresentSelection([]);
+        setMomRemote(null);
+        setMomForm({ decisions: "", actions: "", risks: "" });
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setMeeting(null);
+        show(e.message || "Failed to load meeting.", "warn");
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [id, show]);
+
+  const updateMomField = (key, value) =>
+    setMomForm((f) => ({ ...f, [key]: value }));
+
+  const toggleSelection = (key) => {
+    setPresentSelection((sel) =>
+      sel.includes(key) ? sel.filter((x) => x !== key) : sel.concat(key)
+    );
+  };
+
+  const submitMoM = async () => {
+    if (!meeting) return;
+    const decisions = parseLines(momForm.decisions);
+    const actions = parseLines(momForm.actions);
+    const risks = parseLines(momForm.risks);
+    if (!decisions.length && !actions.length && !risks.length) {
+      show("Add at least one decision, action, or risk.", "warn");
+      return;
     }
-    const t = setTimeout(() => {
-      const items = extractActionItems(momText, meeting);
-      setProposed(items);
-      setRun({ active: false, stepIdx: SUMM_STEPS.length - 1, done: true, count: items.length });
+    const fallbackOwner =
+      meeting.attendees?.[0]?.userId || users[0]?.userId || null;
+    const due = addDaysISO(meeting.meetingDate, 7);
+    const body = {
+      title: meeting.title || "Meeting",
+      templateId: 1,
+      content: [
+        decisions.length ? `Decisions:\n${decisions.map((d) => `- ${d}`).join("\n")}` : "",
+        actions.length ? `Actions:\n${actions.map((d) => `- ${d}`).join("\n")}` : "",
+        risks.length ? `Risks:\n${risks.map((d) => `- ${d}`).join("\n")}` : "",
+      ].filter(Boolean).join("\n\n"),
+      decisions: decisions.map((description) => ({
+        description,
+        ownerUserId: fallbackOwner,
+      })),
+      actionItems: actions.map((description) => ({
+        description,
+        assignedToUserId: fallbackOwner,
+        dueDate: due,
+      })),
+      risks: risks.map((description) => ({
+        description,
+        severity: "LOW",
+        mitigation: "",
+        ownerUserId: fallbackOwner,
+      })),
+    };
+    setSavingMom(true);
+    try {
+      const saved = await saveMoM(meeting.id, body);
+      setMomRemote(saved);
+      show("MoM saved.", "ok");
       setTimeout(() => {
-        taskSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-      }, 50);
-    }, 720);
-    return () => clearTimeout(t);
-  }, [run.active, run.stepIdx, run.done, momText, meeting]);
+        taskSectionRef.current?.scrollIntoView?.({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 60);
+    } catch (e) {
+      show(e.message || "Failed to save MoM.", "warn");
+    } finally {
+      setSavingMom(false);
+    }
+  };
 
-  const proposedActivities = useMemo(
-    () =>
-      meeting && meeting.link === "project"
-        ? activitiesOf(meeting.projectId)
-        : [],
-    [meeting]
-  );
-
+  if (loading) {
+    return (
+      <div className="pmis-mtg">
+        <div className="page-header">
+          <div>
+            <div className="pm-title">Loading…</div>
+            <div className="pm-subtitle">#{id}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!meeting) {
     return (
       <div className="pmis-mtg">
         <div className="page-header">
           <div>
             <div className="pm-title">Meeting not found</div>
-            <div className="pm-subtitle">{id}</div>
+            <div className="pm-subtitle">#{id}</div>
           </div>
           <div className="page-header-actions">
             <button
@@ -187,180 +295,52 @@ export default function MeetingDetailPage() {
     );
   }
 
-  const updateMomField = (key, value) =>
-    setMomForm((f) => ({ ...f, [key]: value }));
+  const internalAttendees = meeting.attendees || [];
+  const externalAttendees = meeting.externalAttendees || [];
 
-  const toggleSelection = (key) => {
-    setPresentSelection((sel) =>
-      sel.includes(key) ? sel.filter((x) => x !== key) : sel.concat(key)
-    );
-  };
-
-  const commitPresent = (keys) => {
-    setPresentSelection(keys);
-    const updated = updateMeeting(meeting.id, { present: keys });
-    setMeeting(updated);
+  const attendanceRows = [
+    ...internalAttendees.map((a) => ({
+      key: a.userId,
+      label: labelFor(a.userId),
+      sub: a.participantRole || "Internal",
+      kind: "int",
+    })),
+    ...externalAttendees.map((e) => ({
+      key: e.email,
+      label: e.email,
+      sub: "External",
+      kind: "ext",
+    })),
+  ];
+  const presentCount = presentSelection.length;
+  const noneSelected = presentCount === 0;
+  const allKeys = attendanceRows.map((r) => r.key);
+  const attendanceButtonLabel = noneSelected
+    ? "Mark all present"
+    : `Mark Present (${presentCount})`;
+  const onAttendanceButton = () => {
+    setPresentSelection(noneSelected ? allKeys : presentSelection);
     show(
-      keys.length === 0
-        ? "Attendance cleared."
-        : `${keys.length} marked present.`,
+      noneSelected
+        ? `${allKeys.length} marked present.`
+        : `${presentCount} marked present.`,
       "ok"
     );
   };
 
-  const saveMoM = () => {
-    const next = updateMeeting(meeting.id, { mom: momText });
-    setMeeting(next);
-    show("MoM saved.", "ok");
-  };
-
-  const loadSample = () => {
-    const txt = sampleMoM(meeting);
-    setMomForm(parseMoM(txt));
-    show("Sample MoM loaded.", "ok");
-  };
-
-  const summarize = () => {
-    if (!momText.trim()) {
-      show("Add some minutes first, or load the sample MoM.", "warn");
-      return;
-    }
-    /* Persist whatever's in the editor before kicking off the run. */
-    updateMeeting(meeting.id, { mom: momText });
-    setRun({ active: true, stepIdx: 0, done: false, count: 0 });
-  };
-
-  const reSummarize = () => {
-    document
-      .getElementById("mom-form")
-      ?.scrollIntoView?.({ behavior: "smooth" });
-    summarize();
-  };
-
-  const proEdit = (i, k, v) =>
-    setProposed((arr) => arr.map((it, idx) => (idx === i ? { ...it, [k]: v } : it)));
-
-  const proSyncOrg = (i) =>
-    setProposed((arr) =>
-      arr.map((it, idx) => {
-        if (idx !== i) return it;
-        const u = userById(it.ownerId);
-        return u ? { ...it, assignedOrg: u.org } : it;
-      })
-    );
-
-  const proRemove = (i) => {
-    setProposed((arr) => {
-      const next = arr.filter((_, idx) => idx !== i);
-      return next.length ? next : null;
-    });
-  };
-
-  const addProposedRow = () => {
-    setProposed((arr) => {
-      const list = arr || [];
-      const u = USERS[0];
-      return list.concat({
-        id: "PRO-" + (list.length + 1),
-        text: "",
-        ownerId: u.id,
-        assignedOrg: u.org,
-        target:
-          meeting.date
-            ? new Date(
-                new Date(meeting.date + "T00:00:00").getTime() +
-                  7 * 86400000
-              )
-                .toISOString()
-                .slice(0, 10)
-            : TODAY,
-        status: "Open",
-        activityId:
-          meeting.link === "project" && meeting.activityIds.length
-            ? meeting.activityIds[0]
-            : null,
-        comments: []
-      });
-    });
-  };
-
-  const confirmTasks = () => {
-    const valid = (proposed || []).filter((it) => it.text.trim());
-    if (!valid.length) {
-      show("Add at least one action item.", "warn");
-      return;
-    }
-    let n = meeting.actionItems.length;
-    const newItems = valid.map((it) => {
-      n++;
-      return {
-        id: "AI-" + n,
-        text: it.text.trim(),
-        ownerId: it.ownerId,
-        assignedOrg: it.assignedOrg,
-        target: it.target,
-        status: isOverdue(it) ? "Delayed" : "Open",
-        activityId: meeting.link === "project" ? it.activityId : null,
-        comments: []
-      };
-    });
-    const next = updateMeeting(meeting.id, {
-      actionItems: meeting.actionItems.concat(newItems),
-      status: "Tasks Created"
-    });
-    setMeeting(next);
-    setProposed(null);
-    setRun({ active: false, stepIdx: 0, done: false, count: 0 });
-    show(`${valid.length} task${valid.length > 1 ? "s" : ""} created.`, "ok");
-  };
-
-  const discardProposed = () => {
-    setProposed(null);
-    setRun({ active: false, stepIdx: 0, done: false, count: 0 });
-  };
-
-  const setItemStatus = (aid, val) => {
-    const updated = meeting.actionItems.map((a) =>
-      a.id === aid ? { ...a, status: val } : a
-    );
-    const next = updateMeeting(meeting.id, { actionItems: updated });
-    setMeeting(next);
-  };
-
-  const toggleCommentsRow = (aid) =>
-    setOpenComments((o) => ({ ...o, [aid]: !o[aid] }));
-
-  const postComment = (aid) => {
-    const text = (commentDraft[aid] || "").trim();
-    if (!text) return;
-    const updated = meeting.actionItems.map((a) =>
-      a.id === aid
-        ? {
-            ...a,
-            comments: a.comments.concat({
-              by: "You",
-              t: fmtDateShort(TODAY),
-              text
-            })
-          }
-        : a
-    );
-    const next = updateMeeting(meeting.id, { actionItems: updated });
-    setMeeting(next);
-    setCommentDraft((d) => ({ ...d, [aid]: "" }));
-  };
-
-  const confirmedDone = meeting.actionItems.filter((a) => a.status === "Completed").length;
-  const confirmedOverdue =
-    meeting.actionItems.filter(isOverdue).length ||
-    meeting.actionItems.filter((a) => a.status === "Delayed").length;
+  const decisions = momRemote?.decisions || [];
+  const actionItems = momRemote?.actionItems || [];
+  const risks = momRemote?.risks || [];
 
   return (
     <div className="pmis-mtg">
       <div className="page-header">
         <div>
           <div className="pm-title">{meeting.title}</div>
-          <div className="pm-subtitle">{meeting.id}</div>
+          <div className="pm-subtitle">
+            #{meeting.id}
+            {meeting.activityName ? ` · ${meeting.activityName}` : ""}
+          </div>
         </div>
         <div className="page-header-actions">
           <button
@@ -376,30 +356,30 @@ export default function MeetingDetailPage() {
       {/* ── Section 1: meeting info ── */}
       <div className="card">
         <div className="mt-hero">
-          <TypeBadge type={meeting.type} />
           <StatusBadge status={meeting.status} />
-          <LinkPill meeting={meeting} />
+          {meeting.projectId && (
+            <span className="pill-link">Project: {meeting.projectId}</span>
+          )}
         </div>
 
         <div className="mt-info-grid">
-          <InfoTile icon="📅" label="Date" value={fmtDate(meeting.date)} />
+          <InfoTile icon="📅" label="Date" value={fmtDate(meeting.meetingDate)} />
           <InfoTile
             icon="🕐"
             label="Time (IST)"
             value={
-              `${meeting.start || "—"} – ${meeting.end || "—"}` +
-              (fmtDuration(meeting.start, meeting.end)
-                ? ` (${fmtDuration(meeting.start, meeting.end)})`
+              `${trimTime(meeting.startTime) || "—"} – ${trimTime(meeting.endTime) || "—"}` +
+              (fmtDuration(meeting.startTime, meeting.endTime)
+                ? ` (${fmtDuration(meeting.startTime, meeting.endTime)})`
                 : "")
             }
           />
-
           <InfoTile
             icon="📍"
             label="Location / Link"
             value={
               <LocationValue
-                loc={meeting.location}
+                loc={meeting.meetingLink}
                 onCopy={(k) =>
                   show(
                     k === "ok" ? "Link copied." : "Copy failed.",
@@ -411,28 +391,22 @@ export default function MeetingDetailPage() {
           />
         </div>
 
-        {meeting.link === "project" && (
+        {(meeting.activityName || meeting.activityId) && (
           <>
-            <div className="mt-section-label">Activities</div>
+            <div className="mt-section-label">Linked Activity</div>
             <div className="attendee-chips">
-              {meeting.activityIds.length === 0 ? (
-                <span className="mt-empty-people">No activities linked.</span>
-              ) : (
-                meeting.activityIds.map((aid) => (
-                  <span key={aid} className="chip">
-                    {activityName(meeting.projectId, aid)}{" "}
-                    <span className="sub">{aid}</span>
-                  </span>
-                ))
-              )}
+              <span className="chip">
+                {meeting.activityName || meeting.activityId}
+                <span className="sub">{meeting.activityId}</span>
+              </span>
             </div>
           </>
         )}
 
-        {meeting.agenda && (
+        {meeting.description && (
           <>
             <div className="mt-section-label">Agenda</div>
-            <div className="mt-agenda">{meeting.agenda}</div>
+            <div className="mt-agenda">{meeting.description}</div>
           </>
         )}
 
@@ -443,116 +417,58 @@ export default function MeetingDetailPage() {
           </span>
         </div>
         <div className="mt-attendance">
-          {(() => {
-            const internal = (meeting.attendees || []).map((uid) => {
-              const u = userById(uid);
-              return {
-                key: uid,
-                label: u ? u.name : uid,
-                sub: u ? `${u.org}${u.division ? " · " + u.division : ""}` : "Internal",
-                kind: "int"
-              };
-            });
-            const external = (meeting.external || []).map((v) => ({
-              key: v,
-              label: v,
-              sub: "External",
-              kind: "ext"
-            }));
-            const rows = internal.concat(external);
-            if (rows.length === 0) {
-              return <div className="mt-empty-people">No attendees added.</div>;
-            }
-            const allKeys = rows.map((r) => r.key);
-            const selectedCount = presentSelection.length;
-            const savedKeys = meeting.present || [];
-            const sameSorted = (a, b) =>
-              a.length === b.length &&
-              [...a].sort().join("|") === [...b].sort().join("|");
-            const dirty = !sameSorted(presentSelection, savedKeys);
-            const noneSelected = selectedCount === 0;
-            const buttonLabel = noneSelected
-              ? "Mark all present"
-              : `Mark Present (${selectedCount})`;
-            const onClickButton = () => {
-              if (noneSelected) commitPresent(allKeys);
-              else commitPresent(presentSelection);
-            };
-            return (
-              <>
-                <div className="mt-attendance__head">
-                  <span>
-                    {savedKeys.length}/{rows.length} present
-                    {dirty && (
-                      <span className="mt-attendance__dirty">
-                        {" "}
-                        · unsaved
-                      </span>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    className={`btn ghost small-btn${
-                      dirty || noneSelected ? " is-emphasised" : ""
-                    }`}
-                    onClick={onClickButton}
-                  >
-                    {buttonLabel}
-                  </button>
-                </div>
-                <div className="mt-attendance__grid">
-                  {rows.map((r) => {
-                    const checked = presentSelection.includes(r.key);
-                    return (
-                      <label
-                        key={r.kind + ":" + r.key}
-                        className={`mt-attendance__row${checked ? " is-present" : ""}`}
+          {attendanceRows.length === 0 ? (
+            <div className="mt-empty-people">No attendees added.</div>
+          ) : (
+            <>
+              <div className="mt-attendance__head">
+                <span>
+                  {presentCount}/{attendanceRows.length} selected
+                </span>
+                <button
+                  type="button"
+                  className="btn ghost small-btn is-emphasised"
+                  onClick={onAttendanceButton}
+                >
+                  {attendanceButtonLabel}
+                </button>
+              </div>
+              <div className="mt-attendance__grid">
+                {attendanceRows.map((r) => {
+                  const checked = presentSelection.includes(r.key);
+                  return (
+                    <label
+                      key={r.kind + ":" + r.key}
+                      className={`mt-attendance__row${checked ? " is-present" : ""}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSelection(r.key)}
+                      />
+                      <span
+                        className={`mt-people-avatar${
+                          r.kind === "ext" ? " mt-people-avatar--ext" : ""
+                        }`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleSelection(r.key)}
-                        />
-                        <span
-                          className={`mt-people-avatar${
-                            r.kind === "ext" ? " mt-people-avatar--ext" : ""
-                          }`}
-                        >
-                          {initials(r.label)}
-                        </span>
-                        <span className="mt-people-body">
-                          <span className="mt-people-name">{r.label}</span>
-                          <span className="mt-people-sub">{r.sub}</span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </>
-            );
-          })()}
+                        {initials(r.label)}
+                      </span>
+                      <span className="mt-people-body">
+                        <span className="mt-people-name">{r.label}</span>
+                        <span className="mt-people-sub">{r.sub}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* ── Section 2: MoM editor ── */}
       <div className="card">
         <div className="card-title">Minutes of Meeting</div>
-        <div className="mom-tools">
-          <button
-            type="button"
-            className="btn ghost small-btn"
-            onClick={loadSample}
-          >
-            Load sample
-          </button>
-          <button
-            type="button"
-            className="btn ghost small-btn"
-            onClick={saveMoM}
-          >
-            Save
-          </button>
-        </div>
         <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
           <div className="field full">
             <label htmlFor="momDecisions">Decisions</label>
@@ -560,23 +476,18 @@ export default function MeetingDetailPage() {
               id="momDecisions"
               className="mom-textarea"
               style={{ height: 130 }}
-              placeholder={"One decision per line.\ne.g. Proceed with planned scope; no baseline change this cycle."}
+              placeholder={"One decision per line."}
               value={momForm.decisions}
               onChange={(e) => updateMomField("decisions", e.target.value)}
             />
           </div>
           <div className="field full">
-            <label htmlFor="momActions">
-              Action Items{" "}
-              <span className="muted">(used by the AI to extract tasks)</span>
-            </label>
+            <label htmlFor="momActions">Action Items</label>
             <textarea
               id="momActions"
               className="mom-textarea"
               style={{ height: 170 }}
-              placeholder={
-                "One action per line.\ne.g. R. Kumar to confirm UAT environment readiness by 20-May."
-              }
+              placeholder={"One action per line."}
               value={momForm.actions}
               onChange={(e) => updateMomField("actions", e.target.value)}
             />
@@ -587,329 +498,104 @@ export default function MeetingDetailPage() {
               id="momRisks"
               className="mom-textarea"
               style={{ height: 110 }}
-              placeholder={"One risk per line.\ne.g. Dependency on third-party sign-off may slip the timeline."}
+              placeholder={"One risk per line."}
               value={momForm.risks}
               onChange={(e) => updateMomField("risks", e.target.value)}
             />
           </div>
         </div>
 
-        <div className="ai-banner">
-          <div className="txt">
-            Held in MS Teams / Google Meet. Record the MoM, then summarize into tasks.
-          </div>
+        <div className="form-actions">
           <button
             type="button"
-            className="btn-ai"
-            onClick={summarize}
-            disabled={run.active}
+            className="btn"
+            onClick={submitMoM}
+            disabled={savingMom}
           >
-            Summarize → Tasks
+            {savingMom ? "Saving…" : "Save MoM"}
           </button>
         </div>
-
-        {run.active && (
-          <>
-            <div className="run-status">
-              <span className="spinner" aria-hidden="true" />
-              <span>{SUMM_STEPS[run.stepIdx]}</span>
-            </div>
-            <div className="run-step">
-              Step {run.stepIdx + 1} of {SUMM_STEPS.length}
-            </div>
-          </>
-        )}
-        {!run.active && run.done && (
-          <div className="run-status" style={{ color: "#15795b" }}>
-            ✓ {run.count} task{run.count !== 1 ? "s" : ""} proposed
-          </div>
-        )}
       </div>
 
-      {/* ── Section 3: tasks ── */}
+      {/* ── Section 3: items returned by the MoM API ── */}
       <div ref={taskSectionRef}>
-        {proposed && proposed.length > 0 ? (
-          <div className="card">
-            <div className="card-title">
-              Proposed Tasks{" "}
-              <span className="badge ai-progress" style={{ verticalAlign: "middle" }}>
-                AI
-              </span>
-            </div>
-            <div className="table-wrap">
-              <table className="table review-table">
-                <thead>
-                  <tr>
-                    <th style={{ minWidth: 240 }}>Action item</th>
-                    <th>Owner</th>
-                    <th>Assigned</th>
-                    <th>Target date</th>
-                    {meeting.link === "project" && <th>Activity</th>}
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {proposed.map((it, idx) => (
-                    <tr key={idx}>
-                      <td>
-                        <input
-                          type="text"
-                          value={it.text}
-                          onChange={(e) => proEdit(idx, "text", e.target.value)}
-                        />
-                        {isOverdue(it) && (
-                          <div className="flag-overdue">⚠ overdue</div>
-                        )}
-                      </td>
-                      <td>
-                        <select
-                          value={it.ownerId}
-                          onChange={(e) => {
-                            proEdit(idx, "ownerId", e.target.value);
-                            setTimeout(() => proSyncOrg(idx), 0);
-                          }}
-                        >
-                          {USERS.map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          value={it.assignedOrg}
-                          onChange={(e) =>
-                            proEdit(idx, "assignedOrg", e.target.value)
-                          }
-                        >
-                          {ORG_OPTIONS.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          type="date"
-                          value={it.target}
-                          onChange={(e) => proEdit(idx, "target", e.target.value)}
-                        />
-                      </td>
-                      {meeting.link === "project" && (
-                        <td>
-                          <select
-                            value={it.activityId || ""}
-                            onChange={(e) =>
-                              proEdit(idx, "activityId", e.target.value)
-                            }
-                          >
-                            {proposedActivities.map((a) => (
-                              <option key={a.id} value={a.id}>
-                                {a.name}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
+        {momRemote ? (
+          <>
+            {decisions.length > 0 && (
+              <div className="card">
+                <div className="card-title">Decisions</div>
+                <ul className="mt-list">
+                  {decisions.map((d) => (
+                    <li key={d.id}>
+                      <span>{d.description}</span>
+                      {d.ownerUserId && (
+                        <span className="muted">
+                          {" "}
+                          · {labelFor(d.ownerUserId)}
+                        </span>
                       )}
-                      <td>
-                        <button
-                          type="button"
-                          className="chip-remove"
-                          title="Remove"
-                          style={{ fontSize: 18 }}
-                          onClick={() => proRemove(idx)}
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="form-actions">
-              <button type="button" className="btn" onClick={confirmTasks}>
-                Create {proposed.length} Task{proposed.length > 1 ? "s" : ""}
-              </button>
-              <button
-                type="button"
-                className="btn ghost small-btn"
-                onClick={addProposedRow}
-              >
-                + Add
-              </button>
-              <button
-                type="button"
-                className="btn cancel"
-                onClick={discardProposed}
-              >
-                Discard
-              </button>
-            </div>
-          </div>
-        ) : meeting.actionItems.length > 0 ? (
-          <div className="card">
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "space-between",
-                gap: 10,
-                alignItems: "center",
-                marginBottom: 10
-              }}
-            >
-              <div className="card-title" style={{ margin: 0 }}>
-                Tasks
+                </ul>
               </div>
-              <div
-                style={{
-                  fontSize: 12.5,
-                  color: "var(--text-soft)",
-                  fontWeight: 600
-                }}
-              >
-                {confirmedDone}/{meeting.actionItems.length} done
-                {confirmedOverdue > 0 && (
-                  <span style={{ color: "var(--red)" }}>
-                    {" "}
-                    · {confirmedOverdue} overdue
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th style={{ minWidth: 240 }}>Action item</th>
-                    <th>Owner</th>
-                    <th>Assigned</th>
-                    <th>Target</th>
-                    <th>Status</th>
-                    {meeting.link === "project" && <th>Activity</th>}
-                    <th>Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {meeting.actionItems.map((a) => {
-                    const u = userById(a.ownerId);
-                    const colSpan = meeting.link === "project" ? 7 : 6;
-                    return (
-                      <React.Fragment key={a.id}>
-                        <tr>
+            )}
+
+            {actionItems.length > 0 && (
+              <div className="card">
+                <div className="card-title">Action Items</div>
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: 240 }}>Description</th>
+                        <th>Owner</th>
+                        <th>Due</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {actionItems.map((a) => (
+                        <tr key={a.id}>
+                          <td>{a.description}</td>
+                          <td>{labelFor(a.assignedToUserId)}</td>
+                          <td>{fmtDate(a.dueDate)}</td>
                           <td>
-                            {a.text}
-                            {isOverdue(a) && (
-                              <div className="flag-overdue">⚠ overdue</div>
-                            )}
-                          </td>
-                          <td>
-                            {u ? u.name : a.ownerId}
-                            <div className="muted">
-                              {u ? u.division || u.role : ""}
-                            </div>
-                          </td>
-                          <td>{a.assignedOrg}</td>
-                          <td>{fmtDate(a.target)}</td>
-                          <td>
-                            <select
-                              value={a.status}
-                              onChange={(e) => setItemStatus(a.id, e.target.value)}
-                            >
-                              {Object.keys(AIS_META).map((s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          {meeting.link === "project" && (
-                            <td>{activityName(meeting.projectId, a.activityId)}</td>
-                          )}
-                          <td>
-                            <button
-                              type="button"
-                              className="btn ghost small-btn"
-                              onClick={() => toggleCommentsRow(a.id)}
-                            >
-                              Notes ({a.comments.length})
-                            </button>
+                            <span className="badge ai-open">
+                              {a.status || "OPEN"}
+                            </span>
                           </td>
                         </tr>
-                        {openComments[a.id] && (
-                          <tr>
-                            <td colSpan={colSpan}>
-                              <div className="comments">
-                                {a.comments.length === 0 ? (
-                                  <div
-                                    className="muted"
-                                    style={{ marginBottom: 6 }}
-                                  >
-                                    No comments yet.
-                                  </div>
-                                ) : (
-                                  a.comments.map((c, i) => (
-                                    <div className="comment" key={i}>
-                                      <div className="av">{initials(c.by)}</div>
-                                      <div className="body">
-                                        <b>{c.by}</b>
-                                        <span className="t">{c.t}</span>
-                                        <div>{c.text}</div>
-                                      </div>
-                                    </div>
-                                  ))
-                                )}
-                              </div>
-                              <div
-                                className="ext-row"
-                                style={{ marginTop: 4 }}
-                              >
-                                <input
-                                  type="text"
-                                  placeholder="Add a comment…"
-                                  value={commentDraft[a.id] || ""}
-                                  onChange={(e) =>
-                                    setCommentDraft((d) => ({
-                                      ...d,
-                                      [a.id]: e.target.value
-                                    }))
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      postComment(a.id);
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn ghost small-btn"
-                                  onClick={() => postComment(a.id)}
-                                >
-                                  Post
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="form-actions">
-              <button type="button" className="btn-ai" onClick={reSummarize}>
-                Re-summarize
-              </button>
-            </div>
-          </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {risks.length > 0 && (
+              <div className="card">
+                <div className="card-title">Risks</div>
+                <ul className="mt-list">
+                  {risks.map((r) => (
+                    <li key={r.id}>
+                      <span>{r.description}</span>
+                      {r.severity && (
+                        <span className="muted"> · {r.severity}</span>
+                      )}
+                      {r.mitigation && (
+                        <div className="muted">Mitigation: {r.mitigation}</div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         ) : (
           <div className="card no-stripe" style={{ borderStyle: "dashed" }}>
-            <div className="empty-state">No tasks yet.</div>
+            <div className="empty-state">
+              Save the MoM to see decisions, action items and risks here.
+            </div>
           </div>
         )}
       </div>

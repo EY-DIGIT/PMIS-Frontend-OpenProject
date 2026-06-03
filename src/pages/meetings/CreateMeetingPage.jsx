@@ -1,25 +1,21 @@
 /* ══════════════════════════════════════════════════════════════════
-   CreateMeetingPage.jsx — single-page Create Meeting form. The
-   "Create a New Meeting" title sits in the global navbar. Activities
-   selection was removed per request; new meetings default to type
-   "Governance" so the model field stays populated for badges/filters
-   elsewhere.
+   CreateMeetingPage.jsx — single-page Create Meeting form.
+
+   POSTs to /api/meetings (see src/api/meetings.js). Projects, the
+   project's milestones, and the user roster are fetched live from the
+   existing project / user APIs; attachments are read as base64 and
+   shipped inside the same JSON body.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  PROJECTS,
-  USERS,
-  projectById,
-  createMeeting
-} from "../../data/meetingsMock";
 import { useToast } from "./_shared";
+import * as projectsApi from "../../api/projects";
+import * as usersApi from "../../api/users";
+import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
 
-const DEFAULT_TYPE = "Governance";
-
-/* Grouped checkbox multi-select used for Activities and Attendees. */
+/* Grouped checkbox multi-select used for Attendees. */
 function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
@@ -182,13 +178,20 @@ function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }
   );
 }
 
+function formatBytes(n) {
+  if (!n) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function CreateMeetingPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
   const [draft, setDraft] = useState({
-    link: "project",
     projectId: "",
+    milestoneId: "",
     title: "",
     date: "",
     start: "",
@@ -200,32 +203,76 @@ export default function CreateMeetingPage() {
   });
   const [extInput, setExtInput] = useState("");
   const [showExt, setShowExt] = useState(false);
+  const [files, setFiles] = useState([]); /* raw File objects */
   const [errors, setErrors] = useState({ date: false, time: false });
+  const [submitting, setSubmitting] = useState(false);
+
+  /* Master data fetched from existing APIs. */
+  const [projects, setProjects] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [milestones, setMilestones] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingMilestones, setLoadingMilestones] = useState(false);
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
-  const onLinkSelect = (v) => {
-    if (v === "__general" || v === "") {
-      updateDraft({ link: "general", projectId: "" });
-    } else {
-      updateDraft({ link: "project", projectId: v });
+  /* Initial load: projects + users in parallel. */
+  useEffect(() => {
+    let alive = true;
+    setLoadingProjects(true);
+    setLoadingUsers(true);
+    projectsApi
+      .list({ pageSize: 200 })
+      .then((rows) => { if (alive) setProjects(rows); })
+      .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
+      .finally(() => { if (alive) setLoadingProjects(false); });
+    usersApi
+      .list({ pageSize: 200 })
+      .then((rows) => { if (alive) setUsers(rows); })
+      .catch((e) => { if (alive) show(`Couldn't load users: ${e.message}`, "warn"); })
+      .finally(() => { if (alive) setLoadingUsers(false); });
+    return () => { alive = false; };
+  }, [show]);
+
+  /* When project changes, fetch its tree → milestones. */
+  useEffect(() => {
+    if (!draft.projectId) {
+      setMilestones([]);
+      return undefined;
     }
-  };
+    let alive = true;
+    setLoadingMilestones(true);
+    projectsApi
+      .getTree(draft.projectId)
+      .then((p) => { if (alive) setMilestones(p?.milestones || []); })
+      .catch((e) => {
+        if (alive) show(`Couldn't load milestones: ${e.message}`, "warn");
+      })
+      .finally(() => { if (alive) setLoadingMilestones(false); });
+    return () => { alive = false; };
+  }, [draft.projectId, show]);
+
+  /* Reset milestone when project changes. */
+  useEffect(() => {
+    setDraft((d) => ({ ...d, milestoneId: "" }));
+  }, [draft.projectId]);
 
   const attendeeGroups = useMemo(() => {
-    const byOrg = {};
-    USERS.forEach((u) => {
-      (byOrg[u.org] = byOrg[u.org] || []).push(u);
+    const byVendor = {};
+    users.forEach((u) => {
+      const group = u.vendorName || u.division || u.orgRole || "Users";
+      (byVendor[group] = byVendor[group] || []).push(u);
     });
-    return Object.entries(byOrg).map(([org, items]) => ({
-      group: org,
+    return Object.entries(byVendor).map(([group, items]) => ({
+      group,
       items: items.map((u) => ({
-        value: u.id,
-        label: u.name,
-        meta: u.division || u.role
+        value: u.userId,
+        label: u.fullName || u.email || u.userId,
+        meta: u.orgRole || u.role || ""
       }))
     }));
-  }, []);
+  }, [users]);
 
   const validateTimes = () => {
     const bad = !!(draft.start && draft.end && draft.end <= draft.start);
@@ -247,48 +294,73 @@ export default function CreateMeetingPage() {
   const removeExt = (v) =>
     updateDraft({ external: draft.external.filter((x) => x !== v) });
 
-  const submit = () => {
+  const onFilesPicked = (e) => {
+    const picked = Array.from(e.target.files || []);
+    if (!picked.length) return;
+    /* Dedupe by name+size so picking the same file twice doesn't double up. */
+    setFiles((prev) => {
+      const sig = (f) => `${f.name}|${f.size}`;
+      const have = new Set(prev.map(sig));
+      return prev.concat(picked.filter((f) => !have.has(sig(f))));
+    });
+    /* Reset the input so the same file can be re-picked after removal. */
+    e.target.value = "";
+  };
+
+  const removeFile = (idx) =>
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+
+  const submit = async () => {
     let ok = true;
     const nextErr = { date: false, time: false };
-    if (draft.link === "project" && !draft.projectId) {
-      show("Select a project, or choose General.", "warn");
-      ok = false;
-    }
-    if (!draft.date) { nextErr.date = true; ok = false; }
-    if (!validateTimes()) { nextErr.time = true; ok = false; }
+    if (!draft.projectId) { show("Select a project.", "warn"); ok = false; }
+    if (!draft.milestoneId) { show("Select a milestone.", "warn"); ok = false; }
     if (!draft.title.trim()) { show("Meeting Title is required.", "warn"); ok = false; }
+    if (!draft.date) { nextErr.date = true; ok = false; }
     if (!draft.start || !draft.end) {
       show("Start and End time are required.", "warn");
       ok = false;
     }
+    if (!validateTimes()) { nextErr.time = true; ok = false; }
     setErrors(nextErr);
     if (!ok) return;
 
-    const created = createMeeting({
-      title: draft.title.trim(),
-      type: DEFAULT_TYPE,
-      link: draft.link,
-      projectId: draft.link === "project" ? draft.projectId : null,
-      activityIds: [],
-      date: draft.date,
-      start: draft.start,
-      end: draft.end,
-      location: draft.location.trim(),
-      agenda: draft.agenda.trim(),
-      attendees: draft.attendees,
-      external: draft.external
-    });
-    show(`Meeting ${created.id} created.`, "ok");
-    /* Tiny delay so the toast is visible before route swap. */
-    setTimeout(() => navigate(`/meetings/${created.id}`), 350);
+    setSubmitting(true);
+    try {
+      const attachments = await encodeAttachments(files);
+      const payload = {
+        title: draft.title.trim(),
+        meetingDate: draft.date,
+        startTime: draft.start,
+        endTime: draft.end,
+        description: draft.agenda.trim(),
+        meetingLink: draft.location.trim(),
+        projectId: draft.projectId,
+        milestoneId: draft.milestoneId,
+        attendees: draft.attendees.map((userId) => ({
+          userId,
+          participantRole: "attendee",
+          mandatory: false
+        })),
+        externalAttendees: draft.external.map((email) => ({ email })),
+        attachments
+      };
+      const created = await createMeeting(payload);
+      show(`Meeting #${created?.id ?? ""} created.`, "ok");
+      setTimeout(() => navigate("/meetings"), 350);
+    } catch (e) {
+      show(e.message || "Failed to create meeting.", "warn");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const projectForTag = draft.projectId ? projectById(draft.projectId) : null;
+  const projectForTag = draft.projectId
+    ? projects.find((p) => p.projectId === draft.projectId)
+    : null;
 
   return (
     <div className="pmis-mtg">
-      {/* Page title moved to the global navbar (resolveNavTitle in
-          Layout.jsx → "Create a New Meeting"). */}
       <div className="card">
         <div
           style={{
@@ -303,41 +375,59 @@ export default function CreateMeetingPage() {
           <div className="card-title" style={{ margin: 0 }}>
             Create a New Meeting Invite
           </div>
-          {draft.link === "general" ? (
-            <span className="pill-link pill-general">General Meeting</span>
-          ) : draft.projectId ? (
+          {projectForTag && (
             <span className="pill-link">
-              {draft.projectId} — {projectForTag ? projectForTag.name : ""}
+              {projectForTag.projectCode || projectForTag.projectId} —{" "}
+              {projectForTag.projectName}
             </span>
-          ) : null}
+          )}
         </div>
 
         <div className="grid grid-3">
-          {/* Row 1 — Project | Title | Date */}
+          {/* Row 1 — Project | Milestone | Title */}
           <div className="field">
             <label htmlFor="projSel">
               Project <span className="required">*</span>
             </label>
             <select
               id="projSel"
-              value={
-                draft.link === "general" ? "__general" : draft.projectId || ""
-              }
-              onChange={(e) => onLinkSelect(e.target.value)}
+              value={draft.projectId}
+              onChange={(e) => updateDraft({ projectId: e.target.value })}
+              disabled={loadingProjects}
             >
               <option value="" disabled>
-                Select…
+                {loadingProjects ? "Loading…" : "Select…"}
               </option>
-              <option value="__general">
-                General — not linked to a project
+              {projects.map((p) => (
+                <option key={p.projectId} value={p.projectId}>
+                  {p.projectCode ? `${p.projectCode} — ` : ""}
+                  {p.projectName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="msSel">
+              Milestone <span className="required">*</span>
+            </label>
+            <select
+              id="msSel"
+              value={draft.milestoneId}
+              onChange={(e) => updateDraft({ milestoneId: e.target.value })}
+              disabled={!draft.projectId || loadingMilestones}
+            >
+              <option value="" disabled>
+                {!draft.projectId
+                  ? "Select a project first"
+                  : loadingMilestones
+                    ? "Loading…"
+                    : "Select…"}
               </option>
-              <optgroup label="Projects">
-                {PROJECTS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id} — {p.name}
-                  </option>
-                ))}
-              </optgroup>
+              {milestones.map((m) => (
+                <option key={m.uuid} value={m.uuid}>
+                  {m.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="field">
@@ -353,6 +443,8 @@ export default function CreateMeetingPage() {
               placeholder="e.g. Q2 Governance Committee Review"
             />
           </div>
+
+          {/* Row 2 — Date | Start | End */}
           <div className="field">
             <label htmlFor="mDate">
               Meeting Date <span className="required">*</span>
@@ -370,8 +462,6 @@ export default function CreateMeetingPage() {
               Please select a date.
             </div>
           </div>
-
-          {/* Row 2 — Start | End | Location */}
           <div className="field">
             <label htmlFor="mStart">
               Start Time (IST) <span className="required">*</span>
@@ -401,6 +491,8 @@ export default function CreateMeetingPage() {
               End time must be after start time.
             </div>
           </div>
+
+          {/* Row 3 — Location | (spacer) | (spacer) */}
           <div className="field">
             <label htmlFor="mLoc">Meeting Location / Link</label>
             <input
@@ -412,11 +504,11 @@ export default function CreateMeetingPage() {
               placeholder="MS Teams / Google Meet link or location"
             />
           </div>
+          <div aria-hidden="true" />
+          <div aria-hidden="true" />
 
-          {/* Row 3 — Agenda | Attendees | (External slot, blank until
-              the user clicks "Add External Attendees"). All three
-              share the 3-col grid so the External panel slides in
-              alongside the others instead of pushing a new row. */}
+          {/* Row 4 — Agenda | Attachments | (External slot, blank until
+              the user clicks "Add External Attendees"). */}
           <div className="field">
             <label htmlFor="mDesc">Agenda</label>
             <textarea
@@ -429,12 +521,42 @@ export default function CreateMeetingPage() {
           </div>
 
           <div className="field">
+            <label htmlFor="mFiles">Attachments</label>
+            <input
+              id="mFiles"
+              type="file"
+              multiple
+              onChange={onFilesPicked}
+            />
+            <div className="attendee-chips" style={{ marginTop: 8 }}>
+              {files.length === 0 ? (
+                <span className="muted">No attachments added.</span>
+              ) : (
+                files.map((f, i) => (
+                  <span key={f.name + ":" + f.size + ":" + i} className="chip">
+                    {f.name}
+                    <span className="sub">{formatBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      className="chip-remove"
+                      title="Remove"
+                      onClick={() => removeFile(i)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="field">
             <label>Attendees</label>
             <GroupedMultiSelect
               groups={attendeeGroups}
               selected={draft.attendees}
               onChange={(sel) => updateDraft({ attendees: sel })}
-              placeholder="Select attendees…"
+              placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
             />
             {!showExt && (
               <button
@@ -448,8 +570,8 @@ export default function CreateMeetingPage() {
             )}
           </div>
 
-          {showExt ? (
-            <div className="field">
+          {showExt && (
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label htmlFor="extInput">External Attendees</label>
               <div className="ext-row">
                 <input
@@ -493,21 +615,23 @@ export default function CreateMeetingPage() {
                 )}
               </div>
             </div>
-          ) : (
-            /* Empty placeholder keeps the grid cell reserved so the
-               row visibly has its third column ready for External. */
-            <div aria-hidden="true" />
           )}
         </div>
 
         <div className="form-actions">
-          <button type="button" className="btn" onClick={submit}>
-            Create Meeting
+          <button
+            type="button"
+            className="btn"
+            onClick={submit}
+            disabled={submitting}
+          >
+            {submitting ? "Creating…" : "Create Meeting"}
           </button>
           <button
             type="button"
             className="btn cancel"
             onClick={() => navigate("/meetings")}
+            disabled={submitting}
           >
             Cancel
           </button>

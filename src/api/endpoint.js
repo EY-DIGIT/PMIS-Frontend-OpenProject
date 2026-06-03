@@ -294,4 +294,20 @@ export const ENDPOINTS = {
     detail: (id) => `/projects/api/v3/approval-inbox/${enc(id)}`,
     transition: (id) => `/projects/api/v3/approval-inbox/${enc(id)}/_transition`,
   },
+
+  /* Meeting Management — the backend exposes a flat /api/meetings path
+     (no service prefix). The curl shared by Gaurav on 2026-06-03 is the
+     reference contract:
+       POST /api/meetings → { title, meetingDate, startTime, endTime,
+         description, meetingLink, projectId, milestoneId,
+         attendees: [{ userId, participantRole, mandatory }],
+         externalAttendees: [{ email }],
+         attachments: [{ filename, contentType, content (base64) }]
+       } */
+  meetings: {
+    list: '/api/meetings',
+    get: (id) => `/api/meetings/${enc(id)}`,
+    create: '/api/meetings',
+    mom: (id) => `/api/meetings/${enc(id)}/mom`,
+  },
 };
