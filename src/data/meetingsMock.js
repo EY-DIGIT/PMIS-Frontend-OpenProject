@@ -506,6 +506,58 @@ export function extractActionItems(text, m) {
   return items;
 }
 
+/* ─── MoM text ⇄ structured form ─── */
+
+/* Split a freeform MoM string into its three canonical sections —
+   Decisions / Actions / Risks. Any leading bullet (`-`, `*`, `•`) is
+   stripped from each line so the form starts clean. Unknown lines
+   before a header land in the first section the parser hits, then
+   default to Decisions if there is no header at all (matches the
+   sample's flow). */
+export function parseMoM(text) {
+  const out = { decisions: "", actions: "", risks: "" };
+  if (!text) return out;
+  const lines = String(text).split(/\r?\n/);
+  let section = "";
+  const buckets = { decisions: [], actions: [], risks: [] };
+  lines.forEach((raw) => {
+    const line = raw.trim();
+    if (!line) return;
+    const low = line.toLowerCase();
+    if (/^decisions?\s*:?$/.test(low)) { section = "decisions"; return; }
+    if (/^actions?\s*:?$/.test(low) || /^action items?\s*:?$/.test(low)) { section = "actions"; return; }
+    if (/^risks?\s*:?$/.test(low)) { section = "risks"; return; }
+    const cleaned = line.replace(/^[-*•]\s*/, "");
+    const target = buckets[section] || buckets.decisions;
+    target.push(cleaned);
+  });
+  out.decisions = buckets.decisions.join("\n");
+  out.actions = buckets.actions.join("\n");
+  out.risks = buckets.risks.join("\n");
+  return out;
+}
+
+/* Compose the three form sections back into the canonical block
+   format the AI extractor + downstream consumers expect. Empty
+   sections are dropped so we don't emit naked headers. */
+export function composeMoM({ decisions, actions, risks } = {}) {
+  const block = (label, body) => {
+    const lines = String(body || "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (!lines.length) return "";
+    return `${label}:\n` + lines.map((l) => `- ${l.replace(/^[-*•]\s*/, "")}`).join("\n");
+  };
+  return [
+    block("Decisions", decisions),
+    block("Actions", actions),
+    block("Risks", risks)
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export function sampleMoM(m) {
   const owners = (m.attendees || [])
     .map((uid) => userById(uid)?.name)

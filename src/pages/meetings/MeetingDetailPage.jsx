@@ -31,7 +31,9 @@ import {
   initials,
   isOverdue,
   extractActionItems,
-  sampleMoM
+  sampleMoM,
+  parseMoM,
+  composeMoM
 } from "../../data/meetingsMock";
 import {
   TypeBadge,
@@ -54,18 +56,23 @@ export default function MeetingDetailPage() {
   const { show, node: toastNode } = useToast();
 
   const [meeting, setMeeting] = useState(() => getMeeting(id));
-  const [mom, setMom] = useState(meeting?.mom || "");
+  /* MoM is captured as a structured form (Decisions / Actions / Risks)
+     and serialized to the canonical block format when saved or fed to
+     the AI extractor. */
+  const [momForm, setMomForm] = useState(() => parseMoM(meeting?.mom || ""));
   const [proposed, setProposed] = useState(null);
   const [run, setRun] = useState({ active: false, stepIdx: 0, done: false, count: 0 });
   const [openComments, setOpenComments] = useState({});
   const [commentDraft, setCommentDraft] = useState({});
   const taskSectionRef = useRef(null);
 
+  const momText = useMemo(() => composeMoM(momForm), [momForm]);
+
   /* Re-pull from store if the route param changes. */
   useEffect(() => {
     const m = getMeeting(id);
     setMeeting(m);
-    setMom(m?.mom || "");
+    setMomForm(parseMoM(m?.mom || ""));
     setProposed(null);
     setRun({ active: false, stepIdx: 0, done: false, count: 0 });
   }, [id]);
@@ -83,7 +90,7 @@ export default function MeetingDetailPage() {
       return () => clearTimeout(t);
     }
     const t = setTimeout(() => {
-      const items = extractActionItems(mom, meeting);
+      const items = extractActionItems(momText, meeting);
       setProposed(items);
       setRun({ active: false, stepIdx: SUMM_STEPS.length - 1, done: true, count: items.length });
       setTimeout(() => {
@@ -91,7 +98,7 @@ export default function MeetingDetailPage() {
       }, 50);
     }, 720);
     return () => clearTimeout(t);
-  }, [run.active, run.stepIdx, run.done, mom, meeting]);
+  }, [run.active, run.stepIdx, run.done, momText, meeting]);
 
   const proposedActivities = useMemo(
     () =>
@@ -125,31 +132,34 @@ export default function MeetingDetailPage() {
 
   const p = meeting.projectId ? projectById(meeting.projectId) : null;
 
+  const updateMomField = (key, value) =>
+    setMomForm((f) => ({ ...f, [key]: value }));
+
   const saveMoM = () => {
-    const next = updateMeeting(meeting.id, { mom });
+    const next = updateMeeting(meeting.id, { mom: momText });
     setMeeting(next);
     show("MoM saved.", "ok");
   };
 
   const loadSample = () => {
     const txt = sampleMoM(meeting);
-    setMom(txt);
+    setMomForm(parseMoM(txt));
     show("Sample MoM loaded.", "ok");
   };
 
   const summarize = () => {
-    if (!mom.trim()) {
-      show("Write some minutes first, or load the sample MoM.", "warn");
+    if (!momText.trim()) {
+      show("Add some minutes first, or load the sample MoM.", "warn");
       return;
     }
     /* Persist whatever's in the editor before kicking off the run. */
-    updateMeeting(meeting.id, { mom });
+    updateMeeting(meeting.id, { mom: momText });
     setRun({ active: true, stepIdx: 0, done: false, count: 0 });
   };
 
   const reSummarize = () => {
     document
-      .getElementById("momBox")
+      .getElementById("mom-form")
       ?.scrollIntoView?.({ behavior: "smooth" });
     summarize();
   };
@@ -414,15 +424,46 @@ export default function MeetingDetailPage() {
             Save
           </button>
         </div>
-        <textarea
-          id="momBox"
-          className="mom-textarea"
-          placeholder={
-            "Decisions:\n- …\nActions:\n- <Owner> to <action> by <date>\nRisks:\n- …"
-          }
-          value={mom}
-          onChange={(e) => setMom(e.target.value)}
-        />
+        <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
+          <div className="field full">
+            <label htmlFor="momDecisions">Decisions</label>
+            <textarea
+              id="momDecisions"
+              className="mom-textarea"
+              style={{ height: 130 }}
+              placeholder={"One decision per line.\ne.g. Proceed with planned scope; no baseline change this cycle."}
+              value={momForm.decisions}
+              onChange={(e) => updateMomField("decisions", e.target.value)}
+            />
+          </div>
+          <div className="field full">
+            <label htmlFor="momActions">
+              Action Items{" "}
+              <span className="muted">(used by the AI to extract tasks)</span>
+            </label>
+            <textarea
+              id="momActions"
+              className="mom-textarea"
+              style={{ height: 170 }}
+              placeholder={
+                "One action per line.\ne.g. R. Kumar to confirm UAT environment readiness by 20-May."
+              }
+              value={momForm.actions}
+              onChange={(e) => updateMomField("actions", e.target.value)}
+            />
+          </div>
+          <div className="field full">
+            <label htmlFor="momRisks">Risks</label>
+            <textarea
+              id="momRisks"
+              className="mom-textarea"
+              style={{ height: 110 }}
+              placeholder={"One risk per line.\ne.g. Dependency on third-party sign-off may slip the timeline."}
+              value={momForm.risks}
+              onChange={(e) => updateMomField("risks", e.target.value)}
+            />
+          </div>
+        </div>
 
         <div className="ai-banner">
           <div className="txt">
