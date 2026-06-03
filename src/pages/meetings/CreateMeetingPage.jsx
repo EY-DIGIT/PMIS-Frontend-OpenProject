@@ -451,25 +451,6 @@ export default function CreateMeetingPage() {
           {showExt ? (
             <div className="field">
               <label htmlFor="extInput">External Attendees</label>
-              <div className="attendee-chips" style={{ marginBottom: 6 }}>
-                {draft.external.length === 0 ? (
-                  <span className="muted">No external attendees added yet.</span>
-                ) : (
-                  draft.external.map((v) => (
-                    <span key={v} className="chip">
-                      {v}{" "}
-                      <button
-                        type="button"
-                        className="chip-remove"
-                        title="Remove"
-                        onClick={() => removeExt(v)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))
-                )}
-              </div>
               <div className="ext-row">
                 <input
                   id="extInput"
@@ -491,6 +472,25 @@ export default function CreateMeetingPage() {
                 >
                   Add
                 </button>
+              </div>
+              <div className="attendee-chips" style={{ marginTop: 8 }}>
+                {draft.external.length === 0 ? (
+                  <span className="muted">No external attendees added yet.</span>
+                ) : (
+                  draft.external.map((v) => (
+                    <span key={v} className="chip">
+                      {v}{" "}
+                      <button
+                        type="button"
+                        className="chip-remove"
+                        title="Remove"
+                        onClick={() => removeExt(v)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))
+                )}
               </div>
             </div>
           ) : (
