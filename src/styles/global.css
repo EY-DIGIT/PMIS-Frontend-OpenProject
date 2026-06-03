@@ -20,7 +20,7 @@
 
 /* ---------- content wrapper ---------- */
 .uidai-pmis-content {
-  padding: 25px;
+  /* padding: 25px; */
   min-width: 0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   color: var(--uidai-pmis-text);
