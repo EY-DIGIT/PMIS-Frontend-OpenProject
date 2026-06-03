@@ -192,9 +192,11 @@ export const ENDPOINTS = {
     },
     /* Finance-module master tables — populate the Cost Type and
        Frequency dropdowns on the project Finance page. Both endpoints
-       return active + retired rows; UI filters by `active`. */
-    costTypes: '/projects/api/v3/master/cost-types',
-    frequencies: '/projects/api/v3/master/frequencies',
+       return active + retired rows; UI filters by `active`.
+       NOTE: these two live at the bare /api/v3/master/* path (no
+       /projects/ service prefix) — confirmed by backend. */
+    costTypes: '/api/v3/master/cost-types',
+    frequencies: '/api/v3/master/frequencies',
   },
 
   resourceTypes: {
