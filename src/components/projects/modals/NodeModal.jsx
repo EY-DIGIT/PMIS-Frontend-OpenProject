@@ -1221,6 +1221,7 @@ export default function NodeModal({
               editable={editable}
               onChange={(next) => setForm(next)}
               onTransition={refreshProcessInstances}
+              projectId={project.projectId}
             />
             <ActivityAuditTrail
               form={form}
