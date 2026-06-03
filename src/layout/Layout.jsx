@@ -107,6 +107,18 @@ function resolveNavTitle(segments) {
     };
   }
 
+  /* Meetings sub-routes. The list page falls through to NAV_TITLES
+     ("Meeting Management"); the Create flow gets its own title so
+     the in-page heading can be dropped. */
+  if (first === "meetings") {
+    if (segments[1] === "new") {
+      return {
+        label: "Create a New Meeting",
+        tooltip: "Fill in details, attendees, and dates to schedule a new meeting."
+      };
+    }
+  }
+
   if (first === "master") {
     if (segments[1] === "vendors") {
       return { label: "Organization Data", tooltip: "Reference data — organizations and their attributes." };

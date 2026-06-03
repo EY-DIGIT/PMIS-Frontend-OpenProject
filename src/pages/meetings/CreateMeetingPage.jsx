@@ -1,9 +1,9 @@
 /* ══════════════════════════════════════════════════════════════════
-   CreateMeetingPage.jsx — single-page Create Meeting form. Project +
-   Activities sit at the top of the form (above Meeting Title), and
-   meeting type is no longer user-selectable; new meetings default to
-   "Steering" so the type field on the underlying model stays
-   populated for badges/filters elsewhere.
+   CreateMeetingPage.jsx — single-page Create Meeting form. The
+   "Create a New Meeting" title sits in the global navbar. Activities
+   selection was removed per request; new meetings default to type
+   "Steering" so the model field stays populated for badges/filters
+   elsewhere.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useMemo, useState } from "react";
@@ -11,7 +11,6 @@ import { useNavigate } from "react-router-dom";
 import {
   PROJECTS,
   USERS,
-  activitiesOf,
   projectById,
   createMeeting
 } from "../../data/meetingsMock";
@@ -190,7 +189,6 @@ export default function CreateMeetingPage() {
   const [draft, setDraft] = useState({
     link: "project",
     projectId: "",
-    activityIds: [],
     title: "",
     date: "",
     start: "",
@@ -208,24 +206,11 @@ export default function CreateMeetingPage() {
 
   const onLinkSelect = (v) => {
     if (v === "__general" || v === "") {
-      updateDraft({ link: "general", projectId: "", activityIds: [] });
+      updateDraft({ link: "general", projectId: "" });
     } else {
-      updateDraft({ link: "project", projectId: v, activityIds: [] });
+      updateDraft({ link: "project", projectId: v });
     }
   };
-
-  const activityGroups = useMemo(() => {
-    if (!draft.projectId) return [];
-    const acts = activitiesOf(draft.projectId);
-    const byStage = {};
-    acts.forEach((a) => {
-      (byStage[a.stage] = byStage[a.stage] || []).push(a);
-    });
-    return Object.entries(byStage).map(([stage, items]) => ({
-      group: stage,
-      items: items.map((a) => ({ value: a.id, label: a.name, meta: a.id }))
-    }));
-  }, [draft.projectId]);
 
   const attendeeGroups = useMemo(() => {
     const byOrg = {};
@@ -284,7 +269,7 @@ export default function CreateMeetingPage() {
       type: DEFAULT_TYPE,
       link: draft.link,
       projectId: draft.link === "project" ? draft.projectId : null,
-      activityIds: draft.link === "project" ? draft.activityIds : [],
+      activityIds: [],
       date: draft.date,
       start: draft.start,
       end: draft.end,
@@ -302,12 +287,8 @@ export default function CreateMeetingPage() {
 
   return (
     <div className="pmis-mtg">
-      <div className="page-header">
-        <div>
-          <div className="pm-title">Create a New Meeting</div>
-        </div>
-      </div>
-
+      {/* Page title moved to the global navbar (resolveNavTitle in
+          Layout.jsx → "Create a New Meeting"). */}
       <div className="card">
         <div
           style={{
@@ -508,37 +489,6 @@ export default function CreateMeetingPage() {
                 ))}
               </optgroup>
             </select>
-          </div>
-          <div className="field">
-            <label>
-              Activities{" "}
-              <span className="muted">
-                {draft.link === "project" ? "(optional)" : "(project required)"}
-              </span>
-            </label>
-            {draft.link === "project" && draft.projectId ? (
-              <GroupedMultiSelect
-                groups={activityGroups}
-                selected={draft.activityIds}
-                onChange={(sel) => updateDraft({ activityIds: sel })}
-                placeholder="Select activities…"
-              />
-            ) : (
-              <div
-                style={{
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "#f3f6fb",
-                  color: "var(--text-muted)",
-                  padding: "12px",
-                  fontSize: 13.5
-                }}
-              >
-                {draft.link === "general"
-                  ? "Not applicable for a General meeting."
-                  : "Select a project first…"}
-              </div>
-            )}
           </div>
         </div>
 
