@@ -67,7 +67,7 @@ export default function MeetingsListPage() {
     <div className="pmis-mtg">
       <div className="page-header">
         <div>
-          <div className="pm-title">Meeting Management</div>
+          {/* <div className="pm-title">Meeting Management</div> */}
         </div>
         <div className="page-header-actions">
           <button
@@ -79,7 +79,7 @@ export default function MeetingsListPage() {
           </button>
         </div>
       </div>
-
+{/* 
       <div className="stat-row">
         <div className="stat s-total">
           <div className="num">{stats.total}</div>
@@ -97,7 +97,7 @@ export default function MeetingsListPage() {
           <div className="num">{stats.done}</div>
           <div className="lbl">Completed</div>
         </div>
-      </div>
+      </div> */}
 
       <div className="card">
         <div className="card-title">All Meetings</div>
