@@ -345,7 +345,7 @@ export default function CreateMeetingPage() {
           </div>
 
           <div className="field full">
-            <label htmlFor="mDesc">Meeting Description / Agenda</label>
+            <label htmlFor="mDesc">Agenda</label>
             <textarea
               id="mDesc"
               maxLength={1000}
