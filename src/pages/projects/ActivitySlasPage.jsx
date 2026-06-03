@@ -149,6 +149,9 @@ export default function ActivitySlasPage() {
     // ---- API configuration ----
     const [baseUrl, setBaseUrl] = useState("http://10.1.131.199/contracts");
 
+    // ---- Tabbed layout: keep the page short by showing one section at a time ----
+    const [activeTab, setActiveTab] = useState("library"); // library | mapping | evaluation
+
     // ---- Step 1: SLA masters list ----
     const [slaList, setSlaList] = useState([]);
     const [slaTotal, setSlaTotal] = useState(0);
@@ -209,6 +212,9 @@ export default function ActivitySlasPage() {
         if (!fromQuery) return;
         setActivityIdInput(fromQuery);
         loadMappings(fromQuery);
+        // Land on the Mapping tab so the loaded mappings are visible
+        // immediately instead of hiding behind the default Library tab.
+        setActiveTab("mapping");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
@@ -545,6 +551,32 @@ export default function ActivitySlasPage() {
 
     const filterFieldLabel = { fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)", marginBottom: 6 };
 
+    const TABS = [
+        { key: "library", label: "SLA Library", hint: "Browse & inspect masters", steps: "1 · 2" },
+        { key: "mapping", label: "Activity Mapping", hint: "Map SLAs to an activity & edit", steps: "3 · 4" },
+        { key: "evaluation", label: "Activity Evaluation", hint: "Run a whole-activity evaluation", steps: "5" },
+    ];
+    const tabBtnBase = {
+        flex: 1,
+        minWidth: 0,
+        padding: "12px 16px",
+        background: "#fff",
+        border: "1px solid var(--uidai-pmis-border)",
+        borderBottom: "none",
+        borderRadius: "10px 10px 0 0",
+        cursor: "pointer",
+        font: "inherit",
+        textAlign: "left",
+        marginRight: 4,
+        transition: "background .15s, color .15s",
+    };
+    const tabBtnActive = {
+        ...tabBtnBase,
+        background: "var(--uidai-pmis-navy, #173e77)",
+        color: "#fff",
+        borderColor: "var(--uidai-pmis-navy, #173e77)",
+    };
+
     return (
         <div className="uidai-pmis-content">
             {/* Header */}
@@ -553,8 +585,57 @@ export default function ActivitySlasPage() {
                 Browse SLA masters, inspect one, map it to an activity, edit the mapping, and evaluate SLAs.
             </div>
 
+            {/* Tab strip — one section at a time so the page stays short. */}
+            <div
+                role="tablist"
+                style={{
+                    display: "flex",
+                    gap: 0,
+                    marginTop: 18,
+                    marginBottom: -1,
+                    borderBottom: "1px solid var(--uidai-pmis-border)",
+                    flexWrap: "wrap",
+                }}
+            >
+                {TABS.map((t) => {
+                    const isActive = activeTab === t.key;
+                    return (
+                        <button
+                            key={t.key}
+                            type="button"
+                            role="tab"
+                            aria-selected={isActive}
+                            onClick={() => setActiveTab(t.key)}
+                            style={isActive ? tabBtnActive : tabBtnBase}
+                        >
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{
+                                    fontSize: 11,
+                                    fontWeight: 800,
+                                    background: isActive ? "rgba(255,255,255,.18)" : "#f1f6fd",
+                                    color: isActive ? "#fff" : "#173e77",
+                                    padding: "2px 8px",
+                                    borderRadius: 999,
+                                }}>
+                                    Step {t.steps}
+                                </span>
+                                <span style={{ fontSize: 14, fontWeight: 700 }}>{t.label}</span>
+                            </div>
+                            <div style={{
+                                fontSize: 12,
+                                marginTop: 4,
+                                color: isActive ? "rgba(255,255,255,.85)" : "var(--uidai-pmis-muted)",
+                            }}>
+                                {t.hint}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+
 
             {/* STEP 1 — SLA masters list */}
+            {activeTab === "library" && (
             <div className="uidai-pmis-card">
                 <div style={sectionHead}><span style={stepBadge}>1</span> All SLA Masters</div>
                 {listError && <Banner text={listError} />}
@@ -641,8 +722,10 @@ export default function ActivitySlasPage() {
                     </div>
                 </div>
             </div>
+            )}
 
             {/* STEP 2 — SLA detail */}
+            {activeTab === "library" && (
             <div className="uidai-pmis-card">
                 <div style={sectionHead}><span style={stepBadge}>2</span> SLA Details</div>
                 {detailError && <Banner text={detailError} />}
@@ -673,8 +756,10 @@ export default function ActivitySlasPage() {
                     </div>
                 ) : null}
             </div>
+            )}
 
             {/* STEP 3 — Map to activity */}
+            {activeTab === "mapping" && (
             <div className="uidai-pmis-card">
                 <div style={sectionHead}><span style={stepBadge}>3</span> Map SLA to Activity</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr auto", gap: 16, alignItems: "end" }}>
@@ -710,8 +795,10 @@ export default function ActivitySlasPage() {
                 </div>
                 <Banner text={createMessage} />
             </div>
+            )}
 
             {/* STEP 4 — Mappings + edit */}
+            {activeTab === "mapping" && (
             <div className="uidai-pmis-card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
                     <div style={{ ...sectionHead, marginBottom: 0 }}><span style={stepBadge}>4</span> Activity SLA Mappings</div>
@@ -830,8 +917,10 @@ export default function ActivitySlasPage() {
                     </div>
                 )}
             </div>
+            )}
 
             {/* STEP 5 — Activity-wide evaluate */}
+            {activeTab === "evaluation" && (
             <div className="uidai-pmis-card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
                     <div style={{ ...sectionHead, marginBottom: 0 }}><span style={stepBadge}>5</span> Evaluate Whole Activity</div>
@@ -902,6 +991,7 @@ export default function ActivitySlasPage() {
                     </div>
                 )}
             </div>
+            )}
         </div>
     );
 }
