@@ -352,7 +352,7 @@ export const ENDPOINTS = {
   meetings: {
     list: '/api/meetings',
     get: (id) => `/api/meetings/${enc(id)}`,
-    create: '/api/meetings',
+    create: '/api/meetings/meetings',
     update: (id) => `/api/meetings/${enc(id)}`,
     mom: (id) => `/api/meetings/${enc(id)}/mom`,
   },
