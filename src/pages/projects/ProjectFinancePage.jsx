@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
 import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
@@ -205,6 +206,7 @@ function SummaryPanel({ totals, rules }) {
 export default function ProjectFinancePage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const project = useProject(projectId);
 
   // ── Master data ──
   const [costTypes, setCostTypes] = useState([]);   // [{ code, name, active }]
@@ -528,17 +530,22 @@ export default function ProjectFinancePage() {
 
   return (
     <div className="uidai-pmis-content">
-      {/* Page title lives in the global navbar now; only the LOCKED pill
-          (when applicable) needs surfacing here. */}
-      {isLocked && (
-        <div style={{
-          display: "inline-block", marginBottom: 14,
-          padding: "4px 10px", borderRadius: 999,
-          background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 11,
-        }}>
-          LOCKED
-        </div>
-      )}
+      {/* Page title lives in the global navbar now — only the descriptive
+          subtitle (with the project code) and a LOCKED pill stay here. */}
+      <div className="uidai-pmis-subtitle" style={{ marginTop: 0, marginBottom: 18 }}>
+        Configure project costs, payment terms by phase, and CCN cap for{" "}
+        <strong style={{ color: "#173e77" }}>
+          {page?.projectCode || project?.projectCode || project?.projectName || projectId}
+        </strong>.
+        {isLocked && (
+          <span style={{
+            marginLeft: 10, padding: "2px 8px", borderRadius: 999,
+            background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 11,
+          }}>
+            LOCKED
+          </span>
+        )}
+      </div>
 
       {/* Section 1 — Project Cost + Summary panel */}
       <div style={{
