@@ -982,6 +982,12 @@ export default function ProjectDetailsPage() {
       visible: true
     },
     {
+      key: "finance",
+      label: "Finance",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`),
+      visible: true
+    },
+    {
       key: "edit",
       label: editing ? "Save" : "Edit",
       onClick: toggleEdit,

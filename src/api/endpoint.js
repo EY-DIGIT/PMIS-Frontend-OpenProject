@@ -190,6 +190,11 @@ export const ENDPOINTS = {
       byCode: (code) => `/master/api/v3/master/divisions/${enc(code)}`,
       restore: (code) => `/master/api/v3/master/divisions/${enc(code)}/restore`,
     },
+    /* Finance-module master tables — populate the Cost Type and
+       Frequency dropdowns on the project Finance page. Both endpoints
+       return active + retired rows; UI filters by `active`. */
+    costTypes: '/projects/api/v3/master/cost-types',
+    frequencies: '/projects/api/v3/master/frequencies',
   },
 
   resourceTypes: {
@@ -225,6 +230,24 @@ export const ENDPOINTS = {
     criticalPathDependencies: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
     criticalPathAnalysis: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/analysis`,
       teamPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-page`,
+    /* Payment / Finance module — full life-cycle for the Finance page
+       (Project Cost rows, Payment Terms per phase, QRG, and CCN cap).
+       The /payment-page GET is the authoritative read; mutations live
+       under /cost-items, /payment-terms, /phases/{n}/qrg and /ccn-cap. */
+    paymentPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-page`,
+    costItems: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/cost-items`,
+    paymentTerms: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-terms`,
+    qrg: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/qrg`,
+    ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
+  },
+
+  /* Payment-module endpoints not scoped to a project. Cost-item and
+     payment-term IDs are global UUIDs — PATCH/DELETE go through these. */
+  paymentTerms: {
+    update: (id) => `/projects/api/v3/payment-terms/${enc(id)}`,
+  },
+  costItems: {
+    remove: (id) => `/projects/api/v3/cost-items/${enc(id)}`,
   },
 
   milestones: {

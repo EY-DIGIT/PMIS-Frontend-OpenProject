@@ -58,6 +58,7 @@ import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import AuditLogsPage from "./pages/projects/AuditLogsPage";
 import SeverityPage from "./pages/severity/severity";
 import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
+import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
 import * as vendorsApi from './api/vendors';
@@ -104,6 +105,7 @@ function Breadcrumbs() {
         config: "Milestone Configuration",
         track: "Track Progress",
         "audit-logs": "Audit Logs",
+        finance: "Finance",
         vendors: "Organizations",
         users: "Users",
         divisions: "Divisions",
@@ -445,6 +447,7 @@ export default function MainApp() {
                                                     element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/finance" element={<RequirePermission action="viewProjects"><ProjectFinancePage /></RequirePermission>} />
                                                 <Route path="/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
 
 
