@@ -413,8 +413,8 @@ export default function CreateMeetingPage() {
             />
           </div>
 
-          {/* Full-width: Agenda, Attendees, External */}
-          <div className="field full">
+          {/* Row 3 — Agenda (2 cols, multi-line) + Attendees (1 col) */}
+          <div className="field" style={{ gridColumn: "span 2" }}>
             <label htmlFor="mDesc">Agenda</label>
             <textarea
               id="mDesc"
@@ -425,7 +425,7 @@ export default function CreateMeetingPage() {
             />
           </div>
 
-          <div className="field full">
+          <div className="field">
             <label>Attendees</label>
             <GroupedMultiSelect
               groups={attendeeGroups}
