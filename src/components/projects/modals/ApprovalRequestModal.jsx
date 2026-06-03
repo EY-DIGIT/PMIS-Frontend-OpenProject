@@ -46,9 +46,14 @@ export default function ApprovalRequestModal({
     setState((s) => ({ ...s, [id]: { ...(s[id] || { files: [] }), text } }));
   }
   function setFiles(id, fileList) {
+    /* Keep the raw File handle alongside the display name + size so the
+       parent can forward it to multipart endpoints. The display shape
+       (`{ name, size }`) is what the audit-trail comment serializer
+       reads — leave it intact and add `raw` for the upload path. */
     const files = Array.from(fileList || []).map((f) => ({
       name: f.name,
-      size: formatBytes(f.size)
+      size: formatBytes(f.size),
+      raw: f
     }));
     setState((s) => ({ ...s, [id]: { ...(s[id] || { text: "" }), files } }));
   }

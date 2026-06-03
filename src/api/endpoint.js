@@ -320,6 +320,26 @@ export const ENDPOINTS = {
     transition: (id) => `/projects/api/v3/approval-inbox/${enc(id)}/_transition`,
   },
 
+  /* ──────────────────────────────────────────────────────────────────
+     Activity Workflow service — distinct from /approval-inbox above.
+     Lives at /activity-workflow/* (no /api/v3 prefix). Used by the
+     ApprovalPanel (workflow toolbar on the activity edit modal) and
+     the Concerned Division inbox.
+
+     Flow:
+       1. transition          → SUBMIT moves activity to PENDINGATCONCERNEDDIVISION
+       2. requestDivisionApproval (multipart) → seeds approver rows
+       3. inbox / inboxDetail → division approver pulls their queue + review
+       4. parallelVote        → APPROVE / REJECT per approver
+     ────────────────────────────────────────────────────────────────── */
+  activityWorkflow: {
+    transition: '/activity-workflow/activities/process/_transition',
+    requestDivisionApproval: '/activity-workflow/activities/parallel/request-division-approval',
+    parallelVote: '/activity-workflow/activities/parallel/vote',
+    inbox: '/activity-workflow/activities/inbox',
+    inboxDetail: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}`,
+  },
+
   /* Meeting Management — the backend exposes a flat /api/meetings path
      (no service prefix). The curl shared by Gaurav on 2026-06-03 is the
      reference contract:

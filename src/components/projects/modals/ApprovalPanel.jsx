@@ -30,7 +30,12 @@ import {
   rejectOwner,
   classifyStep
 } from "../../../utils/project/approvalWorkflow";
-import { transitionActivity, WORKFLOW_ACTIONS } from "../../../api/activityWorkflow";
+import {
+  transitionActivity,
+  requestDivisionApprovalParallel,
+  WORKFLOW_ACTIONS,
+  WORKFLOW_STATES
+} from "../../../api/activityWorkflow";
 import ApprovalRequestModal from "./ApprovalRequestModal";
 
 function StepRow({ index, state, title, children }) {
@@ -119,7 +124,7 @@ function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, b
   );
 }
 
-export default function ApprovalPanel({ activity, form, editable, onChange, onTransition }) {
+export default function ApprovalPanel({ activity, form, editable, onChange, onTransition, projectId }) {
   const [rejection, setRejection] = useState(null);
   const [revertTo, setRevertTo] = useState("vendor");
   const [revertDivisions, setRevertDivisions] = useState([]);
@@ -172,7 +177,12 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     setBusy(true);
     setError("");
     try {
-      await transitionActivity({ businessId, action, comment });
+      await transitionActivity({
+        activityId: businessId,
+        projectId,
+        action,
+        comment
+      });
       const next = transform();
       if (next) apply(next);
       /* Tell the parent to re-fetch the process-instance audit so the
@@ -229,9 +239,54 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
 
   async function submitRequestPopup(payloads) {
     if (requestPopup.kind === "division") {
-      /* Local-only — no API call here per the workflow spec. */
-      apply(requestDivisionApproval(form, consentDivisions, payloads));
-      closeRequestPopup();
+      /* Fire the parallel request-division-approval multipart call so
+         the backend seeds an approver row for each Concerned Division.
+         The endpoint accepts a single attachment + a single comment;
+         we concatenate per-row notes and forward the first raw File
+         the user attached on any row. */
+      if (!businessId) {
+        setError(
+          "Activity has no server id yet — save the activity first, then trigger the workflow."
+        );
+        return;
+      }
+      if (!projectId) {
+        setError("Missing project id — cannot dispatch division approval request.");
+        return;
+      }
+      const combined = payloads
+        .map((p) =>
+          p && p.text && p.text.trim() ? `[${p.label}] ${p.text.trim()}` : ""
+        )
+        .filter(Boolean)
+        .join(" | ");
+      const firstFile = (() => {
+        for (const p of payloads) {
+          const files = (p && p.files) || [];
+          for (const f of files) {
+            if (f && f.raw) return f.raw;
+          }
+        }
+        return null;
+      })();
+      setBusy(true);
+      setError("");
+      try {
+        await requestDivisionApprovalParallel({
+          activityId: businessId,
+          projectId,
+          stateName: WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION,
+          comment: combined || "Please review the activity submission.",
+          file: firstFile
+        });
+        apply(requestDivisionApproval(form, consentDivisions, payloads));
+        if (typeof onTransition === "function") onTransition();
+        closeRequestPopup();
+      } catch (err) {
+        setError(err && err.message ? err.message : "Failed to dispatch division approval request.");
+      } finally {
+        setBusy(false);
+      }
     } else if (requestPopup.kind === "owner") {
       const p = payloads[0] || {};
       apply(requestOwnerApproval(form, ownerName, p));

@@ -1,25 +1,29 @@
 /* ══════════════════════════════════════════════════════════════════
    ApprovalInboxConcernedDivision.jsx — inbox for a Concerned Division
-   reviewer. Driven by the /api/v3/approval-inbox endpoints (list +
-   detail + transition).
+   reviewer. Driven by the activity-workflow service:
 
-   List query is filtered server-side by role + status + search; clicks
-   on Review fetch the detail; Approve / Reject post the transition.
+     GET  /activity-workflow/activities/inbox?userUuid=...
+     GET  /activity-workflow/activities/inbox/{activityId}?userUuid=...
+     POST /activity-workflow/activities/parallel/vote
+
+   The list endpoint returns one row per (activity × this user). Clicks
+   on Review fetch the detail (including organization submissions /
+   attachments and the per-division status breakdown); Approve / Reject
+   post a parallel-vote with the activityId + projectId + stateName the
+   detail surfaced.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { formatDateTime } from "../../utils/project/helpers";
 import { tokenStore } from "../../api/client";
 import {
-  listApprovalInbox,
-  getApprovalInboxItem,
-  transitionApprovalInbox,
-  INBOX_ROLES,
-  INBOX_ACTIONS
-} from "../../api/approvalInbox";
+  getActivityWorkflowInbox,
+  getActivityWorkflowInboxDetail,
+  voteOnActivityParallel,
+  PARALLEL_VOTE,
+  WORKFLOW_STATES
+} from "../../api/activityWorkflow";
 import "../../styles/project/approvalInbox.css";
-
-const CURRENT_ROLE = INBOX_ROLES.CONCERNED_DIVISION;
 
 function cap(s) {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
@@ -29,7 +33,11 @@ function safeArr(v) {
   return Array.isArray(v) ? v : [];
 }
 
-/* Pull a friendly division label from the stored user. */
+function pickUserUuid(user) {
+  if (!user) return "";
+  return user.uuid || user.id || user.userId || user.user_id || "";
+}
+
 function pickUserDivision(user) {
   if (!user) return "";
   return user.division_label || user.divisionLabel || user.division || "";
@@ -43,61 +51,98 @@ function pickUserName(user) {
   return full || user.full_name || user.fullName || user.login || user.email || "";
 }
 
-/* Convert an InboxDetail (or a list element) into the flat object the
-   detail view renders. Both shapes share most fields; we tolerate
-   list-only payloads gracefully. */
+/* The list endpoint surfaces `voteStatus` (PENDING / APPROVED / REJECTED
+   in upper case). Normalize to the lowercase status pill the UI uses. */
+function normalizeVote(v) {
+  const s = String(v || "").toLowerCase();
+  if (s === "approved") return "approved";
+  if (s === "rejected") return "rejected";
+  return "pending";
+}
+
+/* Convert a list-row payload into the flat shape the table renders. */
+function mapListRow(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const status = normalizeVote(raw.voteStatus);
+  return {
+    rowKey: raw.participantUuid || raw.activityId,
+    activityId: raw.activityId,
+    projectId: raw.projectId,
+    stateName: raw.stateName || WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION,
+    activityDisplayCode: raw.activityDisplayCode || "",
+    activityName: raw.activityName || "",
+    projectName: raw.projectName || "",
+    projectCode: raw.projectCode || "",
+    organizationName: raw.organizationName || "",
+    divisionCode: raw.divisionCode || "",
+    divisionName: raw.divisionName || "",
+    submittedAt: raw.submittedAt || "",
+    status
+  };
+}
+
+/* Convert the detail payload into the shape the review panel renders. */
 function mapDetail(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const a = raw.activity || {};
-  const p = raw.project || {};
-  const start = a.plannedStartDate ? String(a.plannedStartDate).slice(0, 10) : "";
-  const end = a.plannedEndDate ? String(a.plannedEndDate).slice(0, 10) : "";
+  const status = normalizeVote(raw.yourStatus);
+  const plannedDates =
+    raw.startDate && raw.endDate
+      ? `${String(raw.startDate).slice(0, 10)} to ${String(raw.endDate).slice(0, 10)}`
+      : "";
   return {
-    requestId: raw.businessId,
-    businessId: raw.businessId,
-    processInstanceId: raw.processInstanceId,
-    projectId: p.code || p.id || "",
-    projectName: p.name || "",
-    activity: {
-      id: a.displayCode || a.id || "",
-      apiId: a.id || "",
-      name: a.name || "",
-      owner: a.ownerDivision || "",
-      ownerOther: a.ownerDivisionOther || "",
-      vendor: raw.organization || "",
-      consentDivisions: safeArr(a.consentDivisions),
-      consentDivisionOther: a.consentDivisionOther || "",
-      plannedDates: start && end ? `${start} to ${end}` : "",
-      description: a.description || ""
-    },
+    activityId: raw.activityId,
+    projectId: raw.projectId,
+    activityDisplayCode: raw.activityDisplayCode || "",
+    activityName: raw.activityName || "",
+    projectName: raw.projectName || "",
+    projectCode: raw.projectCode || "",
+    organizationName: raw.organizationName || "",
+    activityOwnerDivision: raw.activityOwnerDivision || "",
+    yourDivisionCode: raw.yourDivisionCode || "",
+    yourDivisionName: raw.yourDivisionName || "",
+    plannedDates,
+    description: raw.description || "",
     submittedAt: raw.submittedAt || "",
-    status: raw.status || "pending",
-    divisionDecisions: safeArr(raw.divisionDecisions).map((d) => ({
-      division: d.division,
-      status: d.status || "pending",
-      decidedBy: d.decidedBy || "",
-      decidedAt: d.decidedAt || "",
-      reason: d.comment || ""
+    status,
+    submissions: safeArr(raw.organizationSubmissions).map((c) => ({
+      who:
+        (c.author && (c.author.displayName || c.author.login || c.author.email)) ||
+        "Organization",
+      when: c.createdAt || "",
+      text: c.body || "",
+      attachments: safeArr(c.attachments).map((a) => ({
+        name: a.fileName || "attachment",
+        size: typeof a.sizeBytes === "number" ? formatBytes(a.sizeBytes) : "",
+        url: a.url || ""
+      }))
     })),
-    ownerDecision: raw.ownerDecision || null,
-    comments: safeArr(raw.submission && raw.submission.comments).map((c) => ({
-      kind: "user",
-      who: c.who || "",
-      when: c.when || "",
-      text: c.text || "",
-      attachments: safeArr(c.attachments)
+    statusBreakdown: safeArr(raw.yourStatusBreakdown).map((b) => ({
+      divisionCode: b.divisionCode || "",
+      divisionName: b.divisionName || "",
+      approverName: b.approverName || "",
+      status: normalizeVote(b.voteStatus),
+      isYou: !!b.isYou
     })),
-    myView: raw.myView || null
+    /* Surface a reasonable default state for the vote call. The backend
+       expects the same stateName the row was seeded in. */
+    stateName: WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION
   };
+}
+
+function formatBytes(n) {
+  const x = Number(n) || 0;
+  if (x >= 1024 * 1024) return (x / 1024 / 1024).toFixed(1) + " MB";
+  if (x >= 1024) return (x / 1024).toFixed(0) + " KB";
+  return x + " B";
 }
 
 export default function ApprovalInboxConcernedDivision() {
   const storedUser = tokenStore.getUser() || {};
   const CURRENT_USER = useMemo(
     () => ({
+      uuid: pickUserUuid(storedUser),
       name: pickUserName(storedUser),
-      division: pickUserDivision(storedUser),
-      role: CURRENT_ROLE
+      division: pickUserDivision(storedUser)
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -108,7 +153,7 @@ export default function ApprovalInboxConcernedDivision() {
   const [listError, setListError] = useState("");
   const [filterText, setFilterText] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [activeId, setActiveId] = useState(null);
+  const [activeKey, setActiveKey] = useState(null); // selected row.activityId
   const [activeDetail, setActiveDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -116,47 +161,60 @@ export default function ApprovalInboxConcernedDivision() {
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  /* Fetch list — refetches on role/status/search change so the backend
-     does the filtering. Cancelled by a ref-guarded flag on unmount. */
+  /* Fetch list — the new endpoint takes only userUuid; we filter client-
+     side by status + free-text search since the contract has no query
+     params for those. */
   useEffect(() => {
     let cancelled = false;
     setListLoading(true);
     setListError("");
-    const handle = setTimeout(() => {
-      /* Concerned-division view is the backend's default (no role
-         param). Skip it so the request mirrors the curl exactly:
-           GET /api/v3/approval-inbox?status=...&search=... */
-      listApprovalInbox({
-        status: filterStatus,
-        search: filterText
+    getActivityWorkflowInbox(CURRENT_USER.uuid)
+      .then((rows) => {
+        if (cancelled) return;
+        setItems(rows.map(mapListRow).filter(Boolean));
       })
-        .then((rows) => {
-          if (cancelled) return;
-          setItems(rows.map(mapDetail));
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setListError(err && err.message ? err.message : "Failed to load inbox.");
-          setItems([]);
-        })
-        .finally(() => {
-          if (!cancelled) setListLoading(false);
-        });
-    }, filterText ? 220 : 0);
+      .catch((err) => {
+        if (cancelled) return;
+        setListError(err && err.message ? err.message : "Failed to load inbox.");
+        setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setListLoading(false);
+      });
     return () => {
       cancelled = true;
-      clearTimeout(handle);
     };
-  }, [filterStatus, filterText, reloadKey]);
+  }, [CURRENT_USER.uuid, reloadKey]);
 
-  async function openReview(businessId) {
-    setActiveId(businessId);
+  const visibleItems = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    return items.filter((it) => {
+      if (filterStatus !== "all" && it.status !== filterStatus) return false;
+      if (!q) return true;
+      return (
+        (it.activityName || "").toLowerCase().includes(q) ||
+        (it.activityDisplayCode || "").toLowerCase().includes(q) ||
+        (it.projectName || "").toLowerCase().includes(q) ||
+        (it.projectCode || "").toLowerCase().includes(q) ||
+        (it.organizationName || "").toLowerCase().includes(q)
+      );
+    });
+  }, [items, filterText, filterStatus]);
+
+  async function openReview(row) {
+    setActiveKey(row.activityId);
     setRejection({ open: false, reason: "" });
     setDetailError("");
     setDetailLoading(true);
     try {
-      const raw = await getApprovalInboxItem(businessId);
-      setActiveDetail(mapDetail(raw));
+      const raw = await getActivityWorkflowInboxDetail(row.activityId, CURRENT_USER.uuid);
+      /* The detail endpoint doesn't echo back projectId or stateName in
+         every version of the contract — seed both from the list row so
+         the vote call still has what it needs. */
+      const mapped = mapDetail(raw) || {};
+      mapped.projectId = mapped.projectId || row.projectId;
+      mapped.stateName = mapped.stateName || row.stateName;
+      setActiveDetail(mapped);
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to load review.");
       setActiveDetail(null);
@@ -167,7 +225,7 @@ export default function ApprovalInboxConcernedDivision() {
   }
 
   function closeReview() {
-    setActiveId(null);
+    setActiveKey(null);
     setActiveDetail(null);
     setRejection({ open: false, reason: "" });
     setDetailError("");
@@ -183,15 +241,27 @@ export default function ApprovalInboxConcernedDivision() {
 
   async function approve() {
     if (!activeDetail) return;
-    if (!window.confirm(`Approve "${activeDetail.activity.name}"?`)) return;
+    if (!window.confirm(`Approve "${activeDetail.activityName}"?`)) return;
     setBusy(true);
     setDetailError("");
     try {
-      const refreshed = await transitionApprovalInbox(activeDetail.businessId, {
-        action: INBOX_ACTIONS.APPROVE,
+      await voteOnActivityParallel({
+        activityId: activeDetail.activityId,
+        projectId: activeDetail.projectId,
+        stateName: activeDetail.stateName,
+        vote: PARALLEL_VOTE.APPROVED,
         comment: `${CURRENT_USER.division || "Concerned Division"} approved.`
       });
-      setActiveDetail(mapDetail(refreshed));
+      /* Refresh the detail so the status pill + breakdown reflect the
+         new vote. */
+      const refreshed = await getActivityWorkflowInboxDetail(
+        activeDetail.activityId,
+        CURRENT_USER.uuid
+      );
+      const mapped = mapDetail(refreshed) || {};
+      mapped.projectId = mapped.projectId || activeDetail.projectId;
+      mapped.stateName = mapped.stateName || activeDetail.stateName;
+      setActiveDetail(mapped);
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to approve.");
     } finally {
@@ -206,15 +276,25 @@ export default function ApprovalInboxConcernedDivision() {
       setDetailError("Please provide a reason.");
       return;
     }
-    if (!window.confirm(`Reject "${activeDetail.activity.name}"?`)) return;
+    if (!window.confirm(`Reject "${activeDetail.activityName}"?`)) return;
     setBusy(true);
     setDetailError("");
     try {
-      const refreshed = await transitionApprovalInbox(activeDetail.businessId, {
-        action: INBOX_ACTIONS.REJECT,
+      await voteOnActivityParallel({
+        activityId: activeDetail.activityId,
+        projectId: activeDetail.projectId,
+        stateName: activeDetail.stateName,
+        vote: PARALLEL_VOTE.REJECTED,
         comment: reason
       });
-      setActiveDetail(mapDetail(refreshed));
+      const refreshed = await getActivityWorkflowInboxDetail(
+        activeDetail.activityId,
+        CURRENT_USER.uuid
+      );
+      const mapped = mapDetail(refreshed) || {};
+      mapped.projectId = mapped.projectId || activeDetail.projectId;
+      mapped.stateName = mapped.stateName || activeDetail.stateName;
+      setActiveDetail(mapped);
       setRejection({ open: false, reason: "" });
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to reject.");
@@ -223,10 +303,6 @@ export default function ApprovalInboxConcernedDivision() {
     }
   }
 
-  /* For a Concerned Division reviewer the "status" we show on the row
-     is THIS division's decision. Pulled from myView when available
-     (detail), otherwise mirrors the top-level status. */
-  const visibleItems = items;
   const totalCount = visibleItems.length;
 
   return (
@@ -245,7 +321,7 @@ export default function ApprovalInboxConcernedDivision() {
       </div>
 
       <div className="pmis-apinbox-card">
-        {!activeId && (
+        {!activeKey && (
           <div className="pmis-apinbox-card-head">
             <h2 className="pmis-apinbox-card-title">
               All Approvals{" "}
@@ -273,7 +349,7 @@ export default function ApprovalInboxConcernedDivision() {
           </div>
         )}
 
-        {activeId && (
+        {activeKey && (
           <div className="pmis-apinbox-card-head">
             <button type="button" className="pmis-apinbox-btn--back" onClick={closeReview}>
               <span aria-hidden="true">←</span> Back to Inbox
@@ -281,7 +357,7 @@ export default function ApprovalInboxConcernedDivision() {
           </div>
         )}
 
-        {!activeId && (
+        {!activeKey && (
           <div className="pmis-apinbox-table-wrap">
             <table className="pmis-apinbox-table">
               <thead>
@@ -314,51 +390,47 @@ export default function ApprovalInboxConcernedDivision() {
                     </td>
                   </tr>
                 ) : (
-                  visibleItems.map((it) => {
-                    if (!it) return null;
-                    const st = it.status || "pending";
-                    return (
-                      <tr key={it.businessId}>
-                        <td>
-                          <div className="pmis-apinbox-cell-id">{it.activity.id}</div>
-                          <button
-                            type="button"
-                            className="pmis-apinbox-link pmis-apinbox-cell-name"
-                            onClick={() => openReview(it.businessId)}
-                          >
-                            {it.activity.name}
-                          </button>
-                        </td>
-                        <td>
-                          <div>{it.projectName}</div>
-                          <div className="pmis-apinbox-cell-sub">{it.projectId}</div>
-                        </td>
-                        <td>{it.activity.vendor}</td>
-                        <td>{formatDateTime(it.submittedAt)}</td>
-                        <td>
-                          <span className={`pmis-apinbox-pill pmis-apinbox-pill--${st}`}>
-                            {cap(st)}
-                          </span>
-                        </td>
-                        <td className="pmis-apinbox-cell-actions">
-                          <button
-                            type="button"
-                            className="pmis-apinbox-btn pmis-apinbox-btn--sm"
-                            onClick={() => openReview(it.businessId)}
-                          >
-                            Review
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+                  visibleItems.map((it) => (
+                    <tr key={it.rowKey}>
+                      <td>
+                        <div className="pmis-apinbox-cell-id">{it.activityDisplayCode}</div>
+                        <button
+                          type="button"
+                          className="pmis-apinbox-link pmis-apinbox-cell-name"
+                          onClick={() => openReview(it)}
+                        >
+                          {it.activityName}
+                        </button>
+                      </td>
+                      <td>
+                        <div>{it.projectName}</div>
+                        <div className="pmis-apinbox-cell-sub">{it.projectCode}</div>
+                      </td>
+                      <td>{it.organizationName}</td>
+                      <td>{formatDateTime(it.submittedAt)}</td>
+                      <td>
+                        <span className={`pmis-apinbox-pill pmis-apinbox-pill--${it.status}`}>
+                          {cap(it.status)}
+                        </span>
+                      </td>
+                      <td className="pmis-apinbox-cell-actions">
+                        <button
+                          type="button"
+                          className="pmis-apinbox-btn pmis-apinbox-btn--sm"
+                          onClick={() => openReview(it)}
+                        >
+                          Review
+                        </button>
+                      </td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </div>
         )}
 
-        {activeId && (
+        {activeKey && (
           <DetailView
             loading={detailLoading}
             error={detailError}
@@ -405,18 +477,9 @@ function DetailView({
   }
   if (!item) return null;
 
-  const a = item.activity;
-  const myView = item.myView || {};
-  const myStatus = myView.myStatus || item.status || "pending";
-  const canApprove = myView.canApprove !== false;
-  const canReject = myView.canReject !== false;
-  const isDecided = myStatus === "approved" || myStatus === "rejected";
-  const myDecisionRow = item.divisionDecisions.find(
-    (d) =>
-      d.division &&
-      currentUser.division &&
-      String(d.division).toLowerCase() === String(currentUser.division).toLowerCase()
-  );
+  const status = item.status || "pending";
+  const isDecided = status === "approved" || status === "rejected";
+  const myBreakdownRow = item.statusBreakdown.find((b) => b.isYou);
 
   return (
     <div className="pmis-apinbox-detail">
@@ -424,28 +487,22 @@ function DetailView({
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <div className="pmis-apinbox-detail-eyebrow">Approval Request</div>
           <div className="pmis-apinbox-detail-title">
-            <span>{a.name}</span>
-            <span className="pmis-apinbox-detail-title-id">{a.id}</span>
+            <span>{item.activityName}</span>
+            <span className="pmis-apinbox-detail-title-id">{item.activityDisplayCode}</span>
           </div>
         </div>
         <div style={{ paddingTop: 24 }}>
-          <span className={`pmis-apinbox-pill pmis-apinbox-pill--${myStatus}`}>
-            {cap(myStatus)}
+          <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>
+            {cap(status)}
           </span>
         </div>
       </div>
 
-      {isDecided && myDecisionRow && (
-        <div className={`pmis-apinbox-decided pmis-apinbox-decided--${myStatus}`}>
+      {isDecided && (
+        <div className={`pmis-apinbox-decided pmis-apinbox-decided--${status}`}>
           <div>
-            <b>You {myStatus} this request</b>
-            {myDecisionRow.decidedAt ? ` on ${formatDateTime(myDecisionRow.decidedAt)}.` : "."}
+            <b>You {status} this request.</b>
           </div>
-          {myDecisionRow.reason && (
-            <div>
-              <b>Reason:</b> {myDecisionRow.reason}
-            </div>
-          )}
         </div>
       )}
 
@@ -455,7 +512,7 @@ function DetailView({
         </div>
         <div className="pmis-apinbox-project-line">
           {item.projectName}
-          <span className="pmis-apinbox-pid">{item.projectId}</span>
+          <span className="pmis-apinbox-pid">{item.projectCode}</span>
         </div>
       </div>
 
@@ -466,19 +523,19 @@ function DetailView({
         <div className="pmis-apinbox-kv">
           <div>
             <div className="pmis-apinbox-k">Organization</div>
-            <div className="pmis-apinbox-v pmis-apinbox-v--strong">{a.vendor || "—"}</div>
+            <div className="pmis-apinbox-v pmis-apinbox-v--strong">{item.organizationName || "—"}</div>
           </div>
           <div>
-            <div className="pmis-apinbox-k">Activity Owner</div>
-            <div className="pmis-apinbox-v">{a.owner || "—"}</div>
+            <div className="pmis-apinbox-k">Activity Owner Division</div>
+            <div className="pmis-apinbox-v">{item.activityOwnerDivision || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Your Division</div>
-            <div className="pmis-apinbox-v">{currentUser.division || "—"}</div>
+            <div className="pmis-apinbox-v">{item.yourDivisionName || currentUser.division || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Planned Dates</div>
-            <div className="pmis-apinbox-v">{a.plannedDates || "—"}</div>
+            <div className="pmis-apinbox-v">{item.plannedDates || "—"}</div>
           </div>
           <div>
             <div className="pmis-apinbox-k">Submitted</div>
@@ -486,33 +543,49 @@ function DetailView({
           </div>
           <div className="pmis-apinbox-kv-full">
             <div className="pmis-apinbox-k">Description</div>
-            <div className="pmis-apinbox-v pmis-apinbox-desc-text">{a.description || "—"}</div>
+            <div className="pmis-apinbox-v pmis-apinbox-desc-text">{item.description || "—"}</div>
           </div>
         </div>
       </div>
 
-      {item.comments.length > 0 && (
+      {item.submissions.length > 0 && (
         <div className="pmis-apinbox-section">
           <div className="pmis-apinbox-section-head">
             <h3>Organization Submission</h3>
           </div>
-          {item.comments.map((c, i) => (
+          {item.submissions.map((c, i) => (
             <div key={i} className="pmis-apinbox-cmt">
               <div className="pmis-apinbox-cmt-meta">
-                <span className="pmis-apinbox-who">{c.who || "Vendor"}</span>
+                <span className="pmis-apinbox-who">{c.who}</span>
                 <span>{formatDateTime(c.when)}</span>
               </div>
               <div className="pmis-apinbox-cmt-text">{c.text}</div>
               {c.attachments.length > 0 && (
                 <div className="pmis-apinbox-cmt-atts">
-                  {c.attachments.map((att, j) => (
-                    <span key={j} className="pmis-apinbox-att" title={att.name || ""}>
-                      📎 {att.name || "attachment"}{" "}
-                      {att.size && (
-                        <span className="pmis-apinbox-att-size">{att.size}</span>
-                      )}
-                    </span>
-                  ))}
+                  {c.attachments.map((att, j) =>
+                    att.url ? (
+                      <a
+                        key={j}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="pmis-apinbox-att"
+                        title={att.name}
+                      >
+                        📎 {att.name}{" "}
+                        {att.size && (
+                          <span className="pmis-apinbox-att-size">{att.size}</span>
+                        )}
+                      </a>
+                    ) : (
+                      <span key={j} className="pmis-apinbox-att" title={att.name}>
+                        📎 {att.name}{" "}
+                        {att.size && (
+                          <span className="pmis-apinbox-att-size">{att.size}</span>
+                        )}
+                      </span>
+                    )
+                  )}
                 </div>
               )}
             </div>
@@ -525,15 +598,44 @@ function DetailView({
           <h3>Your Status</h3>
         </div>
         <div className="pmis-apinbox-div-status">
-          <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
-            <span className="pmis-apinbox-nm">
-              {currentUser.division || "You"}{" "}
-              <span className="pmis-apinbox-you">YOU</span>
-            </span>
-            <span className={`pmis-apinbox-pill pmis-apinbox-pill--${myStatus}`}>
-              {cap(myStatus)}
-            </span>
-          </div>
+          {item.statusBreakdown.length === 0 ? (
+            <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
+              <span className="pmis-apinbox-nm">
+                {item.yourDivisionName || currentUser.division || "You"}{" "}
+                <span className="pmis-apinbox-you">YOU</span>
+              </span>
+              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>
+                {cap(status)}
+              </span>
+            </div>
+          ) : (
+            item.statusBreakdown.map((b, i) => (
+              <div
+                key={`${b.divisionCode}-${i}`}
+                className={`pmis-apinbox-ds${b.isYou ? " pmis-apinbox-ds--me" : ""}`}
+              >
+                <span className="pmis-apinbox-nm">
+                  {b.divisionName || b.divisionCode}{" "}
+                  {b.isYou && <span className="pmis-apinbox-you">YOU</span>}
+                </span>
+                <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>
+                  {cap(b.status)}
+                </span>
+              </div>
+            ))
+          )}
+          {/* Fallback to top-level status if breakdown doesn't include us. */}
+          {item.statusBreakdown.length > 0 && !myBreakdownRow && (
+            <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
+              <span className="pmis-apinbox-nm">
+                {currentUser.division || "You"}{" "}
+                <span className="pmis-apinbox-you">YOU</span>
+              </span>
+              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>
+                {cap(status)}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -607,7 +709,7 @@ function DetailView({
             type="button"
             className="pmis-apinbox-btn pmis-apinbox-btn--danger"
             onClick={onBeginReject}
-            disabled={busy || !canReject}
+            disabled={busy}
           >
             Reject
           </button>
@@ -615,7 +717,7 @@ function DetailView({
             type="button"
             className="pmis-apinbox-btn"
             onClick={onApprove}
-            disabled={busy || !canApprove}
+            disabled={busy}
           >
             {busy ? "Submitting…" : "Approve"}
           </button>

@@ -1,27 +1,27 @@
 /* ═══════════════════════════════════════════════════════════════
-   activityWorkflow.js — wraps the activity-workflow service's
-   single-transition endpoint:
+   activityWorkflow.js — wraps the activity-workflow service.
 
-     POST {API_BASE}/activity-workflow/activities/process/_transition
+   Endpoints covered (all live under {API_BASE}/activity-workflow/*):
 
-   The endpoint takes a payload of the shape:
-     {
-       RequestInfo: { authToken, userInfo: { uuid, userName, name, type, roles[] } },
-       ProcessInstances: [{ moduleName, businessService, businessId, action, comment }]
-     }
+     POST  /activities/process/_transition
+     POST  /activities/parallel/request-division-approval  (multipart)
+     POST  /activities/parallel/vote
+     GET   /activities/inbox?userUuid=...
+     GET   /activities/inbox/{activityId}?userUuid=...
+     GET   /activities/process/_search/ACTIVITY/{activityId}
 
-   Supported actions: SUBMIT | APPROVE | REJECT | UPDATE.
-     SUBMIT  — first time the activity is sent for approval (Start Activity)
-     APPROVE — Concerned Division or Owner Division approves
-     REJECT  — any reviewer rejects (rejection reason goes in `comment`)
-     UPDATE  — Project Admin resubmits after a rejection
+   The transition payload uses `activityId` + `projectId` (not
+   `businessId`) — see the curl shared on 2026-06-03. The parallel
+   endpoints are the second leg: the SUBMIT transition moves the
+   activity to PENDINGATCONCERNEDDIVISION, and the multipart
+   request-division-approval call seeds approver rows that show up in
+   each division reviewer's inbox.
    ═══════════════════════════════════════════════════════════════ */
 
 import { API_BASE, tokenStore, ApiError } from "./client";
 import { getToken } from "./auth";
 import { readRoleFromUser } from "../auth/roleNormalize";
-
-const PATH = "/activity-workflow/activities/process/_transition";
+import { ENDPOINTS } from "./endpoint";
 
 const MODULE_NAME = "activity-workflow";
 const BUSINESS_SERVICE = "ACTIVITY";
@@ -58,73 +58,59 @@ function deriveRoles(user) {
   return [];
 }
 
+function pickUserUuid(user) {
+  if (!user) return "";
+  return (
+    user.uuid ||
+    user.id ||
+    user.userId ||
+    user.user_id ||
+    ""
+  );
+}
+function pickUserName(user) {
+  if (!user) return "";
+  return (
+    user.userName ||
+    user.user_name ||
+    user.username ||
+    user.login ||
+    ""
+  );
+}
+function pickDisplayName(user) {
+  if (!user) return "";
+  return (
+    user.name ||
+    user.full_name ||
+    user.fullName ||
+    user.displayName ||
+    user.display_name ||
+    ""
+  );
+}
+
 /* Build the RequestInfo wrapper from the currently stored user + token.
    Returns the minimum shape the backend requires; any missing identity
    fields are filled with safe blanks so the call doesn't 400 on shape. */
 function buildRequestInfo() {
   const user = tokenStore.getUser() || {};
   const token = getToken() || "";
-  const roles = deriveRoles(user);
   return {
     authToken: token,
     userInfo: {
-      uuid:
-        user.uuid ||
-        user.id ||
-        user.userId ||
-        user.user_id ||
-        "",
-      userName:
-        user.userName ||
-        user.user_name ||
-        user.username ||
-        user.login ||
-        "",
-      name:
-        user.name ||
-        user.full_name ||
-        user.fullName ||
-        user.displayName ||
-        user.display_name ||
-        "",
+      uuid: pickUserUuid(user),
+      userName: pickUserName(user),
+      name: pickDisplayName(user),
       type: user.type || "EMPLOYEE",
-      roles
+      roles: deriveRoles(user)
     }
   };
 }
 
-/* Fire a single workflow transition. Throws ApiError on non-2xx. */
-export async function transitionActivity({ businessId, action, comment }) {
-  if (!businessId) throw new ApiError("Missing activity id for workflow transition.");
-  if (!action) throw new ApiError("Missing workflow action.");
-
-  const body = {
-    RequestInfo: buildRequestInfo(),
-    ProcessInstances: [
-      {
-        moduleName: MODULE_NAME,
-        businessService: BUSINESS_SERVICE,
-        businessId,
-        action,
-        comment: comment || ""
-      }
-    ]
-  };
-
-  const token = getToken();
-  const headers = {
-    "Content-Type": "application/json",
-    Accept: "application/json"
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(`${API_BASE}${PATH}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    cache: "no-store"
-  });
-
+/* Resolve common HTTP plumbing into a single helper. Throws an ApiError
+   on non-2xx with the backend's message when available. */
+async function parseJsonOrThrow(res, fallbackLabel) {
   const text = await res.text();
   let payload = null;
   if (text) {
@@ -135,10 +121,60 @@ export async function transitionActivity({ businessId, action, comment }) {
       (payload && typeof payload === "object" &&
         (payload.error?.message || payload.message || payload.errorMessage)) ||
       (typeof payload === "string" ? payload : "") ||
-      `Workflow transition failed (${res.status})`;
+      `${fallbackLabel} failed (${res.status})`;
     throw new ApiError(msg, { status: res.status, body: payload });
   }
   return payload;
+}
+
+function authHeaders(extra = {}) {
+  const token = getToken();
+  const h = { Accept: "application/json", ...extra };
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 1 — POST /activities/process/_transition
+   Fire a single workflow transition (SUBMIT / APPROVE / REJECT /
+   UPDATE). Per the 2026-06-03 contract the ProcessInstance row uses
+   `activityId` + `projectId` rather than the older `businessId`.
+   For backward compatibility a caller that only passes `businessId`
+   (legacy callers in NodeModal) still works — we treat it as
+   activityId and skip the projectId field.
+   ───────────────────────────────────────────────────────────────── */
+export async function transitionActivity({
+  activityId,
+  projectId,
+  businessId,
+  action,
+  comment
+}) {
+  const actId = activityId || businessId;
+  if (!actId) throw new ApiError("Missing activity id for workflow transition.");
+  if (!action) throw new ApiError("Missing workflow action.");
+
+  const instance = {
+    moduleName: MODULE_NAME,
+    businessService: BUSINESS_SERVICE,
+    activityId: actId,
+    action,
+    comment: comment || ""
+  };
+  if (projectId) instance.projectId = projectId;
+
+  const body = {
+    RequestInfo: buildRequestInfo(),
+    ProcessInstances: [instance]
+  };
+
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.transition}`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Workflow transition");
 }
 
 export const WORKFLOW_ACTIONS = {
@@ -148,35 +184,159 @@ export const WORKFLOW_ACTIONS = {
   UPDATE: "UPDATE"
 };
 
+export const WORKFLOW_STATES = {
+  PENDING_AT_CONCERNED_DIVISION: "PENDINGATCONCERNEDDIVISION",
+  PENDING_AT_OWNER_DIVISION: "PENDINGATOWNERDIVISION"
+};
+
+export const PARALLEL_VOTE = {
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED"
+};
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 2 — POST /activities/parallel/request-division-approval
+   Multipart upload that seeds per-division approver rows after the
+   SUBMIT transition. `file` is optional (the backend accepts the
+   form without it); the popup may collect one per row but the
+   endpoint takes a single attachment for the whole dispatch.
+   ───────────────────────────────────────────────────────────────── */
+export async function requestDivisionApprovalParallel({
+  activityId,
+  projectId,
+  stateName,
+  comment,
+  file
+} = {}) {
+  if (!activityId) throw new ApiError("Missing activity id for division approval request.");
+  if (!projectId) throw new ApiError("Missing project id for division approval request.");
+
+  const user = tokenStore.getUser() || {};
+  const requestInfo = {
+    userInfo: {
+      uuid: pickUserUuid(user),
+      userName: pickUserName(user),
+      roles: deriveRoles(user)
+    }
+  };
+
+  const fd = new FormData();
+  fd.append("businessService", BUSINESS_SERVICE);
+  fd.append("activityId", activityId);
+  fd.append("projectId", projectId);
+  fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION);
+  fd.append("comment", comment || "");
+  fd.append("requestInfo", JSON.stringify(requestInfo));
+  if (file) fd.append("file", file);
+
+  /* Multipart — DO NOT set Content-Type; the browser sets the
+     boundary header automatically. */
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestDivisionApproval}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: fd,
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Request division approval");
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 3 — GET /activities/inbox?userUuid=...
+   Pulls the queue of activities awaiting THIS user's vote. Falls
+   back to [] on a malformed body so the list page can render empty.
+   ───────────────────────────────────────────────────────────────── */
+export async function getActivityWorkflowInbox(userUuid) {
+  const uuid = userUuid || pickUserUuid(tokenStore.getUser() || {});
+  if (!uuid) throw new ApiError("Missing userUuid for activity-workflow inbox.");
+
+  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.inbox}?userUuid=${encodeURIComponent(uuid)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store"
+  });
+  const payload = await parseJsonOrThrow(res, "Activity inbox fetch");
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.items)) return payload.items;
+  return [];
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 4 — GET /activities/inbox/{activityId}?userUuid=...
+   Hydrates the review page with submissions, status breakdown, etc.
+   ───────────────────────────────────────────────────────────────── */
+export async function getActivityWorkflowInboxDetail(activityId, userUuid) {
+  if (!activityId) throw new ApiError("Missing activityId for inbox detail.");
+  const uuid = userUuid || pickUserUuid(tokenStore.getUser() || {});
+  if (!uuid) throw new ApiError("Missing userUuid for inbox detail.");
+
+  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.inboxDetail(activityId)}?userUuid=${encodeURIComponent(uuid)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Activity inbox detail fetch");
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 5 — POST /activities/parallel/vote
+   Approve / reject as a Concerned Division reviewer. `vote` is
+   "APPROVED" or "REJECTED" per the backend contract.
+   ───────────────────────────────────────────────────────────────── */
+export async function voteOnActivityParallel({
+  activityId,
+  projectId,
+  stateName,
+  vote,
+  comment
+} = {}) {
+  if (!activityId) throw new ApiError("Missing activity id for vote.");
+  if (!projectId) throw new ApiError("Missing project id for vote.");
+  if (!vote) throw new ApiError("Missing vote (APPROVED or REJECTED).");
+
+  const user = tokenStore.getUser() || {};
+  const body = {
+    RequestInfo: {
+      userInfo: {
+        uuid: pickUserUuid(user),
+        userName: pickUserName(user),
+        name: pickDisplayName(user),
+        roles: deriveRoles(user)
+      }
+    },
+    businessService: BUSINESS_SERVICE,
+    activityId,
+    projectId,
+    stateName: stateName || WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION,
+    vote,
+    comment: comment || ""
+  };
+
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.parallelVote}`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Activity vote");
+}
+
 /* GET the full audit / process-instance history for an activity:
-     GET /activity-workflow/activities/process/_search/ACTIVITY/{businessId}
+     GET /activity-workflow/activities/process/_search/ACTIVITY/{activityId}
    Returns an array of ProcessInstance entries in the order the backend
    ships them (typically chronological). Falls back to [] on error so
    callers can simply render the result. */
-export async function getProcessInstances(businessId) {
-  if (!businessId) return [];
-  const token = getToken();
-  const headers = { Accept: "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const url = `${API_BASE}/activity-workflow/activities/process/_search/ACTIVITY/${encodeURIComponent(
-    businessId
-  )}`;
-  const res = await fetch(url, { method: "GET", headers, cache: "no-store" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let payload = null;
-    if (text) {
-      try { payload = JSON.parse(text); } catch { payload = text; }
-    }
-    const msg =
-      (payload && typeof payload === "object" &&
-        (payload.error?.message || payload.message || payload.errorMessage)) ||
-      (typeof payload === "string" ? payload : "") ||
-      `Workflow history fetch failed (${res.status})`;
-    throw new ApiError(msg, { status: res.status, body: payload });
-  }
-  const body = await res.json().catch(() => null);
-  return Array.isArray(body && body.ProcessInstances) ? body.ProcessInstances : [];
+export async function getProcessInstances(activityId) {
+  if (!activityId) return [];
+  const url = `${API_BASE}/activity-workflow/activities/process/_search/ACTIVITY/${encodeURIComponent(activityId)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store"
+  });
+  const payload = await parseJsonOrThrow(res, "Workflow history fetch");
+  return Array.isArray(payload && payload.ProcessInstances) ? payload.ProcessInstances : [];
 }
 
 /* Map a backend previousStatus string to one of our local approvalState
