@@ -15,7 +15,6 @@ import "../../styles/global.css";
      GET   /projects/{pid}/payment-page             — full hydrated state
      GET   /projects/{pid}/milestones               — milestone id → name
      POST  /projects/{pid}/cost-items               — add a cost row
-     DELETE/projects/cost-items/{id}                — remove a cost row
      PATCH /projects/payment-terms/{tid}            — set frequency + %
      PUT   /projects/{pid}/phases/{n}/qrg           — toggle QRG per phase
      PATCH /projects/{pid}/ccn-cap                  — set CCN cap %
@@ -56,7 +55,20 @@ const sectionHead = {
 
 const muted = { color: "var(--uidai-pmis-muted)" };
 
-/* Shared response/error unwrapper that mirrors the backend envelope. */
+/* Disabled-looking blank cell used in the cost table for One-Time rows
+   where Milestone / Phase do not apply. The grey wash + dash makes it
+   clear the field is intentionally inert (not just empty). */
+const disabledCell = {
+  background: "#f3f6fb",
+  color: "#a3afc1",
+  borderRadius: 4,
+  padding: "6px 10px",
+  display: "inline-block",
+  minWidth: 60,
+  textAlign: "center",
+  fontSize: 13,
+};
+
 async function readJson(res) {
   const payload = await res.json().catch(() => null);
   if (res.status === 401) {
@@ -85,9 +97,8 @@ function extractElements(payload) {
   );
 }
 
-/* Inline multi-select used for the Milestones cell on the Fixed-row
-   editor. Keeps the spec-mocked "<No Milestones>" italic placeholder
-   when disabled. */
+/* Inline multi-select used inside the Add Cost Item modal. Keeps the
+   spec-mocked italic placeholder behaviour when disabled. */
 function MilestoneMultiSelect({ value, options, onChange, disabled }) {
   const [open, setOpen] = useState(false);
   const selected = Array.isArray(value) ? value : [];
@@ -97,7 +108,6 @@ function MilestoneMultiSelect({ value, options, onChange, disabled }) {
     else onChange([...selected, id]);
   }
 
-  // Render selected ids as names from the options list.
   const labels = selected
     .map((id) => options.find((o) => o.id === id)?.name)
     .filter(Boolean);
@@ -114,18 +124,13 @@ function MilestoneMultiSelect({ value, options, onChange, disabled }) {
           cursor: disabled ? "not-allowed" : "pointer",
           background: disabled ? "#f3f6fb" : "#fff",
           color: disabled ? "#7c8aa1" : "var(--uidai-pmis-text)",
-          fontStyle: disabled ? "italic" : "normal",
         }}
       >
         <span style={{
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           color: labels.length ? "var(--uidai-pmis-text)" : "var(--uidai-pmis-muted)",
         }}>
-          {disabled
-            ? "<No Milestones>"
-            : labels.length
-              ? labels.join(", ")
-              : "Select milestones…"}
+          {labels.length ? labels.join(", ") : "Select milestones…"}
         </span>
         <span style={{ ...muted, fontSize: 11 }}>▾</span>
       </button>
@@ -156,14 +161,17 @@ function MilestoneMultiSelect({ value, options, onChange, disabled }) {
   );
 }
 
-function SummaryPanel({ totals, rules }) {
+/* Summary sidebar — fixed numbers only. The bullet-rules list was
+   dropped per request; the panel sticks to the page on scroll. */
+function SummaryPanel({ totals }) {
   const fixed = Number(totals?.fixedCost) || 0;
   const oneTime = Number(totals?.oneTimeCost) || 0;
   const total = Number(totals?.totalContractCost) || 0;
   return (
     <div style={{
       background: "#f7faff", border: "1px solid var(--uidai-pmis-border)",
-      borderRadius: 10, padding: 16, height: "fit-content",
+      borderRadius: 10, padding: 16,
+      position: "sticky", top: 16,
     }}>
       <div style={{
         textAlign: "center", fontSize: 15, fontWeight: 800, color: "#173e77",
@@ -173,7 +181,7 @@ function SummaryPanel({ totals, rules }) {
         Summary
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
           <span style={muted}>Fixed Cost</span>
           <strong style={{ color: "#173e77" }}>{inr(fixed)}</strong>
@@ -184,20 +192,246 @@ function SummaryPanel({ totals, rules }) {
         </div>
         <div style={{
           display: "flex", justifyContent: "space-between", gap: 8,
-          padding: "10px 0", borderTop: "1px dashed var(--uidai-pmis-border)",
+          padding: "10px 0 0", borderTop: "1px dashed var(--uidai-pmis-border)",
           fontSize: 14, fontWeight: 700,
         }}>
           <span style={{ color: "#173e77" }}>Total Cost</span>
           <strong style={{ color: "#173e77" }}>{inr(total)}</strong>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div style={{
-        background: "#eef4fc", borderRadius: 8, padding: "10px 12px",
-      }}>
-        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.55, color: "#33445e" }}>
-          {rules.map((r, i) => <li key={i} style={{ marginBottom: 4 }}>{r}</li>)}
-        </ul>
+/* ──────────────────────────────────────────────────────────────────
+   Add Cost Item modal — replaces the previous inline form. Renders
+   into the standard `.uidai-modal` shell so it inherits the project's
+   navy→cyan stripe, dimming overlay, and width treatment.
+   ────────────────────────────────────────────────────────────────── */
+function AddCostItemModal({
+  open, onClose, onSubmit, submitting,
+  costTypes, milestones, hasOneTime,
+}) {
+  const [draft, setDraft] = useState({
+    costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
+  });
+  // Reseed the draft each time the modal opens.
+  useEffect(() => {
+    if (open) {
+      setDraft({
+        costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
+      });
+    }
+  }, [open]);
+
+  if (!open) return null;
+  const isOneTime = draft.costTypeCode === "one_time";
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box">
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">Add Cost Item</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          Pick a cost type, enter the amount and tax %, then attach milestones for Fixed rows.
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Cost Type</label>
+            <select
+              value={draft.costTypeCode}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDraft((d) => ({
+                  ...d,
+                  costTypeCode: next,
+                  phase: next === "one_time" ? "" : (d.phase || 1),
+                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
+                }));
+              }}
+            >
+              {costTypes.length === 0 ? (
+                <option value="fixed">Fixed</option>
+              ) : costTypes.map((c) => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Phase</label>
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
+              <input
+                type="number"
+                min="1"
+                value={draft.phase}
+                onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
+              />
+            )}
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Cost (₹)</label>
+            <input
+              type="number"
+              min="0"
+              value={draft.cost}
+              onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
+            />
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Tax %</label>
+            <input
+              type="number"
+              min="0" max="100"
+              value={draft.taxPercent}
+              onChange={(e) => setDraft((d) => ({ ...d, taxPercent: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
+          <label>Milestones</label>
+          {isOneTime ? (
+            <input value="" disabled placeholder="—" />
+          ) : (
+            <MilestoneMultiSelect
+              value={draft.milestoneIds}
+              options={milestones}
+              onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
+            />
+          )}
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={submitting}
+            onClick={() => onSubmit(draft, hasOneTime)}
+          >
+            {submitting ? "Adding…" : "Save Cost Item"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Edit Payment Term modal — opens when a term row's Edit button is
+   clicked. Holds local frequency + % state; Save PATCHes the term
+   and the parent silently re-loads the payment page.
+   ────────────────────────────────────────────────────────────────── */
+function EditTermModal({
+  open, onClose, term, onSubmit, submitting,
+  frequencies, milestoneName,
+}) {
+  const [frequencyCode, setFrequencyCode] = useState("");
+  const [percentOfPayment, setPercentOfPayment] = useState("");
+
+  useEffect(() => {
+    if (!open || !term) return;
+    setFrequencyCode(term.frequencyCode || "");
+    setPercentOfPayment(
+      term.percentOfPayment === null || term.percentOfPayment === undefined
+        ? ""
+        : String(term.percentOfPayment)
+    );
+  }, [open, term]);
+
+  if (!open || !term) return null;
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">Edit Payment Term</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          Phase <strong style={{ color: "#173e77" }}>{term.phase}</strong>
+          {" · "}
+          Milestone <strong style={{ color: "#173e77" }}>{milestoneName(term.milestoneId)}</strong>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Frequency</label>
+            <select
+              value={frequencyCode || ""}
+              onChange={(e) => setFrequencyCode(e.target.value)}
+            >
+              <option value="">— Select —</option>
+              {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
+            </select>
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>% of Payment</label>
+            <input
+              type="number"
+              min="0" max="100"
+              value={percentOfPayment}
+              onChange={(e) => setPercentOfPayment(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={submitting}
+            onClick={() => onSubmit({
+              frequencyCode: frequencyCode || null,
+              percentOfPayment:
+                percentOfPayment === "" || percentOfPayment === null
+                  ? null
+                  : Number(percentOfPayment),
+            })}
+          >
+            {submitting ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -209,26 +443,24 @@ export default function ProjectFinancePage() {
   const project = useProject(projectId);
 
   // ── Master data ──
-  const [costTypes, setCostTypes] = useState([]);   // [{ code, name, active }]
-  const [frequencies, setFrequencies] = useState([]); // [{ code, name, active }]
-  const [milestones, setMilestones] = useState([]); // [{ id, name }]
+  const [costTypes, setCostTypes] = useState([]);
+  const [frequencies, setFrequencies] = useState([]);
+  const [milestones, setMilestones] = useState([]);
 
   // ── Live payment-page state (single source of truth) ──
-  const [page, setPage] = useState(null); // PaymentPage shape from API
+  const [page, setPage] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
 
-  // ── New-cost-item draft (inline form below the table) ──
-  const [showAddRow, setShowAddRow] = useState(false);
-  const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
-  });
+  // ── Add Cost modal ──
+  const [showAddModal, setShowAddModal] = useState(false);
   const [addingRow, setAddingRow] = useState(false);
 
-  // ── Per-payment-term local edit buffer (debounced PATCH per term) ──
-  const [termEdits, setTermEdits] = useState({}); // { termId: { frequencyCode, percentOfPayment, saving, error } }
+  // ── Edit Payment Term modal ──
+  const [editingTerm, setEditingTerm] = useState(null);
+  const [savingTerm, setSavingTerm] = useState(false);
 
-  // ── CCN cap edit buffer (number input) ──
+  // ── CCN cap edit buffer ──
   const [ccnInput, setCcnInput] = useState("");
   const [ccnSaving, setCcnSaving] = useState(false);
 
@@ -283,7 +515,6 @@ export default function ProjectFinancePage() {
       setMilestones(list);
     } catch (err) {
       if (handleAuthError(err)) return;
-      // Milestone failure is non-fatal — the Fixed editor will just be empty.
       // eslint-disable-next-line no-console
       console.warn("Failed to load milestones for finance page:", err?.message);
     }
@@ -300,8 +531,6 @@ export default function ProjectFinancePage() {
       const payload = await readJson(res);
       const data = payload?.data ?? payload;
       setPage(data);
-      // Seed the CCN input from server (so toggling save/refresh doesn't
-      // blow away the user's in-progress typing on subsequent silent refreshes).
       if (!silent || ccnInput === "") {
         const cap = data?.ccn?.capPercent;
         setCcnInput(cap !== null && cap !== undefined ? String(cap) : "");
@@ -314,7 +543,6 @@ export default function ProjectFinancePage() {
     }
   }
 
-  // Initial load — masters + milestones + payment page in parallel.
   useEffect(() => {
     if (!projectId || !getToken()) return;
     loadCostTypes();
@@ -332,7 +560,6 @@ export default function ProjectFinancePage() {
   const ccnValueServer = page?.ccn?.value;
   const isLocked = !!page?.isLocked;
 
-  // Active phases come from the cost items (phase numbers in use).
   const phaseNumbersFromCosts = useMemo(() => {
     const set = new Set();
     costItems.forEach((c) => { if (c.phase) set.add(Number(c.phase)); });
@@ -342,7 +569,7 @@ export default function ProjectFinancePage() {
   const hasOneTime = costItems.some((c) => c.costTypeCode === "one_time");
 
   // ── Mutations ────────────────────────────────────────────────────
-  async function addCostItem() {
+  async function submitNewCostItem(draft, hasOneTimeNow) {
     if (!projectId) return;
     if (draft.cost === "" || draft.taxPercent === "") {
       uiStore.showError("Enter both Cost and Tax %.");
@@ -352,7 +579,7 @@ export default function ProjectFinancePage() {
       uiStore.showError("Pick at least one milestone for a Fixed cost row.");
       return;
     }
-    if (draft.costTypeCode === "one_time" && hasOneTime) {
+    if (draft.costTypeCode === "one_time" && hasOneTimeNow) {
       uiStore.showError("Only one One-Time cost row is allowed per project.");
       return;
     }
@@ -378,10 +605,7 @@ export default function ProjectFinancePage() {
         body: JSON.stringify(body),
       });
       await readJson(res);
-      setShowAddRow(false);
-      setDraft({
-        costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
-      });
+      setShowAddModal(false);
       await loadPaymentPage({ silent: true });
       uiStore.showMessage("Cost item added.");
     } catch (err) {
@@ -392,49 +616,24 @@ export default function ProjectFinancePage() {
     }
   }
 
-  async function removeCostItem(id) {
-    if (!id) return;
-    if (!window.confirm("Remove this cost item? Its payment terms will also be removed.")) return;
+  async function submitTermEdit({ frequencyCode, percentOfPayment }) {
+    if (!editingTerm) return;
+    setSavingTerm(true);
     try {
-      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.costItems.remove(id)}`, { method: "DELETE" });
-      if (res.status !== 204) await readJson(res);
-      await loadPaymentPage({ silent: true });
-      uiStore.showMessage("Cost item removed.");
-    } catch (err) {
-      if (handleAuthError(err)) return;
-      uiStore.showError(err?.message || "Failed to remove cost item");
-    }
-  }
-
-  function setTermEdit(id, patch) {
-    setTermEdits((e) => ({ ...e, [id]: { ...(e[id] || {}), ...patch } }));
-  }
-
-  async function saveTerm(term) {
-    const edits = termEdits[term.id] || {};
-    const frequencyCode = edits.frequencyCode ?? term.frequencyCode ?? null;
-    const percentRaw = edits.percentOfPayment ?? term.percentOfPayment ?? "";
-    const percentOfPayment = percentRaw === "" || percentRaw === null
-      ? null
-      : Number(percentRaw);
-    setTermEdit(term.id, { saving: true, error: "" });
-    try {
-      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(term.id)}`, {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(editingTerm.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ frequencyCode, percentOfPayment }),
       });
       await readJson(res);
-      setTermEdit(term.id, { saving: false, error: "" });
-      // Clear staged edits for this term now that the server is authoritative.
-      setTermEdits((e) => {
-        const { [term.id]: _drop, ...rest } = e;
-        return rest;
-      });
+      setEditingTerm(null);
       await loadPaymentPage({ silent: true });
+      uiStore.showMessage("Payment term updated.");
     } catch (err) {
       if (handleAuthError(err)) return;
-      setTermEdit(term.id, { saving: false, error: err?.message || "Save failed" });
+      uiStore.showError(err?.message || "Failed to update payment term");
+    } finally {
+      setSavingTerm(false);
     }
   }
 
@@ -466,8 +665,6 @@ export default function ProjectFinancePage() {
         body: JSON.stringify({ ccnCapPercent: Number(ccnInput) }),
       });
       const payload = await readJson(res);
-      // The PATCH response is itself a full PaymentPage — use it directly
-      // to avoid an extra round-trip.
       setPage(payload?.data ?? payload);
       uiStore.showMessage("CCN Cap updated.");
     } catch (err) {
@@ -487,20 +684,6 @@ export default function ProjectFinancePage() {
     return costTypes.find((c) => c.code === code)?.name ||
       (code === "fixed" ? "Fixed" : code === "one_time" ? "One-Time" : code);
   }
-
-  function frequencyLabel(code) {
-    if (!code) return "";
-    return frequencies.find((f) => f.code === code)?.name || code;
-  }
-
-  /* Static rules pulled from the right-hand list in the spec. */
-  const summaryRules = [
-    "One Time costs will not have any milestone or phase.",
-    "Only one One-Time cost row is allowed per project.",
-    "CCN Value is derived from the CCN Cap % applied to total cost.",
-    "Every calculation is done with the Tax Value included.",
-    "QRG percentile is determined automatically from the % of Payment.",
-  ];
 
   // Loading & error gates
   if (!projectId) return null;
@@ -530,8 +713,7 @@ export default function ProjectFinancePage() {
 
   return (
     <div className="uidai-pmis-content">
-      {/* Page title lives in the global navbar now — only the descriptive
-          subtitle (with the project code) and a LOCKED pill stay here. */}
+      {/* Page title lives in the global navbar; this subtitle stays. */}
       <div className="uidai-pmis-subtitle" style={{ marginTop: 0, marginBottom: 18 }}>
         Configure project costs, payment terms by phase, and CCN cap for{" "}
         <strong style={{ color: "#173e77" }}>
@@ -547,280 +729,189 @@ export default function ProjectFinancePage() {
         )}
       </div>
 
-      {/* Section 1 — Project Cost + Summary panel */}
+      {/* Page-wide 2-column grid: every editable section sits on the
+          left; the Summary panel sits on the right and sticks while
+          the user scrolls through the long left column. */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 280px",
+        gridTemplateColumns: "minmax(0, 1fr) 300px",
         gap: 20,
         alignItems: "start",
       }}>
-        <div className="uidai-pmis-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
-            <div style={{ ...sectionHead, marginBottom: 0 }}>
-              <span style={stepBadge}>1</span> Project Cost
+        <div style={{ minWidth: 0 }}>
+          {/* Section 1 — Project Cost */}
+          <div className="uidai-pmis-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
+              <div style={{ ...sectionHead, marginBottom: 0 }}>
+                <span style={stepBadge}>1</span> Project Cost
+              </div>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-small"
+                style={{ marginTop: 0 }}
+                disabled={isLocked}
+                onClick={() => setShowAddModal(true)}
+              >
+                + Add
+              </button>
             </div>
-            <button
-              type="button"
-              className="uidai-pmis-btn uidai-pmis-btn-small"
-              style={{ marginTop: 0 }}
-              disabled={isLocked || showAddRow}
-              onClick={() => setShowAddRow(true)}
-            >
-              + Add
-            </button>
-          </div>
 
-          <div className="uidai-pmis-table-wrap">
-            <table className="uidai-pmis-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 130 }}>Cost Type</th>
-                  <th>Milestones</th>
-                  <th style={{ width: 130 }}>Cost (₹)</th>
-                  <th style={{ width: 90 }}>Phase</th>
-                  <th style={{ width: 100 }}>Tax %</th>
-                  <th style={{ width: 150 }}>Total</th>
-                  <th style={{ width: 60, textAlign: "center" }}>—</th>
-                </tr>
-              </thead>
-              <tbody>
-                {costItems.length === 0 ? (
+            <div className="uidai-pmis-table-wrap">
+              <table className="uidai-pmis-table">
+                <thead>
                   <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: 22, ...muted }}>
-                      No cost items yet — click “+ Add” to create one.
-                    </td>
+                    <th style={{ width: 130 }}>Cost Type</th>
+                    <th>Milestones</th>
+                    <th style={{ width: 130 }}>Cost (₹)</th>
+                    <th style={{ width: 90 }}>Phase</th>
+                    <th style={{ width: 200 }}>Tax</th>
+                    <th style={{ width: 150 }}>Total</th>
                   </tr>
-                ) : costItems.map((r) => {
-                  const isOneTime = r.costTypeCode === "one_time";
-                  return (
-                    <tr key={r.id}>
-                      <td>{costTypeLabel(r.costTypeCode)}</td>
-                      <td>
-                        {isOneTime ? (
-                          <span style={{ ...muted, fontStyle: "italic", fontSize: 12 }}>&lt;No Milestones&gt;</span>
-                        ) : (
-                          (r.milestoneIds || []).map(milestoneName).join(", ") || "—"
-                        )}
-                      </td>
-                      <td>{inr(r.cost)}</td>
-                      <td>
-                        {isOneTime
-                          ? <span style={{ ...muted, fontStyle: "italic", fontSize: 12 }}>&lt;No Phase&gt;</span>
-                          : (r.phase ?? "—")}
-                      </td>
-                      <td>{r.taxPercent != null ? `${Number(r.taxPercent)} %` : "—"}</td>
-                      <td>
-                        <div style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</div>
-                        <div style={{ fontSize: 11, ...muted }}>({isOneTime ? "One-Time" : "Fixed"})</div>
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        <button
-                          type="button"
-                          title="Remove cost item"
-                          disabled={isLocked}
-                          onClick={() => removeCostItem(r.id)}
-                          style={{
-                            border: "1px solid var(--uidai-pmis-red)",
-                            color: "var(--uidai-pmis-red)",
-                            background: "#fff",
-                            borderRadius: 6,
-                            padding: "4px 10px",
-                            cursor: isLocked ? "not-allowed" : "pointer",
-                            fontWeight: 700,
-                            opacity: isLocked ? 0.5 : 1,
-                          }}
-                        >
-                          ✕
-                        </button>
+                </thead>
+                <tbody>
+                  {costItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: 22, ...muted }}>
+                        No cost items yet — click “+ Add” to create one.
                       </td>
                     </tr>
-                  );
-                })}
-                <tr style={{ background: "#f1f6fd" }}>
-                  <td colSpan={5} style={{ fontWeight: 800, color: "#173e77" }}>Total Contract Cost</td>
-                  <td colSpan={2} style={{ fontWeight: 800, color: "#173e77" }}>{inr(totals.totalContractCost)}</td>
-                </tr>
-              </tbody>
-            </table>
+                  ) : costItems.map((r) => {
+                    const isOneTime = r.costTypeCode === "one_time";
+                    const taxPct = r.taxPercent != null ? Number(r.taxPercent) : null;
+                    const taxAmount = taxPct != null
+                      ? (Number(r.cost) || 0) * (taxPct / 100)
+                      : null;
+                    return (
+                      <tr key={r.id}>
+                        <td>{costTypeLabel(r.costTypeCode)}</td>
+                        <td>
+                          {isOneTime
+                            ? <span style={disabledCell}>—</span>
+                            : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
+                        </td>
+                        <td>{inr(r.cost)}</td>
+                        <td>
+                          {isOneTime
+                            ? <span style={disabledCell}>—</span>
+                            : (r.phase ?? "—")}
+                        </td>
+                        <td>
+                          {taxPct == null ? "—" : (
+                            <span>
+                              {taxPct} %
+                              <span style={{ ...muted, marginLeft: 8, fontSize: 12 }}>
+                                ({inr(taxAmount)})
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{ background: "#f1f6fd" }}>
+                    <td colSpan={5} style={{ fontWeight: 800, color: "#173e77" }}>Total Contract Cost</td>
+                    <td style={{ fontWeight: 800, color: "#173e77" }}>{inr(totals.totalContractCost)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* Inline "Add Cost Item" form */}
-          {showAddRow && (
-            <div style={{
-              marginTop: 14, padding: 14,
-              background: "#f7faff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10,
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#173e77", marginBottom: 10 }}>
-                New Cost Item
+          {/* Section 2 — Payment Terms (per phase, collapsible) */}
+          <div className="uidai-pmis-card">
+            <div style={sectionHead}><span style={stepBadge}>2</span> Payment Term</div>
+
+            {phases.length === 0 && phaseNumbersFromCosts.length === 0 ? (
+              <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>
+                Add a Fixed cost row with milestones to populate payment terms.
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                  <label>Cost Type</label>
-                  <select
-                    value={draft.costTypeCode}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setDraft((d) => ({
-                        ...d,
-                        costTypeCode: next,
-                        // Clear phase / milestones when switching to one_time.
-                        phase: next === "one_time" ? "" : (d.phase || 1),
-                        milestoneIds: next === "one_time" ? [] : d.milestoneIds,
-                      }));
-                    }}
-                  >
-                    {costTypes.length === 0 ? (
-                      <option value="fixed">Fixed</option>
-                    ) : costTypes.map((c) => (
-                      <option key={c.code} value={c.code}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                  <label>Phase</label>
-                  {draft.costTypeCode === "one_time" ? (
-                    <input value="<No Phase>" disabled style={{ fontStyle: "italic" }} />
-                  ) : (
-                    <input
-                      type="number"
-                      min="1"
-                      value={draft.phase}
-                      onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
-                    />
-                  )}
-                </div>
-                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                  <label>Cost (₹)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={draft.cost}
-                    onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
-                  />
-                </div>
-                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                  <label>Tax %</label>
-                  <input
-                    type="number"
-                    min="0" max="100"
-                    value={draft.taxPercent}
-                    onChange={(e) => setDraft((d) => ({ ...d, taxPercent: e.target.value }))}
-                  />
-                </div>
-                <div className="uidai-pmis-field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
-                  <label>Milestones</label>
-                  <MilestoneMultiSelect
-                    value={draft.milestoneIds}
-                    options={milestones}
-                    onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
-                    disabled={draft.costTypeCode === "one_time"}
-                  />
-                </div>
+            ) : phases.map((p) => (
+              <PhasePanel
+                key={p.phase}
+                phase={p}
+                milestoneName={milestoneName}
+                onEditTerm={(t) => setEditingTerm(t)}
+                setQrgForPhase={setQrgForPhase}
+                isLocked={isLocked}
+              />
+            ))}
+          </div>
+
+          {/* Section 3 — CCN Cap & Value */}
+          <div className="uidai-pmis-card">
+            <div style={sectionHead}><span style={stepBadge}>3</span> CCN Cap &amp; Value</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 18 }}>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>CCN Cap (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={ccnInput}
+                  onChange={(e) => setCcnInput(e.target.value)}
+                  disabled={isLocked}
+                />
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-                <button
-                  type="button"
-                  className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
-                  onClick={() => { setShowAddRow(false); }}
-                  disabled={addingRow}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="uidai-pmis-btn uidai-pmis-btn-small"
-                  style={{ marginTop: 0 }}
-                  onClick={addCostItem}
-                  disabled={addingRow}
-                >
-                  {addingRow ? "Adding…" : "Save Cost Item"}
-                </button>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>CCN Value</label>
+                <input value={inr(ccnValueServer)} disabled />
               </div>
             </div>
-          )}
-        </div>
-
-        <SummaryPanel totals={totals} rules={summaryRules} />
-      </div>
-
-      {/* Section 2 — Payment Terms (per phase, collapsible) */}
-      <div className="uidai-pmis-card">
-        <div style={sectionHead}><span style={stepBadge}>2</span> Payment Term</div>
-
-        {phases.length === 0 && phaseNumbersFromCosts.length === 0 ? (
-          <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>
-            Add a Fixed cost row with milestones to populate payment terms.
-          </div>
-        ) : phases.map((p) => (
-          <PhasePanel
-            key={p.phase}
-            phase={p}
-            frequencies={frequencies}
-            milestoneName={milestoneName}
-            termEdits={termEdits}
-            setTermEdit={setTermEdit}
-            saveTerm={saveTerm}
-            setQrgForPhase={setQrgForPhase}
-            isLocked={isLocked}
-            totals={totals}
-            frequencyLabel={frequencyLabel}
-          />
-        ))}
-      </div>
-
-      {/* Section 3 — CCN Cap & Value */}
-      <div className="uidai-pmis-card">
-        <div style={sectionHead}><span style={stepBadge}>3</span> CCN Cap &amp; Value</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 18 }}>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>CCN Cap (%)</label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={ccnInput}
-              onChange={(e) => setCcnInput(e.target.value)}
-              disabled={isLocked}
-            />
-          </div>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>CCN Value</label>
-            <input value={inr(ccnValueServer)} disabled />
-          </div>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Total Contract Cost</label>
-            <input value={inr(totals.totalContractCost)} disabled />
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ fontSize: 12, ...muted }}>
+                CCN Value = (CCN Cap % ÷ 100) × Total Contract Cost
+                {ccnCapPctServer != null && (
+                  <span style={{ marginLeft: 12 }}>
+                    · Saved cap: <strong style={{ color: "#173e77" }}>{Number(ccnCapPctServer)} %</strong>
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-small"
+                style={{ marginTop: 0 }}
+                onClick={saveCcnCap}
+                disabled={ccnSaving || isLocked}
+              >
+                {ccnSaving ? "Saving…" : "Save CCN Cap"}
+              </button>
+            </div>
           </div>
         </div>
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <div style={{ fontSize: 12, ...muted }}>
-            CCN Value = (CCN Cap % ÷ 100) × Total Contract Cost
-            {ccnCapPctServer != null && (
-              <span style={{ marginLeft: 12 }}>
-                · Saved cap: <strong style={{ color: "#173e77" }}>{Number(ccnCapPctServer)} %</strong>
-              </span>
-            )}
-          </div>
-          <button
-            type="button"
-            className="uidai-pmis-btn uidai-pmis-btn-small"
-            style={{ marginTop: 0 }}
-            onClick={saveCcnCap}
-            disabled={ccnSaving || isLocked}
-          >
-            {ccnSaving ? "Saving…" : "Save CCN Cap"}
-          </button>
-        </div>
+
+        {/* Right column — sticky Summary */}
+        <SummaryPanel totals={totals} />
       </div>
+
+      <AddCostItemModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSubmit={submitNewCostItem}
+        submitting={addingRow}
+        costTypes={costTypes}
+        milestones={milestones}
+        hasOneTime={hasOneTime}
+      />
+      <EditTermModal
+        open={!!editingTerm}
+        term={editingTerm}
+        onClose={() => setEditingTerm(null)}
+        onSubmit={submitTermEdit}
+        submitting={savingTerm}
+        frequencies={frequencies}
+        milestoneName={milestoneName}
+      />
     </div>
   );
 }
 
 /* Each phase renders as its own collapsible panel — header is always
-   visible, body collapses. Mirrors the "Collapsible" tag in the spec. */
+   visible, body collapses. Frequency column was dropped per spec; the
+   row-level Edit button opens the EditTermModal which holds both
+   frequency and % inputs. */
 function PhasePanel({
-  phase, frequencies, termEdits, setTermEdit, saveTerm, setQrgForPhase,
-  isLocked, totals, milestoneName, frequencyLabel,
+  phase, milestoneName, onEditTerm, setQrgForPhase, isLocked,
 }) {
   const [expanded, setExpanded] = useState(true);
   const terms = phase.paymentTerms || [];
@@ -853,7 +944,7 @@ function PhasePanel({
         <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14 }}>
           Phase {phase.phase}
           <span style={{ color: "var(--uidai-pmis-muted)", fontWeight: 500, marginLeft: 10, fontSize: 12 }}>
-            ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: {inr(phase.phaseFixedTotal)})
+            ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: ₹ {Number(phase.phaseFixedTotal || 0).toLocaleString("en-IN")})
           </span>
         </span>
         <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14 }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
@@ -895,7 +986,7 @@ function PhasePanel({
               <div style={{ flex: 1, minWidth: 280, fontSize: 12, color: "#33445e" }}>
                 <span style={{ fontWeight: 700, color: "#173e77" }}>QRG:</span>{" "}
                 {Number(phase.qrg.percent)} % ={" "}
-                <strong style={{ color: "#173e77" }}>{inr(phase.qrg.value)}</strong>
+                <strong style={{ color: "#173e77" }}>₹ {Number(phase.qrg.value || 0).toLocaleString("en-IN")}</strong>
               </div>
             )}
           </div>
@@ -906,83 +997,42 @@ function PhasePanel({
                 <tr>
                   <th style={{ width: 70 }}>Phase</th>
                   <th>Milestone</th>
-                  <th style={{ width: 160 }}>Frequency</th>
                   <th style={{ width: 150 }}>% of Payment</th>
                   <th style={{ width: 170 }}>Value</th>
-                  <th style={{ width: 90, textAlign: "center" }}>—</th>
+                  <th style={{ width: 110, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={5} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
-                ) : terms.map((t) => {
-                  const edit = termEdits[t.id] || {};
-                  const freq = edit.frequencyCode ?? t.frequencyCode ?? "";
-                  const pct = edit.percentOfPayment ?? (t.percentOfPayment ?? "");
-                  const dirty =
-                    edit.frequencyCode !== undefined ||
-                    edit.percentOfPayment !== undefined;
-                  return (
-                    <tr key={t.id}>
-                      <td style={{ fontWeight: 700, color: "#173e77" }}>{t.phase}</td>
-                      <td>{milestoneName(t.milestoneId)}</td>
-                      <td>
-                        <select
-                          style={ctrl}
-                          value={freq || ""}
-                          disabled={isLocked}
-                          onChange={(e) => setTermEdit(t.id, { frequencyCode: e.target.value || null })}
-                        >
-                          <option value="">— Select —</option>
-                          {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
-                        </select>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <input
-                            type="number"
-                            min="0" max="100"
-                            style={ctrl}
-                            value={pct === null ? "" : pct}
-                            disabled={isLocked}
-                            onChange={(e) => setTermEdit(t.id, { percentOfPayment: e.target.value })}
-                          />
-                          <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 13 }}>%</span>
-                        </div>
-                      </td>
-                      <td style={{ fontWeight: 700, color: "#173e77" }}>{inr(t.value)}</td>
-                      <td style={{ textAlign: "center" }}>
-                        <button
-                          type="button"
-                          className="uidai-pmis-btn uidai-pmis-btn-small"
-                          style={{
-                            marginTop: 0,
-                            opacity: dirty && !edit.saving ? 1 : 0.5,
-                            cursor: dirty && !edit.saving ? "pointer" : "not-allowed",
-                          }}
-                          disabled={!dirty || edit.saving || isLocked}
-                          onClick={() => saveTerm(t)}
-                        >
-                          {edit.saving ? "Saving…" : "Save"}
-                        </button>
-                        {edit.error && (
-                          <div style={{ color: "var(--uidai-pmis-red)", fontSize: 11, marginTop: 4 }}>
-                            {edit.error}
-                          </div>
-                        )}
-                        {!dirty && t.frequencyCode && (
-                          <div style={{ ...{ color: "var(--uidai-pmis-muted)" }, fontSize: 11, marginTop: 4 }}>
-                            {frequencyLabel(t.frequencyCode)}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                ) : terms.map((t) => (
+                  <tr key={t.id}>
+                    <td style={{ fontWeight: 700, color: "#173e77" }}>{t.phase}</td>
+                    <td>{milestoneName(t.milestoneId)}</td>
+                    <td>
+                      {t.percentOfPayment == null
+                        ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
+                        : `${Number(t.percentOfPayment)} %`}
+                    </td>
+                    <td style={{ fontWeight: 700, color: "#173e77" }}>
+                      ₹ {Number(t.value || 0).toLocaleString("en-IN")}
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        type="button"
+                        className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                        disabled={isLocked}
+                        onClick={() => onEditTerm(t)}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
