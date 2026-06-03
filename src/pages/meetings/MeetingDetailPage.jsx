@@ -50,6 +50,35 @@ const SUMM_STEPS = [
   "Mapping action items to PMIS tasks…"
 ];
 
+/* Compact info tile used for date / time / location / division / partner. */
+function InfoTile({ icon, label, value }) {
+  return (
+    <div className="mt-info-tile">
+      <span className="mt-info-tile__icon" aria-hidden="true">{icon}</span>
+      <span className="mt-info-tile__body">
+        <span className="mt-info-tile__lbl">{label}</span>
+        <span className="mt-info-tile__val">{value}</span>
+      </span>
+    </div>
+  );
+}
+
+/* Render the location field as a clickable link when it looks like a
+   URL, otherwise as plain text. Keeps copy-on-click parity with the
+   prior plain-text rendering while making Teams / Meet links obvious. */
+function renderLocation(loc) {
+  const s = String(loc || "").trim();
+  if (!s) return "—";
+  if (/^https?:\/\//i.test(s)) {
+    return (
+      <a href={s} target="_blank" rel="noopener noreferrer">
+        {s}
+      </a>
+    );
+  }
+  return s;
+}
+
 export default function MeetingDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -302,55 +331,38 @@ export default function MeetingDetailPage() {
 
       {/* ── Section 1: meeting info ── */}
       <div className="card">
-        <div className="detail-head">
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              alignItems: "center"
-            }}
-          >
-            <TypeBadge type={meeting.type} />
-            <StatusBadge status={meeting.status} />
-            <LinkPill meeting={meeting} />
-          </div>
+        <div className="mt-hero">
+          <TypeBadge type={meeting.type} />
+          <StatusBadge status={meeting.status} />
+          <LinkPill meeting={meeting} />
         </div>
-        <div className="detail-meta">
-          <div className="meta-item">
-            <span className="k">Date</span>
-            <span className="v">{fmtDate(meeting.date)}</span>
-          </div>
-          <div className="meta-item">
-            <span className="k">Time (IST)</span>
-            <span className="v">
-              {meeting.start} – {meeting.end}
-            </span>
-          </div>
-          <div className="meta-item">
-            <span className="k">Location / Link</span>
-            <span className="v">{meeting.location || "—"}</span>
-          </div>
+
+        <div className="mt-info-grid">
+          <InfoTile icon="📅" label="Date" value={fmtDate(meeting.date)} />
+          <InfoTile
+            icon="🕐"
+            label="Time (IST)"
+            value={`${meeting.start || "—"} – ${meeting.end || "—"}`}
+          />
+          <InfoTile
+            icon="📍"
+            label="Location / Link"
+            value={renderLocation(meeting.location)}
+          />
           {p && (
             <>
-              <div className="meta-item">
-                <span className="k">Division</span>
-                <span className="v">{p.division}</span>
-              </div>
-              <div className="meta-item">
-                <span className="k">Service Partner</span>
-                <span className="v">{p.org}</span>
-              </div>
+              <InfoTile icon="🏛️" label="Division" value={p.division || "—"} />
+              <InfoTile icon="🏢" label="Service Partner" value={p.org || "—"} />
             </>
           )}
         </div>
 
         {meeting.link === "project" && (
-          <div className="meta-item" style={{ marginTop: 12 }}>
-            <span className="k">Activities</span>
+          <>
+            <div className="mt-section-label">Activities</div>
             <div className="attendee-chips">
               {meeting.activityIds.length === 0 ? (
-                <span className="muted">No activities linked</span>
+                <span className="mt-empty-people">No activities linked.</span>
               ) : (
                 meeting.activityIds.map((aid) => (
                   <span key={aid} className="chip">
@@ -360,48 +372,76 @@ export default function MeetingDetailPage() {
                 ))
               )}
             </div>
-          </div>
+          </>
         )}
 
-        <div className="meta-item" style={{ marginTop: 12 }}>
-          <span className="k">Attendees</span>
-          <div className="attendee-chips">
-            {meeting.attendees.length === 0 ? (
-              <span className="muted">None</span>
-            ) : (
-              meeting.attendees.map((uid) => {
-                const u = userById(uid);
-                return (
-                  <span key={uid} className="chip">
-                    {u ? u.name : uid}{" "}
-                    <span className="sub">{u ? u.org : ""}</span>
-                  </span>
-                );
-              })
-            )}
+        <div className="mt-section-label">People</div>
+        <div className="mt-people-grid">
+          <div className="mt-people-card">
+            <div className="mt-people-card__head">
+              <span className="mt-people-card__title">Attendees</span>
+              <span className="mt-people-card__count">
+                {meeting.attendees.length}
+              </span>
+            </div>
+            <div className="mt-people-list">
+              {meeting.attendees.length === 0 ? (
+                <div className="mt-empty-people">No internal attendees.</div>
+              ) : (
+                meeting.attendees.map((uid) => {
+                  const u = userById(uid);
+                  return (
+                    <div key={uid} className="mt-people-row">
+                      <span className="mt-people-avatar">
+                        {initials(u ? u.name : uid)}
+                      </span>
+                      <span className="mt-people-body">
+                        <span className="mt-people-name">
+                          {u ? u.name : uid}
+                        </span>
+                        <span className="mt-people-sub">
+                          {u ? `${u.org}${u.division ? " · " + u.division : ""}` : ""}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="mt-people-card">
+            <div className="mt-people-card__head">
+              <span className="mt-people-card__title">External</span>
+              <span className="mt-people-card__count">
+                {(meeting.external || []).length}
+              </span>
+            </div>
+            <div className="mt-people-list">
+              {!meeting.external || meeting.external.length === 0 ? (
+                <div className="mt-empty-people">No external attendees.</div>
+              ) : (
+                meeting.external.map((v) => (
+                  <div key={v} className="mt-people-row">
+                    <span className="mt-people-avatar mt-people-avatar--ext">
+                      {initials(v)}
+                    </span>
+                    <span className="mt-people-body">
+                      <span className="mt-people-name">{v}</span>
+                      <span className="mt-people-sub">External</span>
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
-        {meeting.external && meeting.external.length > 0 && (
-          <div className="meta-item" style={{ marginTop: 10 }}>
-            <span className="k">External</span>
-            <div className="attendee-chips">
-              {meeting.external.map((v) => (
-                <span key={v} className="chip">
-                  {v}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
         {meeting.agenda && (
-          <div className="meta-item" style={{ marginTop: 12 }}>
-            <span className="k">Agenda</span>
-            <span className="v" style={{ fontWeight: 400 }}>
-              {meeting.agenda}
-            </span>
-          </div>
+          <>
+            <div className="mt-section-label">Agenda</div>
+            <div className="mt-agenda">{meeting.agenda}</div>
+          </>
         )}
       </div>
 
