@@ -100,6 +100,13 @@ function resolveNavTitle(segments) {
         tooltip: "Chronological audit trail of every change made to this project."
       };
     }
+    // /projects/:id/finance            → cost / payment-term / CCN config
+    if (segments[2] === "finance") {
+      return {
+        label: "Project Finance",
+        tooltip: "Configure project costs, payment terms by phase, QRG and CCN cap."
+      };
+    }
     // /projects/:id                    → detail
     return {
       label: "Project Details",
