@@ -192,6 +192,11 @@ export default function MeetingDetailPage() {
     setMeeting(updated);
   };
 
+  const setAllPresent = (keys) => {
+    const updated = updateMeeting(meeting.id, { present: keys });
+    setMeeting(updated);
+  };
+
   const saveMoM = () => {
     const next = updateMeeting(meeting.id, { mom: momText });
     setMeeting(next);
@@ -450,12 +455,23 @@ export default function MeetingDetailPage() {
             if (rows.length === 0) {
               return <div className="mt-empty-people">No attendees added.</div>;
             }
+            const allKeys = rows.map((r) => r.key);
+            const allMarked = presentCount === rows.length;
             return (
               <>
                 <div className="mt-attendance__head">
                   <span>
                     {presentCount}/{rows.length} present
                   </span>
+                  <button
+                    type="button"
+                    className="btn ghost small-btn"
+                    onClick={() =>
+                      setAllPresent(allMarked ? [] : allKeys)
+                    }
+                  >
+                    {allMarked ? "Clear all" : "Mark all present"}
+                  </button>
                 </div>
                 <div className="mt-attendance__grid">
                   {rows.map((r) => {

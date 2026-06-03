@@ -355,7 +355,9 @@
 }
 .pmis-mtg .mt-attendance__head {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   font-size: 12px;
   font-weight: 700;
   color: var(--navy);
