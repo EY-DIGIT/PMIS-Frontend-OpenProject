@@ -1172,15 +1172,19 @@ export default function ProjectFinancePage() {
 
   return (
     <div className="uidai-pmis-content">
-      {/* Page title lives in the global navbar; this subtitle stays. */}
-      <div className="uidai-pmis-subtitle" style={{ marginTop: 0, marginBottom: 18 }}>
-        Configure project costs, payment terms by phase, and CCN cap for{" "}
-        <strong style={{ color: "#173e77" }}>
-          {page?.projectCode || project?.projectCode || project?.projectName || projectId}
-        </strong>.
+      {/* Slim header — just the project name on the right (and the
+          LOCKED chip if applicable). The long descriptive subtitle
+          was dropped at the user's request. */}
+      <div style={{
+        display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10,
+        marginTop: 0, marginBottom: 12,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#173e77" }}>
+          {page?.projectName || project?.projectName || ""}
+        </span>
         {isLocked && (
           <span style={{
-            marginLeft: 10, padding: "2px 8px", borderRadius: 999,
+            padding: "2px 8px", borderRadius: 999,
             background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 11,
           }}>
             LOCKED
