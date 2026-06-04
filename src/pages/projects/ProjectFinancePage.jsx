@@ -161,42 +161,61 @@ function MilestoneMultiSelect({ value, options, onChange, disabled }) {
   );
 }
 
-/* Summary sidebar — fixed numbers only. The bullet-rules list was
-   dropped per request; the panel sticks to the page on scroll. */
+/* Summary sidebar — fixed numbers only. The panel is positioned by its
+   parent (the sticky right-column stack); no positioning here. */
 function SummaryPanel({ totals }) {
   const fixed = Number(totals?.fixedCost) || 0;
   const oneTime = Number(totals?.oneTimeCost) || 0;
   const total = Number(totals?.totalContractCost) || 0;
   return (
     <div style={{
-      background: "#f7faff", border: "1px solid var(--uidai-pmis-border)",
-      borderRadius: 10, padding: 16,
-      position: "sticky", top: 16,
+      background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
+      border: "1px solid var(--uidai-pmis-border)",
+      borderRadius: 12,
+      padding: 18,
+      boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
     }}>
       <div style={{
-        textAlign: "center", fontSize: 15, fontWeight: 800, color: "#173e77",
-        paddingBottom: 10, marginBottom: 12,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        fontSize: 14, fontWeight: 800, color: "#173e77",
+        letterSpacing: 0.5, textTransform: "uppercase",
+        paddingBottom: 12, marginBottom: 14,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        Summary
+        <span aria-hidden="true">💼</span> Summary
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          gap: 8, fontSize: 13,
+          background: "#fff", border: "1px solid var(--uidai-pmis-border)",
+          borderRadius: 8, padding: "8px 12px",
+        }}>
           <span style={muted}>Fixed Cost</span>
           <strong style={{ color: "#173e77" }}>{inr(fixed)}</strong>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13 }}>
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          gap: 8, fontSize: 13,
+          background: "#fff", border: "1px solid var(--uidai-pmis-border)",
+          borderRadius: 8, padding: "8px 12px",
+        }}>
           <span style={muted}>One-Time Cost</span>
           <strong style={{ color: "#173e77" }}>{inr(oneTime)}</strong>
         </div>
         <div style={{
-          display: "flex", justifyContent: "space-between", gap: 8,
-          padding: "10px 0 0", borderTop: "1px dashed var(--uidai-pmis-border)",
-          fontSize: 14, fontWeight: 700,
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+          marginTop: 6, padding: "12px 14px",
+          background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
+          color: "#fff",
+          borderRadius: 10,
+          boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
         }}>
-          <span style={{ color: "#173e77" }}>Total Cost</span>
-          <strong style={{ color: "#173e77" }}>{inr(total)}</strong>
+          <span style={{ fontSize: 11, opacity: 0.9, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            Total Contract Cost
+          </span>
+          <strong style={{ fontSize: 18, color: "#fff" }}>{inr(total)}</strong>
         </div>
       </div>
     </div>
@@ -798,7 +817,7 @@ export default function ProjectFinancePage() {
           the user scrolls through the long left column. */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 300px",
+        gridTemplateColumns: "minmax(0, 1fr) 320px",
         gap: 20,
         alignItems: "start",
       }}>
@@ -945,19 +964,26 @@ export default function ProjectFinancePage() {
           </div>
         </div>
 
-        {/* Right column — sticky Summary */}
-        <SummaryPanel totals={totals} />
+        {/* Right column — sticky stack: Summary on top, QGR below.
+            Both move together as the user scrolls the long left column. */}
+        <div style={{
+          position: "sticky",
+          top: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          maxHeight: "calc(100vh - 32px)",
+          overflowY: "auto",
+        }}>
+          <SummaryPanel totals={totals} />
+          <QgrConfigSection
+            phases={phases}
+            isLocked={isLocked || qgrSaving}
+            busy={qgrSaving}
+            onSetQrgForPhase={setQrgForPhase}
+          />
+        </div>
       </div>
-
-      {/* Section 4 — QGR (Quality Review Gate) configuration. Rendered
-          BELOW the Summary grid so reviewers see the totals first and
-          then decide which single phase carries the QGR hold-back. */}
-      <QgrConfigSection
-        phases={phases}
-        isLocked={isLocked || qgrSaving}
-        busy={qgrSaving}
-        onSetQrgForPhase={setQrgForPhase}
-      />
 
       <AddCostItemModal
         open={showAddModal}
@@ -1141,95 +1167,130 @@ function PhasePanel({
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   QgrConfigSection — dedicated panel rendered below the Summary grid.
-   Lists every phase as a card with Yes / No pills. Only one phase can
-   carry QGR=Yes at a time (the page-level setQrgForPhase enforces the
-   cascade via PUT calls). When a phase has QGR applied the card surfaces
-   the computed %  and value the backend ships in phase.qrg.
+   QgrConfigSection — compact panel rendered in the right column below
+   the Summary card. Each phase is a single horizontal row with a
+   segmented Yes / No control on the right. Only one phase can carry
+   QGR=Yes at a time (the page-level setQrgForPhase enforces the
+   cascade via PUT calls). When a phase has QGR applied the row
+   highlights green and surfaces the computed % + ₹ value the backend
+   ships in phase.qrg.
    ────────────────────────────────────────────────────────────────── */
 function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
   if (!phases || phases.length === 0) return null;
   const appliedPhase = phases.find((p) => p.qrg?.applied);
   return (
-    <div className="uidai-pmis-card" style={{ marginTop: 18 }}>
+    <div style={{
+      background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
+      border: "1px solid var(--uidai-pmis-border)",
+      borderRadius: 12,
+      padding: 16,
+      boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
+    }}>
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        flexWrap: "wrap", gap: 10, marginBottom: 10,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        fontSize: 14, fontWeight: 800, color: "#173e77",
+        letterSpacing: 0.5, textTransform: "uppercase",
+        paddingBottom: 12, marginBottom: 14,
+        borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        <div style={{ ...sectionHead, marginBottom: 0 }}>
-          <span style={stepBadge}>4</span> QGR Configuration
-        </div>
-        <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)" }}>
-          Only one phase can carry QGR at a time.
-          {appliedPhase ? (
-            <>
-              {" "}Currently applied to{" "}
-              <strong style={{ color: "#1b7a42" }}>Phase {appliedPhase.phase}</strong>.
-            </>
-          ) : (
-            <> No phase has QGR applied.</>
-          )}
-          {busy && (
-            <span style={{ marginLeft: 8, color: "#173e77", fontWeight: 700 }}>
-              Updating…
-            </span>
-          )}
-        </div>
+        <span aria-hidden="true">🛡️</span> QGR Configuration
       </div>
 
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-        gap: 12,
+        fontSize: 11, color: "var(--uidai-pmis-muted)", textAlign: "center",
+        marginBottom: 12, lineHeight: 1.4,
       }}>
+        Only one phase can carry QGR at a time.
+        {appliedPhase ? (
+          <>
+            {" "}Active on{" "}
+            <strong style={{ color: "#1b7a42" }}>Phase {appliedPhase.phase}</strong>.
+          </>
+        ) : (
+          <> No phase active.</>
+        )}
+        {busy && (
+          <span style={{
+            display: "inline-block", marginLeft: 6,
+            padding: "1px 8px", borderRadius: 999,
+            background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 10,
+          }}>
+            Updating…
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {phases.map((p) => {
           const yes = !!p.qrg?.applied;
           return (
             <div
               key={p.phase}
               style={{
+                display: "flex", alignItems: "center", gap: 10,
                 border: yes ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
-                background: yes
-                  ? "linear-gradient(180deg, #f1faf4 0%, #ffffff 60%)"
-                  : "#fff",
+                background: yes ? "#f1faf4" : "#fff",
                 borderRadius: 10,
-                padding: "14px 16px",
+                padding: "10px 12px",
                 boxShadow: yes
                   ? "0 2px 6px rgba(27, 122, 66, 0.10)"
                   : "0 1px 2px rgba(20, 50, 110, 0.04)",
-                transition: "border-color .15s, box-shadow .15s",
+                transition: "border-color .15s, background .15s, box-shadow .15s",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <div style={{ fontWeight: 800, color: "#173e77", fontSize: 14 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  fontWeight: 800, color: "#173e77", fontSize: 13,
+                }}>
                   Phase {p.phase}
+                  {yes && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                      padding: "1px 6px", borderRadius: 999,
+                      background: "#1b7a42", color: "#fff",
+                    }}>
+                      ON
+                    </span>
+                  )}
                 </div>
-                {yes && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
-                    padding: "2px 8px", borderRadius: 999,
-                    background: "#1b7a42", color: "#fff",
-                  }}>
-                    APPLIED
-                  </span>
-                )}
+                <div style={{ fontSize: 11, marginTop: 3, lineHeight: 1.3 }}>
+                  {yes && p.qrg ? (
+                    <>
+                      <span style={{ fontWeight: 700, color: "#1b7a42" }}>
+                        {Number(p.qrg.percent)} %
+                      </span>
+                      <span style={{ color: "var(--uidai-pmis-muted)" }}> · </span>
+                      <strong style={{ color: "#173e77" }}>
+                        ₹ {Number(p.qrg.value || 0).toLocaleString("en-IN")}
+                      </strong>
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--uidai-pmis-muted)" }}>No hold-back</span>
+                  )}
+                </div>
               </div>
 
               <div role="group" aria-label={`Apply QGR to Phase ${p.phase}`}
-                style={{ display: "inline-flex", border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, overflow: "hidden" }}>
+                style={{
+                  display: "inline-flex", flex: "0 0 auto",
+                  border: "1px solid var(--uidai-pmis-border)",
+                  borderRadius: 999, overflow: "hidden",
+                  background: "#fff",
+                }}>
                 <button
                   type="button"
                   disabled={isLocked}
                   onClick={() => !yes && onSetQrgForPhase(p.phase, true)}
                   style={{
-                    padding: "6px 14px",
+                    padding: "5px 12px",
                     border: "none",
-                    background: yes ? "#1b7a42" : "#fff",
+                    background: yes ? "#1b7a42" : "transparent",
                     color: yes ? "#fff" : "#173e77",
                     fontWeight: 700,
                     cursor: isLocked ? "not-allowed" : "pointer",
                     opacity: isLocked ? 0.5 : 1,
-                    fontSize: 13,
+                    fontSize: 12,
                   }}
                 >
                   Yes
@@ -1239,35 +1300,19 @@ function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
                   disabled={isLocked}
                   onClick={() => yes && onSetQrgForPhase(p.phase, false)}
                   style={{
-                    padding: "6px 14px",
+                    padding: "5px 12px",
                     border: "none",
                     borderLeft: "1px solid var(--uidai-pmis-border)",
-                    background: !yes ? "#eef2f7" : "#fff",
+                    background: !yes ? "#eef2f7" : "transparent",
                     color: "#173e77",
                     fontWeight: 700,
                     cursor: isLocked ? "not-allowed" : "pointer",
                     opacity: isLocked ? 0.5 : 1,
-                    fontSize: 13,
+                    fontSize: 12,
                   }}
                 >
                   No
                 </button>
-              </div>
-
-              <div style={{ marginTop: 12, fontSize: 12, color: "#33445e", minHeight: 18 }}>
-                {yes && p.qrg ? (
-                  <>
-                    <span style={{ fontWeight: 700, color: "#1b7a42" }}>{Number(p.qrg.percent)} %</span>
-                    {" = "}
-                    <strong style={{ color: "#173e77" }}>
-                      ₹ {Number(p.qrg.value || 0).toLocaleString("en-IN")}
-                    </strong>
-                  </>
-                ) : (
-                  <span style={{ color: "var(--uidai-pmis-muted)" }}>
-                    No QGR hold-back on this phase.
-                  </span>
-                )}
               </div>
             </div>
           );
