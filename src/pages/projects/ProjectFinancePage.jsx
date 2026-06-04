@@ -1341,7 +1341,7 @@ export default function ProjectFinancePage() {
                 onClick={saveCcnCap}
                 disabled={ccnSaving || isLocked}
               >
-                {ccnSaving ? "Saving…" : "Save CCN Cap"}
+                {ccnSaving ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
