@@ -1313,11 +1313,13 @@ export default function ProjectFinancePage() {
             ))}
           </div>
 
-          {/* Section 3 — CCN Cap & Value */}
+          {/* Section 3 — CCN Cap & Value. Calculation hint dropped per
+              request; the Save button now lives at the right end of the
+              same row as the two inputs. */}
           <div className="uidai-pmis-card">
             <div style={sectionHead}><span style={stepBadge}>3</span> CCN Cap &amp; Value</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 18 }}>
-              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
                 <label>CCN Cap (%)</label>
                 <input
                   type="number"
@@ -1328,24 +1330,14 @@ export default function ProjectFinancePage() {
                   disabled={isLocked}
                 />
               </div>
-              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
                 <label>CCN Value</label>
                 <input value={inr(ccnValueServer)} disabled />
-              </div>
-            </div>
-            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-              <div style={{ fontSize: 12, ...muted }}>
-                CCN Value = (CCN Cap % ÷ 100) × Total Contract Cost
-                {ccnCapPctServer != null && (
-                  <span style={{ marginLeft: 12 }}>
-                    · Saved cap: <strong style={{ color: "#173e77" }}>{Number(ccnCapPctServer)} %</strong>
-                  </span>
-                )}
               </div>
               <button
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-small"
-                style={{ marginTop: 0 }}
+                style={{ marginTop: 0, flex: "0 0 auto" }}
                 onClick={saveCcnCap}
                 disabled={ccnSaving || isLocked}
               >
