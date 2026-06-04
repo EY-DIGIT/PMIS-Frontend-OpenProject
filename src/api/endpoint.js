@@ -336,9 +336,11 @@ export const ENDPOINTS = {
   activityWorkflow: {
     transition: '/activity-workflow/activities/process/_transition',
     requestDivisionApproval: '/activity-workflow/activities/parallel/request-division-approval',
+    requestOwnerApproval: '/activity-workflow/activities/parallel/request-owner-approval',
     parallelVote: '/activity-workflow/activities/parallel/vote',
     inbox: '/activity-workflow/activities/inbox',
     inboxDetail: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}`,
+    auditLogs: (activityId) => `/activity-workflow/activities/audit/ACTIVITY/${enc(activityId)}`,
   },
 
   /* Meeting Management — the backend exposes a flat /api/meetings path

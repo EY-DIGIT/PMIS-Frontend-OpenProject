@@ -5,9 +5,11 @@
 
      POST  /activities/process/_transition
      POST  /activities/parallel/request-division-approval  (multipart)
+     POST  /activities/parallel/request-owner-approval     (multipart)
      POST  /activities/parallel/vote
      GET   /activities/inbox?userUuid=...
      GET   /activities/inbox/{activityId}?userUuid=...
+     GET   /activities/audit/ACTIVITY/{activityId}
      GET   /activities/process/_search/ACTIVITY/{activityId}
 
    The transition payload uses `activityId` + `projectId` (not
@@ -241,6 +243,49 @@ export async function requestDivisionApprovalParallel({
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   Step 6 — POST /activities/parallel/request-owner-approval
+   Multipart upload that hands the activity from the Concerned Division
+   stage to the Activity Owner stage. Same payload shape as
+   request-division-approval but with `stateName=PENDINGATOWNERDIVISION`.
+   ───────────────────────────────────────────────────────────────── */
+export async function requestOwnerApprovalParallel({
+  activityId,
+  projectId,
+  stateName,
+  comment,
+  file
+} = {}) {
+  if (!activityId) throw new ApiError("Missing activity id for owner approval request.");
+  if (!projectId) throw new ApiError("Missing project id for owner approval request.");
+
+  const user = tokenStore.getUser() || {};
+  const requestInfo = {
+    userInfo: {
+      uuid: pickUserUuid(user),
+      userName: pickUserName(user),
+      roles: deriveRoles(user)
+    }
+  };
+
+  const fd = new FormData();
+  fd.append("businessService", BUSINESS_SERVICE);
+  fd.append("activityId", activityId);
+  fd.append("projectId", projectId);
+  fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION);
+  fd.append("comment", comment || "");
+  fd.append("requestInfo", JSON.stringify(requestInfo));
+  if (file) fd.append("file", file);
+
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestOwnerApproval}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: fd,
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Request owner approval");
+}
+
+/* ─────────────────────────────────────────────────────────────────
    Step 3 — GET /activities/inbox?userUuid=...
    Pulls the queue of activities awaiting THIS user's vote. Falls
    back to [] on a malformed body so the list page can render empty.
@@ -337,6 +382,26 @@ export async function getProcessInstances(activityId) {
   });
   const payload = await parseJsonOrThrow(res, "Workflow history fetch");
   return Array.isArray(payload && payload.ProcessInstances) ? payload.ProcessInstances : [];
+}
+
+/* GET the activity-workflow audit log used by the timeline:
+     GET /activity-workflow/activities/audit/ACTIVITY/{activityId}
+   Returns an array of audit entries with actionName, previousState,
+   resultantState, outcome, performedByUsername, performedByRoles,
+   comment, createdTime (epoch ms). Failed transitions are surfaced
+   too (outcome=FAILED + errorMessage). Falls back to [] on error. */
+export async function getActivityWorkflowAuditLogs(activityId) {
+  if (!activityId) return [];
+  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.auditLogs(activityId)}`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: authHeaders(),
+    cache: "no-store"
+  });
+  const payload = await parseJsonOrThrow(res, "Workflow audit fetch");
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.auditLogs)) return payload.auditLogs;
+  return [];
 }
 
 /* Map a backend previousStatus string to one of our local approvalState

@@ -6,7 +6,10 @@ import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
 import ActivityAuditTrail from "./ActivityAuditTrail";
 import StartActivityBanner from "./StartActivityBanner";
-import { getProcessInstances } from "../../../api/activityWorkflow";
+import {
+  getProcessInstances,
+  getActivityWorkflowAuditLogs
+} from "../../../api/activityWorkflow";
 import {
   deriveStateFromInstances,
   deriveDivisionApprovalsFromInstances,
@@ -447,16 +450,28 @@ export default function NodeModal({
     let cancelled = false;
     setProcessLoading(true);
     setProcessError("");
-    getProcessInstances(businessId)
-      .then((list) => {
+    /* Fire BOTH the legacy process-instance search (still needed to
+       derive approvalState / division votes / owner vote) AND the
+       new audit-log endpoint (richer timeline with outcome, resultant
+       state, performedBy username). The audit list is what the
+       timeline component renders; the process instances feed state
+       derivation. If the new audit endpoint fails or returns empty
+       we fall back to the legacy instances for display. */
+    Promise.allSettled([
+      getProcessInstances(businessId),
+      getActivityWorkflowAuditLogs(businessId)
+    ])
+      .then(([piRes, auditRes]) => {
         if (cancelled) return;
-        const instances = Array.isArray(list) ? list : [];
-        setProcessInstances(instances);
-        /* Sync the local form state with the workflow service's view —
-           refresh otherwise loses every transition the user made and
-           the timeline rewinds to "Mark Ready". The activity's
-           Concerned Divisions list disambiguates how many APPROVE-at-
-           concerned events imply the move to pending_owner. */
+        const instances = piRes.status === "fulfilled" && Array.isArray(piRes.value)
+          ? piRes.value : [];
+        const auditLogs = auditRes.status === "fulfilled" && Array.isArray(auditRes.value)
+          ? auditRes.value : [];
+
+        /* Prefer the new audit-log rows for the timeline; fall back to
+           legacy instances when the audit endpoint is empty. */
+        setProcessInstances(auditLogs.length ? auditLogs : instances);
+
         const consentDivisions = parseDivisionList(node && node.concernedDivision);
         const derivedState = deriveStateFromInstances(instances, consentDivisions);
         if (!derivedState) return;
@@ -480,6 +495,11 @@ export default function NodeModal({
               }
             : b
         );
+
+        if (piRes.status === "rejected" && auditRes.status === "rejected") {
+          const err = piRes.reason || auditRes.reason;
+          setProcessError(err && err.message ? err.message : "Failed to load workflow history.");
+        }
       })
       .catch((err) => {
         if (cancelled) return;

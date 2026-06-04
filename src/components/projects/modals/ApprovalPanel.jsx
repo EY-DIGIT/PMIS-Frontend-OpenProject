@@ -33,6 +33,7 @@ import {
 import {
   transitionActivity,
   requestDivisionApprovalParallel,
+  requestOwnerApprovalParallel,
   WORKFLOW_ACTIONS,
   WORKFLOW_STATES
 } from "../../../api/activityWorkflow";
@@ -288,9 +289,45 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         setBusy(false);
       }
     } else if (requestPopup.kind === "owner") {
+      /* Fire the parallel request-owner-approval multipart call so the
+         backend hands the activity off to the Activity Owner stage. */
+      if (!businessId) {
+        setError(
+          "Activity has no server id yet — save the activity first, then trigger the workflow."
+        );
+        return;
+      }
+      if (!projectId) {
+        setError("Missing project id — cannot dispatch owner approval request.");
+        return;
+      }
       const p = payloads[0] || {};
-      apply(requestOwnerApproval(form, ownerName, p));
-      closeRequestPopup();
+      const note = (p && p.text && p.text.trim()) || "";
+      const firstFile = (() => {
+        const files = (p && p.files) || [];
+        for (const f of files) {
+          if (f && f.raw) return f.raw;
+        }
+        return null;
+      })();
+      setBusy(true);
+      setError("");
+      try {
+        await requestOwnerApprovalParallel({
+          activityId: businessId,
+          projectId,
+          stateName: WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION,
+          comment: note || "All divisions approved. Forwarding for owner review.",
+          file: firstFile
+        });
+        apply(requestOwnerApproval(form, ownerName, p));
+        if (typeof onTransition === "function") onTransition();
+        closeRequestPopup();
+      } catch (err) {
+        setError(err && err.message ? err.message : "Failed to dispatch owner approval request.");
+      } finally {
+        setBusy(false);
+      }
     } else if (requestPopup.kind === "resubmit") {
       /* Resubmit after rejection — fires UPDATE and then applies the
          local resubmit transition. Concatenate per-target messages into

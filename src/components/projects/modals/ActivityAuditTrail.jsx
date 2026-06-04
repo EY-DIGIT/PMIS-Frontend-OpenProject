@@ -32,7 +32,9 @@ const SYSTEM_GLYPH = {
 const ACTION_TO_TYPE = {
   SUBMIT: "request",
   APPROVE: "approval",
+  ALL_APPROVED: "approval",
   REJECT: "rejection",
+  ANY_REJECTED: "rejection",
   UPDATE: "update",
   COMPLETE: "completion"
 };
@@ -43,6 +45,7 @@ const STATUS_LABEL = {
   PENDINGATCONCERNEDDIVISION: "Pending Concerned Division",
   PENDINGATOWNERDIVISION: "Pending Owner Division",
   COMPLETED: "Completed",
+  ACTIVITYCOMPLETED: "Activity Completed",
   REJECTED: "Rejected",
   RETURNEDTOVENDOR: "Returned to Vendor"
 };
@@ -53,23 +56,57 @@ function fmtAuditTime(ms) {
   return formatDateTime(new Date(n).toISOString());
 }
 
-/* Normalize a ProcessInstance into the shape the audit list renders. */
+/* Normalize a backend audit entry into the shape the audit list
+   renders. Accepts both shapes:
+
+   1. Legacy ProcessInstance from /process/_search/...:
+        { action, previousStatus, comment, auditDetails: { createdBy, createdTime } }
+
+   2. New AuditLog from /activities/audit/ACTIVITY/{id}:
+        { actionName, previousState, resultantState, outcome, errorMessage,
+          performedByUuid, performedByUsername, performedByRoles[],
+          comment, createdTime }
+   */
 function fromProcessInstance(pi) {
-  const action = String(pi.action || "").toUpperCase();
-  const type = ACTION_TO_TYPE[action] || "request";
-  const prevLabel = STATUS_LABEL[String(pi.previousStatus || "").toUpperCase()] || pi.previousStatus || "";
+  const isNewAudit = pi && typeof pi === "object"
+    && (pi.actionName !== undefined || pi.outcome !== undefined);
+
+  const action = String(
+    isNewAudit ? pi.actionName : pi.action || ""
+  ).toUpperCase();
+  const outcome = String(pi.outcome || "").toUpperCase();
+  /* On a failed transition the entry stays a rejection-style row so it
+     visually flags. Successful ones use the action's variant. */
+  const type = outcome === "FAILED" ? "rejection" : (ACTION_TO_TYPE[action] || "request");
+
+  const prevRaw = isNewAudit ? pi.previousState : pi.previousStatus;
+  const nextRaw = isNewAudit ? pi.resultantState : "";
+  const prevLabel = STATUS_LABEL[String(prevRaw || "").toUpperCase()] || prevRaw || "";
+  const nextLabel = STATUS_LABEL[String(nextRaw || "").toUpperCase()] || nextRaw || "";
+
   const lines = [];
   if (action) lines.push(action);
-  if (prevLabel) lines.push(`from ${prevLabel}`);
+  if (prevLabel && nextLabel) lines.push(`${prevLabel} → ${nextLabel}`);
+  else if (prevLabel) lines.push(`from ${prevLabel}`);
+  if (outcome === "FAILED") lines.push("FAILED");
   const headline = lines.join(" · ");
+
+  const comment = pi.comment || pi.errorMessage || "";
+  const who = isNewAudit
+    ? (pi.performedByUsername || pi.performedByUuid || "System")
+    : ((pi.auditDetails && pi.auditDetails.createdBy) || pi.createdBy || "System");
+  const whenMs = isNewAudit
+    ? pi.createdTime
+    : (pi.auditDetails && pi.auditDetails.createdTime);
+
   return {
     type,
     headline,
-    comment: pi.comment || "",
-    who: (pi.auditDetails && pi.auditDetails.createdBy) || pi.createdBy || "System",
-    when: fmtAuditTime(pi.auditDetails && pi.auditDetails.createdTime),
+    comment,
+    who,
+    when: fmtAuditTime(whenMs),
     escalated: !!pi.escalated,
-    id: pi.id
+    id: pi.uuid || pi.id
   };
 }
 
