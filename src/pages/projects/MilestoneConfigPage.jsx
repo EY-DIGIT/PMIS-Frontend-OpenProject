@@ -544,12 +544,13 @@ export default function MilestoneConfigPage({ mode }) {
       return;
     }
 
-    // Exiting edit mode (Save click). If the project is still in NEW
-    // (just created, never persisted), promote it to DRAFT using the
-    // same /projects/{id}/save endpoint the first-time onboarding flow
-    // hits. Mirrors finalizeOnboarding's "p.status = DRAFT" step.
+    // Exiting edit mode (Save click). Only fire /projects/{id}/save
+    // when the project is still in DRAFT — that single call promotes
+    // it to NEW. If the project is already NEW the Save click is a
+    // no-op (the user is just leaving edit mode), so we skip the API
+    // and avoid re-promoting an already-promoted project.
     const currentStatus = String(project?.status || "").toUpperCase();
-    if (currentStatus === "NEW" && project?.projectId && getToken()) {
+    if (currentStatus === "DRAFT" && project?.projectId && getToken()) {
       uiStore.showLoader("Saving project...");
       try {
         await saveProjectApi(project.projectId);
@@ -557,12 +558,12 @@ export default function MilestoneConfigPage({ mode }) {
           (projectsStore.find ? projectsStore.find(project.projectId) : null) ||
           apiProjectLocal;
         if (target) {
-          target.status = "DRAFT";
+          target.status = "NEW";
           commitUpdate(target);
         }
         try { hydrateProjects({ force: true }); } catch (e) {}
         uiStore.hideLoader();
-        uiStore.showMessage("Project saved as draft.");
+        uiStore.showMessage("Project saved.");
       } catch (err) {
         uiStore.hideLoader();
         if (err?.isAuth) return handleAuthError(err);
