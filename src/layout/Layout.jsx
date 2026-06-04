@@ -106,7 +106,14 @@ function resolveNavTitle(segments) {
         label: "Project Finance",
         tooltip: "Configure project costs, payment terms by phase, QRG and CCN cap."
       };
+    }// /projects/:id/activity-slas      → SLA → activity mapping & evaluation
+    if (segments[2] === "activity-slas") {
+      return {
+        label: "Map SLA to Activity",
+        tooltip: "Map SLA masters to an activity, edit mappings, and evaluate SLAs."
+      };
     }
+
     // /projects/:id                    → detail
     return {
       label: "Project Details",
@@ -236,7 +243,20 @@ export default function Layout({ children }) {
     let hidden = false;
     const update = () => {
       const top = Math.max(content?.scrollTop || 0, window.scrollY || 0);
-      if (!hidden && top > HIDE_AT) {
+      // Collapsing the (sticky) strip shrinks the page by its height. If the
+      // page only barely overflows, that shrink removes the very scroll
+      // distance that triggered the collapse: the position snaps back toward
+      // the top, the strip re-expands, the page grows again — a constant
+      // collapse↔️expand shake. So only hide when there's MORE scrollable
+      // distance than the strip would reclaim, leaving the user comfortably
+      // past HIDE_AT afterwards. Revealing only depends on nearing the top.
+      const strip = document.querySelector('.header-accessibility-strip');
+      const reclaim = (strip && !hidden) ? strip.offsetHeight : 0;
+      const maxScroll = Math.max(
+        document.documentElement.scrollHeight - window.innerHeight,
+        content ? content.scrollHeight - content.clientHeight : 0
+      );
+      if (!hidden && top > HIDE_AT && maxScroll > reclaim + HIDE_AT) {
         hidden = true;
         setA11yCollapsed(true);
       } else if (hidden && top < SHOW_AT) {

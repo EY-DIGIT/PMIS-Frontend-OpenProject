@@ -91,7 +91,7 @@ function PageTitle() {
    Works for every route because it reads useLocation().
    ───────────────────────────────────────────────────────────── */
 function Breadcrumbs() {
-    const { pathname } = useLocation();
+    const { pathname,search } = useLocation();
     const projects = useProjectsList();
     const { users, vendors } = useData();
     const pageCtx = usePageContext();
@@ -271,6 +271,40 @@ function Breadcrumbs() {
                 </Link>
                 <span style={{ color: "#999" }}>›</span>
                 <span style={{ color: "#333", fontWeight: 600 }}>Finance</span>
+            </nav>
+        );
+    }
+    /* /projects/:projectId/activity-slas — Map SLA flow. Trail:
+         Home › Project Detail › [Milestone] › [Activity] › Map SLA
+       The milestone/activity names ride along as query params from the
+       launching activity modal (absent on a direct visit, so those crumbs
+       are dropped). Milestone/Activity link back to the config page. */
+    if (segments[0] === "projects" && segments[2] === "activity-slas") {
+        const pid = decodeURIComponent(segments[1]);
+        const projectUrl = `/projects/${encodeURIComponent(pid)}`;
+        const configUrl = `${projectUrl}/config`;
+        const qp = new URLSearchParams(search);
+        const msName = qp.get("milestoneName") || "";
+        const actName = qp.get("activityName") || "";
+        const sep = <span style={{ color: "#999" }}>›</span>;
+        const linkStyle = { color: "#173e77", textDecoration: "none", fontWeight: 500 };
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={linkStyle}>Home</Link>
+                {sep}
+                <Link to={projectUrl} style={linkStyle}>Project Detail</Link>
+                {msName && (<>{sep}<Link to={configUrl} style={linkStyle}>{msName}</Link></>)}
+                {actName && (<>{sep}<Link to={configUrl} style={linkStyle}>{actName}</Link></>)}
+                {sep}
+                <span style={{ color: "#333", fontWeight: 600 }}>Map SLA</span>
             </nav>
         );
     }
@@ -478,7 +512,7 @@ export default function MainApp() {
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequirePermission action="viewProjects"><ProjectFinancePage /></RequirePermission>} />
-                                                <Route path="/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
 
 
                                                 {/* Vendors */}

@@ -754,7 +754,16 @@ export default function NodeModal({
             type="button"
             aria-label="SLA Mapping"
             title="Manage SLA activity mappings"
-            onClick={() => navigate(`/activity-slas?activityId=${encodeURIComponent(node.serverDisplayCode || node.id)}`)}
+            onClick={() => {
+              // Nested under the project so the global breadcrumb extends as
+              // Project Detail › Milestone › Activity › Map SLA. The milestone /
+              // activity names ride along as query params for those crumbs.
+              const loc = locateNode(project, node.uid);
+              const params = new URLSearchParams({ activityId: node.serverDisplayCode || node.id });
+              if (loc?.parent?.name) params.set("milestoneName", loc.parent.name);
+              if (node?.name) params.set("activityName", node.name);
+              navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);
+            }}
             style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 12px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" }}
           >
             SLA Mapping
