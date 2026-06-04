@@ -217,7 +217,7 @@ function SummaryPanel({ totals }) {
         paddingBottom: 12, marginBottom: 14,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        <span aria-hidden="true">💼</span> Summary
+        Summary
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1470,7 +1470,6 @@ function PhasePanel({
             <table className="uidai-pmis-table uidai-pmis-table-compact">
               <thead>
                 <tr>
-                  <th style={{ width: 70 }}>Phase</th>
                   <th>Milestone</th>
                   <th style={{ width: 140 }}>Frequency</th>
                   <th style={{ width: 130 }}>% of Payment</th>
@@ -1481,7 +1480,7 @@ function PhasePanel({
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={5} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -1489,7 +1488,6 @@ function PhasePanel({
                   const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
                   return (
                     <tr key={t.id}>
-                      <td style={{ fontWeight: 700, color: "#173e77" }}>{t.phase}</td>
                       <td>{milestoneName(t.milestoneId)}</td>
                       <td>
                         {freqLabel
@@ -1589,7 +1587,7 @@ function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
         paddingBottom: 12, marginBottom: 14,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        <span aria-hidden="true">🛡️</span> QGR Configuration
+        QGR Configuration
       </div>
 
       <div style={{
