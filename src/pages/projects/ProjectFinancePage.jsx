@@ -98,12 +98,23 @@ function extractElements(payload) {
 }
 
 /* Inline multi-select used inside the Add Cost Item modal. Keeps the
-   spec-mocked italic placeholder behaviour when disabled. */
-function MilestoneMultiSelect({ value, options, onChange, disabled }) {
+   spec-mocked italic placeholder behaviour when disabled.
+
+   `disabledIds` is the set of milestone ids already attached to a saved
+   cost row — those rows render greyed out and are non-clickable. They
+   stay visible so the user understands why they're unavailable. */
+function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds }) {
   const [open, setOpen] = useState(false);
   const selected = Array.isArray(value) ? value : [];
 
+  function isLocked(id) {
+    if (!disabledIds) return false;
+    if (typeof disabledIds.has === "function") return disabledIds.has(id);
+    return Array.isArray(disabledIds) && disabledIds.includes(id);
+  }
+
   function toggle(id) {
+    if (isLocked(id)) return;
     if (selected.includes(id)) onChange(selected.filter((s) => s !== id));
     else onChange([...selected, id]);
   }
@@ -143,38 +154,62 @@ function MilestoneMultiSelect({ value, options, onChange, disabled }) {
         }}>
           {options.length === 0 ? (
             <div style={{ padding: 10, fontSize: 12, ...muted }}>No milestones available</div>
-          ) : options.map((opt) => (
-            <label key={opt.id} style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
-              borderRadius: 6, cursor: "pointer", fontSize: 13,
-            }}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => { e.stopPropagation(); toggle(opt.id); }}
-            >
-              <input type="checkbox" readOnly checked={selected.includes(opt.id)} style={{ width: "auto" }} />
-              {opt.name}
-            </label>
-          ))}
+          ) : options.map((opt) => {
+            const locked = isLocked(opt.id);
+            return (
+              <label key={opt.id}
+                title={locked ? "Already used in another cost item" : undefined}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
+                  borderRadius: 6,
+                  cursor: locked ? "not-allowed" : "pointer",
+                  fontSize: 13,
+                  color: locked ? "#9aa6bb" : "var(--uidai-pmis-text)",
+                  background: locked ? "#f3f6fb" : "transparent",
+                }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (locked) return;
+                  toggle(opt.id);
+                }}
+              >
+                <input
+                  type="checkbox"
+                  readOnly
+                  disabled={locked}
+                  checked={selected.includes(opt.id)}
+                  style={{ width: "auto" }}
+                />
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {opt.name}
+                </span>
+                {locked && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                    padding: "1px 6px", borderRadius: 999,
+                    background: "#eef2f7", color: "#5a6680", border: "1px solid #d8e0ec",
+                  }}>
+                    USED
+                  </span>
+                )}
+              </label>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-/* Summary sidebar — fixed numbers only. The panel is positioned by its
-   parent (the sticky right-column stack); no positioning here. */
+/* Summary section — top half of the unified right-side card. Renders
+   as plain content (no border / shadow); the parent owns the card. */
 function SummaryPanel({ totals }) {
   const fixed = Number(totals?.fixedCost) || 0;
   const oneTime = Number(totals?.oneTimeCost) || 0;
   const total = Number(totals?.totalContractCost) || 0;
   return (
-    <div style={{
-      background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
-      border: "1px solid var(--uidai-pmis-border)",
-      borderRadius: 12,
-      padding: 18,
-      boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
-    }}>
+    <div style={{ padding: 18 }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         fontSize: 14, fontWeight: 800, color: "#173e77",
@@ -229,16 +264,16 @@ function SummaryPanel({ totals }) {
    ────────────────────────────────────────────────────────────────── */
 function AddCostItemModal({
   open, onClose, onSubmit, submitting,
-  costTypes, milestones, hasOneTime,
+  costTypes, milestones, hasOneTime, disabledMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
-        costTypeCode: "fixed", phase: 1, cost: "", taxPercent: "", milestoneIds: [],
+        costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
       });
     }
   }, [open]);
@@ -311,12 +346,12 @@ function AddCostItemModal({
             />
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Tax %</label>
+            <label>Tax Amount (₹)</label>
             <input
               type="number"
-              min="0" max="100"
-              value={draft.taxPercent}
-              onChange={(e) => setDraft((d) => ({ ...d, taxPercent: e.target.value }))}
+              min="0"
+              value={draft.taxAmount}
+              onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
             />
           </div>
         </div>
@@ -329,6 +364,7 @@ function AddCostItemModal({
             <MilestoneMultiSelect
               value={draft.milestoneIds}
               options={milestones}
+              disabledIds={disabledMilestoneIds}
               onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
             />
           )}
@@ -591,11 +627,26 @@ export default function ProjectFinancePage() {
 
   const hasOneTime = costItems.some((c) => c.costTypeCode === "one_time");
 
+  /* Every milestone already attached to a saved cost row is off-limits
+     for new rows — each milestone can back at most one Fixed cost item.
+     We compute the set once and pass it down to the picker, which
+     greys those rows out (visible so the user understands why they
+     can't be picked again). */
+  const usedMilestoneIds = useMemo(() => {
+    const set = new Set();
+    costItems.forEach((c) => {
+      if (Array.isArray(c.milestoneIds)) {
+        c.milestoneIds.forEach((id) => { if (id) set.add(id); });
+      }
+    });
+    return set;
+  }, [costItems]);
+
   // ── Mutations ────────────────────────────────────────────────────
   async function submitNewCostItem(draft, hasOneTimeNow) {
     if (!projectId) return;
-    if (draft.cost === "" || draft.taxPercent === "") {
-      uiStore.showError("Enter both Cost and Tax %.");
+    if (draft.cost === "" || draft.taxAmount === "") {
+      uiStore.showError("Enter both Cost and Tax Amount.");
       return;
     }
     if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
@@ -612,13 +663,13 @@ export default function ProjectFinancePage() {
           costTypeCode: "fixed",
           phase: Number(draft.phase) || 1,
           cost: Number(draft.cost),
-          taxPercent: Number(draft.taxPercent),
+          taxAmount: Number(draft.taxAmount),
           milestoneIds: draft.milestoneIds,
         }
         : {
           costTypeCode: "one_time",
           cost: Number(draft.cost),
-          taxPercent: Number(draft.taxPercent),
+          taxAmount: Number(draft.taxAmount),
         };
     setAddingRow(true);
     try {
@@ -847,7 +898,7 @@ export default function ProjectFinancePage() {
                     <th>Milestones</th>
                     <th style={{ width: 130 }}>Cost (₹)</th>
                     <th style={{ width: 90 }}>Phase</th>
-                    <th style={{ width: 200 }}>Tax</th>
+                    <th style={{ width: 200 }}>Tax Amount</th>
                     <th style={{ width: 150 }}>Total</th>
                   </tr>
                 </thead>
@@ -860,10 +911,14 @@ export default function ProjectFinancePage() {
                     </tr>
                   ) : costItems.map((r) => {
                     const isOneTime = r.costTypeCode === "one_time";
-                    const taxPct = r.taxPercent != null ? Number(r.taxPercent) : null;
-                    const taxAmount = taxPct != null
-                      ? (Number(r.cost) || 0) * (taxPct / 100)
-                      : null;
+                    /* Prefer the new explicit taxAmount field; fall back
+                       to deriving it from taxPercent for rows saved
+                       before the contract change. */
+                    const taxAmt = r.taxAmount != null
+                      ? Number(r.taxAmount)
+                      : (r.taxPercent != null
+                          ? (Number(r.cost) || 0) * (Number(r.taxPercent) / 100)
+                          : null);
                     return (
                       <tr key={r.id}>
                         <td>{costTypeLabel(r.costTypeCode)}</td>
@@ -878,17 +933,7 @@ export default function ProjectFinancePage() {
                             ? <span style={disabledCell}></span>
                             : (r.phase ?? "—")}
                         </td>
-                        <td>
-                          {taxPct == null ? "—" : (
-                            <span>
-                              
-                                 {inr(taxAmount)}
-                              <span style={{ ...muted, marginLeft: 8, fontSize: 12 }}>
-                             ({taxPct} %)
-                              </span>
-                            </span>
-                          )}
-                        </td>
+                        <td>{taxAmt == null ? "—" : inr(taxAmt)}</td>
                         <td style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</td>
                       </tr>
                     );
@@ -964,18 +1009,26 @@ export default function ProjectFinancePage() {
           </div>
         </div>
 
-        {/* Right column — sticky stack: Summary on top, QGR below.
-            Both move together as the user scrolls the long left column. */}
+        {/* Right column — Summary + QGR fused into one sticky card so
+            the eye reads them as a single status panel. The card itself
+            owns the border + shadow; the inner sections render as bare
+            content separated by a hairline divider. */}
         <div style={{
           position: "sticky",
           top: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
+          background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
+          border: "1px solid var(--uidai-pmis-border)",
+          borderRadius: 12,
+          boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
           maxHeight: "calc(100vh - 32px)",
           overflowY: "auto",
         }}>
           <SummaryPanel totals={totals} />
+          <div style={{
+            height: 1,
+            background: "var(--uidai-pmis-border)",
+            margin: "0 16px",
+          }} />
           <QgrConfigSection
             phases={phases}
             isLocked={isLocked || qgrSaving}
@@ -993,6 +1046,7 @@ export default function ProjectFinancePage() {
         costTypes={costTypes}
         milestones={milestones}
         hasOneTime={hasOneTime}
+        disabledMilestoneIds={usedMilestoneIds}
       />
       <EditTermModal
         open={!!editingTerm}
@@ -1179,13 +1233,7 @@ function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
   if (!phases || phases.length === 0) return null;
   const appliedPhase = phases.find((p) => p.qrg?.applied);
   return (
-    <div style={{
-      background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
-      border: "1px solid var(--uidai-pmis-border)",
-      borderRadius: 12,
-      padding: 16,
-      boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
-    }}>
+    <div style={{ padding: 16 }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         fontSize: 14, fontWeight: 800, color: "#173e77",
