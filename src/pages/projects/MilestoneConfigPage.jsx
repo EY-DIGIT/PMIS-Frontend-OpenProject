@@ -537,43 +537,11 @@ export default function MilestoneConfigPage({ mode }) {
     setCurrentPage(1);
   }
 
-  async function toggleEdit() {
-    // Entering edit mode — just flip the flag.
-    if (!editingConfig) {
-      setEditingConfig(true);
-      return;
-    }
-
-    // Exiting edit mode (Save click). Only fire /projects/{id}/save
-    // when the project is still in DRAFT — that single call promotes
-    // it to NEW. If the project is already NEW the Save click is a
-    // no-op (the user is just leaving edit mode), so we skip the API
-    // and avoid re-promoting an already-promoted project.
-    const currentStatus = String(project?.status || "").toUpperCase();
-    if (currentStatus === "DRAFT" && project?.projectId && getToken()) {
-      uiStore.showLoader("Saving project...");
-      try {
-        await saveProjectApi(project.projectId);
-        const target =
-          (projectsStore.find ? projectsStore.find(project.projectId) : null) ||
-          apiProjectLocal;
-        if (target) {
-          target.status = "NEW";
-          commitUpdate(target);
-        }
-        try { hydrateProjects({ force: true }); } catch (e) {}
-        uiStore.hideLoader();
-        uiStore.showMessage("Project saved.");
-      } catch (err) {
-        uiStore.hideLoader();
-        if (err?.isAuth) return handleAuthError(err);
-        uiStore.showError(err?.message || "Failed to save project");
-        // Stay in edit mode so the user can retry.
-        return;
-      }
-    }
-
-    setEditingConfig(false);
+  function toggleEdit() {
+    // Pure UI toggle — never hits the network. Per-node saves (via the
+    // modal) fire their own PATCH/POST; this button just flips the
+    // page-level edit flag so the row buttons appear/disappear.
+    setEditingConfig((v) => !v);
   }
 
   function openNodeModal(kind, modeAction, parentUid, nodeUid) {
