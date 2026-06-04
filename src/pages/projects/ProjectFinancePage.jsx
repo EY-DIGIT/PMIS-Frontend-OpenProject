@@ -1179,7 +1179,13 @@ export default function ProjectFinancePage() {
         display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10,
         marginTop: 0, marginBottom: 12,
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#173e77" }}>
+        <span style={{
+          fontSize: 13, fontWeight: 700, color: "#fff",
+          padding: "4px 14px", borderRadius: 999,
+          background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
+          boxShadow: "0 2px 6px rgba(23, 62, 119, 0.18)",
+          letterSpacing: 0.2,
+        }}>
           {page?.projectName || project?.projectName || ""}
         </span>
         {isLocked && (
