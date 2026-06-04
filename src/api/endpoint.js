@@ -249,6 +249,7 @@ export const ENDPOINTS = {
     update: (id) => `/projects/api/v3/payment-terms/${enc(id)}`,
   },
   costItems: {
+    update: (id) => `/projects/api/v3/cost-items/${enc(id)}`,
     remove: (id) => `/projects/api/v3/cost-items/${enc(id)}`,
   },
 

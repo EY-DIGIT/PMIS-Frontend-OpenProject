@@ -395,6 +395,255 @@ function AddCostItemModal({
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   Edit Cost Item modal — opens when a Project Cost row's pencil
+   button is clicked. Same field layout as AddCostItemModal, but
+   pre-populated with the row's current values and routed through the
+   PATCH /cost-items/{id} endpoint. The milestone picker excludes
+   "USED" milestones from OTHER rows (this row's own milestones stay
+   selectable so the user can keep or replace them).
+   ────────────────────────────────────────────────────────────────── */
+function EditCostItemModal({
+  open, onClose, onSubmit, submitting,
+  costTypes, milestones, row, usedMilestoneIds,
+}) {
+  const [draft, setDraft] = useState({
+    costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
+  });
+
+  useEffect(() => {
+    if (!open || !row) return;
+    const isOne = row.costTypeCode === "one_time";
+    const taxAmt = row.taxAmount != null
+      ? row.taxAmount
+      : (row.taxPercent != null
+          ? (Number(row.cost) || 0) * (Number(row.taxPercent) / 100)
+          : "");
+    setDraft({
+      costTypeCode: row.costTypeCode || "fixed",
+      phase: isOne ? "" : (row.phase ?? 1),
+      cost: row.cost != null ? String(row.cost) : "",
+      taxAmount: taxAmt === "" ? "" : String(taxAmt),
+      milestoneIds: Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
+    });
+  }, [open, row]);
+
+  /* Disable milestones used by other cost rows — but keep THIS row's
+     own milestones selectable so the user can leave them in place or
+     swap them out. */
+  const lockedIds = useMemo(() => {
+    if (!usedMilestoneIds) return new Set();
+    const own = new Set((row && row.milestoneIds) || []);
+    const out = new Set();
+    usedMilestoneIds.forEach((id) => { if (!own.has(id)) out.add(id); });
+    return out;
+  }, [usedMilestoneIds, row]);
+
+  if (!open || !row) return null;
+  const isOneTime = draft.costTypeCode === "one_time";
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box">
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">Edit Cost Item</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          Update the cost row's amount, phase, tax, or milestones.
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Cost Type</label>
+            <select
+              value={draft.costTypeCode}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDraft((d) => ({
+                  ...d,
+                  costTypeCode: next,
+                  phase: next === "one_time" ? "" : (d.phase || 1),
+                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
+                }));
+              }}
+            >
+              {costTypes.length === 0 ? (
+                <option value="fixed">Fixed</option>
+              ) : costTypes.map((c) => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Phase</label>
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
+              <input
+                type="number"
+                min="1"
+                value={draft.phase}
+                onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
+              />
+            )}
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Cost (₹)</label>
+            <input
+              type="number"
+              min="0"
+              value={draft.cost}
+              onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
+            />
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Tax Amount (₹)</label>
+            <input
+              type="number"
+              min="0"
+              value={draft.taxAmount}
+              onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
+          <label>Milestones</label>
+          {isOneTime ? (
+            <input value="" disabled placeholder="—" />
+          ) : (
+            <MilestoneMultiSelect
+              value={draft.milestoneIds}
+              options={milestones}
+              disabledIds={lockedIds}
+              onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
+            />
+          )}
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={submitting}
+            onClick={() => onSubmit(draft)}
+          >
+            {submitting ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   CostItemActions — pencil + trash icon buttons rendered in the
+   Action column of the Project Cost table.
+   ────────────────────────────────────────────────────────────────── */
+function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
+  const baseBtn = {
+    width: 32, height: 32,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    border: "1px solid var(--uidai-pmis-border)",
+    background: "#fff",
+    borderRadius: 6,
+    padding: 0,
+    transition: "background .15s, border-color .15s, transform .15s",
+  };
+  return (
+    <div style={{ display: "inline-flex", gap: 6 }}>
+      <button
+        type="button"
+        title="Edit cost item"
+        aria-label="Edit cost item"
+        disabled={isLocked || isDeleting}
+        onClick={onEdit}
+        style={{
+          ...baseBtn,
+          color: "#173e77",
+          cursor: isLocked ? "not-allowed" : "pointer",
+          opacity: isLocked ? 0.5 : 1,
+        }}
+        onMouseEnter={(e) => {
+          if (isLocked) return;
+          e.currentTarget.style.background = "#eaf4ff";
+          e.currentTarget.style.borderColor = "#0aa1c0";
+          e.currentTarget.style.transform = "translateY(-1px)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#fff";
+          e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
+          e.currentTarget.style.transform = "translateY(0)";
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        title="Delete cost item"
+        aria-label="Delete cost item"
+        disabled={isLocked || isDeleting}
+        onClick={onDelete}
+        style={{
+          ...baseBtn,
+          color: "#9b1c1c",
+          cursor: isLocked || isDeleting ? "not-allowed" : "pointer",
+          opacity: isLocked || isDeleting ? 0.5 : 1,
+        }}
+        onMouseEnter={(e) => {
+          if (isLocked || isDeleting) return;
+          e.currentTarget.style.background = "#fdecec";
+          e.currentTarget.style.borderColor = "#e3a5a5";
+          e.currentTarget.style.transform = "translateY(-1px)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "#fff";
+          e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
+          e.currentTarget.style.transform = "translateY(0)";
+        }}
+      >
+        {isDeleting ? (
+          <span style={{ fontSize: 11, fontWeight: 700 }}>…</span>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2"
+            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6l-2 14H7L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Edit Payment Term modal — opens when a term row's Edit button is
    clicked. Holds local frequency + % state; Save PATCHes the term
    and the parent silently re-loads the payment page.
@@ -510,6 +759,13 @@ export default function ProjectFinancePage() {
   // ── Add Cost modal ──
   const [showAddModal, setShowAddModal] = useState(false);
   const [addingRow, setAddingRow] = useState(false);
+
+  // ── Edit Cost Item modal ──
+  const [editingCostItem, setEditingCostItem] = useState(null);
+  const [savingCostItem, setSavingCostItem] = useState(false);
+
+  // ── Per-row delete busy state (keyed by cost-item id) ──
+  const [deletingCostItemId, setDeletingCostItemId] = useState("");
 
   // ── Edit Payment Term modal ──
   const [editingTerm, setEditingTerm] = useState(null);
@@ -687,6 +943,75 @@ export default function ProjectFinancePage() {
       uiStore.showError(err?.message || "Failed to add cost item");
     } finally {
       setAddingRow(false);
+    }
+  }
+
+  async function submitCostItemEdit(draft) {
+    if (!editingCostItem) return;
+    if (draft.cost === "" || draft.taxAmount === "") {
+      uiStore.showError("Enter both Cost and Tax Amount.");
+      return;
+    }
+    if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
+      uiStore.showError("Pick at least one milestone for a Fixed cost row.");
+      return;
+    }
+    const body =
+      draft.costTypeCode === "fixed"
+        ? {
+            costTypeCode: "fixed",
+            phase: Number(draft.phase) || 1,
+            cost: Number(draft.cost),
+            taxAmount: Number(draft.taxAmount),
+            milestoneIds: draft.milestoneIds,
+          }
+        : {
+            costTypeCode: "one_time",
+            cost: Number(draft.cost),
+            taxAmount: Number(draft.taxAmount),
+          };
+    setSavingCostItem(true);
+    try {
+      const res = await authorizedFetch(
+        `${API_BASE}${ENDPOINTS.costItems.update(editingCostItem.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      await readJson(res);
+      setEditingCostItem(null);
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage("Cost item updated.");
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      uiStore.showError(err?.message || "Failed to update cost item");
+    } finally {
+      setSavingCostItem(false);
+    }
+  }
+
+  async function deleteCostItem(row) {
+    if (!row?.id) return;
+    const label = row.costTypeCode === "one_time" ? "the One-Time cost row" : `the ${costTypeLabel(row.costTypeCode)} cost row`;
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
+    setDeletingCostItemId(row.id);
+    try {
+      const res = await authorizedFetch(
+        `${API_BASE}${ENDPOINTS.costItems.remove(row.id)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok && res.status !== 204) {
+        await readJson(res);
+      }
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage("Cost item deleted.");
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      uiStore.showError(err?.message || "Failed to delete cost item");
+    } finally {
+      setDeletingCostItemId("");
     }
   }
 
@@ -900,12 +1225,13 @@ export default function ProjectFinancePage() {
                     <th style={{ width: 90 }}>Phase</th>
                     <th style={{ width: 200 }}>Tax Amount</th>
                     <th style={{ width: 150 }}>Total</th>
+                    <th style={{ width: 100, textAlign: "center" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {costItems.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: 22, ...muted }}>
+                      <td colSpan={7} style={{ textAlign: "center", padding: 22, ...muted }}>
                         No cost items yet — click “+ Add” to create one.
                       </td>
                     </tr>
@@ -935,12 +1261,22 @@ export default function ProjectFinancePage() {
                         </td>
                         <td>{taxAmt == null ? "—" : inr(taxAmt)}</td>
                         <td style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <CostItemActions
+                            row={r}
+                            isLocked={isLocked}
+                            isDeleting={deletingCostItemId === r.id}
+                            onEdit={() => setEditingCostItem(r)}
+                            onDelete={() => deleteCostItem(r)}
+                          />
+                        </td>
                       </tr>
                     );
                   })}
                   <tr style={{ background: "#f1f6fd" }}>
                     <td colSpan={5} style={{ fontWeight: 800, color: "#173e77" }}>Total Contract Cost</td>
                     <td style={{ fontWeight: 800, color: "#173e77" }}>{inr(totals.totalContractCost)}</td>
+                    <td />
                   </tr>
                 </tbody>
               </table>
@@ -1047,6 +1383,16 @@ export default function ProjectFinancePage() {
         milestones={milestones}
         hasOneTime={hasOneTime}
         disabledMilestoneIds={usedMilestoneIds}
+      />
+      <EditCostItemModal
+        open={!!editingCostItem}
+        row={editingCostItem}
+        onClose={() => setEditingCostItem(null)}
+        onSubmit={submitCostItemEdit}
+        submitting={savingCostItem}
+        costTypes={costTypes}
+        milestones={milestones}
+        usedMilestoneIds={usedMilestoneIds}
       />
       <EditTermModal
         open={!!editingTerm}
