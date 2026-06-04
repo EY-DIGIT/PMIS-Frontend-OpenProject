@@ -988,6 +988,12 @@ export default function ProjectDetailsPage() {
       visible: true
     },
     {
+      key: "Severity And LD Configure",
+      label: "Severity And LD Configure",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/severity`),
+      visible: true
+    },
+    {
       key: "edit",
       label: editing ? "Save" : "Edit",
       onClick: toggleEdit,

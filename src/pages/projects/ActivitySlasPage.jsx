@@ -145,6 +145,7 @@ export default function ActivitySlasPage() {
     // Prefill the Activity ID when we're launched from an activity's node modal
     // (it navigates here with ?activityId=…), so the user lands ready to map.
     const [searchParams] = useSearchParams();
+    const activityLabel=searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
 
     // ---- API configuration ----
     const [baseUrl, setBaseUrl] = useState("http://10.1.131.199/contracts");
@@ -707,7 +708,7 @@ export default function ActivitySlasPage() {
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: showMappingEdit ? 12 : 0 }}>
                         Map SLA to Activity
                         <span style={{ ...muted, fontWeight: 400, marginLeft: 8 }}>
-                            activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityIdInput || "—"}</code>
+                            activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>
                             {!showMappingEdit && ` · ${effFrom} → ${effUntil}`}
                         </span>
                     </div>
@@ -715,7 +716,9 @@ export default function ActivitySlasPage() {
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
                             <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                 <label>Activity ID</label>
-                                <input type="text" placeholder="e.g. A1.1" value={activityIdInput} onChange={(e) => setActivityIdInput(e.target.value)} />
+                                <input type="text" value={activityLabel} readOnly style={{background:"#f1f6fd"}}
+                                // onChange={(e) => setActivityIdInput(e.target.value)} 
+                                />
                             </div>
                             <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                 <label>Effective From</label>
@@ -903,7 +906,7 @@ export default function ActivitySlasPage() {
                     </div>
                     <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
                         Evaluates every active SLA mapping on activity{" "}
-                        <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityIdInput || "—"}</code>.
+                        <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
                     </div>
                     {actEvalError && <Banner text={actEvalError} />}
 

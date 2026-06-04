@@ -759,7 +759,9 @@ export default function NodeModal({
               // Project Detail › Milestone › Activity › Map SLA. The milestone /
               // activity names ride along as query params for those crumbs.
               const loc = locateNode(project, node.uid);
-              const params = new URLSearchParams({ activityId: node.serverDisplayCode || node.id });
+              const params = new URLSearchParams({ activityId:node.apiId });
+              const code=node.serverDisplayCode || node.id;
+              if(code) params.set("activityCode", code);
               if (loc?.parent?.name) params.set("milestoneName", loc.parent.name);
               if (node?.name) params.set("activityName", node.name);
               navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);

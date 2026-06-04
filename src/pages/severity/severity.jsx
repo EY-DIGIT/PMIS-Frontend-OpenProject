@@ -239,7 +239,7 @@ export default function SeverityPage() {
     }
 
     function addLdRow() {
-      setLdRows((prev) => [...prev, { id: null, points_threshold: 0, ld_percent: 100, label: `Band ${prev.length + 1}` }]);
+      setLdRows((prev) => [...prev, { id: null, points_threshold: 0, ld_percent: 10, label: `Band ${prev.length + 1}` }]);
     }
 
     function removeLdRow(index) {
