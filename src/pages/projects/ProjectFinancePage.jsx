@@ -1472,7 +1472,7 @@ function PhasePanel({
                 <tr>
                   <th>Milestone</th>
                   <th style={{ width: 140 }}>Frequency</th>
-                  <th style={{ width: 130 }}>% of Payment</th>
+                  <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
