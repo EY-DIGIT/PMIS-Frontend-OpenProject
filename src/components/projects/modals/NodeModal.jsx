@@ -13,7 +13,10 @@ import {
 import {
   deriveStateFromInstances,
   deriveDivisionApprovalsFromInstances,
-  deriveOwnerApprovalFromInstances
+  deriveOwnerApprovalFromInstances,
+  deriveStateFromAuditLogs,
+  deriveDivisionApprovalsFromAuditLogs,
+  deriveOwnerApprovalFromAuditLogs
 } from "../../../utils/project/approvalWorkflow";
 import {
   NODE_TYPE_OPTIONS,
@@ -473,10 +476,29 @@ export default function NodeModal({
         setProcessInstances(auditLogs.length ? auditLogs : instances);
 
         const consentDivisions = parseDivisionList(node && node.concernedDivision);
-        const derivedState = deriveStateFromInstances(instances, consentDivisions);
+        /* State derivation source priority: audit logs first (carry
+           `resultantState` directly, including ALL_APPROVED auto-transitions
+           the legacy process-instance shape never recorded) → process
+           instances → bail. The audit endpoint also surfaces failed attempts
+           which we filter out inside the derive helpers. */
+        let derivedState = null;
+        let derivedDivs = [];
+        let derivedOwner = null;
+        if (auditLogs.length) {
+          derivedState = deriveStateFromAuditLogs(auditLogs, consentDivisions);
+          derivedDivs = deriveDivisionApprovalsFromAuditLogs(auditLogs, consentDivisions);
+          derivedOwner = deriveOwnerApprovalFromAuditLogs(auditLogs);
+        }
+        if (!derivedState && instances.length) {
+          derivedState = deriveStateFromInstances(instances, consentDivisions);
+          if (!derivedDivs.length) {
+            derivedDivs = deriveDivisionApprovalsFromInstances(instances, consentDivisions);
+          }
+          if (!derivedOwner) {
+            derivedOwner = deriveOwnerApprovalFromInstances(instances);
+          }
+        }
         if (!derivedState) return;
-        const derivedDivs = deriveDivisionApprovalsFromInstances(instances, consentDivisions);
-        const derivedOwner = deriveOwnerApprovalFromInstances(instances);
         setForm((f) => ({
           ...f,
           approvalState: derivedState,

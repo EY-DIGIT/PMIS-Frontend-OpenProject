@@ -556,6 +556,152 @@ export function deriveOwnerApprovalFromInstances(instances) {
   };
 }
 
+/* ─── State derivation from /activities/audit/ACTIVITY/{id} ───
+   The audit-log endpoint carries the authoritative `resultantState` on
+   every SUCCESS entry, so we can read the current state directly instead
+   of inferring it from action + previousStatus (which is what the legacy
+   process-instance derivation has to do). FAILED entries are ignored —
+   they didn't move the state machine. */
+function _sortedSuccessAuditLogs(auditLogs) {
+  return safeArray(auditLogs)
+    .filter((e) => String((e && e.outcome) || "").toUpperCase() === "SUCCESS")
+    .slice()
+    .sort(
+      (a, b) =>
+        (Number(a && a.createdTime) || 0) - (Number(b && b.createdTime) || 0)
+    );
+}
+
+export function deriveStateFromAuditLogs(auditLogs, consentDivisions) {
+  const sorted = _sortedSuccessAuditLogs(auditLogs);
+  if (sorted.length === 0) return null;
+
+  const last = sorted[sorted.length - 1];
+  const action = String((last && last.actionName) || "").toUpperCase();
+  const resultant = String((last && last.resultantState) || "").toUpperCase();
+  const prev = String((last && last.previousState) || "").toUpperCase();
+
+  /* SUBMIT / UPDATE just landed the activity in PENDINGATCONCERNEDDIVISION,
+     but the UI splits that backend state into two visible steps. Park at
+     ready_for_approval so the "Request Division Approval" button surfaces
+     (matches the legacy derivation's parking behavior). */
+  if (action === "SUBMIT" || action === "UPDATE") return "ready_for_approval";
+  if (action === "REJECT" || action === "ANY_REJECTED") return "rejected_to_vendor";
+
+  switch (resultant) {
+    case "ACTIVITYCOMPLETED":
+    case "COMPLETED":
+      return "completed";
+    case "PENDINGATOWNERDIVISION":
+      return "pending_owner";
+    case "PENDINGATCONCERNEDDIVISION":
+      return "pending_division";
+    case "READYFORAPPROVAL":
+      return "ready_for_approval";
+    case "RETURNEDTOVENDOR":
+    case "REJECTED":
+      return "rejected_to_vendor";
+    default:
+      return _STATUS_TO_LOCAL[prev] || null;
+  }
+}
+
+/* Audit-log version of deriveDivisionApprovalsFromInstances. Two distinct
+   sources of "all divisions approved":
+     1. ALL_APPROVED action (backend-emitted auto-transition) — fill every
+        configured division as approved by that one event.
+     2. Per-division APPROVE events (one per division) — fill in the order
+        the events arrived, head-aligned with consentDivisions. */
+export function deriveDivisionApprovalsFromAuditLogs(auditLogs, consentDivisions) {
+  const divs = safeArray(consentDivisions);
+  if (!divs.length) return [];
+  const sorted = _sortedSuccessAuditLogs(auditLogs);
+  if (sorted.length === 0) return [];
+
+  const allApprovedEvent = sorted.find(
+    (e) =>
+      String((e && e.actionName) || "").toUpperCase() === "ALL_APPROVED" &&
+      String((e && e.previousState) || "").toUpperCase() ===
+        "PENDINGATCONCERNEDDIVISION"
+  );
+  if (allApprovedEvent) {
+    const at = Number(allApprovedEvent.createdTime) || 0;
+    const decidedAt = at ? new Date(at).toISOString() : "";
+    return divs.map((d) => ({
+      division: d,
+      status: "approved",
+      decidedBy: allApprovedEvent.performedByUsername || "",
+      decidedAt,
+      reason: allApprovedEvent.comment || ""
+    }));
+  }
+
+  const approveEvents = sorted.filter(
+    (e) =>
+      String((e && e.actionName) || "").toUpperCase() === "APPROVE" &&
+      String((e && e.previousState) || "").toUpperCase() ===
+        "PENDINGATCONCERNEDDIVISION"
+  );
+  const rejectEvent = sorted.find(
+    (e) =>
+      ["REJECT", "ANY_REJECTED"].includes(
+        String((e && e.actionName) || "").toUpperCase()
+      ) &&
+      String((e && e.previousState) || "").toUpperCase() ===
+        "PENDINGATCONCERNEDDIVISION"
+  );
+  return divs.map((d, i) => {
+    const ev = approveEvents[i];
+    if (ev) {
+      const at = Number(ev.createdTime) || 0;
+      return {
+        division: d,
+        status: "approved",
+        decidedBy: ev.performedByUsername || "",
+        decidedAt: at ? new Date(at).toISOString() : "",
+        reason: ev.comment || ""
+      };
+    }
+    if (rejectEvent && i === approveEvents.length) {
+      const at = Number(rejectEvent.createdTime) || 0;
+      return {
+        division: d,
+        status: "rejected",
+        decidedBy: rejectEvent.performedByUsername || "",
+        decidedAt: at ? new Date(at).toISOString() : "",
+        reason: rejectEvent.comment || ""
+      };
+    }
+    return {
+      division: d,
+      status: "pending",
+      decidedBy: "",
+      decidedAt: "",
+      reason: ""
+    };
+  });
+}
+
+export function deriveOwnerApprovalFromAuditLogs(auditLogs) {
+  const sorted = _sortedSuccessAuditLogs(auditLogs);
+  if (sorted.length === 0) return null;
+  const ownerEvent = [...sorted].reverse().find(
+    (e) =>
+      String((e && e.previousState) || "").toUpperCase() ===
+      "PENDINGATOWNERDIVISION"
+  );
+  if (!ownerEvent) return null;
+  const action = String(ownerEvent.actionName || "").toUpperCase();
+  if (action !== "APPROVE" && action !== "REJECT") return null;
+  const at = Number(ownerEvent.createdTime) || 0;
+  return {
+    status: action === "APPROVE" ? "approved" : "rejected",
+    decidedBy: ownerEvent.performedByUsername || "",
+    decidedAt: at ? new Date(at).toISOString() : "",
+    reason: ownerEvent.comment || ""
+  };
+}
+
 /* Classify each of the 5 timeline steps for rendering. */
 export function classifyStep(name, form, allTasksDone, hasTasks) {
   const state = form.approvalState || "idle";
