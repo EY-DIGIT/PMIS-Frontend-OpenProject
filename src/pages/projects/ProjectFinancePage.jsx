@@ -1225,17 +1225,17 @@ export default function ProjectFinancePage() {
               </button>
             </div>
 
-            <div className="uidai-pmis-table-wrap">
-              <table className="uidai-pmis-table">
+            <div className="uidai-pmis-table-wrap" style={{ overflow: "visible" }}>
+              <table className="uidai-pmis-table" style={{ minWidth: 0, tableLayout: "auto", wordBreak: "break-word" }}>
                 <thead>
                   <tr>
-                    <th style={{ width: 130 }}>Cost Type</th>
+                    <th>Cost Type</th>
                     <th>Milestones</th>
-                    <th style={{ width: 130 }}>Cost (₹)</th>
-                    <th style={{ width: 90 }}>Phase</th>
-                    <th style={{ width: 200 }}>Tax Amount</th>
-                    <th style={{ width: 150 }}>Total</th>
-                    <th style={{ width: 100, textAlign: "center" }}>Action</th>
+                    <th>Cost (₹)</th>
+                    <th>Phase</th>
+                    <th>Tax Amount</th>
+                    <th>Total</th>
+                    <th style={{ textAlign: "center" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1466,15 +1466,15 @@ function PhasePanel({
 
       {expanded && (
         <div style={{ padding: 16 }}>
-          <div className="uidai-pmis-table-wrap">
-            <table className="uidai-pmis-table uidai-pmis-table-compact">
+          <div className="uidai-pmis-table-wrap" style={{ overflow: "visible" }}>
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ minWidth: 0, tableLayout: "auto", wordBreak: "break-word" }}>
               <thead>
                 <tr>
                   <th>Milestone</th>
-                  <th style={{ width: 140 }}>Frequency</th>
-                  <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
-                  <th style={{ width: 170 }}>Value</th>
-                  <th style={{ width: 90, textAlign: "center" }}>Action</th>
+                  <th>Frequency</th>
+                  <th>% of Payment (Fixed + One-time)</th>
+                  <th>Value</th>
+                  <th style={{ textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
