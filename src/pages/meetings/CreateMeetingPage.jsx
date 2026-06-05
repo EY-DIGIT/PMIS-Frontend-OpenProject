@@ -345,9 +345,9 @@ export default function CreateMeetingPage() {
             marginBottom: 16
           }}
         >
-          <div className="card-title" style={{ margin: 0 }}>
+          {/* <div className="card-title" style={{ margin: 0 }}>
             Create a New Meeting Invite
-          </div>
+          </div> */}
           {projectForTag && (
             <span className="pill-link">
               {projectForTag.projectCode || projectForTag.projectId} —{" "}
