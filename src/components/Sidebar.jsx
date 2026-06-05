@@ -16,7 +16,9 @@ import {
   FiChevronRight,
   FiChevronDown
 } from "react-icons/fi";
-import { useCan } from "../auth/permissions";
+import { useCan, useCurrentRole } from "../auth/permissions";
+import { userHasRole } from "../auth/roleNormalize";
+import { tokenStore } from "../api/client";
 
 const ICON_SIZE = 18;
 
@@ -34,6 +36,22 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canCreateVendor = useCan("createVendor");
   const canViewUsers = useCan("viewUsers");
   const canCreateUser = useCan("createUser");
+
+  // Approval Inbox role gating. division_approver / division_owner are
+  // workflow roles that live OUTSIDE rolesConfig, so we read them straight
+  // off the user object rather than the normalized identity role.
+  // Subscribing to useCurrentRole() keeps this re-rendering on login /
+  // logout / role refresh.
+  useCurrentRole();
+  const currentUser = tokenStore.getUser();
+  const isDivisionApprover = userHasRole(currentUser, "division_approver");
+  const isActivityOwner = userHasRole(currentUser, "division_owner");
+  // A division_approver sees only Concerned Division; a division_owner sees
+  // only Activity Owner. Anyone who carries neither workflow role (admins,
+  // etc.) keeps seeing both, as before.
+  const hasInboxRole = isDivisionApprover || isActivityOwner;
+  const showCdInbox = isDivisionApprover || !hasInboxRole;
+  const showAoInbox = isActivityOwner || !hasInboxRole;
 
   // A whole "Management" section is visible only when the user can
   // either view the list or create an item under it. Otherwise the
@@ -339,9 +357,9 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </>
         )}
 
-        {/* Approval Inbox — both sub-items visible until role gating is
-            wired up. A Concerned Division reviewer should see only the
-            first; an Activity Owner the second. */}
+        {/* Approval Inbox — role-gated sub-items. A division_approver sees
+            only Concerned Division; a division_owner only Activity Owner.
+            Users with neither workflow role (admins, etc.) see both. */}
         <a
           className={inboxActive ? "active" : ""}
           onClick={() => setInboxOpen(!inboxOpen)}
@@ -353,20 +371,24 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${inboxOpen ? " open" : ""}`}>
-          <div
-            className={inboxCdActive ? "active" : ""}
-            onClick={() => navigate("/approvals/concerned-division")}
-          >
-            <FiUsers size={ICON_SIZE} />
-            <span className="pmis-text">Concerned Division</span>
-          </div>
-          <div
-            className={inboxAoActive ? "active" : ""}
-            onClick={() => navigate("/approvals/activity-owner")}
-          >
-            <FiCheckCircle size={ICON_SIZE} />
-            <span className="pmis-text">Activity Owner</span>
-          </div>
+          {showCdInbox && (
+            <div
+              className={inboxCdActive ? "active" : ""}
+              onClick={() => navigate("/approvals/concerned-division")}
+            >
+              <FiUsers size={ICON_SIZE} />
+              <span className="pmis-text">Concerned Division</span>
+            </div>
+          )}
+          {showAoInbox && (
+            <div
+              className={inboxAoActive ? "active" : ""}
+              onClick={() => navigate("/approvals/activity-owner")}
+            >
+              <FiCheckCircle size={ICON_SIZE} />
+              <span className="pmis-text">Activity Owner</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

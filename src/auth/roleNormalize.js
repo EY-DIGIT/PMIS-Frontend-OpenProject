@@ -78,3 +78,55 @@ export function readRoleFromUser(user) {
     null
   );
 }
+
+/* Collect EVERY role identifier present on the user, across all the
+   shapes the backend uses (string, array of strings, array of objects
+   carrying role_name / roleName / name / code, single object).
+
+   Unlike readRoleFromUser — which collapses to ONE identity role via the
+   rolesConfig hierarchy — this returns the full set. Needed to gate
+   features on workflow roles such as `division_approver` /
+   `division_owner` that aren't in rolesConfig and would otherwise be
+   dropped by the hierarchy pick. */
+export function readAllRoleNames(user) {
+  if (!user) return [];
+  const out = new Set();
+  const add = (v) => {
+    if (v && typeof v === "string") out.add(v);
+  };
+  const fromEntry = (e) => {
+    if (!e) return;
+    if (typeof e === "string") {
+      add(e);
+      return;
+    }
+    if (typeof e === "object") {
+      add(e.role_name);
+      add(e.roleName);
+      add(e.name);
+      add(e.code);
+    }
+  };
+  const fromField = (raw) => {
+    if (!raw) return;
+    if (Array.isArray(raw)) {
+      raw.forEach(fromEntry);
+      return;
+    }
+    fromEntry(raw);
+  };
+  fromField(user.orgRole);
+  fromField(user.org_role);
+  fromField(user.role);
+  fromField(user.roles);
+  return Array.from(out);
+}
+
+/* True when the user carries `roleName` in ANY of its role fields,
+   case-insensitive. Use for workflow-role gating (division_approver /
+   division_owner). */
+export function userHasRole(user, roleName) {
+  if (!roleName) return false;
+  const target = String(roleName).toLowerCase();
+  return readAllRoleNames(user).some((r) => String(r).toLowerCase() === target);
+}
