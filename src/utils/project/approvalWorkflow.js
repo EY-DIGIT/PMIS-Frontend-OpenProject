@@ -608,10 +608,19 @@ export function deriveStateFromAuditLogs(auditLogs, consentDivisions) {
      ready_for_approval so the "Request Division Approval" button surfaces. */
   if (action === "SUBMIT" || action === "UPDATE") return "ready_for_approval";
   if (action === "REJECT" || action === "ANY_REJECTED") return "rejected_to_vendor";
-  /* ALL_APPROVED is the backend's auto-transition when the last
-     Concerned Division approves — park at division_approved so the
-     "Request Owner Approval" button surfaces. */
-  if (action === "ALL_APPROVED") return "division_approved";
+  /* ALL_APPROVED is the action fired when the activity is forwarded past
+     the Concerned Division gate. Map it by where it actually landed:
+       • resultantState PENDINGATOWNERDIVISION → owner now has it
+         (pending_owner) — hide the Request Owner button.
+       • resultantState COMPLETED / ACTIVITYCOMPLETED → completed.
+       • anything else (e.g. the backend stamps ALL_APPROVED while still
+         parked at the Concerned Division gate) → division_approved so the
+         "Request Owner Approval" button surfaces. */
+  if (action === "ALL_APPROVED") {
+    if (resultant === "PENDINGATOWNERDIVISION") return "pending_owner";
+    if (resultant === "ACTIVITYCOMPLETED" || resultant === "COMPLETED") return "completed";
+    return "division_approved";
+  }
 
   if (action === "APPROVE") {
     if (prev === "PENDINGATOWNERDIVISION") return "completed";
