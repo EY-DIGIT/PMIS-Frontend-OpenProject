@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getTeamPage,
@@ -10,10 +10,18 @@ import { setPageContext, clearPageContext } from '../../utils/pageContext';
 import './ManageTeam.css';
 
 /* Build a {id, name} record the MultiSelect understands from a raw
-   associated-user. Backend ships `firstName`/`lastName`/`login`/`email`
-   in a mix; coalesce to the friendliest label we have. */
+   associated-user. Two shapes in the wild:
+     • Team-page userDirectory: { id, name } — pre-formatted, use as-is.
+     • Associated-users endpoint: { id, firstName, lastName, login, email }
+       — coalesce to the friendliest label we have.
+   Without the name-preserving branch, directory entries fall through to
+   `u.id` and rows render as UUID slices instead of person names. */
 function normalizeAssociatedUser(u) {
   if (!u || !u.id) return null;
+  const preformatted = typeof u.name === 'string' && u.name.trim();
+  if (preformatted) {
+    return { id: String(u.id), name: u.name.trim() };
+  }
   const first = (u.firstName || '').trim();
   const last = (u.lastName || '').trim();
   const full = `${first} ${last}`.trim();
@@ -683,11 +691,30 @@ export default function ManageTeam() {
     return (od && (od.name || od.code)) || 'Owner';
   };
 
-  /* Look up a user's friendly name in a directory; falls back to a
-     short id slice so unknown ids still render something readable. */
+  /* Project-wide id → display name map, built once from the team-page
+     userDirectory (which carries every user the project knows about,
+     irrespective of division). Used as a fallback for findUserName so
+     assigned users still render with a real name even when the per-
+     division dropdown hasn't loaded them (cross-division assignments,
+     in-flight fetches, etc). */
+  const userDirectoryNameById = useMemo(() => {
+    const m = new Map();
+    (Array.isArray(userDirectory) ? userDirectory : []).forEach((u) => {
+      const norm = normalizeAssociatedUser(u);
+      if (norm) m.set(norm.id, norm.name);
+    });
+    return m;
+  }, [userDirectory]);
+
+  /* Look up a user's friendly name. Primary source is the division-
+     specific dropdown the caller passes in; otherwise fall back to the
+     project's userDirectory; only show a UUID slice when even the
+     directory doesn't know the id. */
   const findUserName = (uid, dirArr) => {
     const u = (Array.isArray(dirArr) ? dirArr : []).find((x) => x.id === uid);
     if (u) return u.name;
+    const fallback = userDirectoryNameById.get(String(uid || ''));
+    if (fallback) return fallback;
     return String(uid || '').slice(0, 8);
   };
 
