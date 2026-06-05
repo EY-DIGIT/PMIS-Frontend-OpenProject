@@ -573,7 +573,21 @@ function _sortedSuccessAuditLogs(auditLogs) {
 }
 
 export function deriveStateFromAuditLogs(auditLogs, consentDivisions) {
-  const sorted = _sortedSuccessAuditLogs(auditLogs);
+  /* For state derivation we care about both SUCCESS (real backend
+     transition) AND BUTTON_CLICK (UI-only progress: Request Division /
+     Request Owner buttons emit BUTTON_CLICK audit rows so the UI can
+     remember the user moved past those buttons without a backend
+     state change). FAILED rows are still ignored. */
+  const sorted = safeArray(auditLogs)
+    .filter((e) => {
+      const o = String((e && e.outcome) || "").toUpperCase();
+      return o === "SUCCESS" || o === "BUTTON_CLICK";
+    })
+    .slice()
+    .sort(
+      (a, b) =>
+        (Number(a && a.createdTime) || 0) - (Number(b && b.createdTime) || 0)
+    );
   if (sorted.length === 0) return null;
 
   const last = sorted[sorted.length - 1];
@@ -581,12 +595,28 @@ export function deriveStateFromAuditLogs(auditLogs, consentDivisions) {
   const resultant = String((last && last.resultantState) || "").toUpperCase();
   const prev = String((last && last.previousState) || "").toUpperCase();
 
+  /* UI-only button-click events advance the local stage without moving
+     the backend state machine. Honor them so the right next-step button
+     surfaces: REQUEST_DIVISION_APPROVAL → divisions are now waiting
+     (hide button, show approver rows); REQUEST_OWNER_APPROVAL → owner
+     is now waiting (hide button, show owner row). */
+  if (action === "REQUEST_DIVISION_APPROVAL") return "pending_division";
+  if (action === "REQUEST_OWNER_APPROVAL") return "pending_owner";
+
   /* SUBMIT / UPDATE just landed the activity in PENDINGATCONCERNEDDIVISION,
      but the UI splits that backend state into two visible steps. Park at
-     ready_for_approval so the "Request Division Approval" button surfaces
-     (matches the legacy derivation's parking behavior). */
+     ready_for_approval so the "Request Division Approval" button surfaces. */
   if (action === "SUBMIT" || action === "UPDATE") return "ready_for_approval";
   if (action === "REJECT" || action === "ANY_REJECTED") return "rejected_to_vendor";
+  /* ALL_APPROVED is the backend's auto-transition when the last
+     Concerned Division approves — park at division_approved so the
+     "Request Owner Approval" button surfaces. */
+  if (action === "ALL_APPROVED") return "division_approved";
+
+  if (action === "APPROVE") {
+    if (prev === "PENDINGATOWNERDIVISION") return "completed";
+    if (prev === "PENDINGATCONCERNEDDIVISION") return "pending_division";
+  }
 
   switch (resultant) {
     case "ACTIVITYCOMPLETED":
