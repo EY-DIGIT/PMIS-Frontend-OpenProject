@@ -444,7 +444,7 @@ export default function MeetingDetailPage() {
         <div>
           <div className="pm-title">{meeting.title}</div>
           <div className="pm-subtitle">
-            #{meeting.id}
+            #{meeting.meetingCode}
             {meeting.activityName ? ` · ${meeting.activityName}` : ""}
           </div>
         </div>
@@ -464,7 +464,7 @@ export default function MeetingDetailPage() {
         <div className="mt-hero">
           <StatusBadge status={meeting.status} />
           {meeting.projectId && (
-            <span className="pill-link">Project: {meeting.projectId}</span>
+            <span className="pill-link">Project: {meeting.projectName}</span>
           )}
         </div>
 

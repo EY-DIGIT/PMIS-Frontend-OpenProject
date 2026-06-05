@@ -214,11 +214,11 @@ export default function MeetingsListPage() {
                     className="clickable"
                     onClick={() => navigate(`/meetings/${m.id}`)}
                   >
-                    <td><span className="link">#{m.id}</span></td>
+                    <td><span className="link">#{m.meetingCode}</span></td>
                     <td>{m.title}</td>
                     <td>
                       <span className="pill-link">
-                        {projectName(m.projectId)}
+                        {projectName(m.projectName)}
                       </span>
                     </td>
                     <td>{fmtDate(m.meetingDate)}</td>
