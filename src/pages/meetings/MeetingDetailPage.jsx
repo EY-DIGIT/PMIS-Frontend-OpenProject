@@ -192,6 +192,19 @@ export default function MeetingDetailPage() {
       .then((m) => {
         if (!alive) return;
         setMeeting(m);
+        /* Backend echoes back attendance state — pre-tick everyone the
+           response already marks as present so the user sees the saved
+           state instead of an empty grid. Internal rows are keyed by
+           userId; external rows by email — same keys the toggle uses. */
+        const presentKeys = [
+          ...(m?.attendees || [])
+            .filter((a) => a && a.isPresent)
+            .map((a) => a.userId),
+          ...(m?.externalAttendees || [])
+            .filter((e) => e && e.isPresent)
+            .map((e) => e.email),
+        ].filter(Boolean);
+        setPresentSelection(presentKeys);
       })
       .catch((e) => {
         if (!alive) return;
