@@ -14,6 +14,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
 import { getMeeting, getMoM, saveMoM, updateMeeting } from "../../api/meetings";
+import { sampleMoM, parseMoM } from "../../data/meetingsMock";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
@@ -257,6 +258,15 @@ export default function MeetingDetailPage() {
 
   const updateMomField = (key, value) =>
     setMomForm((f) => ({ ...f, [key]: value }));
+
+  /* Drop a canned MoM block into the three textareas so the user can
+     test the form without typing the whole thing. Mirrors the helper
+     from the pre-API HTML reference; doesn't touch the server. */
+  const loadSample = () => {
+    if (!meeting) return;
+    setMomForm(parseMoM(sampleMoM(meeting)));
+    show("Sample MoM loaded.", "ok");
+  };
 
   const toggleSelection = (key) => {
     setPresentSelection((sel) =>
@@ -565,7 +575,27 @@ export default function MeetingDetailPage() {
 
       {/* ── Section 2: MoM editor ── */}
       <div className="card">
-        <div className="card-title">Minutes of Meeting</div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          <div className="card-title" style={{ margin: 0 }}>
+            Minutes of Meeting
+          </div>
+          <button
+            type="button"
+            className="btn ghost small-btn"
+            onClick={loadSample}
+            disabled={savingMom}
+          >
+            Load sample
+          </button>
+        </div>
         <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
           <div className="field full">
             <label htmlFor="momDecisions">Decisions</label>
