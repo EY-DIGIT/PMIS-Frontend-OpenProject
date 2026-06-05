@@ -24,10 +24,6 @@ import {
   requestDivisionApproval,
   requestOwnerApproval,
   resubmitAfterRejection,
-  approveDivision,
-  rejectDivision,
-  approveOwner,
-  rejectOwner,
   classifyStep
 } from "../../../utils/project/approvalWorkflow";
 import {
@@ -90,46 +86,7 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
   );
 }
 
-function RejectInline({ label, reasonText, onReasonChange, onCancel, onCommit, busy, embedded }) {
-  return (
-    <div className="pmis-awf-reject" style={embedded ? { border: "none", background: "transparent", padding: 0 } : undefined}>
-      <label className="pmis-awf-reject__label">
-        {label} <span style={{ color: "#9b1c1c" }}>*</span>
-      </label>
-      <textarea
-        className="pmis-awf-reject__textarea"
-        placeholder="Why is this being rejected?"
-        value={reasonText}
-        onChange={(e) => onReasonChange(e.target.value)}
-        disabled={busy}
-      />
-      <div className="pmis-awf-reject__actions">
-        <button
-          type="button"
-          className="pmis-awf-btn"
-          disabled={!reasonText.trim() || busy}
-          onClick={onCommit}
-        >
-          {busy ? "Submitting…" : "Confirm Rejection"}
-        </button>
-        <button
-          type="button"
-          className="pmis-awf-btn pmis-awf-btn--ghost"
-          onClick={onCancel}
-          disabled={busy}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function ApprovalPanel({ activity, form, editable, onChange, onTransition, projectId }) {
-  const [rejection, setRejection] = useState(null);
-  const [revertTo, setRevertTo] = useState("vendor");
-  const [revertDivisions, setRevertDivisions] = useState([]);
-  const [reasonText, setReasonText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   /* Per-target Request popup state. `kind` is 'division' or 'owner'
@@ -153,19 +110,6 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
 
   function apply(nextForm) {
     if (nextForm && nextForm !== form) onChange(nextForm);
-  }
-
-  function startRejection(target) {
-    setRejection(target);
-    setReasonText("");
-    setRevertTo("vendor");
-    setRevertDivisions([]);
-    setError("");
-  }
-
-  function cancelRejection() {
-    setRejection(null);
-    setReasonText("");
   }
 
   async function runTransition({ action, comment, transform }) {
@@ -433,54 +377,14 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     setRequestPopup({ open: true, kind: "resubmit" });
   }
 
-  async function handleApproveDivision(divisionName) {
-    await runTransition({
-      action: WORKFLOW_ACTIONS.APPROVE,
-      comment: `${divisionName} approved.`,
-      transform: () => approveDivision(form, divisionName)
-    });
-  }
-
-  async function handleApproveOwner() {
-    await runTransition({
-      action: WORKFLOW_ACTIONS.APPROVE,
-      comment: `${ownerName} (Activity Owner) approved.`,
-      transform: () => approveOwner(form, ownerName)
-    });
-  }
-
-  async function commitRejection() {
-    const reason = reasonText.trim();
-    if (!reason) return;
-    if (rejection.kind === "division") {
-      const ok = await runTransition({
-        action: WORKFLOW_ACTIONS.REJECT,
-        comment: reason,
-        transform: () => rejectDivision(form, rejection.divisionName, reason)
-      });
-      if (ok) cancelRejection();
-    } else if (rejection.kind === "owner") {
-      if (revertTo === "divisions" && !revertDivisions.length) return;
-      const ok = await runTransition({
-        action: WORKFLOW_ACTIONS.REJECT,
-        comment: reason,
-        transform: () =>
-          rejectOwner(
-            form,
-            ownerName,
-            reason,
-            revertTo,
-            revertTo === "divisions" ? revertDivisions : []
-          )
-      });
-      if (ok) cancelRejection();
-    }
-  }
-
+  /* Division Approve/Reject and Owner Approve/Reject are NOT issued from
+     this panel anymore — those decisions live on the Concerned Division
+     and Activity Owner inbox review pages. The timeline shows status
+     only; resubmit after a rejection is still driven from here. */
 
   /* ─── Toolbar (HTML reference parity) ─── */
   const toolbarBtns = [];
-  if (workflowEnabled && !rejection) {
+  if (workflowEnabled) {
     if (state === "idle" && allTasksDone) {
       toolbarBtns.push(
         <button
@@ -638,64 +542,19 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
   } else {
     const rows = safeArray(form.divisionApprovals);
     if (rows.length) {
+      /* Division Approve/Reject is now driven from the Concerned-Division
+         reviewer's inbox page — the timeline shows status only. */
       s3Body = (
         <div className="pmis-awf-targets">
-          {rows.map((r) => {
-            const isPending = r.status === "pending";
-            const isRejectingThis =
-              rejection &&
-              rejection.kind === "division" &&
-              rejection.divisionName === r.division;
-            const showActions =
-              workflowEnabled && s3 === "active" && isPending && !isRejectingThis;
-            return (
-              <React.Fragment key={r.division}>
-                <TargetRow
-                  name={r.division}
-                  status={r.status}
-                  decidedAt={r.decidedAt}
-                  reason={r.reason}
-                  actions={
-                    showActions ? (
-                      <>
-                        <button
-                          type="button"
-                          className="pmis-awf-btn"
-                          disabled={busy}
-                          onClick={() => handleApproveDivision(r.division)}
-                        >
-                          {busy ? "…" : "Approve"}
-                        </button>
-                        <button
-                          type="button"
-                          className="pmis-awf-btn pmis-awf-btn--danger"
-                          disabled={busy}
-                          onClick={() =>
-                            startRejection({
-                              kind: "division",
-                              divisionName: r.division
-                            })
-                          }
-                        >
-                          Reject
-                        </button>
-                      </>
-                    ) : null
-                  }
-                />
-                {isRejectingThis && (
-                  <RejectInline
-                    label={`Rejection reason for ${r.division}`}
-                    reasonText={reasonText}
-                    onReasonChange={setReasonText}
-                    onCancel={cancelRejection}
-                    onCommit={commitRejection}
-                    busy={busy}
-                  />
-                )}
-              </React.Fragment>
-            );
-          })}
+          {rows.map((r) => (
+            <TargetRow
+              key={r.division}
+              name={r.division}
+              status={r.status}
+              decidedAt={r.decidedAt}
+              reason={r.reason}
+            />
+          ))}
         </div>
       );
     } else if (state === "rejected_to_vendor" && form.lastRejection?.byKind === "division") {
@@ -739,7 +598,8 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
       </>
     );
   } else if (s4 === "active" && state === "pending_owner") {
-    const isRejectingOwner = rejection && rejection.kind === "owner";
+    /* Owner Approve/Reject is now driven from the Activity Owner inbox
+       page — the timeline shows the pending owner row, status only. */
     s4Body = (
       <>
         Awaiting decision from <b>{ownerName}</b>.
@@ -749,94 +609,8 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
             name={ownerName}
             status={form.ownerApproval?.status || "pending"}
             decidedAt={form.ownerApproval?.decidedAt}
-            actions={
-              workflowEnabled && !isRejectingOwner ? (
-                <>
-                  <button
-                    type="button"
-                    className="pmis-awf-btn"
-                    disabled={busy}
-                    onClick={handleApproveOwner}
-                  >
-                    {busy ? "…" : "Approve"}
-                  </button>
-                  <button
-                    type="button"
-                    className="pmis-awf-btn pmis-awf-btn--danger"
-                    disabled={busy}
-                    onClick={() => startRejection({ kind: "owner" })}
-                  >
-                    Reject
-                  </button>
-                </>
-              ) : null
-            }
           />
         </div>
-        {isRejectingOwner && (
-          <div className="pmis-awf-reject">
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>
-              Owner Rejection — Pick Revert Target
-            </div>
-            <label className="pmis-awf-reject__mode">
-              <input
-                type="radio"
-                name="revertTo"
-                value="vendor"
-                checked={revertTo === "vendor"}
-                onChange={() => setRevertTo("vendor")}
-                disabled={busy}
-              />
-              Revert to Vendor (full resend)
-            </label>
-            <label className="pmis-awf-reject__mode">
-              <input
-                type="radio"
-                name="revertTo"
-                value="divisions"
-                checked={revertTo === "divisions"}
-                onChange={() => setRevertTo("divisions")}
-                disabled={busy}
-              />
-              Revert to Concerned Division(s)
-            </label>
-            {revertTo === "divisions" && (
-              <div className="pmis-awf-reject__divlist">
-                {consentDivisions.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#66788f" }}>
-                    No concerned divisions to revert to.
-                  </div>
-                )}
-                {consentDivisions.map((d) => (
-                  <label key={d}>
-                    <input
-                      type="checkbox"
-                      checked={revertDivisions.includes(d)}
-                      disabled={busy}
-                      onChange={(e) => {
-                        setRevertDivisions((cur) =>
-                          e.target.checked
-                            ? cur.concat(d)
-                            : cur.filter((x) => x !== d)
-                        );
-                      }}
-                    />
-                    {d}
-                  </label>
-                ))}
-              </div>
-            )}
-            <RejectInline
-              label="Rejection reason"
-              reasonText={reasonText}
-              onReasonChange={setReasonText}
-              onCancel={cancelRejection}
-              onCommit={commitRejection}
-              busy={busy}
-              embedded
-            />
-          </div>
-        )}
       </>
     );
   } else if (s4 === "done") {
