@@ -358,5 +358,6 @@ export const ENDPOINTS = {
     create: '/meetings/create',
     update: (id) => `/meetings/update/${enc(id)}`,
     mom: (id) => `/meetings/mom/create/${enc(id)}`,
+    momGet: (id) => `/meetings/mom/get/${enc(id)}`,
   },
 };

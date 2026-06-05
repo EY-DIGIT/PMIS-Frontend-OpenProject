@@ -13,7 +13,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
-import { getMeeting, saveMoM, updateMeeting } from "../../api/meetings";
+import { getMeeting, getMoM, saveMoM, updateMeeting } from "../../api/meetings";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
@@ -178,17 +178,20 @@ export default function MeetingDetailPage() {
     return u ? u.fullName || u.email || uid : uid;
   };
 
-  /* Fetch the meeting whenever the route param changes. */
+  /* Fetch the meeting whenever the route param changes. Also pulls any
+     existing MoM via /meetings/mom/get/{id} and prefills the MoM
+     textareas + the rendered decisions/actions/risks panel so the user
+     edits a saved record instead of starting from blank. */
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setPresentSelection([]);
+    setMomRemote(null);
+    setMomForm({ decisions: "", actions: "", risks: "" });
     getMeeting(id)
       .then((m) => {
         if (!alive) return;
         setMeeting(m);
-        setPresentSelection([]);
-        setMomRemote(null);
-        setMomForm({ decisions: "", actions: "", risks: "" });
       })
       .catch((e) => {
         if (!alive) return;
@@ -196,6 +199,46 @@ export default function MeetingDetailPage() {
         show(e.message || "Failed to load meeting.", "warn");
       })
       .finally(() => { if (alive) setLoading(false); });
+
+    getMoM(id)
+      .then((mom) => {
+        if (!alive || !mom) return;
+        /* Tolerate the various wrappers the backend hands us — direct
+           object, { data: {...} }, { mom: {...} }, or { data: { mom: {...} } }
+           — so the panel and the form pick up the same record regardless
+           of shape. Field names also vary (actionItems vs actions). */
+        const data =
+          mom?.data?.mom ?? mom?.mom ?? mom?.data ?? mom;
+        if (!data || typeof data !== "object") return;
+        const decisionsList = Array.isArray(data.decisions) ? data.decisions : [];
+        const actionsList = Array.isArray(data.actionItems)
+          ? data.actionItems
+          : Array.isArray(data.actions)
+          ? data.actions
+          : [];
+        const risksList = Array.isArray(data.risks) ? data.risks : [];
+        /* Hand the panel a normalized record so its `momRemote?.decisions /
+           actionItems / risks` reads work even when the server used
+           `actions` as the key. */
+        setMomRemote({
+          ...data,
+          decisions: decisionsList,
+          actionItems: actionsList,
+          risks: risksList,
+        });
+        setMomForm({
+          decisions: joinLines(
+            decisionsList.map((d) => d?.description || "").filter(Boolean)
+          ),
+          actions: joinLines(
+            actionsList.map((a) => a?.description || "").filter(Boolean)
+          ),
+          risks: joinLines(
+            risksList.map((r) => r?.description || "").filter(Boolean)
+          ),
+        });
+      })
+      .catch(() => { /* no existing MoM yet — leave the form blank */ });
     return () => { alive = false; };
   }, [id, show]);
 
