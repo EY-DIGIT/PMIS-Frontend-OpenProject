@@ -12,11 +12,17 @@ import rolesConfig from '../../config/roles.json';
 // Edit is allowed only when the logged-in user's role is strictly higher
 // in the hierarchy than the target user's role. super_admin → admin →
 // org_admin → project_admin → project_member.
+//
+// Unknown target roles (workflow-only roles like `division_approver` /
+// `division_owner` that aren't part of the user-management hierarchy)
+// are treated as below every known role so any logged-in user with a
+// known role can still manage them — server enforces the real check.
 function canEditTargetRole(currentRole, targetRole) {
   const h = rolesConfig.hierarchy || [];
   const ci = h.indexOf(currentRole);
+  if (ci < 0) return false;
   const ti = h.indexOf(targetRole);
-  if (ci < 0 || ti < 0) return false;
+  if (ti < 0) return true;
   return ci < ti;
 }
 
