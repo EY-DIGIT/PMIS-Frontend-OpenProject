@@ -355,7 +355,7 @@ export const ENDPOINTS = {
   meetings: {
     list: '/meetings',
     get: (id) => `/meetings/${enc(id)}`,
-    create: '/meetings/meetings',
+    create: '/meeting/create',
     update: (id) => `/meetings/${enc(id)}`,
     mom: (id) => `/meetings/${enc(id)}/mom`,
   },
