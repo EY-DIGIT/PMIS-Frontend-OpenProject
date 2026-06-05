@@ -477,7 +477,6 @@ export default function ProjectDetailsPage() {
       active: true,
       status_explanation: project.statusExplanation || "",
       owner: (form.owner || "").trim(),
-      ownerOther: ownerRequiresOther ? (form.ownerOther || "").trim() : "",
       vendor_ids: resolveVendorIds(form.vendors),
       startDate: toIsoDate(form.startDate),
       endDate: toIsoDate(form.endDate),
