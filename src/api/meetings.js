@@ -78,10 +78,15 @@ export async function saveMoM(meetingId, body) {
    ({decisions, actionItems, risks, ...}) used to prefill the MoM
    form on the meeting detail page. Returns null if no MoM exists. */
 export async function getMoM(meetingId) {
-  return api.get(ENDPOINTS.meetings.momGet(meetingId));
+  return api.get(ENDPOINTS.meetings.momGetByMeeting(meetingId));
 }
 
 /* PUT /api/meetings/{id} — update meeting including attendance. */
 export async function updateMeeting(meetingId, payload) {
   return api.put(ENDPOINTS.meetings.update(meetingId), payload);
+}
+
+export async function updateMeetingStatus(meetingId, status) {
+  return api.put(ENDPOINTS.meetings.updateStatus(meetingId),undefined,{query: { status },
+  });
 }

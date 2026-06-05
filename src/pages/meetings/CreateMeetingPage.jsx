@@ -294,6 +294,7 @@ export default function CreateMeetingPage() {
       show("Start and End time are required.", "warn");
       ok = false;
     }
+    if(!draft.attendees || draft.attendees.length === 0){ show("Select at least one attendee.", "warn"); ok = false; }
     if (!validateTimes()) { nextErr.time = true; ok = false; }
     setErrors(nextErr);
     if (!ok) return;
@@ -500,11 +501,13 @@ export default function CreateMeetingPage() {
           </div>
 
           <div className="field">
-            <label>Attendees</label>
+            <label>Attendees<span className="required">*</span>
+            </label>
             <GroupedMultiSelect
               groups={attendeeGroups}
               selected={draft.attendees}
-              onChange={(sel) => updateDraft({ attendees: sel })}
+              onChange={(sel) => {updateDraft({ attendees: sel });
+              setErrors((er) => ({ ...er, attendees: false }))}}
               placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
             />
             {!showExt && (

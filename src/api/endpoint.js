@@ -357,7 +357,9 @@ export const ENDPOINTS = {
     get: (id) => `/meetings/get/${enc(id)}`,
     create: '/meetings/create',
     update: (id) => `/meetings/update/${enc(id)}`,
+    updateStatus: (id) => `/meetings/update-status/${enc(id)}`,
     mom: (id) => `/meetings/mom/create/${enc(id)}`,
     momGet: (id) => `/meetings/mom/get/${enc(id)}`,
+    momGetByMeeting: (meetingId) => `/meetings/mom/getByMeeting/${enc(meetingId)}`,
   },
 };
