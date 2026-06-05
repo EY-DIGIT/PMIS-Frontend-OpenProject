@@ -732,6 +732,29 @@ export function deriveOwnerApprovalFromAuditLogs(auditLogs) {
   };
 }
 
+/* Map the parallel gate-status `divisions[]` roll-up into our local
+   divisionApprovals rows. The gate is the authoritative source of each
+   Concerned Division's vote (voteStatus APPROVED / REJECTED / PENDING),
+   so when it's available we prefer it over the audit-log inference which
+   only counts anonymous APPROVE events. `votedAt` is epoch ms. */
+export function deriveDivisionApprovalsFromGate(gate) {
+  const divs = safeArray(gate && gate.divisions);
+  if (!divs.length) return [];
+  return divs.map((d) => {
+    const vote = String((d && d.voteStatus) || "").toUpperCase();
+    const status =
+      vote === "APPROVED" ? "approved" : vote === "REJECTED" ? "rejected" : "pending";
+    const at = Number(d && d.votedAt) || 0;
+    return {
+      division: d.divisionName || d.divisionCode || "",
+      status,
+      decidedBy: d.approverName || "",
+      decidedAt: at ? new Date(at).toISOString() : "",
+      reason: d.voteComment || ""
+    };
+  });
+}
+
 /* Classify each of the 5 timeline steps for rendering. */
 export function classifyStep(name, form, allTasksDone, hasTasks) {
   const state = form.approvalState || "idle";

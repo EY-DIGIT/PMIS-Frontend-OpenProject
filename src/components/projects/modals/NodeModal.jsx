@@ -17,7 +17,8 @@ import {
   deriveOwnerApprovalFromInstances,
   deriveStateFromAuditLogs,
   deriveDivisionApprovalsFromAuditLogs,
-  deriveOwnerApprovalFromAuditLogs
+  deriveOwnerApprovalFromAuditLogs,
+  deriveDivisionApprovalsFromGate
 } from "../../../utils/project/approvalWorkflow";
 import {
   NODE_TYPE_OPTIONS,
@@ -503,7 +504,15 @@ export default function NodeModal({
           }
         }
         /* Gate-status is the authoritative roll-up of Concerned Division
-           votes. When every division has approved the backend sets
+           votes. Its `divisions[]` carries each division's real vote, so
+           prefer it over the audit-log inference (which only counts
+           anonymous APPROVE events and can lag, leaving rows stuck on
+           "pending" in the timeline even after a division approved). */
+        const gateDivs = deriveDivisionApprovalsFromGate(gate);
+        if (gateDivs.length) {
+          derivedDivs = gateDivs;
+        }
+        /* When every division has approved the backend sets
            readyForOwner=true — surface the "Request Owner Approval" button
            by bumping pending_division → division_approved. Only upgrade
            that one step; never downgrade a state already at/past the owner
