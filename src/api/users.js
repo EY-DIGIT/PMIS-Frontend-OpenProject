@@ -1,6 +1,6 @@
 import { api } from './client';
 import { ENDPOINTS } from './endpoint';
-import { normalizeRoleValue } from '../auth/roleNormalize';
+import { readRoleFromUser } from '../auth/roleNormalize';
 
 function unwrap(res) {
   if (Array.isArray(res)) return res;
@@ -49,12 +49,13 @@ export function fromApi(u) {
     employeeId: u.employeeId || u.employee_id || u.login || '',
     email: u.email || '',
     role: u.admin ? 'Admin' : (u.role || 'Viewer'),
-    /* The backend can hand back org_role as a string OR an array of
-       {role_name, scope, role_id, ...} objects. Collapse to a single
-       string so the Users page can render / filter on it directly.
-       See src/auth/roleNormalize.js for precedence rules (global
-       scope beats project scope; rolesConfig.hierarchy breaks ties). */
-    orgRole: normalizeRoleValue(u.orgRole) || normalizeRoleValue(u.org_role) || '',
+    /* The backend can hand back the role as a string OR an array of
+       {role_name, scope, role_id, ...} objects, and the field name varies
+       across endpoints: list/get uses `orgRole`/`org_role`, but
+       login/me responses use `role`/`roles`. Route through readRoleFromUser
+       so any of those shapes resolves to a single hierarchy slug — the
+       UserDetails page's Edit-gate depends on this being populated. */
+    orgRole: readRoleFromUser(u) || '',
     vendorId,
     vendorName,
     division: u.division || '',
