@@ -15,6 +15,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
 import { getMeeting, getMoM, saveMoM, updateMeeting } from "../../api/meetings";
 import { sampleMoM, parseMoM } from "../../data/meetingsMock";
+import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
@@ -168,6 +169,9 @@ export default function MeetingDetailPage() {
     return () => { alive = false; };
   }, []);
 
+  /* Clear the breadcrumb's meeting-name context when leaving the page. */
+  useEffect(() => () => clearPageContext(), []);
+
   const userById = useMemo(() => {
     const m = new Map();
     users.forEach((u) => m.set(u.userId, u));
@@ -193,6 +197,9 @@ export default function MeetingDetailPage() {
       .then((m) => {
         if (!alive) return;
         setMeeting(m);
+        /* Publish the meeting name so the global breadcrumb shows it
+           instead of the raw id. */
+        setPageContext({ meetingName: m?.title || m?.meetingCode || "" });
         /* Backend echoes back attendance state — pre-tick everyone the
            response already marks as present so the user sees the saved
            state instead of an empty grid. Internal rows are keyed by
@@ -206,6 +213,55 @@ export default function MeetingDetailPage() {
             .map((e) => e.email),
         ].filter(Boolean);
         setPresentSelection(presentKeys);
+
+        /* The MoM endpoint is keyed on the meeting's own id — the same id
+           `saveMoM` posts to — NOT the route param (which is the meeting
+           code). Fetch it here, once the loaded meeting gives us that id,
+           so a saved MoM reappears on reload. */
+        getMoM(m?.id ?? id)
+          .then((mom) => {
+            if (!alive || !mom) return;
+            /* Tolerate the various wrappers the backend hands us — direct
+               object, { data: {...} }, { mom: {...} }, or { data: { mom: {...} } }.
+               Pick whichever candidate actually carries the MoM arrays.
+               Field names also vary (actionItems vs actions). */
+            const candidates = [mom?.data?.mom, mom?.mom, mom?.data, mom];
+            const hasMoM = (c) =>
+              c && typeof c === "object" &&
+              (Array.isArray(c.decisions) ||
+                Array.isArray(c.actionItems) ||
+                Array.isArray(c.actions) ||
+                Array.isArray(c.risks));
+            const data =
+              candidates.find(hasMoM) ||
+              candidates.find((c) => c && typeof c === "object");
+            if (!data || typeof data !== "object") return;
+            const decisionsList = Array.isArray(data.decisions) ? data.decisions : [];
+            const actionsList = Array.isArray(data.actionItems)
+              ? data.actionItems
+              : Array.isArray(data.actions)
+              ? data.actions
+              : [];
+            const risksList = Array.isArray(data.risks) ? data.risks : [];
+            setMomRemote({
+              ...data,
+              decisions: decisionsList,
+              actionItems: actionsList,
+              risks: risksList,
+            });
+            setMomForm({
+              decisions: joinLines(
+                decisionsList.map((d) => d?.description || "").filter(Boolean)
+              ),
+              actions: joinLines(
+                actionsList.map((a) => a?.description || "").filter(Boolean)
+              ),
+              risks: joinLines(
+                risksList.map((r) => r?.description || "").filter(Boolean)
+              ),
+            });
+          })
+          .catch(() => { /* no existing MoM yet — leave the form blank */ });
       })
       .catch((e) => {
         if (!alive) return;
@@ -213,46 +269,6 @@ export default function MeetingDetailPage() {
         show(e.message || "Failed to load meeting.", "warn");
       })
       .finally(() => { if (alive) setLoading(false); });
-
-    getMoM(id)
-      .then((mom) => {
-        if (!alive || !mom) return;
-        /* Tolerate the various wrappers the backend hands us — direct
-           object, { data: {...} }, { mom: {...} }, or { data: { mom: {...} } }
-           — so the panel and the form pick up the same record regardless
-           of shape. Field names also vary (actionItems vs actions). */
-        const data =
-          mom?.data?.mom ?? mom?.mom ?? mom?.data ?? mom;
-        if (!data || typeof data !== "object") return;
-        const decisionsList = Array.isArray(data.decisions) ? data.decisions : [];
-        const actionsList = Array.isArray(data.actionItems)
-          ? data.actionItems
-          : Array.isArray(data.actions)
-          ? data.actions
-          : [];
-        const risksList = Array.isArray(data.risks) ? data.risks : [];
-        /* Hand the panel a normalized record so its `momRemote?.decisions /
-           actionItems / risks` reads work even when the server used
-           `actions` as the key. */
-        setMomRemote({
-          ...data,
-          decisions: decisionsList,
-          actionItems: actionsList,
-          risks: risksList,
-        });
-        setMomForm({
-          decisions: joinLines(
-            decisionsList.map((d) => d?.description || "").filter(Boolean)
-          ),
-          actions: joinLines(
-            actionsList.map((a) => a?.description || "").filter(Boolean)
-          ),
-          risks: joinLines(
-            risksList.map((r) => r?.description || "").filter(Boolean)
-          ),
-        });
-      })
-      .catch(() => { /* no existing MoM yet — leave the form blank */ });
     return () => { alive = false; };
   }, [id, show]);
 

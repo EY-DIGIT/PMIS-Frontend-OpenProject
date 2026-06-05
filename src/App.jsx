@@ -357,6 +357,8 @@ function Breadcrumbs() {
                       (projects.find((p) => p.projectId === decodeURIComponent(seg))?.projectCode) ||
                       ""
                     : "";
+                    const isMeetingIdSeg=i===1 && visibleSegments[0]==="meetings" && seg!=="new";
+                    const meetingName=isMeetingIdSeg?((pageCtx && pageCtx.meetingName) || ""):"";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
                     : isUserIdSeg && userCode
@@ -365,6 +367,8 @@ function Breadcrumbs() {
                             ? vendorCode
                             : isMtProjectIdSeg && mtProjectCode
                                 ? mtProjectCode
+                                :isMeetingIdSeg && meetingName
+                                    ? meetingName
                                 : isDashboardSub && DASH_SUB_LABELS[seg]
                                     ? DASH_SUB_LABELS[seg]
                                     : (LABELS[seg] || decodeURIComponent(seg));

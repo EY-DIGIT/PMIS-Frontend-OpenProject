@@ -5,7 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listMeetings } from "../../api/meetings";
+import { listMeetings, updateMeetingStatus } from "../../api/meetings";
 import * as projectsApi from "../../api/projects";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
@@ -60,6 +60,33 @@ export default function MeetingsListPage() {
   const [q, setQ] = useState("");
   const [fProject, setFProject] = useState("ALL");
   const [fStatus, setFStatus] = useState("ALL");
+
+  /* Inline per-row status editing. `editingId` is the meeting being edited;
+     `savingId` guards its row's Save button. */
+  const [editingId, setEditingId] = useState("");
+  const [statusDraft, setStatusDraft] = useState("");
+  const [savingId, setSavingId] = useState("");
+
+  const startStatusEdit = (m) => {
+    setEditingId(m.id);
+    setStatusDraft(String(m.status || "").toUpperCase() || STATUS_OPTIONS[0]);
+  };
+  const cancelStatusEdit = () => { setEditingId(""); setStatusDraft(""); };
+  const saveStatus = async (m) => {
+    if (savingId) return;
+    try {
+      setSavingId(m.id);
+      await updateMeetingStatus(m.id, statusDraft);
+      setRows((list) => list.map((r) => (r.id === m.id ? { ...r, status: statusDraft } : r)));
+      setEditingId("");
+      setStatusDraft("");
+      show("Status updated.", "ok");
+    } catch (e) {
+      show(e.message || "Failed to update status.", "warn");
+    } finally {
+      setSavingId("");
+    }
+  };
 
   /* Load projects for the filter dropdown + name lookup. */
   useEffect(() => {
@@ -189,7 +216,7 @@ export default function MeetingsListPage() {
                 <th>Project</th>
                 <th>Date</th>
                 <th>Time (IST)</th>
-                <th>Status</th>
+                <th style={{width:250}}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -225,7 +252,50 @@ export default function MeetingsListPage() {
                     <td>
                       {trimTime(m.startTime)}–{trimTime(m.endTime)}
                     </td>
-                    <td><StatusPill status={m.status} /></td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {editingId === m.id ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <select
+                            value={statusDraft}
+                            onChange={(e) => setStatusDraft(e.target.value)}
+                            disabled={savingId === m.id}
+                            style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border, #dbe5f1)", font: "inherit", fontSize: 12.5 }}
+                          >
+                            {STATUS_OPTIONS.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn small-btn"
+                            onClick={() => saveStatus(m),cancelStatusEdit}
+                            disabled={savingId === m.id}
+                          >
+                            {savingId === m.id ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost small-btn"
+                            onClick={cancelStatusEdit}
+                            disabled={savingId === m.id}
+                          >
+                            x
+                          </button>
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                          <StatusPill status={m.status} />
+                          <button
+                            type="button"
+                            className="btn ghost small-btn"
+                            title="Edit status"
+                            onClick={() => startStatusEdit(m)}
+                          >
+                            Edit
+                          </button>
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
