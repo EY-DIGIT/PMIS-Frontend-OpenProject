@@ -353,10 +353,10 @@ export const ENDPOINTS = {
          attachments: [{ filename, contentType, content (base64) }]
        } */
   meetings: {
-    list: '/meetings',
-    get: (id) => `/meetings/${enc(id)}`,
-    create: '/meeting/create',
-    update: (id) => `/meetings/${enc(id)}`,
-    mom: (id) => `/meetings/${enc(id)}/mom`,
+    list: '/meetings/getAll',
+    get: (id) => `/meetings/get/${enc(id)}`,
+    create: '/meetings/create',
+    update: (id) => `/meetings/update/${enc(id)}`,
+    mom: (id) => `/meetings/mom/create/${enc(id)}`,
   },
 };
