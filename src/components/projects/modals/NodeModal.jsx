@@ -808,7 +808,7 @@ export default function NodeModal({
               if (node?.name) params.set("activityName", node.name);
               navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);
             }}
-            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 12px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" }}
+            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 16px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" ,marginTop:4}}
           >
             SLA Mapping
           </button>
@@ -818,7 +818,7 @@ export default function NodeModal({
           aria-label={fullscreen ? "Exit full screen" : "Full screen"}
           title={fullscreen ? "Exit full screen" : "Full screen"}
           onClick={() => setFullscreen((v) => !v)}
-          style={{ ...iconBtnStyle, top: 8, right: 44, fontSize: 16, lineHeight: 1 }}
+          style={{ ...iconBtnStyle, top: 8, right: 44, fontSize: 16, lineHeight: 1 ,marginTop:4}}
         >
           {fullscreen ? "🗗" : "⛶"}
         </button>
@@ -826,7 +826,7 @@ export default function NodeModal({
           type="button"
           aria-label="Close"
           onClick={onCancel}
-          style={{ ...iconBtnStyle, top: 8, right: 10, fontSize: 22, lineHeight: 1 }}
+          style={{ ...iconBtnStyle, top: 8, right: 10, fontSize: 22, lineHeight: 1 ,marginTop:4}}
         >
           ×
         </button>
