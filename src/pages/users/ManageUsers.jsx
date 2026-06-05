@@ -334,14 +334,23 @@ export default function ManageTeam() {
         });
         const owner = data?.ownerDivision || null;
         setOwnerDivision(owner);
-        /* Map code → { id, name } so activity rows that only carry the
-           division code can resolve to a numeric id (needed to look up
-           that division's user dropdown). */
+        /* Map code → { id, name } so any activity row referencing a
+           division by code resolves to a numeric id (needed to look up
+           that division's user dropdown). Seed from divisionRefs (the
+           authoritative project-wide list), then layer in the project's
+           own concerned divisions, owner, and every activity's owner —
+           each activity can target a division that isn't in the project-
+           level concernedDivisions list. */
         const codeMap = {};
-        (Array.isArray(data?.concernedDivisions) ? data.concernedDivisions : []).forEach((d) => {
+        const addDivToMap = (d) => {
           if (d && d.code) codeMap[String(d.code).toLowerCase()] = d;
+        };
+        (Array.isArray(data?.divisionRefs) ? data.divisionRefs : []).forEach(addDivToMap);
+        (Array.isArray(data?.concernedDivisions) ? data.concernedDivisions : []).forEach(addDivToMap);
+        addDivToMap(owner);
+        (Array.isArray(data?.activities) ? data.activities : []).forEach((a) => {
+          addDivToMap(a?.ownerDivision);
         });
-        if (owner && owner.code) codeMap[String(owner.code).toLowerCase()] = owner;
         setDivisionByCode(codeMap);
 
         const activities = (data?.activities || []).map((a) => ({
@@ -354,6 +363,12 @@ export default function ManageTeam() {
           milestoneId: a?.milestoneId || '',
           name: a?.name || '',
           milestone: a?.milestone || '(Unassigned)',
+          /* Per-activity owner division — each activity may belong to a
+             different division than the project-level ownerDivision, so
+             we preserve the activity's own value for label + dropdown
+             resolution downstream. Falls back to the project owner
+             division when the activity didn't ship one. */
+          ownerDivision: a?.ownerDivision || owner || null,
           concernedDivisions: Array.isArray(a?.concernedDivisions) ? a.concernedDivisions : [],
           owner: Array.isArray(a?.owner) ? a.owner : [],
           ownerApprover: Array.isArray(a?.ownerApprover) ? a.ownerApprover : [],
@@ -395,6 +410,7 @@ export default function ManageTeam() {
         const uniqueDivIds = new Set();
         if (owner && owner.id) uniqueDivIds.add(owner.id);
         activities.forEach((a) => {
+          if (a.ownerDivision && a.ownerDivision.id) uniqueDivIds.add(a.ownerDivision.id);
           (a.concernedDivisions || []).forEach((code) => {
             const d = codeMap[String(code).toLowerCase()];
             if (d && d.id) uniqueDivIds.add(d.id);
@@ -651,6 +667,21 @@ export default function ManageTeam() {
     const d = divisionByCode[String(code || '').toLowerCase()];
     return (d && (d.name || d.code)) || code;
   };
+  /* Per-activity Owner Division resolvers — each activity may carry its
+     own ownerDivision distinct from the project's. Falls back to the
+     project-level owner so older payloads (sans per-activity ownerDivision)
+     still render. */
+  const usersForActivityOwnerDivision = (act) => {
+    const od = (act && act.ownerDivision) || ownerDivision;
+    if (od && od.id && Array.isArray(divisionUsersById[od.id])) {
+      return divisionUsersById[od.id];
+    }
+    return normalizeUsersList(userDirectory);
+  };
+  const labelForActivityOwnerDivision = (act) => {
+    const od = (act && act.ownerDivision) || ownerDivision;
+    return (od && (od.name || od.code)) || 'Owner';
+  };
 
   /* Look up a user's friendly name in a directory; falls back to a
      short id slice so unknown ids still render something readable. */
@@ -667,10 +698,12 @@ export default function ManageTeam() {
      cell only shows divisions that actually have assignees. */
   const buildOwnerCellRows = (act) => {
     const rows = [];
-    if (ownerDivision && Array.isArray(act.owner) && act.owner.length > 0) {
+    const actOwnerDiv = act.ownerDivision || ownerDivision;
+    const actOwnerUsers = usersForActivityOwnerDivision(act);
+    if (actOwnerDiv && Array.isArray(act.owner) && act.owner.length > 0) {
       rows.push({
-        division: ownerDivision.name || ownerDivision.code || 'Owner',
-        names: act.owner.map((uid) => findUserName(uid, ownerDivisionUsers)).join(', ')
+        division: actOwnerDiv.name || actOwnerDiv.code || 'Owner',
+        names: act.owner.map((uid) => findUserName(uid, actOwnerUsers)).join(', ')
       });
     }
     (act.concernedDivisions || []).forEach((code) => {
@@ -687,10 +720,12 @@ export default function ManageTeam() {
 
   const buildApproverCellRows = (act) => {
     const rows = [];
-    if (ownerDivision && Array.isArray(act.ownerApprover) && act.ownerApprover.length > 0) {
+    const actOwnerDiv = act.ownerDivision || ownerDivision;
+    const actOwnerUsers = usersForActivityOwnerDivision(act);
+    if (actOwnerDiv && Array.isArray(act.ownerApprover) && act.ownerApprover.length > 0) {
       rows.push({
-        division: ownerDivision.name || ownerDivision.code || 'Owner',
-        names: act.ownerApprover.map((uid) => findUserName(uid, ownerDivisionUsers)).join(', ')
+        division: actOwnerDiv.name || actOwnerDiv.code || 'Owner',
+        names: act.ownerApprover.map((uid) => findUserName(uid, actOwnerUsers)).join(', ')
       });
     }
     (act.concernedDivisions || []).forEach((code) => {
@@ -726,6 +761,8 @@ export default function ManageTeam() {
   /* ─── Inline editor for one activity (no Save/Cancel — persists immediately) ─── */
   const renderActivityPanel = (act) => {
     const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
+    const actOwnerUsers = usersForActivityOwnerDivision(act);
+    const actOwnerLabel = labelForActivityOwnerDivision(act);
     return (
       <div
         id={`mt-activity-panel-${act.id}`}
@@ -736,19 +773,21 @@ export default function ManageTeam() {
           {/* Activity ownership */}
           <div className="mt-modal-role-group mt-division-group">
             <div className="mt-division-group-header">
-              <span className="mt-division-tag">Activity</span>
+              <span className="mt-division-tag">{actOwnerLabel}</span>
               <span className="mt-division-group-sub">
-                Pick the Approver and Activity Owner for this activity.
+                Pick the Approver and Activity Owner for this activity from{' '}
+                <strong>{actOwnerLabel}</strong>.
               </span>
             </div>
             <div className="mt-modal-field">
               <div className="mt-modal-field-label">Approver</div>
               <div className="mt-modal-field-hint">
-                A single approver who will sign off on the Activity Owner's work.
+                A single approver from <strong>{actOwnerLabel}</strong> who will sign
+                off on the Activity Owner's work.
               </div>
               <MultiSelect
                 path={`exp:${act.id}:ownerApprover`}
-                users={ownerDivisionUsers}
+                users={actOwnerUsers}
                 selectedIds={act.ownerApprover}
                 single
                 isOpen={openMsPath === `exp:${act.id}:ownerApprover`}
@@ -760,11 +799,12 @@ export default function ManageTeam() {
             <div className="mt-modal-field">
               <div className="mt-modal-field-label">Activity Owner</div>
               <div className="mt-modal-field-hint">
-                One or more users responsible for this activity.
+                One or more users from <strong>{actOwnerLabel}</strong> responsible
+                for this activity.
               </div>
               <MultiSelect
                 path={`exp:${act.id}:owner`}
-                users={ownerDivisionUsers}
+                users={actOwnerUsers}
                 selectedIds={act.owner}
                 single={false}
                 isOpen={openMsPath === `exp:${act.id}:owner`}
@@ -1088,17 +1128,17 @@ export default function ManageTeam() {
                             <>
                             <td data-label="Activity Owner">
                               <div className="mt-cell-edit">
-                                {ownerDivision && (
+                                {(act.ownerDivision || ownerDivision) && (
                                   <div className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span>{labelForActivityOwnerDivision(act)}</span>
                                       <span className="mt-div-type mt-div-type--owner">
                                         Owner Division
                                       </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:owner`}
-                                      users={ownerDivisionUsers}
+                                      users={usersForActivityOwnerDivision(act)}
                                       selectedIds={act.owner}
                                       single={false}
                                       isOpen={openMsPath === `tbl:${act.id}:owner`}
@@ -1132,17 +1172,17 @@ export default function ManageTeam() {
                             </td>
                             <td data-label="Activity Approver">
                               <div className="mt-cell-edit">
-                                {ownerDivision && (
+                                {(act.ownerDivision || ownerDivision) && (
                                   <div className="mt-cell-edit-row">
                                     <div className="mt-cell-edit-label">
-                                      <span>{ownerDivision.name || ownerDivision.code}</span>
+                                      <span>{labelForActivityOwnerDivision(act)}</span>
                                       <span className="mt-div-type mt-div-type--owner">
                                         Owner Division
                                       </span>
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:ownerApprover`}
-                                      users={ownerDivisionUsers}
+                                      users={usersForActivityOwnerDivision(act)}
                                       selectedIds={act.ownerApprover}
                                       single
                                       isOpen={openMsPath === `tbl:${act.id}:ownerApprover`}
