@@ -1458,7 +1458,7 @@ function PhasePanel({
             </span>
           )}
           <span style={{ color: "#173e77", fontWeight: 700, marginLeft: 4, fontSize: 12 }}>
-            ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: ₹ {Number(phase.phaseFixedTotal || 0).toLocaleString("en-IN")})
+            ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: ₹ {Number(phase.effectivePhaseTotal ||phase.phaseFixedTotal || 0).toLocaleString("en-IN")})
           </span>
         </span>
         <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14 }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
