@@ -1103,7 +1103,7 @@ export default function ManageTeam() {
                     <thead>
                       <tr>
                         <th>Activity</th>
-                        <th>Activity Owner</th>
+                        <th>Activity Member</th>
                         <th>Activity Approver</th>
                       </tr>
                     </thead>
