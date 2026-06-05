@@ -512,22 +512,24 @@ export default function NodeModal({
         if (gateDivs.length) {
           derivedDivs = gateDivs;
         }
-        /* Gate-status also carries the activity's true workflow stateName.
-           While the backend is still parked at the Concerned Division gate
-           it is the authority on the division/owner boundary — even if a
-           stray owner-stage audit row was written (e.g. a
-           request-owner-approval the backend rejected with 400 AFTER
-           partially logging a REQUEST_OWNER_APPROVAL row). Pin the local
-           state to the gate so the timeline can't jump to the owner stage
-           prematurely or hide the Request Owner button:
-             readyForOwner=true  → division_approved (show Request Owner)
-             readyForOwner=false → pending_division  (still collecting votes)
-           Never override a rejection. Once the gate reports a later
-           stateName (PENDINGATOWNERDIVISION / COMPLETED) we leave the
-           audit-derived state untouched. */
-        const gateState = String((gate && gate.stateName) || "").toUpperCase();
-        if (gate && !gate.hasRejection && gateState === "PENDINGATCONCERNEDDIVISION") {
-          derivedState = gate.readyForOwner === true ? "division_approved" : "pending_division";
+        /* When the gate reports every division approved (readyForOwner)
+           surface the "Request Owner Approval" button by bumping
+           pending_division → division_approved. Upgrade ONLY — never
+           downgrade a state the audit log already advanced to the owner
+           stage or completed. A successful request-owner-approval returns
+           200 with an empty body, so the forward-to-owner is confirmed by
+           the audit-derived pending_owner, NOT by the gate (the parallel
+           gate-status can keep reporting its own
+           PENDINGATCONCERNEDDIVISION / readyForOwner roll-up even after the
+           activity has moved on — trusting it here would yank the timeline
+           back to division_approved). Never override a rejection. */
+        if (
+          gate &&
+          gate.readyForOwner === true &&
+          !gate.hasRejection &&
+          (derivedState === "pending_division" || derivedState === null)
+        ) {
+          derivedState = "division_approved";
         }
         if (!derivedState) return;
         setForm((f) => ({
