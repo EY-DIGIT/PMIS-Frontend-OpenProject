@@ -7,7 +7,7 @@ const RAW_BASE = import.meta.env.VITE_API_BASE_URL || 'http://10.1.131.199:8000/
 export const API_BASE = RAW_BASE.replace(/\/+$/, '');
 
 const BASE = RAW_BASE;
-const REFRESH_PATH = '/api/v3/users/refresh';
+const REFRESH_PATH = '/users/api/v3/users/refresh';
 
 const TOKEN_KEY = 'pmis_token';
 const REFRESH_KEY = 'pmis_refresh_token';
