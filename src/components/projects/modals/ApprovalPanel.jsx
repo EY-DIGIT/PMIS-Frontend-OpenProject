@@ -33,6 +33,7 @@ import {
   WORKFLOW_ACTIONS,
   WORKFLOW_STATES
 } from "../../../api/activityWorkflow";
+import { useCan } from "../../../auth/permissions";
 import ApprovalRequestModal from "./ApprovalRequestModal";
 
 function StepRow({ index, state, title, children }) {
@@ -97,11 +98,15 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
   const isStarted = !!form.actualStartDate || !!activity.actualStartDate;
   const allTasksDone = activityTasksAllComplete(activity);
   const hasTasks = !activityHasNoTasks(activity);
-  /* Workflow toolbar buttons (Mark Ready, Request Division, etc.) only
-     enable once the activity has been started — the Start Activity
-     banner sits in the left column and stamping actualStartDate flips
-     this flag. */
-  const workflowEnabled = editable && !busy && isStarted;
+  /* Mark Ready / Request Division / Request Owner / Resend are gated on
+     the submitActivityForApproval permission (granted to super_admin,
+     admin, org_admin, project_admin) — NOT on the form's editable flag.
+     This lets org_admin / project_admin drive the workflow even though
+     they can't edit the activity's fields. The activity also has to be
+     started (actualStartDate stamped) so the Start banner gates buttons
+     until the work has actually begun. */
+  const canSubmitForApproval = useCan('submitActivityForApproval');
+  const workflowEnabled = canSubmitForApproval && !busy && isStarted;
   const ownerName = form.ownerDivision || activity.owner || "Owner";
   const consentDivisions = safeArray(form.concernedDivision).length
     ? safeArray(form.concernedDivision)
@@ -469,7 +474,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         Awaiting Activity Owner decision — approve or reject from the row below.
       </div>
     );
-  } else if (editable) {
+  } else if (canSubmitForApproval) {
     toolbarNode = (
       <div className="pmis-awf-toolbar pmis-awf-toolbar--empty">
         No actions available at this stage.

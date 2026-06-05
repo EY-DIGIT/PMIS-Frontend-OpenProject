@@ -15,8 +15,14 @@ import { formatDateDisplay } from "../../../utils/project/helpers";
 import { startActivity } from "../../../utils/project/approvalWorkflow";
 import { api } from "../../../api/client";
 import { ENDPOINTS } from "../../../api/endpoint";
+import { useCan } from "../../../auth/permissions";
 
 export default function StartActivityBanner({ activity, form, editable, onChange }) {
+  /* Start Activity is part of the approval-workflow pipeline (it gates
+     Mark Ready), so it follows the same permission as the timeline
+     buttons: super_admin / admin / org_admin / project_admin can start
+     even though they may not have full activity-edit rights. */
+  const canSubmit = useCan('submitActivityForApproval');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -83,7 +89,7 @@ export default function StartActivityBanner({ activity, form, editable, onChange
                 the panel on the right.
               </div>
             </div>
-            {editable && (
+            {canSubmit && (
               <button
                 type="button"
                 className="pmis-awf-start-banner__btn"
