@@ -846,7 +846,7 @@ export default function ActivitySlasPage() {
                         {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
                     </div>
                     {!singleEval ? (
-                        <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
+                        <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
                     ) : (
                         <>
                             <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 10 }}>
@@ -904,7 +904,7 @@ export default function ActivitySlasPage() {
                             <button type="button" className="uidai-pmis-filter-toggle" onClick={closeActivityEval}>✕ Close</button>
                         )}
                     </div>
-                    <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
+                    <div style={{ fontSize: 12, ...muted, marginTop: 8 ,padding: 11}}>
                         Evaluates every active SLA mapping on activity{" "}
                         <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
                     </div>
