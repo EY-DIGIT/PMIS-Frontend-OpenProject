@@ -8,7 +8,8 @@ import ActivityAuditTrail from "./ActivityAuditTrail";
 import StartActivityBanner from "./StartActivityBanner";
 import {
   getProcessInstances,
-  getActivityWorkflowAuditLogs
+  getActivityWorkflowAuditLogs,
+  getParallelGateStatus
 } from "../../../api/activityWorkflow";
 import {
   deriveStateFromInstances,
@@ -462,14 +463,17 @@ export default function NodeModal({
        we fall back to the legacy instances for display. */
     Promise.allSettled([
       getProcessInstances(businessId),
-      getActivityWorkflowAuditLogs(businessId)
+      getActivityWorkflowAuditLogs(businessId),
+      getParallelGateStatus(businessId)
     ])
-      .then(([piRes, auditRes]) => {
+      .then(([piRes, auditRes, gateRes]) => {
         if (cancelled) return;
         const instances = piRes.status === "fulfilled" && Array.isArray(piRes.value)
           ? piRes.value : [];
         const auditLogs = auditRes.status === "fulfilled" && Array.isArray(auditRes.value)
           ? auditRes.value : [];
+        const gate = gateRes.status === "fulfilled" && gateRes.value && typeof gateRes.value === "object"
+          ? gateRes.value : null;
 
         /* Prefer the new audit-log rows for the timeline; fall back to
            legacy instances when the audit endpoint is empty. */
@@ -497,6 +501,20 @@ export default function NodeModal({
           if (!derivedOwner) {
             derivedOwner = deriveOwnerApprovalFromInstances(instances);
           }
+        }
+        /* Gate-status is the authoritative roll-up of Concerned Division
+           votes. When every division has approved the backend sets
+           readyForOwner=true — surface the "Request Owner Approval" button
+           by bumping pending_division → division_approved. Only upgrade
+           that one step; never downgrade a state already at/past the owner
+           stage, and never override a rejection. */
+        if (
+          gate &&
+          gate.readyForOwner === true &&
+          !gate.hasRejection &&
+          (derivedState === "pending_division" || derivedState === null)
+        ) {
+          derivedState = "division_approved";
         }
         if (!derivedState) return;
         setForm((f) => ({

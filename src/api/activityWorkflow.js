@@ -404,6 +404,33 @@ export async function getActivityWorkflowAuditLogs(activityId) {
   return [];
 }
 
+/* GET the parallel gate status — the authoritative roll-up of the
+   Concerned Division votes:
+     GET /activity-workflow/activities/parallel/gate-status/ACTIVITY/{activityId}
+   Returns the backend object as-is, e.g.
+     { businessService, activityId, stateName, totalApprovers,
+       approvedCount, pendingCount, rejectedCount, readyForOwner,
+       hasRejection, divisions: [{ divisionCode, approverName,
+       voteStatus, voteComment, votedAt, ... }] }
+   `readyForOwner: true` means every Concerned Division approved and the
+   activity is ready to be forwarded to the Activity Owner. Returns null
+   on error so callers can simply fall back to audit-log derivation. */
+export async function getParallelGateStatus(activityId) {
+  if (!activityId) return null;
+  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.gateStatus(activityId)}`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: authHeaders(),
+      cache: "no-store"
+    });
+    const payload = await parseJsonOrThrow(res, "Gate status fetch");
+    return payload && typeof payload === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
 /* Map a backend previousStatus string to one of our local approvalState
    codes. Used by the timeline + audit trail to render API-driven flow. */
 export const STATUS_MAP = {

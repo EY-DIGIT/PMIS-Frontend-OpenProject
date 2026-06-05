@@ -341,6 +341,10 @@ export const ENDPOINTS = {
     inbox: '/activity-workflow/activities/inbox',
     inboxDetail: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}`,
     auditLogs: (activityId) => `/activity-workflow/activities/audit/ACTIVITY/${enc(activityId)}`,
+    /* Parallel gate status — authoritative roll-up of the Concerned
+       Division votes. `readyForOwner: true` means every division approved
+       and the activity can be forwarded to the Activity Owner. */
+    gateStatus: (activityId) => `/activity-workflow/activities/parallel/gate-status/ACTIVITY/${enc(activityId)}`,
   },
 
   /* Meeting Management — the backend exposes a flat /api/meetings path
