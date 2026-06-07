@@ -180,7 +180,7 @@
 .uidai-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(11, 60, 136, .78) 0%, rgba(10, 30, 80, .88) 100%);
+  /* background: linear-gradient(135deg, rgba(11, 60, 136, .78) 0%, rgba(10, 30, 80, .88) 100%); */
   display: flex;
   justify-content: flex-end;
   align-items: center;
