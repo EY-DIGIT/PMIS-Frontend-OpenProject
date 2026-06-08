@@ -84,8 +84,42 @@ function isScalar(v) {
   return v == null || ["string", "number", "boolean"].includes(typeof v);
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Matches a value that starts with an ISO date (plain "2026-06-08" or a
+// full datetime "2026-06-08T00:00:00+05:30").
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/;
+
+// Format an ISO date / datetime audit value to "DD-MMM-YYYY" (or
+// "DD-MMM-YYYY HH:MM" in IST when it carries a meaningful time). Returns
+// null if it isn't a parseable date so the caller can fall back to raw.
+function fmtIsoValue(v) {
+  const s = String(v);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (dateOnly) {
+    const [, y, m, d] = dateOnly;
+    return `${d}-${MONTHS[Number(m) - 1]}-${y}`;
+  }
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+  const ist = new Date(dt.getTime() + 330 * 60000);
+  const day = String(ist.getUTCDate()).padStart(2, "0");
+  const month = MONTHS[ist.getUTCMonth()];
+  const year = ist.getUTCFullYear();
+  const hh = ist.getUTCHours();
+  const mm = ist.getUTCMinutes();
+  const ss = ist.getUTCSeconds();
+  // Midnight / end-of-day boundaries are date markers — drop the time.
+  const isBoundary = (hh === 0 && mm === 0 && ss === 0) || (hh === 23 && mm === 59);
+  if (isBoundary) return `${day}-${month}-${year}`;
+  return `${day}-${month}-${year} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 function fmtScalar(v) {
   if (v == null || v === "") return "—";
+  if (typeof v === "string" && ISO_DATE_RE.test(v)) {
+    const f = fmtIsoValue(v);
+    if (f) return f;
+  }
   return String(v);
 }
 
