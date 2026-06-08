@@ -1482,6 +1482,7 @@ function PhasePanel({
   const [expanded, setExpanded] = useState(true);
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
+  const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
   const qrgApplied = !!phase.qrg?.applied;
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
@@ -1670,13 +1671,16 @@ function PhasePanel({
             </table>
           </div>
 
-          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
             <div style={{
               fontSize: 13,
               color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
               fontWeight: 700,
             }}>
               Scheduled: {totalPercent}%{totalPercent > 100 && " — over 100%"}
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77" }}>
+              Total: {inr(totalValue)}
             </div>
           </div>
         </div>
@@ -1769,7 +1773,6 @@ function QgrSummarySection({ phases, totals }) {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {stat("Terms", `${terms.length} term${terms.length === 1 ? "" : "s"}`)}
                 {stat("Scheduled", `${totalPercent}%`,
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Phase Fixed", inr(phaseFixed))}
