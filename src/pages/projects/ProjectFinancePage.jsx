@@ -1418,10 +1418,7 @@ export default function ProjectFinancePage() {
             background: "var(--uidai-pmis-border)",
             margin: "0 16px",
           }} />
-          <QgrSummarySection
-            phases={phases}
-            totals={totals}
-          />
+          <QgrSummarySection phases={phases} />
         </div>
       </div>
 
@@ -1673,26 +1670,20 @@ function PhasePanel({
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   QgrSummarySection — read-only QGR summary in the right column below
-   the Summary card. The Yes/No toggles now live in each phase's
-   collapsible header on the left; this panel just reports the outcome:
-   which phase holds QGR, the held-back %/amount, the total contract
-   cost, and how much remains payable after the hold-back.
+   QgrSummarySection — read-only per-phase summary in the right column
+   below the Summary card. The Yes/No toggles live in each phase's
+   collapsible header on the left; this panel reports, for every phase:
+   the scheduled term count + %, the phase Fixed total, and (when the
+   phase carries QGR) the held-back %/₹ value. Total Contract Cost is
+   intentionally omitted here — it already shows in the Summary above.
    ────────────────────────────────────────────────────────────────── */
-function QgrSummarySection({ phases, totals }) {
+function QgrSummarySection({ phases }) {
   if (!phases || phases.length === 0) return null;
-  const appliedPhase = phases.find((p) => p.qrg?.applied);
-  const total = Number(totals?.totalContractCost) || 0;
-  const percent = appliedPhase ? Number(appliedPhase.qrg?.percent) || 0 : 0;
-  const holdBack = appliedPhase ? Number(appliedPhase.qrg?.value) || 0 : 0;
-  const remaining = total - holdBack;
 
-  const row = (label, value, opts = {}) => (
+  const stat = (label, value, opts = {}) => (
     <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      gap: 8, fontSize: 13,
-      background: "#fff", border: "1px solid var(--uidai-pmis-border)",
-      borderRadius: 8, padding: "8px 12px",
+      display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+      fontSize: 12,
     }}>
       <span style={muted}>{label}</span>
       <strong style={{ color: opts.color || "#173e77" }}>{value}</strong>
@@ -1708,54 +1699,60 @@ function QgrSummarySection({ phases, totals }) {
         paddingBottom: 12, marginBottom: 14,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        QGR Summary
+        Phase Summary
       </div>
 
-      <div style={{
-        fontSize: 12, textAlign: "center", marginBottom: 14, lineHeight: 1.4,
-      }}>
-        {appliedPhase ? (
-          <span style={{ color: "#173e77", fontWeight: 700 }}>
-            Active on{" "}
-            <span style={{
-              display: "inline-block",
-              padding: "2px 9px", borderRadius: 999, marginLeft: 2,
-              background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
-              fontSize: 11, fontWeight: 800,
-            }}>
-              Phase {appliedPhase.phase}
-            </span>
-          </span>
-        ) : (
-          <span style={muted}>No phase has QGR applied — full amount is payable.</span>
-        )}
-      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {phases.map((p) => {
+          const terms = p.paymentTerms || [];
+          const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
+          const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
+          const yes = !!p.qrg?.applied;
+          const qgrPercent = yes ? Number(p.qrg?.percent) || 0 : 0;
+          const qgrValue = yes ? Number(p.qrg?.value) || 0 : 0;
+          return (
+            <div
+              key={p.phase}
+              style={{
+                border: yes ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
+                background: yes ? "#f1faf4" : "#fff",
+                borderRadius: 10,
+                padding: "12px 14px",
+                boxShadow: yes
+                  ? "0 2px 6px rgba(27, 122, 66, 0.10)"
+                  : "0 1px 2px rgba(20, 50, 110, 0.04)",
+              }}
+            >
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                fontWeight: 800, color: "#173e77", fontSize: 13,
+                paddingBottom: 8, marginBottom: 8,
+                borderBottom: "1px solid var(--uidai-pmis-border)",
+              }}>
+                Phase {p.phase}
+                {yes && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                    padding: "1px 6px", borderRadius: 999,
+                    background: "#1b7a42", color: "#fff",
+                  }}>
+                    QGR
+                  </span>
+                )}
+              </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {row("QGR %", appliedPhase ? `${percent} %` : "—",
-          { color: appliedPhase ? "#1b7a42" : "#a3afc1" })}
-        {row("QGR Hold-back", appliedPhase ? inr(holdBack) : inr(0),
-          { color: appliedPhase ? "#9b1c1c" : "#173e77" })}
-        {row("Total Contract Cost", inr(total))}
-
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-          marginTop: 6, padding: "12px 14px",
-          background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
-          color: "#fff",
-          borderRadius: 10,
-          boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
-        }}>
-          <span style={{ fontSize: 11, opacity: 0.9, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Remaining Payable
-          </span>
-          <strong style={{ fontSize: 18, color: "#fff" }}>{inr(remaining)}</strong>
-          {appliedPhase && (
-            <span style={{ fontSize: 10, opacity: 0.85 }}>
-              after ₹ {holdBack.toLocaleString("en-IN")} QGR hold-back
-            </span>
-          )}
-        </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {stat("Terms", `${terms.length} term${terms.length === 1 ? "" : "s"}`)}
+                {stat("Scheduled", `${totalPercent}%`,
+                  { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
+                {stat("Phase Fixed", inr(phaseFixed))}
+                {stat("QGR Hold-back",
+                  yes ? `${qgrPercent}% · ${inr(qgrValue)}` : "—",
+                  { color: yes ? "#1b7a42" : "#a3afc1" })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
