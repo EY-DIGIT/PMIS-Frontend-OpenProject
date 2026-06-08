@@ -1484,6 +1484,8 @@ function PhasePanel({
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
   const qrgApplied = !!phase.qrg?.applied;
+  const qgrPercent = qrgApplied ? Number(phase.qrg?.percent) || 0 : 0;
+  const totalNet = totalValue * (1 - qgrPercent / 100);
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
 
@@ -1594,18 +1596,22 @@ function PhasePanel({
                   <th style={{ width: 140 }}>Frequency</th>
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
+                  <th style={{ width: 200 }}>Breakup (Gross / QGR / Net)</th>
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
                 ) : terms.map((t) => {
                   const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
+                  const gross = Number(t.value) || 0;
+                  const qgrHold = gross * (qgrPercent / 100);
+                  const net = gross - qgrHold;
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
@@ -1623,7 +1629,16 @@ function PhasePanel({
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
                       <td style={{ fontWeight: 700, color: "#173e77" }}>
-                        ₹ {Number(t.value || 0).toLocaleString("en-IN")}
+                        ₹ {gross.toLocaleString("en-IN")}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
+                          <span style={muted}>Gross: <strong style={{ color: "#173e77" }}>{inr(gross)}</strong></span>
+                          <span style={{ color: qgrHold > 0 ? "#b54708" : "#a3afc1" }}>
+                            − QGR {qgrPercent}%: {inr(qgrHold)}
+                          </span>
+                          <span style={{ fontWeight: 700, color: "#1b7a42" }}>Net: {inr(net)}</span>
+                        </div>
                       </td>
                       <td style={{ textAlign: "center" }}>
                         <button
@@ -1674,6 +1689,9 @@ function PhasePanel({
                     </td>
                     <td style={{ fontWeight: 800, color: "#173e77" }}>
                       ₹ {totalValue.toLocaleString("en-IN")}
+                    </td>
+                    <td style={{ fontWeight: 700, color: "#1b7a42", fontSize: 12 }}>
+                      Net: {inr(totalNet)}
                     </td>
                     <td />
                   </tr>
