@@ -48,11 +48,12 @@ export default function Profile() {
   });
 
   function seedForm(u) {
+    console.log("Seeding form with user", u);
     const fn = u?.fullName || u?.full_name || u?.name || u?.login || "";
     setForm({
       fullName: fn,
       email: u?.email || "",
-      phoneNumber: u?.phoneNumber || "",
+      phoneNumber: u?.phone_number || "",
       division: (u?.division || "").toLowerCase() || "tmd1",
       divisionOther: u?.divisionOther || "",
     });
