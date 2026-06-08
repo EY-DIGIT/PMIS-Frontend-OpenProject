@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -105,6 +105,9 @@ function extractElements(payload) {
    stay visible so the user understands why they're unavailable. */
 function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, ready: false });
+  const toggleRef = useRef(null);
+  const panelRef = useRef(null);
   const selected = Array.isArray(value) ? value : [];
 
   function isLocked(id) {
@@ -123,10 +126,65 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
     .map((id) => options.find((o) => o.id === id)?.name)
     .filter(Boolean);
 
+  /* The Add Cost modal box is `overflow:auto`, so an absolutely-positioned
+     dropdown gets clipped and the user has to scroll the modal to see the
+     list. Render the panel position:fixed (anchored to the toggle) so it
+     floats above the modal — same technique as the Manage Team picker. */
+  useLayoutEffect(() => {
+    if (!open) { setPos((p) => ({ ...p, ready: false })); return; }
+    const place = () => {
+      const toggleEl = toggleRef.current;
+      const panel = panelRef.current;
+      if (!toggleEl || !panel) return;
+      const rect = toggleEl.getBoundingClientRect();
+      const margin = 10;
+      const gap = 6;
+      const viewportH = window.innerHeight;
+      const width = rect.width;
+      let left = rect.left;
+      if (left + width > window.innerWidth - margin) left = window.innerWidth - margin - width;
+      if (left < margin) left = margin;
+
+      const panelHeight = panel.offsetHeight;
+      const spaceBelow = viewportH - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      let top;
+      if (spaceBelow >= panelHeight + gap || spaceBelow >= spaceAbove) {
+        top = rect.bottom + gap;
+        if (top + panelHeight > viewportH - margin) top = Math.max(margin, viewportH - margin - panelHeight);
+      } else {
+        top = rect.top - panelHeight - gap;
+        if (top < margin) top = margin;
+      }
+      setPos({ top, left, width, ready: true });
+    };
+    place();
+    const onReposition = () => place();
+    window.addEventListener("scroll", onReposition, true);
+    window.addEventListener("resize", onReposition);
+    return () => {
+      window.removeEventListener("scroll", onReposition, true);
+      window.removeEventListener("resize", onReposition);
+    };
+  }, [open, options.length]);
+
+  /* Close on outside click. */
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (toggleRef.current?.contains(e.target)) return;
+      if (panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
   return (
     <div style={{ position: "relative" }}>
       <button
         type="button"
+        ref={toggleRef}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         style={{
@@ -146,56 +204,46 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
         <span style={{ ...muted, fontSize: 11 }}>▾</span>
       </button>
       {open && !disabled && (
-        <div style={{
-          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
-          background: "#fff", border: "1px solid var(--uidai-pmis-border)",
-          borderRadius: 8, boxShadow: "0 10px 24px rgba(0,0,0,.10)",
-          maxHeight: 200, overflowY: "auto", padding: 4,
-        }}>
-          {options.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, ...muted }}>No milestones available</div>
-          ) : options.map((opt) => {
-            const locked = isLocked(opt.id);
-            return (
-              <label key={opt.id}
-                title={locked ? "Already used in another cost item" : undefined}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
-                  borderRadius: 6,
-                  cursor: locked ? "not-allowed" : "pointer",
-                  fontSize: 13,
-                  color: locked ? "#9aa6bb" : "var(--uidai-pmis-text)",
-                  background: locked ? "#f3f6fb" : "transparent",
-                }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (locked) return;
-                  toggle(opt.id);
-                }}
-              >
-                <input
-                  type="checkbox"
-                  readOnly
-                  disabled={locked}
-                  checked={selected.includes(opt.id)}
-                  style={{ width: "auto" }}
-                />
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {opt.name}
-                </span>
-                {locked && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-                    padding: "1px 6px", borderRadius: 999,
-                    background: "#eef2f7", color: "#5a6680", border: "1px solid #d8e0ec",
-                  }}>
-                    USED
-                  </span>
-                )}
-              </label>
-            );
-          })}
+        <div
+          ref={panelRef}
+          className="fin-ms-panel"
+          style={{
+            position: "fixed",
+            top: pos.top + "px",
+            left: pos.left + "px",
+            width: pos.width + "px",
+            visibility: pos.ready ? "visible" : "hidden",
+          }}
+        >
+          <div className="fin-ms-options" role="listbox">
+            {options.length === 0 ? (
+              <div className="fin-ms-empty">No milestones available</div>
+            ) : options.map((opt) => {
+              const locked = isLocked(opt.id);
+              const checked = selected.includes(opt.id);
+              return (
+                <label key={opt.id}
+                  title={locked ? "Already used in another cost item" : undefined}
+                  className={`fin-ms-option${checked ? " fin-ms-checked" : ""}${locked ? " fin-ms-locked" : ""}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (locked) return;
+                    toggle(opt.id);
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    readOnly
+                    disabled={locked}
+                    checked={checked}
+                  />
+                  <span>{opt.name}</span>
+                  {locked && <span className="fin-ms-used-tag">USED</span>}
+                </label>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
