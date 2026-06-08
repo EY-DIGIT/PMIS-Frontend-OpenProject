@@ -710,27 +710,22 @@ function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
 
 /* ──────────────────────────────────────────────────────────────────
    Edit Payment Term modal — opens when a term row's Edit button is
-   clicked. Holds the term's start/end dates, % of payment and cycle;
+   clicked. Start/End dates and Cycle are read-only (managed at the
+   phase level via Apply Frequency); only % of Payment is editable.
    Save PATCHes the term and the parent silently re-loads the page.
    ────────────────────────────────────────────────────────────────── */
 function EditTermModal({
   open, onClose, term, onSubmit, submitting, milestoneName,
 }) {
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
   const [percentOfPayment, setPercentOfPayment] = useState("");
-  const [cycle, setCycle] = useState("");
 
   useEffect(() => {
     if (!open || !term) return;
-    setStartDate(term.startDate || "");
-    setEndDate(term.endDate || "");
     setPercentOfPayment(
       term.percentOfPayment === null || term.percentOfPayment === undefined
         ? ""
         : String(term.percentOfPayment)
     );
-    setCycle(term.cycle == null ? "" : String(term.cycle));
   }, [open, term]);
 
   if (!open || !term) return null;
@@ -760,20 +755,11 @@ function EditTermModal({
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
+            <input type="text" value={fmtDMY(term.startDate)} disabled title="Set via Apply Frequency" />
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              min={startDate || undefined}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+            <input type="text" value={fmtDMY(term.endDate)} disabled title="Set via Apply Frequency" />
           </div>
         </div>
 
@@ -791,9 +777,9 @@ function EditTermModal({
             <label>Cycle</label>
             <input
               type="text"
-              value={cycle}
-              placeholder="e.g. 1"
-              onChange={(e) => setCycle(e.target.value)}
+              value={term.cycleCount == null ? "" : String(term.cycleCount)}
+              disabled
+              title="Set via Apply Frequency"
             />
           </div>
         </div>
@@ -813,13 +799,10 @@ function EditTermModal({
             style={{ marginTop: 0 }}
             disabled={submitting}
             onClick={() => onSubmit({
-              startDate: startDate || null,
-              endDate: endDate || null,
               percentOfPayment:
                 percentOfPayment === "" || percentOfPayment === null
                   ? null
                   : Number(percentOfPayment),
-              cycle: cycle === "" ? null : cycle,
             })}
           >
             {submitting ? "Saving…" : "Save"}
@@ -1106,7 +1089,7 @@ export default function ProjectFinancePage() {
 
   /* Edit Payment Term — invoked from the EditTermModal's Save button.
      Returns true on success so the caller can close the modal. */
-  async function saveTerm(term, { startDate, endDate, percentOfPayment, cycle }) {
+  async function saveTerm(term, { percentOfPayment }) {
     if (!term) return false;
 
     /* Hard validation: the final milestone of the final phase is the
@@ -1143,9 +1126,6 @@ export default function ProjectFinancePage() {
         body: JSON.stringify({
           frequencyCode: term.frequencyCode ?? null,
           percentOfPayment,
-          startDate,
-          endDate,
-          cycle,
         }),
       });
       await readJson(res);
@@ -1285,10 +1265,6 @@ export default function ProjectFinancePage() {
       (code === "fixed" ? "Fixed" : code === "one_time" ? "One-Time" : code);
   }
 
-  function frequencyName(code) {
-    if (!code) return "";
-    return frequencies.find((f) => f.code === code)?.name || code;
-  }
 
   // Loading & error gates
   if (!projectId) return null;
@@ -1452,7 +1428,6 @@ export default function ProjectFinancePage() {
                 key={p.phase}
                 phase={p}
                 milestoneName={milestoneName}
-                frequencyName={frequencyName}
                 frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
                 onApplyFrequency={applyPhaseFrequency}
@@ -1570,7 +1545,7 @@ export default function ProjectFinancePage() {
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencyName, frequencies = [], onEditTerm, onApplyFrequency,
+  phase, milestoneName, frequencies = [], onEditTerm, onApplyFrequency,
   isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -1724,7 +1699,7 @@ function PhasePanel({
               <thead>
                 <tr>
                   <th>Milestone</th>
-                  <th style={{ width: 140 }}>Frequency</th>
+                  <th style={{ width: 110 }}>Cycle</th>
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
@@ -1739,7 +1714,6 @@ function PhasePanel({
                     </td>
                   </tr>
                 ) : terms.map((t, idx) => {
-                  const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
                   const value = Number(t.value) || 0;
                   const pct = Number(t.percentOfPayment) || 0;
                   /* Running balance: each row's remaining = base minus every
@@ -1753,11 +1727,12 @@ function PhasePanel({
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
                       <td>
-                        {freqLabel
+                        {t.cycleCount != null
                           ? <span style={{
                               display: "inline-block", padding: "2px 8px", borderRadius: 999,
-                              background: "#eef4fc", color: "#173e77", fontSize: 12, fontWeight: 600,
-                            }}>{freqLabel}</span>
+                              background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600,
+                              border: "1px solid #c4e9d0",
+                            }}>{t.cycleCount}</span>
                           : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
                       </td>
                       <td>
