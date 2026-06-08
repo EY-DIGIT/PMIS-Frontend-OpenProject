@@ -32,13 +32,12 @@ function inr(n) {
 
 const ctrl = {
   width: "100%",
-  padding: "8px 10px",
+  padding: "10px",
   border: "1px solid var(--uidai-pmis-border)",
   borderRadius: 6,
   background: "#fff",
   color: "var(--uidai-pmis-text)",
   font: "inherit",
-  fontSize: 13,
   boxSizing: "border-box",
 };
 
