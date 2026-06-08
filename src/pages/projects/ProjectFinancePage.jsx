@@ -1671,7 +1671,7 @@ function PhasePanel({
             </table>
           </div>
 
-          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
             <div style={{
               fontSize: 13,
               color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
