@@ -1517,7 +1517,6 @@ function PhasePanel({
   const phaseBase = totalPercent > 0 ? totalValue / (totalPercent / 100) : 0;
   const phaseRemaining = phaseBase - totalValue;
   const qrgApplied = !!phase.qrg?.applied;
-  const qgrPercent = qrgApplied ? Number(phase.qrg?.percent) || 0 : 0;
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
 
@@ -1628,7 +1627,7 @@ function PhasePanel({
                   <th style={{ width: 140 }}>Frequency</th>
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
-                  <th style={{ width: 220 }}>Breakup (Total / % / Remaining / QGR)</th>
+                  <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
@@ -1650,8 +1649,6 @@ function PhasePanel({
                     .slice(0, idx + 1)
                     .reduce((s, r) => s + (Number(r.value) || 0), 0);
                   const remaining = phaseBase - scheduledSoFar;
-                  const qgrHold = value * (qgrPercent / 100);
-                  const net = value - qgrHold;
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
@@ -1678,16 +1675,6 @@ function PhasePanel({
                           <span style={{ fontWeight: 700, color: remaining > 0 ? "#b54708" : "#1b7a42" }}>
                             Remaining: {inr(remaining)}
                           </span>
-                          {qrgApplied && (
-                            <>
-                              <span style={{ color: "#b54708" }}>
-                                − QGR {qgrPercent}%: {inr(qgrHold)}
-                              </span>
-                              <span style={{ fontWeight: 700, color: "#1b7a42" }}>
-                                Net: {inr(net)}
-                              </span>
-                            </>
-                          )}
                         </div>
                       </td>
                       <td style={{ textAlign: "center" }}>
@@ -1745,16 +1732,6 @@ function PhasePanel({
                       <div style={{ color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }}>
                         Remaining: {inr(phaseRemaining)}
                       </div>
-                      {qrgApplied && (
-                        <>
-                          <div style={{ color: "#b54708" }}>
-                            − QGR {qgrPercent}%: {inr(totalValue * (qgrPercent / 100))}
-                          </div>
-                          <div style={{ color: "#1b7a42" }}>
-                            Net: {inr(totalValue * (1 - qgrPercent / 100))}
-                          </div>
-                        </>
-                      )}
                     </td>
                     <td />
                   </tr>
