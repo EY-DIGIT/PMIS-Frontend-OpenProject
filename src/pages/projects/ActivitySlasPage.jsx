@@ -838,9 +838,9 @@ export default function ActivitySlasPage() {
 
             {/* MAPPING — evaluation, two panels side by side */}
             {view === "mapping" && (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 22, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 22, alignItems: "start" }}>
                 {/* Single-mapping evaluate */}
-                <div className="uidai-pmis-card" style={{ marginBottom: 0, minWidth: 0 }}>
+                <div className="uidai-pmis-card" style={{ marginBottom: 0,width:"100%" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
                         <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
                         {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
@@ -853,7 +853,7 @@ export default function ActivitySlasPage() {
                                 {singleEval.slaTitle || "Mapping"}
                                 <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
                             </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16,maxWidth:640 }}>
                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                     <label>Period Start</label>
                                     <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
@@ -893,7 +893,7 @@ export default function ActivitySlasPage() {
                 </div>
 
                 {/* Whole-activity evaluate */}
-                <div className="uidai-pmis-card" style={{ marginBottom: 0, minWidth: 0 }}>
+                <div className="uidai-pmis-card" style={{ marginBottom: 0,width:"100%"}}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
                         <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate Whole Activity</div>
                         {!actEval ? (
@@ -904,7 +904,7 @@ export default function ActivitySlasPage() {
                             <button type="button" className="uidai-pmis-filter-toggle" onClick={closeActivityEval}>✕ Close</button>
                         )}
                     </div>
-                    <div style={{ fontSize: 12, ...muted, marginTop: 8 ,padding: 11}}>
+                    <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
                         Evaluates every active SLA mapping on activity{" "}
                         <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
                     </div>
@@ -912,7 +912,7 @@ export default function ActivitySlasPage() {
 
                     {actEval && (
                         <div style={{ marginTop: 14 }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 ,maxWidth:440}}>
                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                     <label>Period Start</label>
                                     <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />

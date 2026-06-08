@@ -162,7 +162,7 @@ export default function MeetingsListPage() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" style={{margin:0}}>
         <div className="card-title">All Meetings</div>
 
         <div className="toolbar">

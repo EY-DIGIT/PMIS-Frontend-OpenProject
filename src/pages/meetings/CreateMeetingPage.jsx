@@ -342,7 +342,8 @@ export default function CreateMeetingPage() {
             justifyContent: "space-between",
             gap: 10,
             alignItems: "center",
-            marginBottom: 16
+            marginBottom: 16,
+            margin:0
           }}
         >
           {/* <div className="card-title" style={{ margin: 0 }}>
@@ -392,9 +393,6 @@ export default function CreateMeetingPage() {
               placeholder="e.g. Q2 Governance Committee Review"
             />
           </div>
-          <div aria-hidden="true" />
-
-          {/* Row 2 — Date | Start | End */}
           <div className="field">
             <label htmlFor="mDate">
               Meeting Date <span className="required">*</span>
@@ -412,6 +410,10 @@ export default function CreateMeetingPage() {
               Please select a date.
             </div>
           </div>
+          
+
+          {/* Row 2 — Date | Start | End */}
+          
           <div className="field">
             <label htmlFor="mStart">
               Start Time (IST) <span className="required">*</span>
@@ -454,8 +456,6 @@ export default function CreateMeetingPage() {
               placeholder="MS Teams / Google Meet link or location"
             />
           </div>
-          <div aria-hidden="true" />
-          <div aria-hidden="true" />
 
           {/* Row 4 — Agenda | Attachments | (External slot, blank until
               the user clicks "Add External Attendees"). */}
