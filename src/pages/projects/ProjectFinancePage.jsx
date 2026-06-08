@@ -1355,7 +1355,7 @@ export default function ProjectFinancePage() {
               <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>
                 Add a Fixed cost row with milestones to populate payment terms.
               </div>
-            ) : phases.map((p) => (
+            ) : phases.map((p, idx) => (
               <PhasePanel
                 key={p.phase}
                 phase={p}
@@ -1363,6 +1363,7 @@ export default function ProjectFinancePage() {
                 frequencyName={frequencyName}
                 onEditTerm={(t) => setEditingTerm(t)}
                 isLocked={isLocked}
+                isLastPhase={idx === phases.length - 1}
                 qgrLocked={isLocked || qgrSaving}
                 qgrBusy={qgrSaving}
                 onSetQrgForPhase={setQrgForPhase}
@@ -1476,7 +1477,7 @@ export default function ProjectFinancePage() {
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencyName, onEditTerm, isLocked,
+  phase, milestoneName, frequencyName, onEditTerm, isLocked, isLastPhase,
   qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -1712,7 +1713,24 @@ function PhasePanel({
             </table>
           </div>
 
-          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            {/* The final phase must schedule the full contract — i.e. its
+                payment terms have to total exactly 100%. Flag any shortfall
+                or overage so it can't be left unbalanced. */}
+            {isLastPhase && terms.length > 0 && totalPercent !== 100 ? (
+              <div style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                fontSize: 12, fontWeight: 700, color: "var(--uidai-pmis-red)",
+                background: "#fdecec", border: "1px solid #f5c2c2",
+                borderRadius: 8, padding: "6px 10px",
+              }}>
+                <span aria-hidden="true">⚠</span>
+                Last phase must total 100% — currently {totalPercent}%
+                {totalPercent < 100
+                  ? ` (${100 - totalPercent}% short)`
+                  : ` (${totalPercent - 100}% over)`}
+              </div>
+            ) : <span />}
             <div style={{
               fontSize: 13,
               color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
