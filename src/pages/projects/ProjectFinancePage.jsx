@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -203,7 +204,7 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
         </span>
         <span style={{ ...muted, fontSize: 11 }}>▾</span>
       </button>
-      {open && !disabled && (
+      {open && !disabled && createPortal(
         <div
           ref={panelRef}
           className="fin-ms-panel"
@@ -244,7 +245,8 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
