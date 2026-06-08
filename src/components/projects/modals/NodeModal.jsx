@@ -1209,7 +1209,8 @@ export default function NodeModal({
                 <option value="">— Select Priority —</option>
                 {safeArray(priorities).map((p) => (
                   <option key={p.id || p.code} value={p.code}>
-                    {p.name}{p.description ? ` — ${p.description}` : ""}
+                    {p.name}
+                    {/* {p.description ? ` — ${p.description}` : ""} */}
                   </option>
                 ))}
               </select>
