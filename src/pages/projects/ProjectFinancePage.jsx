@@ -224,7 +224,6 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
               const checked = selected.includes(opt.id);
               return (
                 <label key={opt.id}
-                  title={locked ? "Already used in another cost item" : undefined}
                   className={`fin-ms-option${checked ? " fin-ms-checked" : ""}${locked ? " fin-ms-locked" : ""}`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={(e) => {
@@ -240,7 +239,6 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
                     checked={checked}
                   />
                   <span>{opt.name}</span>
-                  {locked && <span className="fin-ms-used-tag">USED</span>}
                 </label>
               );
             })}
@@ -395,6 +393,9 @@ function AddCostItemModal({
               onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
             />
           </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Tax Amount (₹)</label>
             <input
@@ -404,20 +405,19 @@ function AddCostItemModal({
               onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
             />
           </div>
-        </div>
-
-        <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
-          <label>Milestones</label>
-          {isOneTime ? (
-            <input value="" disabled placeholder="—" />
-          ) : (
-            <MilestoneMultiSelect
-              value={draft.milestoneIds}
-              options={milestones}
-              disabledIds={disabledMilestoneIds}
-              onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
-            />
-          )}
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Milestones</label>
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
+              <MilestoneMultiSelect
+                value={draft.milestoneIds}
+                options={milestones}
+                disabledIds={disabledMilestoneIds}
+                onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
+              />
+            )}
+          </div>
         </div>
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
@@ -555,6 +555,9 @@ function EditCostItemModal({
               onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
             />
           </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Tax Amount (₹)</label>
             <input
@@ -564,20 +567,19 @@ function EditCostItemModal({
               onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
             />
           </div>
-        </div>
-
-        <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
-          <label>Milestones</label>
-          {isOneTime ? (
-            <input value="" disabled placeholder="—" />
-          ) : (
-            <MilestoneMultiSelect
-              value={draft.milestoneIds}
-              options={milestones}
-              disabledIds={lockedIds}
-              onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
-            />
-          )}
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Milestones</label>
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
+              <MilestoneMultiSelect
+                value={draft.milestoneIds}
+                options={milestones}
+                disabledIds={lockedIds}
+                onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
+              />
+            )}
+          </div>
         </div>
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
