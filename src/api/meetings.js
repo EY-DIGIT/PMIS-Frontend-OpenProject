@@ -90,3 +90,10 @@ export async function updateMeetingStatus(meetingId, status) {
   return api.put(ENDPOINTS.meetings.updateStatus(meetingId),undefined,{query: { status },
   });
 }
+
+export async function momUpdateStatus(momId, status) {
+  return api.put(
+    `${ENDPOINTS.meetings.momUpdateStatus(momId)}?status=${encodeURIComponent(status)}`,
+    null
+  );
+}

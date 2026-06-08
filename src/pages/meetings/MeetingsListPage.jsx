@@ -245,7 +245,7 @@ export default function MeetingsListPage() {
                     <td>{m.title}</td>
                     <td>
                       <span className="pill-link">
-                        {projectName(m.projectName)}
+                        {projectName(m.projectCode)}
                       </span>
                     </td>
                     <td>{fmtDate(m.meetingDate)}</td>

@@ -36,13 +36,13 @@
 .pmis-mtg *::after { box-sizing: border-box; }
 
 /* Page heading */
-.pmis-mtg .page-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 14px; margin-bottom: 6px; padding: 0 14px; }
+.pmis-mtg .page-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 14px; margin-bottom: 6px; padding: 0 0px; }
 .pmis-mtg .pm-title { font-size: 22px; font-weight: 700; color: var(--navy); line-height: 1.2; letter-spacing: -0.1px; }
 .pmis-mtg .pm-subtitle { color: var(--green); font-weight: 700; font-size: 14px; margin: 0 0 6px; line-height: 1.4; }
 .pmis-mtg .page-header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
 /* Cards */
-.pmis-mtg .card { background: #fff; padding: 18px 22px 16px; border-radius: 10px; border: 1px solid var(--border-soft); box-shadow: 0 2px 8px rgba(11,60,136,.06); margin: 0 14px 16px; position: relative; }
+.pmis-mtg .card { background: #fff; padding: 18px 22px 16px; border-radius: 10px; border: 1px solid var(--border-soft); box-shadow: 0 2px 8px rgba(11,60,136,.06); margin: 0 0px 16px; position: relative; }
 .pmis-mtg .card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--uidai-stripe); border-radius: 10px 10px 0 0; }
 .pmis-mtg .card.no-stripe::before { display: none; }
 .pmis-mtg .card.no-stripe { padding-top: 16px; }

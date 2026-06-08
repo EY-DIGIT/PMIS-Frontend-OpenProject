@@ -13,11 +13,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
-import { getMeeting, getMoM, saveMoM, updateMeeting } from "../../api/meetings";
+import { getMeeting, getMoM, saveMoM, updateMeeting, momUpdateStatus } from "../../api/meetings";
 import { sampleMoM, parseMoM } from "../../data/meetingsMock";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
+
+const STATUS_OPTIONS = ["DRAFT", "IN_REVIEW", "FINALIZED"];
 
 /* ─── Small helpers (date / time / strings) ─── */
 function fmtDate(iso) {
@@ -67,9 +69,8 @@ function addDaysISO(iso, n) {
 /* ─── Status badge — DRAFT / SCHEDULED / COMPLETED / CANCELLED ─── */
 const STATUS_CLASS = {
   DRAFT: "st-draft",
-  SCHEDULED: "st-scheduled",
-  COMPLETED: "st-completed",
-  CANCELLED: "st-mom",
+  IN_REVIEW: "st-review",
+  FINALIZED: "st-completed",
 };
 function StatusBadge({ status }) {
   const s = String(status || "").toUpperCase();
@@ -153,11 +154,48 @@ export default function MeetingDetailPage() {
   });
   const [momRemote, setMomRemote] = useState(null);
   const [savingMom, setSavingMom] = useState(false);
+  const [editingId, setEditingId] = useState("");
+  const [statusDraft, setStatusDraft] = useState("");
 
   /* Attendance is tracked locally and persisted via PUT when Mark Present is clicked. */
   const [presentSelection, setPresentSelection] = useState([]);
   const [updatingAttendance, setUpdatingAttendance] = useState(false);
   const taskSectionRef = useRef(null);
+  const [savingId, setSavingId] = useState("");
+
+  const startStatusEdit = (m) => {
+    setEditingId(m.id);
+    setStatusDraft(String(m.status || "").toUpperCase() || STATUS_OPTIONS[0]);
+  };
+  const cancelStatusEdit = () => { setEditingId(""); setStatusDraft(""); };
+  const saveStatus = async () => {
+    if (!momRemote?.id) {
+      show("MoM ID missing", "warn");
+      return;
+    }
+
+    if (savingId) return;
+
+    try {
+      setSavingId(momRemote.id);
+
+      await momUpdateStatus(momRemote.id, statusDraft); // ✅ FIX HERE
+
+      setRows((list) =>
+        list.map((r) =>
+          r.id === momRemote.id ? { ...r, status: statusDraft } : r
+        )
+      );
+
+      setEditingId("");
+      setStatusDraft("");
+      show("Status updated.", "ok");
+    } catch (e) {
+      show(e.message || "Failed to update status.", "warn");
+    } finally {
+      setSavingId("");
+    }
+  };
 
   /* Load users for attendee display + owner labels. */
   useEffect(() => {
@@ -261,7 +299,13 @@ export default function MeetingDetailPage() {
               ),
             });
           })
-          .catch(() => { /* no existing MoM yet — leave the form blank */ });
+          .catch(() => {
+
+            if (!alive) return;
+
+            // ✅ Treat 404 as "no MoM"
+            setMomRemote(null);
+          });
       })
       .catch((e) => {
         if (!alive) return;
@@ -347,7 +391,7 @@ export default function MeetingDetailPage() {
   if (loading) {
     return (
       <div className="pmis-mtg">
-        <div className="page-header">
+        <div className="page-header" style={{ margin: 0 }}>
           <div>
             <div className="pm-title">Loading…</div>
             <div className="pm-subtitle">#{id}</div>
@@ -359,7 +403,7 @@ export default function MeetingDetailPage() {
   if (!meeting) {
     return (
       <div className="pmis-mtg">
-        <div className="page-header">
+        <div className="page-header" style={{ margin: 0 }}>
           <div>
             <div className="pm-title">Meeting not found</div>
             <div className="pm-subtitle">#{id}</div>
@@ -461,7 +505,7 @@ export default function MeetingDetailPage() {
           <div className="pm-title">{meeting.title}</div>
           <div className="pm-subtitle">
             #{meeting.meetingCode}
-            {meeting.activityName ? ` · ${meeting.activityName}` : ""}
+            {meeting.projectCode ? ` · ${meeting.projectCode}` : ""}
           </div>
         </div>
         <div className="page-header-actions">
@@ -519,7 +563,7 @@ export default function MeetingDetailPage() {
             <div className="attendee-chips">
               <span className="chip">
                 {meeting.activityName || meeting.activityId}
-                <span className="sub">{meeting.activityId}</span>
+                {/* <span className="sub">{meeting.activityId}</span> */}
               </span>
             </div>
           </>
@@ -570,9 +614,8 @@ export default function MeetingDetailPage() {
                         onChange={() => toggleSelection(r.key)}
                       />
                       <span
-                        className={`mt-people-avatar${
-                          r.kind === "ext" ? " mt-people-avatar--ext" : ""
-                        }`}
+                        className={`mt-people-avatar${r.kind === "ext" ? " mt-people-avatar--ext" : ""
+                          }`}
                       >
                         {initials(r.label)}
                       </span>
@@ -590,158 +633,200 @@ export default function MeetingDetailPage() {
       </div>
 
       {/* ── Section 2: MoM editor ── */}
-      <div className="card">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 8,
-          }}
-        >
-          <div className="card-title" style={{ margin: 0 }}>
-            Minutes of Meeting
-          </div>
-          <button
-            type="button"
-            className="btn ghost small-btn"
-            onClick={loadSample}
-            disabled={savingMom}
+      {momRemote === null ? (
+        <div className="card">
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 8,
+            }}
           >
-            Load sample
-          </button>
-        </div>
-        <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
-          <div className="field full">
-            <label htmlFor="momDecisions">Decisions</label>
-            <textarea
-              id="momDecisions"
-              className="mom-textarea"
-              style={{ height: 130 }}
-              placeholder={"One decision per line."}
-              value={momForm.decisions}
-              onChange={(e) => updateMomField("decisions", e.target.value)}
-            />
+            <div className="card-title" style={{ margin: 0 }}>
+              Minutes of Meeting
+            </div>
+            <button
+              type="button"
+              className="btn ghost small-btn"
+              onClick={loadSample}
+              disabled={savingMom}
+            >
+              Load sample
+            </button>
           </div>
-          <div className="field full">
-            <label htmlFor="momActions">Action Items</label>
-            <textarea
-              id="momActions"
-              className="mom-textarea"
-              style={{ height: 170 }}
-              placeholder={"One action per line."}
-              value={momForm.actions}
-              onChange={(e) => updateMomField("actions", e.target.value)}
-            />
-          </div>
-          <div className="field full">
-            <label htmlFor="momRisks">Risks</label>
-            <textarea
-              id="momRisks"
-              className="mom-textarea"
-              style={{ height: 110 }}
-              placeholder={"One risk per line."}
-              value={momForm.risks}
-              onChange={(e) => updateMomField("risks", e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="form-actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={submitMoM}
-            disabled={savingMom}
-          >
-            {savingMom ? "Saving…" : "Save MoM"}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Section 3: items returned by the MoM API ── */}
-      <div ref={taskSectionRef}>
-        {momRemote ? (
-          <>
-            {decisions.length > 0 && (
-              <div className="card">
-                <div className="card-title">Decisions</div>
-                <ul className="mt-list">
-                  {decisions.map((d) => (
-                    <li key={d.id}>
-                      <span>{d.description}</span>
-                      {d.ownerUserId && (
-                        <span className="muted">
-                          {" "}
-                          · {labelFor(d.ownerUserId)}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {actionItems.length > 0 && (
-              <div className="card">
-                <div className="card-title">Action Items</div>
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th style={{ minWidth: 240 }}>Description</th>
-                        <th>Owner</th>
-                        <th>Due</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {actionItems.map((a) => (
-                        <tr key={a.id}>
-                          <td>{a.description}</td>
-                          <td>{labelFor(a.assignedToUserId)}</td>
-                          <td>{fmtDate(a.dueDate)}</td>
-                          <td>
-                            <span className="badge ai-open">
-                              {a.status || "OPEN"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {risks.length > 0 && (
-              <div className="card">
-                <div className="card-title">Risks</div>
-                <ul className="mt-list">
-                  {risks.map((r) => (
-                    <li key={r.id}>
-                      <span>{r.description}</span>
-                      {r.severity && (
-                        <span className="muted"> · {r.severity}</span>
-                      )}
-                      {r.mitigation && (
-                        <div className="muted">Mitigation: {r.mitigation}</div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="card no-stripe" style={{ borderStyle: "dashed" }}>
-            <div className="empty-state">
-              Save the MoM to see decisions, action items and risks here.
+          <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
+            <div className="field full">
+              <label htmlFor="momDecisions">Decisions</label>
+              <textarea
+                id="momDecisions"
+                className="mom-textarea"
+                style={{ height: 130 }}
+                placeholder={"One decision per line."}
+                value={momForm.decisions}
+                onChange={(e) => updateMomField("decisions", e.target.value)}
+              />
+            </div>
+            <div className="field full">
+              <label htmlFor="momActions">Action Items</label>
+              <textarea
+                id="momActions"
+                className="mom-textarea"
+                style={{ height: 170 }}
+                placeholder={"One action per line."}
+                value={momForm.actions}
+                onChange={(e) => updateMomField("actions", e.target.value)}
+              />
+            </div>
+            <div className="field full">
+              <label htmlFor="momRisks">Risks</label>
+              <textarea
+                id="momRisks"
+                className="mom-textarea"
+                style={{ height: 110 }}
+                placeholder={"One risk per line."}
+                value={momForm.risks}
+                onChange={(e) => updateMomField("risks", e.target.value)}
+              />
             </div>
           </div>
-        )}
-      </div>
+
+          <div className="form-actions">
+            <button
+              type="button"
+              className="btn"
+              onClick={submitMoM}
+              disabled={savingMom}
+            >
+              {savingMom ? "Saving…" : "Save MoM"}
+            </button>
+          </div>
+        </div>) : (
+        <div ref={taskSectionRef}>
+          {momRemote ? (
+            <>
+              {decisions.length > 0 && (
+                <div className="card">
+                  <div className="card-title">Decisions</div>
+                  <ul className="mt-list">
+                    {decisions.map((d) => (
+                      <li key={d.id}>
+                        <span>{d.description}</span>
+                        {d.ownerUserId && (
+                          <span className="muted">
+                            {" "}
+                            · {labelFor(d.ownerUserId)}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {actionItems.length > 0 && (
+                <div className="card">
+                  <div className="card-title">Action Items</div>
+                  <div className="table-wrap">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th style={{ minWidth: 240 }}>Description</th>
+                          <th>Owner</th>
+                          <th>Due</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {actionItems.map((a) => (
+                          <tr key={a.id}>
+                            <td>{a.description}</td>
+                            <td>{labelFor(a.assignedToUserId)}</td>
+                            <td>{fmtDate(a.dueDate)}</td>
+                            <td>
+                              {editingId === meeting.id ? (
+                                <>
+                                  <select
+                                    value={statusDraft}
+                                    onChange={(e) => setStatusDraft(e.target.value)}
+                                  >
+                                    {STATUS_OPTIONS.map((s) => (
+                                      <option key={s} value={s}>{s}</option>
+                                    ))}
+                                  </select>
+
+                                  <button
+                                    className="btn small-btn"
+                                    onClick={() => saveStatus(meeting)}
+                                    disabled={savingId === meeting.id}
+                                  >
+                                    Save
+                                  </button>
+
+                                  <button
+                                    className="btn ghost small-btn"
+                                    onClick={cancelStatusEdit}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="badge ai-open">
+                                    {meeting.status}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    className="btn ghost small-btn"
+                                    onClick={() => startStatusEdit(meeting)}
+                                  >
+                                    Edit
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {risks.length > 0 && (
+                <div className="card">
+                  <div className="card-title">Risks</div>
+                  <ul className="mt-list">
+                    {risks.map((r) => (
+                      <li key={r.id}>
+                        <span>{r.description}</span>
+                        {r.severity && (
+                          <span className="muted"> · {r.severity}</span>
+                        )}
+                        {r.mitigation && (
+                          <div className="muted">Mitigation: {r.mitigation}</div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="card no-stripe" style={{ borderStyle: "dashed" }}>
+              <div className="empty-state">
+                Save the MoM to see decisions, action items and risks here.
+              </div>
+            </div>
+          )}
+        </div>)
+      }
+
+
+      {/* ── Section 3: items returned by the MoM API ── */}
+
       {toastNode}
     </div>
   );
