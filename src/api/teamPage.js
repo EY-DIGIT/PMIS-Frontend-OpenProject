@@ -75,3 +75,53 @@ export function listUsersByDivision(divisionId) {
   }
   return listAssociatedUsers({ divisionId, divisionDetails: true });
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Team-candidate dropdown sources — the server returns the eligible
+   users for each role directly, so the UI no longer has to derive them
+   from division membership.
+
+   Response shape isn't fixed across deployments, so accept any of:
+     [ ... ]                       (bare array)
+     { users: [ ... ] }
+     { candidates: [ ... ] }
+     { data: <one of the above> }  (already unwrapped above)
+   Always resolve to a plain array; fall back to [] on error so the
+   dropdown renders empty instead of crashing the page.
+   ────────────────────────────────────────────────────────────────── */
+function asCandidateList(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.users)) return data.users;
+  if (Array.isArray(data?.candidates)) return data.candidates;
+  if (Array.isArray(data?.items)) return data.items;
+  return [];
+}
+
+async function getCandidates(endpointPath, query) {
+  try {
+    const res = await api.get(endpointPath, query ? { query } : undefined);
+    return asCandidateList(unwrap(res));
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[teamCandidates] failed for', endpointPath, query || '', e);
+    return [];
+  }
+}
+
+/* Project-level candidate lists (no division param). */
+export function listProjectOwnerCandidates(projectId) {
+  return getCandidates(ENDPOINTS.projects.teamCandidateProjectOwners(projectId));
+}
+export function listProjectOwnerApproverCandidates(projectId) {
+  return getCandidates(ENDPOINTS.projects.teamCandidateProjectOwnerApprovers(projectId));
+}
+
+/* Division-scoped activity candidate lists. */
+export function listActivityMemberCandidates(projectId, divisionCode) {
+  if (!divisionCode) return Promise.resolve([]);
+  return getCandidates(ENDPOINTS.projects.teamCandidateActivityMembers(projectId), { divisionCode });
+}
+export function listActivityApproverCandidates(projectId, divisionCode) {
+  if (!divisionCode) return Promise.resolve([]);
+  return getCandidates(ENDPOINTS.projects.teamCandidateActivityApprovers(projectId), { divisionCode });
+}

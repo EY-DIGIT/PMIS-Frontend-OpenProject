@@ -4,7 +4,11 @@ import {
   getTeamPage,
   updateTeamPage,
   listUsersByProjectOrg,
-  listUsersByDivision
+  listUsersByDivision,
+  listProjectOwnerCandidates,
+  listProjectOwnerApproverCandidates,
+  listActivityMemberCandidates,
+  listActivityApproverCandidates
 } from '../../api/teamPage';
 import { setPageContext, clearPageContext } from '../../utils/pageContext';
 import './ManageTeam.css';
@@ -28,6 +32,12 @@ function normalizeAssociatedUser(u) {
   const name = full || u.login || u.email || u.id;
   return { id: String(u.id), name: String(name) };
 }
+
+/* Division codes are referenced in mixed case across the payload (e.g.
+   "TMD1" on the division object vs "tmd1" in an activity's code list).
+   Key every candidate cache by the lower-cased code so lookups match
+   regardless of the casing the server used. */
+const divKey = (code) => String(code || '').toLowerCase();
 
 function normalizeUsersList(list) {
   if (!Array.isArray(list)) return [];
@@ -265,6 +275,13 @@ export default function ManageTeam() {
   /* Users belonging to each division id we've fetched. Indexed by the
      numeric division id from the team-page response. */
   const [divisionUsersById, setDivisionUsersById] = useState({});
+  /* Dedicated team-candidate dropdown sources (server-derived). The two
+     project-owner lists are project-level; the activity lists are keyed
+     by lower-cased division code (see divKey). */
+  const [projectOwnerCandidates, setProjectOwnerCandidates] = useState([]);
+  const [projectOwnerApproverCandidates, setProjectOwnerApproverCandidates] = useState([]);
+  const [activityMembersByDiv, setActivityMembersByDiv] = useState({});
+  const [activityApproversByDiv, setActivityApproversByDiv] = useState({});
   /* Owner division shipped on the team-page response (id/code/name).
      Drives the Project Owner section + per-activity Owner / Approver. */
   const [ownerDivision, setOwnerDivision] = useState(null);
@@ -438,6 +455,43 @@ export default function ManageTeam() {
               // eslint-disable-next-line no-console
               console.warn(`[ManageTeam] div-${id} fetch failed:`, e);
             });
+        });
+
+        /* Background fetch — dedicated candidate lists that back the role
+           dropdowns. Project Owner + its Approver are project-level; the
+           activity Owner/Approver (and each Concerned Division) are fetched
+           per division code. These take priority over the division-derived
+           lists above, which now act only as a fallback. */
+        listProjectOwnerCandidates(projectId)
+          .then(normalizeUsersList)
+          .then((users) => { if (!cancelled) setProjectOwnerCandidates(users); })
+          .catch(() => {});
+        listProjectOwnerApproverCandidates(projectId)
+          .then(normalizeUsersList)
+          .then((users) => { if (!cancelled) setProjectOwnerApproverCandidates(users); })
+          .catch(() => {});
+
+        const divCodes = new Set();
+        activities.forEach((a) => {
+          const oc = a.ownerDivision && a.ownerDivision.code;
+          if (oc) divCodes.add(String(oc));
+          (a.concernedDivisions || []).forEach((c) => { if (c) divCodes.add(String(c)); });
+        });
+        divCodes.forEach((code) => {
+          listActivityMemberCandidates(projectId, code)
+            .then(normalizeUsersList)
+            .then((users) => {
+              if (cancelled) return;
+              setActivityMembersByDiv((prev) => ({ ...prev, [divKey(code)]: users }));
+            })
+            .catch(() => {});
+          listActivityApproverCandidates(projectId, code)
+            .then(normalizeUsersList)
+            .then((users) => {
+              if (cancelled) return;
+              setActivityApproversByDiv((prev) => ({ ...prev, [divKey(code)]: users }));
+            })
+            .catch(() => {});
         });
       } catch (err) {
         if (!cancelled) {
@@ -691,6 +745,24 @@ export default function ManageTeam() {
     return (od && (od.name || od.code)) || 'Owner';
   };
 
+  /* ─── Team-candidate dropdown sources ───
+     These return the server-provided candidate lists for each role and
+     fall back to the legacy division/directory lists while the candidate
+     fetch is in flight (or if the endpoint responds empty), so a dropdown
+     is never blank when we have something to show. */
+  const ownerCandidatesOr = (fallback) =>
+    (projectOwnerCandidates.length ? projectOwnerCandidates : fallback);
+  const ownerApproverCandidatesOr = (fallback) =>
+    (projectOwnerApproverCandidates.length ? projectOwnerApproverCandidates : fallback);
+  const activityMembersForCode = (code, fallback) => {
+    const list = activityMembersByDiv[divKey(code)];
+    return (Array.isArray(list) && list.length) ? list : fallback;
+  };
+  const activityApproversForCode = (code, fallback) => {
+    const list = activityApproversByDiv[divKey(code)];
+    return (Array.isArray(list) && list.length) ? list : fallback;
+  };
+
   /* Project-wide id → display name map, built once from the team-page
      userDirectory (which carries every user the project knows about,
      irrespective of division). Used as a fallback for findUserName so
@@ -790,6 +862,7 @@ export default function ManageTeam() {
     const concerned = Array.isArray(act.concernedDivisions) ? act.concernedDivisions : [];
     const actOwnerUsers = usersForActivityOwnerDivision(act);
     const actOwnerLabel = labelForActivityOwnerDivision(act);
+    const actOwnerCode = ((act.ownerDivision || ownerDivision) || {}).code;
     return (
       <div
         id={`mt-activity-panel-${act.id}`}
@@ -814,7 +887,7 @@ export default function ManageTeam() {
               </div>
               <MultiSelect
                 path={`exp:${act.id}:ownerApprover`}
-                users={actOwnerUsers}
+                users={activityApproversForCode(actOwnerCode, actOwnerUsers)}
                 selectedIds={act.ownerApprover}
                 single
                 isOpen={openMsPath === `exp:${act.id}:ownerApprover`}
@@ -831,7 +904,7 @@ export default function ManageTeam() {
               </div>
               <MultiSelect
                 path={`exp:${act.id}:owner`}
-                users={actOwnerUsers}
+                users={activityMembersForCode(actOwnerCode, actOwnerUsers)}
                 selectedIds={act.owner}
                 single={false}
                 isOpen={openMsPath === `exp:${act.id}:owner`}
@@ -864,7 +937,7 @@ export default function ManageTeam() {
                     </div>
                     <MultiSelect
                       path={`exp:${act.id}:divApprover:${d}`}
-                      users={divUsers}
+                      users={activityApproversForCode(d, divUsers)}
                       selectedIds={(act.divisionApprovers || {})[d] || []}
                       single
                       isOpen={openMsPath === `exp:${act.id}:divApprover:${d}`}
@@ -880,7 +953,7 @@ export default function ManageTeam() {
                     </div>
                     <MultiSelect
                       path={`exp:${act.id}:div:${d}`}
-                      users={divUsers}
+                      users={activityMembersForCode(d, divUsers)}
                       selectedIds={(act.divisionUsers || {})[d] || []}
                       single={false}
                       isOpen={openMsPath === `exp:${act.id}:div:${d}`}
@@ -1026,7 +1099,9 @@ export default function ManageTeam() {
                     <td data-label={row.single ? 'User' : 'Users'}>
                       <MultiSelect
                         path={path}
-                        users={ownerDivisionUsers}
+                        users={row.roleLabel === 'Approver'
+                          ? ownerApproverCandidatesOr(ownerDivisionUsers)
+                          : ownerCandidatesOr(ownerDivisionUsers)}
                         selectedIds={row.users}
                         single={!!row.single}
                         isOpen={openMsPath === path}
@@ -1113,6 +1188,7 @@ export default function ManageTeam() {
                           ? act.concernedDivisions
                           : [];
                         const isExpanded = expandedActivities.has(act.id);
+                        const actOwnerCode = ((act.ownerDivision || ownerDivision) || {}).code;
                         return (
                           <tr key={act.id} className="mt-activity-tr">
                             <td data-label="Activity">
@@ -1165,7 +1241,7 @@ export default function ManageTeam() {
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:owner`}
-                                      users={usersForActivityOwnerDivision(act)}
+                                      users={activityMembersForCode(actOwnerCode, usersForActivityOwnerDivision(act))}
                                       selectedIds={act.owner}
                                       single={false}
                                       isOpen={openMsPath === `tbl:${act.id}:owner`}
@@ -1185,7 +1261,7 @@ export default function ManageTeam() {
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:div:${code}`}
-                                      users={usersForDivisionCode(code)}
+                                      users={activityMembersForCode(code, usersForDivisionCode(code))}
                                       selectedIds={(act.divisionUsers || {})[code] || []}
                                       single={false}
                                       isOpen={openMsPath === `tbl:${act.id}:div:${code}`}
@@ -1209,7 +1285,7 @@ export default function ManageTeam() {
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:ownerApprover`}
-                                      users={usersForActivityOwnerDivision(act)}
+                                      users={activityApproversForCode(actOwnerCode, usersForActivityOwnerDivision(act))}
                                       selectedIds={act.ownerApprover}
                                       single
                                       isOpen={openMsPath === `tbl:${act.id}:ownerApprover`}
@@ -1229,7 +1305,7 @@ export default function ManageTeam() {
                                     </div>
                                     <MultiSelect
                                       path={`tbl:${act.id}:divApprover:${code}`}
-                                      users={usersForDivisionCode(code)}
+                                      users={activityApproversForCode(code, usersForDivisionCode(code))}
                                       selectedIds={(act.divisionApprovers || {})[code] || []}
                                       single
                                       isOpen={openMsPath === `tbl:${act.id}:divApprover:${code}`}

@@ -232,6 +232,13 @@ export const ENDPOINTS = {
     criticalPathDependencies: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
     criticalPathAnalysis: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/analysis`,
       teamPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-page`,
+    /* Team-page candidate dropdown sources. project-owners / project-owner-
+       approvers are project-level; activity-members / activity-approvers are
+       scoped to a division (pass ?divisionCode=<code>). */
+    teamCandidateProjectOwners: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-candidates/project-owners`,
+    teamCandidateProjectOwnerApprovers: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-candidates/project-owner-approvers`,
+    teamCandidateActivityMembers: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-candidates/activity-members`,
+    teamCandidateActivityApprovers: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/team-candidates/activity-approvers`,
     /* Payment / Finance module — full life-cycle for the Finance page
        (Project Cost rows, Payment Terms per phase, QRG, and CCN cap).
        The /payment-page GET is the authoritative read; mutations live
