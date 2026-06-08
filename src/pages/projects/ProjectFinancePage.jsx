@@ -1610,11 +1610,17 @@ function PhasePanel({
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
-                ) : terms.map((t) => {
+                ) : terms.map((t, idx) => {
                   const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
                   const value = Number(t.value) || 0;
                   const pct = Number(t.percentOfPayment) || 0;
-                  const remaining = phaseBase - value;
+                  /* Running balance: each row's remaining = base minus every
+                     term value up to and including this one, so it carries
+                     down from the previous row's remaining. */
+                  const scheduledSoFar = terms
+                    .slice(0, idx + 1)
+                    .reduce((s, r) => s + (Number(r.value) || 0), 0);
+                  const remaining = phaseBase - scheduledSoFar;
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
