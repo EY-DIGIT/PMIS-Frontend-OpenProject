@@ -1161,6 +1161,27 @@ export default function ProjectFinancePage() {
     }
   }
 
+  /* Apply Frequency — PUTs a single frequency onto a phase, then reloads
+     so the per-phase startDate/endDate/cycleCount come back fresh.
+     Returns true on success so the PhasePanel can close its modal. */
+  async function applyPhaseFrequency(phaseNum, frequencyCode) {
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.phaseFrequency(projectId, phaseNum)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frequencyCode }),
+      });
+      await readJson(res);
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage("Frequency applied.");
+      return true;
+    } catch (err) {
+      if (handleAuthError(err)) return false;
+      uiStore.showError(err?.message || "Failed to apply frequency");
+      return false;
+    }
+  }
+
   async function setQrgForPhase(phase, applied) {
     /* Mutual exclusion: only one phase can carry QGR=Yes at a time.
        When the user turns Yes on for `phase`, we PUT every other
@@ -1434,6 +1455,7 @@ export default function ProjectFinancePage() {
                 frequencyName={frequencyName}
                 frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
+                onApplyFrequency={applyPhaseFrequency}
                 isLocked={isLocked}
                 isLastPhase={idx === phases.length - 1}
                 qgrLocked={isLocked || qgrSaving}
@@ -1548,8 +1570,8 @@ export default function ProjectFinancePage() {
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencyName, frequencies = [], onEditTerm, isLocked, isLastPhase,
-  qgrLocked, qgrBusy, onSetQrgForPhase,
+  phase, milestoneName, frequencyName, frequencies = [], onEditTerm, onApplyFrequency,
+  isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
   /* Apply-Frequency tool: a start/end/frequency window for the phase.
@@ -1558,6 +1580,7 @@ function PhasePanel({
   const [freqStart, setFreqStart] = useState("");
   const [freqEnd, setFreqEnd] = useState("");
   const [freqCode, setFreqCode] = useState("");
+  const [applyingFreq, setApplyingFreq] = useState(false);
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
@@ -1889,6 +1912,7 @@ function PhasePanel({
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
                 onClick={() => setShowFreqModal(false)}
+                disabled={applyingFreq}
               >
                 Cancel
               </button>
@@ -1896,24 +1920,19 @@ function PhasePanel({
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-small"
                 style={{ marginTop: 0 }}
-                onClick={() => {
-                  if (!freqStart || !freqEnd) {
-                    uiStore.showError("Pick both a start and end date.");
-                    return;
-                  }
+                disabled={applyingFreq}
+                onClick={async () => {
                   if (!freqCode) {
                     uiStore.showError("Pick a frequency.");
                     return;
                   }
-                  if (new Date(freqStart) > new Date(freqEnd)) {
-                    uiStore.showError("End date must be on or after the start date.");
-                    return;
-                  }
-                  setShowFreqModal(false);
-                  uiStore.showMessage("Frequency applied.");
+                  setApplyingFreq(true);
+                  const ok = await onApplyFrequency(phase.phase, freqCode);
+                  setApplyingFreq(false);
+                  if (ok) setShowFreqModal(false);
                 }}
               >
-                Apply
+                {applyingFreq ? "Applying…" : "Apply"}
               </button>
             </div>
           </div>

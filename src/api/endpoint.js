@@ -247,6 +247,7 @@ export const ENDPOINTS = {
     costItems: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/cost-items`,
     paymentTerms: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-terms`,
     qrg: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/qrg`,
+    phaseFrequency: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/frequency`,
     ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
   },
 
