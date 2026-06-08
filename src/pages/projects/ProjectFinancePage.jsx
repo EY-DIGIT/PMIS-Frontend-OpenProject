@@ -1277,7 +1277,13 @@ export default function ProjectFinancePage() {
               request; the Save button now lives at the right end of the
               same row as the two inputs. */}
           <div className="uidai-pmis-card">
-            <div style={sectionHead}><span style={stepBadge}>3</span> CCN Cap &amp; Value</div>
+            <div style={sectionHead}>
+              <span style={stepBadge}>3</span>
+              CCN Cap &amp; Value
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
+                (Change Control Note)
+              </span>
+            </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
               <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
                 <label>CCN Cap (%)</label>
@@ -1434,8 +1440,11 @@ function PhasePanel({
               onClick={(e) => e.stopPropagation()}
               style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
             >
-              <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3, textTransform: "uppercase" }}>
-                QGR
+              <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
+                QGR{" "}
+                <span style={{ fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
+                  (Quarterly Guaranteed Revenue)
+                </span>
               </span>
               <div role="group" aria-label={`Apply QGR to Phase ${phase.phase}`}
                 style={{
