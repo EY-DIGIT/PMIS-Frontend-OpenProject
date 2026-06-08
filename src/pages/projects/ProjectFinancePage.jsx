@@ -30,48 +30,6 @@ function inr(n) {
   return `₹ ${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
-/* Map a frequency's display name to a calendar step. Best-effort match on
-   the catalog labels (Monthly / Quarterly / Half-Yearly / Yearly / Weekly /
-   Fortnightly / Daily); defaults to monthly. */
-function freqStep(frequencyName) {
-  const name = (frequencyName || "").toLowerCase();
-  if (name.includes("fortnight") || (name.includes("bi") && name.includes("week"))) return { days: 14 };
-  if (name.includes("week")) return { days: 7 };
-  if (name.includes("dai") || name.includes("day")) return { days: 1 };
-  if (name.includes("quarter")) return { months: 3 };
-  if (name.includes("half")) return { months: 6 };
-  if (name.includes("year") || name.includes("annual")) return { months: 12 };
-  return { months: 1 };
-}
-
-/* Build the list of billing cycles (each a period start Date) between two
-   dates for a frequency. Guard-capped so a tiny step over a huge range
-   can't spin forever. */
-function buildCycles(startDate, endDate, frequencyName) {
-  if (!startDate || !endDate) return [];
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
-  const step = freqStep(frequencyName);
-  const out = [];
-  const cur = new Date(start);
-  let guard = 0;
-  while (cur <= end && guard < 600) {
-    out.push(new Date(cur));
-    if (step.months) cur.setMonth(cur.getMonth() + step.months);
-    else cur.setDate(cur.getDate() + step.days);
-    guard++;
-  }
-  return out;
-}
-
-function fmtCycleDate(d) {
-  try {
-    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  } catch {
-    return "";
-  }
-}
 
 const ctrl = {
   width: "100%",
@@ -739,24 +697,27 @@ function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
 
 /* ──────────────────────────────────────────────────────────────────
    Edit Payment Term modal — opens when a term row's Edit button is
-   clicked. Holds local frequency + % state; Save PATCHes the term
-   and the parent silently re-loads the payment page.
+   clicked. Holds the term's start/end dates, % of payment and cycle;
+   Save PATCHes the term and the parent silently re-loads the page.
    ────────────────────────────────────────────────────────────────── */
 function EditTermModal({
-  open, onClose, term, onSubmit, submitting,
-  frequencies, milestoneName,
+  open, onClose, term, onSubmit, submitting, milestoneName,
 }) {
-  const [frequencyCode, setFrequencyCode] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const [percentOfPayment, setPercentOfPayment] = useState("");
+  const [cycle, setCycle] = useState("");
 
   useEffect(() => {
     if (!open || !term) return;
-    setFrequencyCode(term.frequencyCode || "");
+    setStartDate(term.startDate || "");
+    setEndDate(term.endDate || "");
     setPercentOfPayment(
       term.percentOfPayment === null || term.percentOfPayment === undefined
         ? ""
         : String(term.percentOfPayment)
     );
+    setCycle(term.cycle == null ? "" : String(term.cycle));
   }, [open, term]);
 
   if (!open || !term) return null;
@@ -785,15 +746,25 @@ function EditTermModal({
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Frequency</label>
-            <select
-              value={frequencyCode || ""}
-              onChange={(e) => setFrequencyCode(e.target.value)}
-            >
-              <option value="">— Select —</option>
-              {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
-            </select>
+            <label>Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
           </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>End Date</label>
+            <input
+              type="date"
+              value={endDate}
+              min={startDate || undefined}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>% of Payment</label>
             <input
@@ -801,6 +772,15 @@ function EditTermModal({
               min="0" max="100"
               value={percentOfPayment}
               onChange={(e) => setPercentOfPayment(e.target.value)}
+            />
+          </div>
+          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+            <label>Cycle</label>
+            <input
+              type="text"
+              value={cycle}
+              placeholder="e.g. 1"
+              onChange={(e) => setCycle(e.target.value)}
             />
           </div>
         </div>
@@ -820,11 +800,13 @@ function EditTermModal({
             style={{ marginTop: 0 }}
             disabled={submitting}
             onClick={() => onSubmit({
-              frequencyCode: frequencyCode || null,
+              startDate: startDate || null,
+              endDate: endDate || null,
               percentOfPayment:
                 percentOfPayment === "" || percentOfPayment === null
                   ? null
                   : Number(percentOfPayment),
+              cycle: cycle === "" ? null : cycle,
             })}
           >
             {submitting ? "Saving…" : "Save"}
@@ -1111,7 +1093,7 @@ export default function ProjectFinancePage() {
 
   /* Edit Payment Term — invoked from the EditTermModal's Save button.
      Returns true on success so the caller can close the modal. */
-  async function saveTerm(term, { frequencyCode, percentOfPayment }) {
+  async function saveTerm(term, { startDate, endDate, percentOfPayment, cycle }) {
     if (!term) return false;
 
     /* Hard validation: the final milestone of the final phase is the
@@ -1145,7 +1127,13 @@ export default function ProjectFinancePage() {
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(term.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ frequencyCode, percentOfPayment }),
+        body: JSON.stringify({
+          frequencyCode: term.frequencyCode ?? null,
+          percentOfPayment,
+          startDate,
+          endDate,
+          cycle,
+        }),
       });
       await readJson(res);
       await loadPaymentPage({ silent: true });
@@ -1535,7 +1523,6 @@ export default function ProjectFinancePage() {
           if (ok) setEditingTerm(null);
         }}
         submitting={savingTerm}
-        frequencies={frequencies}
         milestoneName={milestoneName}
       />
     </div>
@@ -1552,15 +1539,12 @@ function PhasePanel({
   qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
-  /* Apply-Frequency tool: a start/end/frequency window that generates the
-     billing cycles shown in the (conditionally rendered) Cycle column.
-     Lives in local state — there's no persistence endpoint for it yet. */
+  /* Apply-Frequency tool: a start/end/frequency window for the phase.
+     Values persist between opens so the modal re-opens prefilled. */
   const [showFreqModal, setShowFreqModal] = useState(false);
   const [freqStart, setFreqStart] = useState("");
   const [freqEnd, setFreqEnd] = useState("");
   const [freqCode, setFreqCode] = useState("");
-  const [cycles, setCycles] = useState([]);
-  const hasCycles = cycles.length > 0;
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
@@ -1679,9 +1663,9 @@ function PhasePanel({
               style={{ marginTop: 0 }}
               disabled={isLocked || terms.length === 0}
               onClick={() => {
-                setFreqStart("");
-                setFreqEnd("");
-                setFreqCode(terms[0]?.frequencyCode || "");
+                /* Prefill: keep last-applied dates; seed frequency from the
+                   first term when nothing has been chosen yet. */
+                setFreqCode((c) => c || terms[0]?.frequencyCode || "");
                 setShowFreqModal(true);
               }}
             >
@@ -1697,14 +1681,13 @@ function PhasePanel({
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
-                  {hasCycles && <th style={{ width: 150 }}>Cycle</th>}
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={hasCycles ? 7 : 6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -1747,21 +1730,6 @@ function PhasePanel({
                           </span>
                         </div>
                       </td>
-                      {hasCycles && (
-                        <td>
-                          {cycles[idx] ? (
-                            <span style={{
-                              display: "inline-block", padding: "2px 8px", borderRadius: 999,
-                              background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600,
-                              border: "1px solid #c4e9d0",
-                            }}>
-                              Cycle {idx + 1}: {fmtCycleDate(cycles[idx])}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
-                          )}
-                        </td>
-                      )}
                       <td style={{ textAlign: "center" }}>
                         <button
                           type="button"
@@ -1818,7 +1786,6 @@ function PhasePanel({
                         Remaining: {inr(phaseRemaining)}
                       </div>
                     </td>
-                    {hasCycles && <td />}
                     <td />
                   </tr>
                 )}
@@ -1872,7 +1839,7 @@ function PhasePanel({
             </button>
             <h3 className="uidai-modal__title">Apply Frequency — Phase {phase.phase}</h3>
             <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
-              Pick a start date, end date and frequency to generate the billing cycles.
+              Set the start date, end date and frequency for this phase's payment cycles.
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
@@ -1918,14 +1885,8 @@ function PhasePanel({
                     uiStore.showError("End date must be on or after the start date.");
                     return;
                   }
-                  const freqName = frequencies.find((f) => f.code === freqCode)?.name || freqCode;
-                  const generated = buildCycles(freqStart, freqEnd, freqName);
-                  if (generated.length === 0) {
-                    uiStore.showError("No cycles fall in this date range.");
-                    return;
-                  }
-                  setCycles(generated);
                   setShowFreqModal(false);
+                  uiStore.showMessage("Frequency applied.");
                 }}
               >
                 Apply
