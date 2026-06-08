@@ -1357,6 +1357,9 @@ export default function ProjectFinancePage() {
                 frequencyName={frequencyName}
                 onEditTerm={(t) => setEditingTerm(t)}
                 isLocked={isLocked}
+                qgrLocked={isLocked || qgrSaving}
+                qgrBusy={qgrSaving}
+                onSetQrgForPhase={setQrgForPhase}
               />
             ))}
           </div>
@@ -1415,11 +1418,9 @@ export default function ProjectFinancePage() {
             background: "var(--uidai-pmis-border)",
             margin: "0 16px",
           }} />
-          <QgrConfigSection
+          <QgrSummarySection
             phases={phases}
-            isLocked={isLocked || qgrSaving}
-            busy={qgrSaving}
-            onSetQrgForPhase={setQrgForPhase}
+            totals={totals}
           />
         </div>
       </div>
@@ -1464,11 +1465,14 @@ export default function ProjectFinancePage() {
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
   phase, milestoneName, frequencyName, onEditTerm, isLocked,
+  qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const qrgApplied = !!phase.qrg?.applied;
+  const canToggleQgr = typeof onSetQrgForPhase === "function";
+  const qgrDisabled = qgrLocked || qgrBusy;
 
   return (
     <div style={{
@@ -1479,22 +1483,23 @@ function PhasePanel({
       overflow: "hidden",
       boxShadow: "0 1px 2px rgba(20, 50, 110, 0.04)",
     }}>
-      <button
-        type="button"
+      {/* Header is a div (not a button) so the QGR Yes/No segmented
+          control can live inside it without nesting buttons. Clicking
+          anywhere except the QGR control toggles the collapse. */}
+      <div
         onClick={() => setExpanded((e) => !e)}
         style={{
           width: "100%",
           display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 12, flexWrap: "wrap",
           background: "linear-gradient(90deg, #eef4fc 0%, #f5f9ff 100%)",
-          border: "none",
           borderBottom: expanded ? "1px solid var(--uidai-pmis-border)" : "none",
           padding: "12px 16px",
           cursor: "pointer",
-          font: "inherit",
           textAlign: "left",
         }}
       >
-        <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
           Phase {phase.phase}
           {qrgApplied && (
             <span style={{
@@ -1509,8 +1514,61 @@ function PhasePanel({
             ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: ₹ {Number(phase.effectivePhaseTotal ||phase.phaseFixedTotal || 0).toLocaleString("en-IN")})
           </span>
         </span>
-        <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14 }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
-      </button>
+
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 12, flex: "0 0 auto" }}>
+          {canToggleQgr && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3, textTransform: "uppercase" }}>
+                QGR
+              </span>
+              <div role="group" aria-label={`Apply QGR to Phase ${phase.phase}`}
+                style={{
+                  display: "inline-flex",
+                  border: "1px solid var(--uidai-pmis-border)",
+                  borderRadius: 999, overflow: "hidden", background: "#fff",
+                }}>
+                <button
+                  type="button"
+                  disabled={qgrDisabled}
+                  onClick={() => !qrgApplied && onSetQrgForPhase(phase.phase, true)}
+                  style={{
+                    padding: "4px 12px",
+                    border: "none",
+                    background: qrgApplied ? "#1b7a42" : "transparent",
+                    color: qrgApplied ? "#fff" : "#173e77",
+                    fontWeight: 700, fontSize: 12,
+                    cursor: qgrDisabled ? "not-allowed" : "pointer",
+                    opacity: qgrDisabled ? 0.5 : 1,
+                  }}
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  disabled={qgrDisabled}
+                  onClick={() => qrgApplied && onSetQrgForPhase(phase.phase, false)}
+                  style={{
+                    padding: "4px 12px",
+                    border: "none",
+                    borderLeft: "1px solid var(--uidai-pmis-border)",
+                    background: !qrgApplied ? "#eef2f7" : "transparent",
+                    color: "#173e77",
+                    fontWeight: 700, fontSize: 12,
+                    cursor: qgrDisabled ? "not-allowed" : "pointer",
+                    opacity: qgrDisabled ? 0.5 : 1,
+                  }}
+                >
+                  No
+                </button>
+              </div>
+            </div>
+          )}
+          <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14 }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
+        </div>
+      </div>
 
       {expanded && (
         <div style={{ padding: 16 }}>
@@ -1615,19 +1673,34 @@ function PhasePanel({
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   QgrConfigSection — compact panel rendered in the right column below
-   the Summary card. Each phase is a single horizontal row with a
-   segmented Yes / No control on the right. Only one phase can carry
-   QGR=Yes at a time (the page-level setQrgForPhase enforces the
-   cascade via PUT calls). When a phase has QGR applied the row
-   highlights green and surfaces the computed % + ₹ value the backend
-   ships in phase.qrg.
+   QgrSummarySection — read-only QGR summary in the right column below
+   the Summary card. The Yes/No toggles now live in each phase's
+   collapsible header on the left; this panel just reports the outcome:
+   which phase holds QGR, the held-back %/amount, the total contract
+   cost, and how much remains payable after the hold-back.
    ────────────────────────────────────────────────────────────────── */
-function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
+function QgrSummarySection({ phases, totals }) {
   if (!phases || phases.length === 0) return null;
   const appliedPhase = phases.find((p) => p.qrg?.applied);
+  const total = Number(totals?.totalContractCost) || 0;
+  const percent = appliedPhase ? Number(appliedPhase.qrg?.percent) || 0 : 0;
+  const holdBack = appliedPhase ? Number(appliedPhase.qrg?.value) || 0 : 0;
+  const remaining = total - holdBack;
+
+  const row = (label, value, opts = {}) => (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      gap: 8, fontSize: 13,
+      background: "#fff", border: "1px solid var(--uidai-pmis-border)",
+      borderRadius: 8, padding: "8px 12px",
+    }}>
+      <span style={muted}>{label}</span>
+      <strong style={{ color: opts.color || "#173e77" }}>{value}</strong>
+    </div>
+  );
+
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 18 }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         fontSize: 14, fontWeight: 800, color: "#173e77",
@@ -1635,130 +1708,54 @@ function QgrConfigSection({ phases, isLocked, busy, onSetQrgForPhase }) {
         paddingBottom: 12, marginBottom: 14,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
-        QGR Configuration
+        QGR Summary
       </div>
 
       <div style={{
-        fontSize: 11, color: "var(--uidai-pmis-muted)", textAlign: "center",
-        marginBottom: 12, lineHeight: 1.4,
+        fontSize: 12, textAlign: "center", marginBottom: 14, lineHeight: 1.4,
       }}>
-        Only one phase can carry QGR at a time.
         {appliedPhase ? (
-          <>
-            {" "}Active on{" "}
-            <strong style={{ color: "#1b7a42" }}>Phase {appliedPhase.phase}</strong>.
-          </>
-        ) : (
-          <> No phase active.</>
-        )}
-        {busy && (
-          <span style={{
-            display: "inline-block", marginLeft: 6,
-            padding: "1px 8px", borderRadius: 999,
-            background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 10,
-          }}>
-            Updating…
+          <span style={{ color: "#173e77", fontWeight: 700 }}>
+            Active on{" "}
+            <span style={{
+              display: "inline-block",
+              padding: "2px 9px", borderRadius: 999, marginLeft: 2,
+              background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
+              fontSize: 11, fontWeight: 800,
+            }}>
+              Phase {appliedPhase.phase}
+            </span>
           </span>
+        ) : (
+          <span style={muted}>No phase has QGR applied — full amount is payable.</span>
         )}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {phases.map((p) => {
-          const yes = !!p.qrg?.applied;
-          return (
-            <div
-              key={p.phase}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                border: yes ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
-                background: yes ? "#f1faf4" : "#fff",
-                borderRadius: 10,
-                padding: "10px 12px",
-                boxShadow: yes
-                  ? "0 2px 6px rgba(27, 122, 66, 0.10)"
-                  : "0 1px 2px rgba(20, 50, 110, 0.04)",
-                transition: "border-color .15s, background .15s, box-shadow .15s",
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  fontWeight: 800, color: "#173e77", fontSize: 13,
-                }}>
-                  Phase {p.phase}
-                  {yes && (
-                    <span style={{
-                      fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
-                      padding: "1px 6px", borderRadius: 999,
-                      background: "#1b7a42", color: "#fff",
-                    }}>
-                      ON
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, marginTop: 3, lineHeight: 1.3 }}>
-                  {yes && p.qrg ? (
-                    <>
-                      <span style={{ fontWeight: 700, color: "#1b7a42" }}>
-                        {Number(p.qrg.percent)} %
-                      </span>
-                      <span style={{ color: "var(--uidai-pmis-muted)" }}> · </span>
-                      <strong style={{ color: "#173e77" }}>
-                        ₹ {Number(p.qrg.value || 0).toLocaleString("en-IN")}
-                      </strong>
-                    </>
-                  ) : (
-                    <span style={{ color: "var(--uidai-pmis-muted)" }}>No hold-back</span>
-                  )}
-                </div>
-              </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {row("QGR %", appliedPhase ? `${percent} %` : "—",
+          { color: appliedPhase ? "#1b7a42" : "#a3afc1" })}
+        {row("QGR Hold-back", appliedPhase ? inr(holdBack) : inr(0),
+          { color: appliedPhase ? "#9b1c1c" : "#173e77" })}
+        {row("Total Contract Cost", inr(total))}
 
-              <div role="group" aria-label={`Apply QGR to Phase ${p.phase}`}
-                style={{
-                  display: "inline-flex", flex: "0 0 auto",
-                  border: "1px solid var(--uidai-pmis-border)",
-                  borderRadius: 999, overflow: "hidden",
-                  background: "#fff",
-                }}>
-                <button
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => !yes && onSetQrgForPhase(p.phase, true)}
-                  style={{
-                    padding: "5px 12px",
-                    border: "none",
-                    background: yes ? "#1b7a42" : "transparent",
-                    color: yes ? "#fff" : "#173e77",
-                    fontWeight: 700,
-                    cursor: isLocked ? "not-allowed" : "pointer",
-                    opacity: isLocked ? 0.5 : 1,
-                    fontSize: 12,
-                  }}
-                >
-                  Yes
-                </button>
-                <button
-                  type="button"
-                  disabled={isLocked}
-                  onClick={() => yes && onSetQrgForPhase(p.phase, false)}
-                  style={{
-                    padding: "5px 12px",
-                    border: "none",
-                    borderLeft: "1px solid var(--uidai-pmis-border)",
-                    background: !yes ? "#eef2f7" : "transparent",
-                    color: "#173e77",
-                    fontWeight: 700,
-                    cursor: isLocked ? "not-allowed" : "pointer",
-                    opacity: isLocked ? 0.5 : 1,
-                    fontSize: 12,
-                  }}
-                >
-                  No
-                </button>
-              </div>
-            </div>
-          );
-        })}
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+          marginTop: 6, padding: "12px 14px",
+          background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
+          color: "#fff",
+          borderRadius: 10,
+          boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
+        }}>
+          <span style={{ fontSize: 11, opacity: 0.9, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            Remaining Payable
+          </span>
+          <strong style={{ fontSize: 18, color: "#fff" }}>{inr(remaining)}</strong>
+          {appliedPhase && (
+            <span style={{ fontSize: 10, opacity: 0.85 }}>
+              after ₹ {holdBack.toLocaleString("en-IN")} QGR hold-back
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
