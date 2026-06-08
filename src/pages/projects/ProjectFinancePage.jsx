@@ -1667,20 +1667,28 @@ function PhasePanel({
                     </tr>
                   );
                 })}
+                {terms.length > 0 && (
+                  <tr style={{ background: "#f1f6fd" }}>
+                    <td colSpan={3} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
+                      Total
+                    </td>
+                    <td style={{ fontWeight: 800, color: "#173e77" }}>
+                      ₹ {totalValue.toLocaleString("en-IN")}
+                    </td>
+                    <td />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
 
-          <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 10 }}>
             <div style={{
               fontSize: 13,
               color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
               fontWeight: 700,
             }}>
               Scheduled: {totalPercent}%{totalPercent > 100 && " — over 100%"}
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77" }}>
-              Total: {inr(totalValue)}
             </div>
           </div>
         </div>
