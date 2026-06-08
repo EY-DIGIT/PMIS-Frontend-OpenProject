@@ -1496,23 +1496,20 @@ function PhasePanel({
           textAlign: "left",
         }}
       >
-        <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
-          Phase {phase.phase}
-          {qrgApplied && (
-            <span style={{
-              fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
-              padding: "2px 7px", borderRadius: 999,
-              background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
-            }}>
-              QGR
-            </span>
-          )}
-          <span style={{ color: "#173e77", fontWeight: 700, marginLeft: 4, fontSize: 12 }}>
-            ({terms.length} term{terms.length === 1 ? "" : "s"} · {totalPercent}% scheduled · Phase Fixed: ₹ {Number(phase.effectivePhaseTotal ||phase.phaseFixedTotal || 0).toLocaleString("en-IN")})
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 12, minWidth: 0, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            Phase {phase.phase}
+            {qrgApplied && (
+              <span style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
+                padding: "2px 7px", borderRadius: 999,
+                background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
+              }}>
+                QGR
+              </span>
+            )}
           </span>
-        </span>
 
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 12, flex: "0 0 auto" }}>
           {canToggleQgr && (
             <div
               onClick={(e) => e.stopPropagation()}
@@ -1563,8 +1560,9 @@ function PhasePanel({
               </div>
             </div>
           )}
-          <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14 }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
         </div>
+
+        <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14, flex: "0 0 auto" }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
       </div>
 
       {expanded && (
