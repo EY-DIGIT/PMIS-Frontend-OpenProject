@@ -1483,9 +1483,12 @@ function PhasePanel({
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
+  /* Base (100%) the term percentages are taken from = scheduled value
+     scaled back up by the scheduled %. Remaining = the still-unscheduled
+     part of that base. */
+  const phaseBase = totalPercent > 0 ? totalValue / (totalPercent / 100) : 0;
+  const phaseRemaining = phaseBase - totalValue;
   const qrgApplied = !!phase.qrg?.applied;
-  const qgrPercent = qrgApplied ? Number(phase.qrg?.percent) || 0 : 0;
-  const totalNet = totalValue * (1 - qgrPercent / 100);
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
 
@@ -1596,7 +1599,7 @@ function PhasePanel({
                   <th style={{ width: 140 }}>Frequency</th>
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
-                  <th style={{ width: 200 }}>Breakup (Gross / QGR / Net)</th>
+                  <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
@@ -1609,9 +1612,9 @@ function PhasePanel({
                   </tr>
                 ) : terms.map((t) => {
                   const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
-                  const gross = Number(t.value) || 0;
-                  const qgrHold = gross * (qgrPercent / 100);
-                  const net = gross - qgrHold;
+                  const value = Number(t.value) || 0;
+                  const pct = Number(t.percentOfPayment) || 0;
+                  const remaining = phaseBase - value;
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
@@ -1629,15 +1632,15 @@ function PhasePanel({
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
                       <td style={{ fontWeight: 700, color: "#173e77" }}>
-                        ₹ {gross.toLocaleString("en-IN")}
+                        ₹ {value.toLocaleString("en-IN")}
                       </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
-                          <span style={muted}>Gross: <strong style={{ color: "#173e77" }}>{inr(gross)}</strong></span>
-                          <span style={{ color: qgrHold > 0 ? "#b54708" : "#a3afc1" }}>
-                            − QGR {qgrPercent}%: {inr(qgrHold)}
+                          <span style={muted}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
+                          <span style={{ color: "#173e77" }}>{pct}% of Payment: {inr(value)}</span>
+                          <span style={{ fontWeight: 700, color: remaining > 0 ? "#b54708" : "#1b7a42" }}>
+                            Remaining: {inr(remaining)}
                           </span>
-                          <span style={{ fontWeight: 700, color: "#1b7a42" }}>Net: {inr(net)}</span>
                         </div>
                       </td>
                       <td style={{ textAlign: "center" }}>
@@ -1690,8 +1693,11 @@ function PhasePanel({
                     <td style={{ fontWeight: 800, color: "#173e77" }}>
                       ₹ {totalValue.toLocaleString("en-IN")}
                     </td>
-                    <td style={{ fontWeight: 700, color: "#1b7a42", fontSize: 12 }}>
-                      Net: {inr(totalNet)}
+                    <td style={{ fontSize: 11, lineHeight: 1.4, fontWeight: 700 }}>
+                      <div style={{ color: "#173e77" }}>Total: {inr(phaseBase)}</div>
+                      <div style={{ color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }}>
+                        Remaining: {inr(phaseRemaining)}
+                      </div>
                     </td>
                     <td />
                   </tr>
