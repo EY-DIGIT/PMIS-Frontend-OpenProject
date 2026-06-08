@@ -30,6 +30,11 @@ function inr(n) {
   return `₹ ${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+/* ISO datetime → YYYY-MM-DD for <input type="date">. */
+function toDateInput(iso) {
+  return typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : "";
+}
+
 
 const ctrl = {
   width: "100%",
@@ -1594,6 +1599,15 @@ function PhasePanel({
                 QGR
               </span>
             )}
+            {phase.cycleCount != null && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                padding: "2px 7px", borderRadius: 999,
+                background: "#eef4fc", color: "#173e77", border: "1px solid #cfe0f5",
+              }}>
+                {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Cycle" : "Cycles"}
+              </span>
+            )}
           </span>
 
           {canToggleQgr && (
@@ -1663,8 +1677,10 @@ function PhasePanel({
               style={{ marginTop: 0 }}
               disabled={isLocked || terms.length === 0}
               onClick={() => {
-                /* Prefill: keep last-applied dates; seed frequency from the
-                   first term when nothing has been chosen yet. */
+                /* Start/end come from the phase (read-only); seed frequency
+                   from the first term when nothing has been chosen yet. */
+                setFreqStart(toDateInput(phase.startDate));
+                setFreqEnd(toDateInput(phase.endDate));
                 setFreqCode((c) => c || terms[0]?.frequencyCode || "");
                 setShowFreqModal(true);
               }}
@@ -1845,11 +1861,11 @@ function PhasePanel({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                 <label>Start Date</label>
-                <input type="date" value={freqStart} onChange={(e) => setFreqStart(e.target.value)} />
+                <input type="date" value={freqStart} disabled title="Set on the phase" />
               </div>
               <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                 <label>End Date</label>
-                <input type="date" value={freqEnd} min={freqStart || undefined} onChange={(e) => setFreqEnd(e.target.value)} />
+                <input type="date" value={freqEnd} disabled title="Set on the phase" />
               </div>
             </div>
             <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
