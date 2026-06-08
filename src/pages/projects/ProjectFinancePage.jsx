@@ -1279,7 +1279,7 @@ export default function ProjectFinancePage() {
           <div className="uidai-pmis-card">
             <div style={sectionHead}>
               <span style={stepBadge}>3</span>
-              CCN Cap &amp; Value
+              CCN 
               <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
                 (Change Control Note)
               </span>
