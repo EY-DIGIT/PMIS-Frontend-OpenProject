@@ -1208,7 +1208,7 @@ export default function MilestoneConfigPage({ mode }) {
       uiStore.hideLoader();
       const label = p.projectCode || p.projectId;
       uiStore.showMessage(`Project ${label} added successfully!`, () =>
-        navigate("/projects")
+        navigate(`/projects/${encodeURIComponent(p.projectId)}/finance`)
       );
     };
 
