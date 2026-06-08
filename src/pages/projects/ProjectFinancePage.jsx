@@ -35,6 +35,14 @@ function toDateInput(iso) {
   return typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : "";
 }
 
+/* YYYY-MM-DD (or ISO datetime) → DD-MM-YYYY for read-only display. */
+function fmtDMY(value) {
+  const ymd = toDateInput(value);
+  if (!ymd) return "";
+  const [y, m, d] = ymd.split("-");
+  return `${d}-${m}-${y}`;
+}
+
 
 const ctrl = {
   width: "100%",
@@ -1861,11 +1869,11 @@ function PhasePanel({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                 <label>Start Date</label>
-                <input type="date" value={freqStart} disabled title="Set on the phase" />
+                <input type="text" value={fmtDMY(freqStart)} disabled title="Set on the phase" />
               </div>
               <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                 <label>End Date</label>
-                <input type="date" value={freqEnd} disabled title="Set on the phase" />
+                <input type="text" value={fmtDMY(freqEnd)} disabled title="Set on the phase" />
               </div>
             </div>
             <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
