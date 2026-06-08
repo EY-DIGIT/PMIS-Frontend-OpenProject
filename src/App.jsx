@@ -309,6 +309,36 @@ function Breadcrumbs() {
         );
     }
 
+    /* /manage-users/:projectId — Manage Team is a project sub-page, so the
+       trail mirrors Finance: Home › Project Detail › Manage Team. The
+       generic logic would otherwise link the "Manage Team" crumb to
+       /manage-users (a 404) and never link back to the project. */
+    if (segments[0] === "manage-users" && segments[1]) {
+        const pid = decodeURIComponent(segments[1]);
+        const projectUrl = `/projects/${encodeURIComponent(pid)}`;
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Home
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <Link to={projectUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Project Detail
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <span style={{ color: "#333", fontWeight: 600 }}>Manage Team</span>
+            </nav>
+        );
+    }
+
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so
        the breadcrumb stops at "Track Progress". */
