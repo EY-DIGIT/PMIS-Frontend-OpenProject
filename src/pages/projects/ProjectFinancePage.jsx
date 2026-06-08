@@ -1678,6 +1678,14 @@ function PhasePanel({
 function QgrSummarySection({ phases }) {
   if (!phases || phases.length === 0) return null;
 
+  /* Total remaining balance = the held-back (QGR) amount across every
+     phase that carries QGR. This is the money guaranteed but not yet
+     released through the scheduled payment terms. */
+  const totalRemaining = phases.reduce(
+    (s, p) => s + (p.qrg?.applied ? Number(p.qrg?.value) || 0 : 0),
+    0
+  );
+
   const stat = (label, value, opts = {}) => (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
@@ -1751,6 +1759,20 @@ function QgrSummarySection({ phases }) {
             </div>
           );
         })}
+      </div>
+
+      {/* Total remaining balance — sum of QGR hold-back across all phases. */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+        marginTop: 14, padding: "12px 14px",
+        background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
+        color: "#fff", borderRadius: 10,
+        boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
+      }}>
+        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+          Total Remaining Balance
+        </span>
+        <strong style={{ fontSize: 16, color: "#fff" }}>{inr(totalRemaining)}</strong>
       </div>
     </div>
   );
