@@ -30,6 +30,49 @@ function inr(n) {
   return `₹ ${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+/* Map a frequency's display name to a calendar step. Best-effort match on
+   the catalog labels (Monthly / Quarterly / Half-Yearly / Yearly / Weekly /
+   Fortnightly / Daily); defaults to monthly. */
+function freqStep(frequencyName) {
+  const name = (frequencyName || "").toLowerCase();
+  if (name.includes("fortnight") || (name.includes("bi") && name.includes("week"))) return { days: 14 };
+  if (name.includes("week")) return { days: 7 };
+  if (name.includes("dai") || name.includes("day")) return { days: 1 };
+  if (name.includes("quarter")) return { months: 3 };
+  if (name.includes("half")) return { months: 6 };
+  if (name.includes("year") || name.includes("annual")) return { months: 12 };
+  return { months: 1 };
+}
+
+/* Build the list of billing cycles (each a period start Date) between two
+   dates for a frequency. Guard-capped so a tiny step over a huge range
+   can't spin forever. */
+function buildCycles(startDate, endDate, frequencyName) {
+  if (!startDate || !endDate) return [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return [];
+  const step = freqStep(frequencyName);
+  const out = [];
+  const cur = new Date(start);
+  let guard = 0;
+  while (cur <= end && guard < 600) {
+    out.push(new Date(cur));
+    if (step.months) cur.setMonth(cur.getMonth() + step.months);
+    else cur.setDate(cur.getDate() + step.days);
+    guard++;
+  }
+  return out;
+}
+
+function fmtCycleDate(d) {
+  try {
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
+
 const ctrl = {
   width: "100%",
   padding: "10px",
@@ -1388,6 +1431,7 @@ export default function ProjectFinancePage() {
                 phase={p}
                 milestoneName={milestoneName}
                 frequencyName={frequencyName}
+                frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
                 isLocked={isLocked}
                 isLastPhase={idx === phases.length - 1}
@@ -1504,10 +1548,19 @@ export default function ProjectFinancePage() {
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencyName, onEditTerm, isLocked, isLastPhase,
+  phase, milestoneName, frequencyName, frequencies = [], onEditTerm, isLocked, isLastPhase,
   qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
+  /* Apply-Frequency tool: a start/end/frequency window that generates the
+     billing cycles shown in the (conditionally rendered) Cycle column.
+     Lives in local state — there's no persistence endpoint for it yet. */
+  const [showFreqModal, setShowFreqModal] = useState(false);
+  const [freqStart, setFreqStart] = useState("");
+  const [freqEnd, setFreqEnd] = useState("");
+  const [freqCode, setFreqCode] = useState("");
+  const [cycles, setCycles] = useState([]);
+  const hasCycles = cycles.length > 0;
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
@@ -1619,6 +1672,22 @@ function PhasePanel({
 
       {expanded && (
         <div style={{ padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <button
+              type="button"
+              className="uidai-pmis-btn uidai-pmis-btn-small"
+              style={{ marginTop: 0 }}
+              disabled={isLocked || terms.length === 0}
+              onClick={() => {
+                setFreqStart("");
+                setFreqEnd("");
+                setFreqCode(terms[0]?.frequencyCode || "");
+                setShowFreqModal(true);
+              }}
+            >
+              Apply Frequency
+            </button>
+          </div>
           <div className="uidai-pmis-table-wrap">
             <table className="uidai-pmis-table uidai-pmis-table-compact">
               <thead>
@@ -1628,13 +1697,14 @@ function PhasePanel({
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
+                  {hasCycles && <th style={{ width: 150 }}>Cycle</th>}
                   <th style={{ width: 90, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={hasCycles ? 7 : 6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -1677,6 +1747,21 @@ function PhasePanel({
                           </span>
                         </div>
                       </td>
+                      {hasCycles && (
+                        <td>
+                          {cycles[idx] ? (
+                            <span style={{
+                              display: "inline-block", padding: "2px 8px", borderRadius: 999,
+                              background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600,
+                              border: "1px solid #c4e9d0",
+                            }}>
+                              Cycle {idx + 1}: {fmtCycleDate(cycles[idx])}
+                            </span>
+                          ) : (
+                            <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
+                          )}
+                        </td>
+                      )}
                       <td style={{ textAlign: "center" }}>
                         <button
                           type="button"
@@ -1733,6 +1818,7 @@ function PhasePanel({
                         Remaining: {inr(phaseRemaining)}
                       </div>
                     </td>
+                    {hasCycles && <td />}
                     <td />
                   </tr>
                 )}
@@ -1764,6 +1850,86 @@ function PhasePanel({
               fontWeight: 700,
             }}>
               Scheduled: {totalPercent}%{totalPercent > 100 && " — over 100%"}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFreqModal && (
+        <div className="uidai-modal" role="dialog" aria-modal="true">
+          <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => setShowFreqModal(false)}
+              style={{
+                position: "absolute", top: 8, right: 10, width: 28, height: 28,
+                border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+                cursor: "pointer", color: "#666", padding: 0,
+              }}
+            >
+              ×
+            </button>
+            <h3 className="uidai-modal__title">Apply Frequency — Phase {phase.phase}</h3>
+            <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+              Pick a start date, end date and frequency to generate the billing cycles.
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>Start Date</label>
+                <input type="date" value={freqStart} onChange={(e) => setFreqStart(e.target.value)} />
+              </div>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>End Date</label>
+                <input type="date" value={freqEnd} min={freqStart || undefined} onChange={(e) => setFreqEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
+              <label>Frequency</label>
+              <select value={freqCode} onChange={(e) => setFreqCode(e.target.value)}>
+                <option value="">— Select —</option>
+                {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
+              </select>
+            </div>
+
+            <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                onClick={() => setShowFreqModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-small"
+                style={{ marginTop: 0 }}
+                onClick={() => {
+                  if (!freqStart || !freqEnd) {
+                    uiStore.showError("Pick both a start and end date.");
+                    return;
+                  }
+                  if (!freqCode) {
+                    uiStore.showError("Pick a frequency.");
+                    return;
+                  }
+                  if (new Date(freqStart) > new Date(freqEnd)) {
+                    uiStore.showError("End date must be on or after the start date.");
+                    return;
+                  }
+                  const freqName = frequencies.find((f) => f.code === freqCode)?.name || freqCode;
+                  const generated = buildCycles(freqStart, freqEnd, freqName);
+                  if (generated.length === 0) {
+                    uiStore.showError("No cycles fall in this date range.");
+                    return;
+                  }
+                  setCycles(generated);
+                  setShowFreqModal(false);
+                }}
+              >
+                Apply
+              </button>
             </div>
           </div>
         </div>
