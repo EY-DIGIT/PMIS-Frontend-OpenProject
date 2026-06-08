@@ -1070,6 +1070,33 @@ export default function ProjectFinancePage() {
      Returns true on success so the caller can close the modal. */
   async function saveTerm(term, { frequencyCode, percentOfPayment }) {
     if (!term) return false;
+
+    /* Hard validation: the final milestone of the final phase is the
+       balancing term — saving it must bring that phase's scheduled %
+       to exactly 100%. Block the save (no PATCH) otherwise. */
+    const lastPhase = phases[phases.length - 1];
+    if (lastPhase && term.phase === lastPhase.phase) {
+      const phaseTerms = lastPhase.paymentTerms || [];
+      const isLastTerm =
+        phaseTerms.length > 0 && phaseTerms[phaseTerms.length - 1].id === term.id;
+      if (isLastTerm) {
+        const others = phaseTerms
+          .filter((t) => t.id !== term.id)
+          .reduce((s, t) => s + (Number(t.percentOfPayment) || 0), 0);
+        const newPct = Number(percentOfPayment) || 0;
+        const total = others + newPct;
+        if (Math.abs(total - 100) > 0.001) {
+          const needed = 100 - others;
+          uiStore.showError(
+            `Last phase must total 100%. This makes it ${total}% ` +
+            `(${total < 100 ? `${100 - total}% short` : `${total - 100}% over`}). ` +
+            `Set this milestone to ${needed}%.`
+          );
+          return false;
+        }
+      }
+    }
+
     setSavingTerm(true);
     try {
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(term.id)}`, {
