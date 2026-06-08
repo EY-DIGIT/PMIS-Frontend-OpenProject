@@ -1333,7 +1333,7 @@ export default function ProjectFinancePage() {
             background: "var(--uidai-pmis-border)",
             margin: "0 16px",
           }} />
-          <QgrSummarySection phases={phases} />
+          <QgrSummarySection phases={phases} totals={totals} />
         </div>
       </div>
 
@@ -1675,16 +1675,19 @@ function PhasePanel({
    phase carries QGR) the held-back %/₹ value. Total Contract Cost is
    intentionally omitted here — it already shows in the Summary above.
    ────────────────────────────────────────────────────────────────── */
-function QgrSummarySection({ phases }) {
+function QgrSummarySection({ phases, totals }) {
   if (!phases || phases.length === 0) return null;
 
-  /* Total remaining balance = the held-back (QGR) amount across every
-     phase that carries QGR. This is the money guaranteed but not yet
-     released through the scheduled payment terms. */
-  const totalRemaining = phases.reduce(
-    (s, p) => s + (p.qrg?.applied ? Number(p.qrg?.value) || 0 : 0),
+  /* Remaining balance = Total Contract Cost minus everything already
+     scheduled through the payment terms (sum of each term's ₹ value
+     across all phases). It's the portion of the contract not yet
+     committed to a payment term. */
+  const totalContractCost = Number(totals?.totalContractCost) || 0;
+  const totalScheduled = phases.reduce(
+    (s, p) => s + (p.paymentTerms || []).reduce((a, t) => a + (Number(t.value) || 0), 0),
     0
   );
+  const totalRemaining = totalContractCost - totalScheduled;
 
   const stat = (label, value, opts = {}) => (
     <div style={{
