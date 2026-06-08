@@ -694,104 +694,6 @@ function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────
-   Edit Payment Term modal — opens when a term row's Edit button is
-   clicked. Holds local frequency + % state; Save PATCHes the term
-   and the parent silently re-loads the payment page.
-   ────────────────────────────────────────────────────────────────── */
-function EditTermModal({
-  open, onClose, term, onSubmit, submitting,
-  frequencies, milestoneName,
-}) {
-  const [frequencyCode, setFrequencyCode] = useState("");
-  const [percentOfPayment, setPercentOfPayment] = useState("");
-
-  useEffect(() => {
-    if (!open || !term) return;
-    setFrequencyCode(term.frequencyCode || "");
-    setPercentOfPayment(
-      term.percentOfPayment === null || term.percentOfPayment === undefined
-        ? ""
-        : String(term.percentOfPayment)
-    );
-  }, [open, term]);
-
-  if (!open || !term) return null;
-
-  return (
-    <div className="uidai-modal" role="dialog" aria-modal="true">
-      <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onClose}
-          style={{
-            position: "absolute", top: 8, right: 10, width: 28, height: 28,
-            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
-            cursor: "pointer", color: "#666", padding: 0,
-          }}
-        >
-          ×
-        </button>
-        <h3 className="uidai-modal__title">Edit Payment Term</h3>
-        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
-          Phase <strong style={{ color: "#173e77" }}>{term.phase}</strong>
-          {" · "}
-          Milestone <strong style={{ color: "#173e77" }}>{milestoneName(term.milestoneId)}</strong>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Frequency</label>
-            <select
-              value={frequencyCode || ""}
-              onChange={(e) => setFrequencyCode(e.target.value)}
-            >
-              <option value="">— Select —</option>
-              {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
-            </select>
-          </div>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>% of Payment</label>
-            <input
-              type="number"
-              min="0" max="100"
-              value={percentOfPayment}
-              onChange={(e) => setPercentOfPayment(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="uidai-pmis-btn uidai-pmis-btn-small"
-            style={{ marginTop: 0 }}
-            disabled={submitting}
-            onClick={() => onSubmit({
-              frequencyCode: frequencyCode || null,
-              percentOfPayment:
-                percentOfPayment === "" || percentOfPayment === null
-                  ? null
-                  : Number(percentOfPayment),
-            })}
-          >
-            {submitting ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function ProjectFinancePage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -819,7 +721,6 @@ export default function ProjectFinancePage() {
   const [deletingCostItemId, setDeletingCostItemId] = useState("");
 
   // ── Edit Payment Term modal ──
-  const [editingTerm, setEditingTerm] = useState(null);
   const [savingTerm, setSavingTerm] = useState(false);
 
   // ── CCN cap edit buffer ──
@@ -1066,22 +967,25 @@ export default function ProjectFinancePage() {
     }
   }
 
-  async function submitTermEdit({ frequencyCode, percentOfPayment }) {
-    if (!editingTerm) return;
+  /* Inline term edit — invoked from the row's Save button. Returns true
+     on success so the PhasePanel can drop back out of edit mode. */
+  async function saveTerm(term, { frequencyCode, percentOfPayment }) {
+    if (!term) return false;
     setSavingTerm(true);
     try {
-      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(editingTerm.id)}`, {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(term.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ frequencyCode, percentOfPayment }),
       });
       await readJson(res);
-      setEditingTerm(null);
       await loadPaymentPage({ silent: true });
       uiStore.showMessage("Payment term updated.");
+      return true;
     } catch (err) {
-      if (handleAuthError(err)) return;
+      if (handleAuthError(err)) return false;
       uiStore.showError(err?.message || "Failed to update payment term");
+      return false;
     } finally {
       setSavingTerm(false);
     }
@@ -1358,7 +1262,9 @@ export default function ProjectFinancePage() {
                 phase={p}
                 milestoneName={milestoneName}
                 frequencyName={frequencyName}
-                onEditTerm={(t) => setEditingTerm(t)}
+                frequencies={frequencies}
+                onSaveTerm={saveTerm}
+                savingTerm={savingTerm}
                 isLocked={isLocked}
                 qgrLocked={isLocked || qgrSaving}
                 qgrBusy={qgrSaving}
@@ -1445,34 +1351,44 @@ export default function ProjectFinancePage() {
         milestones={milestones}
         usedMilestoneIds={usedMilestoneIds}
       />
-      <EditTermModal
-        open={!!editingTerm}
-        term={editingTerm}
-        onClose={() => setEditingTerm(null)}
-        onSubmit={submitTermEdit}
-        submitting={savingTerm}
-        frequencies={frequencies}
-        milestoneName={milestoneName}
-      />
     </div>
   );
 }
 
 /* Each phase renders as its own collapsible panel — header is always
    visible, body collapses. Frequency + % of Payment are first-class
-   columns now; the row-level pencil button opens the EditTermModal
-   which holds both. QGR moved out into the dedicated section below
-   the Summary, so this panel stays focused on payment terms. */
+   columns now; the row-level pencil button turns the Frequency and %
+   cells into inline inputs (no modal). QGR moved out into the dedicated
+   section below the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencyName, onEditTerm, isLocked,
+  phase, milestoneName, frequencyName, frequencies = [], onSaveTerm, savingTerm, isLocked,
   qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const [draftFreq, setDraftFreq] = useState("");
+  const [draftPct, setDraftPct] = useState("");
   const terms = phase.paymentTerms || [];
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const qrgApplied = !!phase.qrg?.applied;
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
+
+  function startEdit(t) {
+    setEditingId(t.id);
+    setDraftFreq(t.frequencyCode || "");
+    setDraftPct(t.percentOfPayment == null ? "" : String(t.percentOfPayment));
+  }
+  function cancelEdit() {
+    setEditingId(null);
+  }
+  async function saveEdit(t) {
+    const ok = await onSaveTerm(t, {
+      frequencyCode: draftFreq || null,
+      percentOfPayment: draftPct === "" ? null : Number(draftPct),
+    });
+    if (ok) setEditingId(null);
+  }
 
   return (
     <div style={{
@@ -1590,11 +1506,27 @@ function PhasePanel({
                   </tr>
                 ) : terms.map((t) => {
                   const freqLabel = frequencyName ? frequencyName(t.frequencyCode) : (t.frequencyCode || "");
+                  const editing = editingId === t.id;
+                  const editCtrl = {
+                    width: "100%", padding: "6px 8px",
+                    border: "1px solid var(--uidai-pmis-border)", borderRadius: 6,
+                    font: "inherit", fontSize: 13, boxSizing: "border-box", background: "#fff",
+                  };
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
                       <td>
-                        {freqLabel
+                        {editing ? (
+                          <select
+                            value={draftFreq}
+                            disabled={savingTerm}
+                            onChange={(e) => setDraftFreq(e.target.value)}
+                            style={editCtrl}
+                          >
+                            <option value="">— Select —</option>
+                            {frequencies.map((f) => <option key={f.code} value={f.code}>{f.name}</option>)}
+                          </select>
+                        ) : freqLabel
                           ? <span style={{
                               display: "inline-block", padding: "2px 8px", borderRadius: 999,
                               background: "#eef4fc", color: "#173e77", fontSize: 12, fontWeight: 600,
@@ -1602,7 +1534,16 @@ function PhasePanel({
                           : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
                       </td>
                       <td>
-                        {t.percentOfPayment == null
+                        {editing ? (
+                          <input
+                            type="number"
+                            min="0" max="100"
+                            value={draftPct}
+                            disabled={savingTerm}
+                            onChange={(e) => setDraftPct(e.target.value)}
+                            style={editCtrl}
+                          />
+                        ) : t.percentOfPayment == null
                           ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
@@ -1610,43 +1551,90 @@ function PhasePanel({
                         ₹ {Number(t.value || 0).toLocaleString("en-IN")}
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        <button
-                          type="button"
-                          title="Edit payment term"
-                          aria-label="Edit payment term"
-                          disabled={isLocked}
-                          onClick={() => onEditTerm(t)}
-                          style={{
-                            width: 32, height: 32,
-                            display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            border: "1px solid var(--uidai-pmis-border)",
-                            background: "#fff",
-                            color: "#173e77",
-                            borderRadius: 6,
-                            cursor: isLocked ? "not-allowed" : "pointer",
-                            opacity: isLocked ? 0.5 : 1,
-                            padding: 0,
-                            transition: "background .15s, border-color .15s, transform .15s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (isLocked) return;
-                            e.currentTarget.style.background = "#eaf4ff";
-                            e.currentTarget.style.borderColor = "#0aa1c0";
-                            e.currentTarget.style.transform = "translateY(-1px)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "#fff";
-                            e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
-                            e.currentTarget.style.transform = "translateY(0)";
-                          }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor" strokeWidth="2"
-                            strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M12 20h9" />
-                            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                          </svg>
-                        </button>
+                        {editing ? (
+                          <div style={{ display: "inline-flex", gap: 6, justifyContent: "center" }}>
+                            <button
+                              type="button"
+                              title="Save"
+                              aria-label="Save payment term"
+                              disabled={savingTerm}
+                              onClick={() => saveEdit(t)}
+                              style={{
+                                width: 32, height: 32,
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                border: "1px solid #1b7a42", background: "#1b7a42", color: "#fff",
+                                borderRadius: 6, cursor: savingTerm ? "not-allowed" : "pointer",
+                                opacity: savingTerm ? 0.6 : 1, padding: 0,
+                              }}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2.5"
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              title="Cancel"
+                              aria-label="Cancel edit"
+                              disabled={savingTerm}
+                              onClick={cancelEdit}
+                              style={{
+                                width: 32, height: 32,
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                border: "1px solid var(--uidai-pmis-border)", background: "#fff",
+                                color: "#666", borderRadius: 6,
+                                cursor: savingTerm ? "not-allowed" : "pointer",
+                                opacity: savingTerm ? 0.6 : 1, padding: 0,
+                              }}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2.5"
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M18 6 6 18" />
+                                <path d="m6 6 12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            title="Edit payment term"
+                            aria-label="Edit payment term"
+                            disabled={isLocked}
+                            onClick={() => startEdit(t)}
+                            style={{
+                              width: 32, height: 32,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              border: "1px solid var(--uidai-pmis-border)",
+                              background: "#fff",
+                              color: "#173e77",
+                              borderRadius: 6,
+                              cursor: isLocked ? "not-allowed" : "pointer",
+                              opacity: isLocked ? 0.5 : 1,
+                              padding: 0,
+                              transition: "background .15s, border-color .15s, transform .15s",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (isLocked) return;
+                              e.currentTarget.style.background = "#eaf4ff";
+                              e.currentTarget.style.borderColor = "#0aa1c0";
+                              e.currentTarget.style.transform = "translateY(-1px)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = "#fff";
+                              e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
+                              e.currentTarget.style.transform = "translateY(0)";
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                              stroke="currentColor" strokeWidth="2"
+                              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                            </svg>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
