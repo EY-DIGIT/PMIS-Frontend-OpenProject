@@ -20,6 +20,7 @@ import DeleteProjectModal from "../../components/projects/modals/DeleteProjectMo
 import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
+import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
 import { hydrateProjects } from "../../store/project/apiSync";
 import { useCan, useCurrentRole } from "../../auth/permissions";
 
@@ -220,6 +221,9 @@ export default function ProjectDetailsPage() {
   const [apiProject, setApiProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(false);
   const [projectError, setProjectError] = useState("");
+  // null = unknown/not loaded yet, otherwise the project's milestone count.
+  // Finance is hidden only when we know the project has zero milestones.
+  const [milestoneCount, setMilestoneCount] = useState(null);
 
   const [vendorMaster, setVendorMaster] = useState([]);
   const [divisionOptions, setDivisionOptions] = useState([]);
@@ -398,6 +402,24 @@ export default function ProjectDetailsPage() {
     if (!projectId) return;
     fetchProjectDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  /* Milestone count drives whether the Finance entry point is shown — a
+     project with zero milestones has nothing to finance, so hide it. The
+     detail GET doesn't return milestones, so fetch them separately. */
+  useEffect(() => {
+    if (!projectId || !getToken()) return;
+    let cancelled = false;
+    setMilestoneCount(null);
+    loadMilestonesForProject(projectId)
+      .then((list) => {
+        if (!cancelled) setMilestoneCount(safeArray(list).length);
+      })
+      .catch(() => {
+        // On failure leave count unknown (null) so Finance stays visible.
+        if (!cancelled) setMilestoneCount(null);
+      });
+    return () => { cancelled = true; };
   }, [projectId]);
 
   useEffect(() => {
@@ -984,7 +1006,8 @@ export default function ProjectDetailsPage() {
       key: "finance",
       label: "Finance",
       onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`),
-      visible: true
+      // Hidden when the project has no milestones (count known to be 0).
+      visible: milestoneCount !== 0
     },
     {
       key: "Severity And LD Configure",
