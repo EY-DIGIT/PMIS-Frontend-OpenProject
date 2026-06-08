@@ -1745,6 +1745,7 @@ function QgrSummarySection({ phases, totals }) {
         {phases.map((p) => {
           const terms = p.paymentTerms || [];
           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
+          const phaseTotal = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
           const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
           const yes = !!p.qrg?.applied;
           const qgrPercent = yes ? Number(p.qrg?.percent) || 0 : 0;
@@ -1763,27 +1764,30 @@ function QgrSummarySection({ phases, totals }) {
               }}
             >
               <div style={{
-                display: "flex", alignItems: "center", gap: 6,
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
                 fontWeight: 800, color: "#173e77", fontSize: 13,
                 paddingBottom: 8, marginBottom: 8,
                 borderBottom: "1px solid var(--uidai-pmis-border)",
               }}>
-                Phase {p.phase}
-                {yes && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
-                    padding: "1px 6px", borderRadius: 999,
-                    background: "#1b7a42", color: "#fff",
-                  }}>
-                    QGR
-                  </span>
-                )}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  Phase {p.phase}
+                  {yes && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+                      padding: "1px 6px", borderRadius: 999,
+                      background: "#1b7a42", color: "#fff",
+                    }}>
+                      QGR
+                    </span>
+                  )}
+                </span>
+                <span style={{ fontWeight: 800, color: "#173e77" }}>{inr(phaseTotal)}</span>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {stat("Scheduled", `${totalPercent}%`,
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
-                {stat("Phase Fixed", inr(phaseFixed))}
+                {stat("Delivery Cost", inr(phaseFixed))}
                 {stat("QGR Hold-back",
                   yes ? `${qgrPercent}% · ${inr(qgrValue)}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
