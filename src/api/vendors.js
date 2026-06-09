@@ -61,9 +61,40 @@ function fromApi(v) {
   // Project Admins, whose /users list won't include users from other
   // organizations at all).
   const embeddedUsersById = new Map();
+  // Newer payloads ship the assignments already nested per project as
+  //   projectAssignments: [{ projectId, roles: [{ role, userIds }] }]
+  // which is exactly the shape the page works with. When present, seed
+  // `grouped` straight from it so the Users column reflects the saved
+  // selection (the flat user_assignments grouping below is the fallback
+  // for older payloads).
+  const nestedAssignments = Array.isArray(v.projectAssignments)
+    ? v.projectAssignments
+    : Array.isArray(v.project_assignments)
+      ? v.project_assignments
+      : [];
+  const nestedPids = new Set();
+  nestedAssignments.forEach((pa) => {
+    const pid = pa?.projectId || pa?.project_id || '';
+    if (!pid) return;
+    nestedPids.add(pid);
+    if (!grouped.has(pid)) grouped.set(pid, { projectId: pid, roles: [] });
+    (Array.isArray(pa?.roles) ? pa.roles : []).forEach((r) => {
+      grouped.get(pid).roles.push({
+        role: fromRoleKey(r?.role),
+        userIds: Array.isArray(r?.userIds)
+          ? r.userIds
+          : Array.isArray(r?.user_ids)
+            ? r.user_ids
+            : [],
+      });
+    });
+  });
   flatAssignments.forEach((ua) => {
     const pid = ua?.project_id || ua?.projectId || '';
     if (!pid) return;
+    // Skip projects already seeded from the nested projectAssignments
+    // shape so we don't double up role rows.
+    if (nestedPids.has(pid)) return;
     if (!grouped.has(pid)) grouped.set(pid, { projectId: pid, roles: [] });
     grouped.get(pid).roles.push({
       role: fromRoleKey(ua.role),
