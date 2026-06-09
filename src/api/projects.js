@@ -20,6 +20,15 @@ export async function list({ offset = 1, pageSize = 50, active } = {}) {
   return unwrapList(res).map(fromApiProject);
 }
 
+// Same list endpoint but WITHOUT offset/pageSize query params — some
+// callers (e.g. the user-search Project Mapping filter) need the full set
+// and the paginated variant fails for them. Returns every project the
+// caller is allowed to see.
+export async function listAll() {
+  const res = await api.get(ENDPOINTS.projects.list);
+  return unwrapList(res).map(fromApiProject);
+}
+
 export async function get(uuid) {
   const res = await api.get(ENDPOINTS.projects.get(uuid));
   return fromApiProject(res);

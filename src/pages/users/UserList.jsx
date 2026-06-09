@@ -39,7 +39,7 @@ export default function UserList() {
     vendorsApi.list()
       .then((v) => { if (!cancelled) setVendorList(Array.isArray(v) ? v : []); })
       .catch(() => {});
-    projectsApi.list({ pageSize: 500 })
+    projectsApi.listAll()
       .then((p) => { if (!cancelled) setProjectList(Array.isArray(p) ? p : []); })
       .catch(() => {});
     return () => { cancelled = true; };
