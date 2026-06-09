@@ -373,16 +373,16 @@ export function updateMeeting(id, patch) {
 export function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  });
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
 }
 export function fmtDateShort(iso) {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}`;
 }
 export function fmtDuration(start, end) {
   if (!start || !end) return "";

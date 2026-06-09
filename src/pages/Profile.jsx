@@ -16,15 +16,17 @@ function formatDateTime(iso) {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
-    return d.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
+    if (Number.isNaN(d.getTime())) return "—";
+    const datePart = d
+      .toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" })
+      .replace(/\//g, "-");
+    const timePart = d.toLocaleTimeString("en-IN", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
       timeZone: "Asia/Kolkata",
     });
+    return `${datePart} ${timePart}`;
   } catch {
     return "—";
   }
