@@ -29,7 +29,8 @@ function normalizeAssociatedUser(u) {
   const first = (u.firstName || '').trim();
   const last = (u.lastName || '').trim();
   const full = `${first} ${last}`.trim();
-  const name = full || u.login || u.email || u.id;
+  const fullName = typeof u.fullName === 'string' ? u.fullName.trim() : '';
+  const name = full || fullName || u.login || u.email || u.id;
   return { id: String(u.id), name: String(name) };
 }
 

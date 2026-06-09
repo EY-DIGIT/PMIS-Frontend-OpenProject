@@ -94,6 +94,9 @@ function asCandidateList(data) {
   if (Array.isArray(data?.users)) return data.users;
   if (Array.isArray(data?.candidates)) return data.candidates;
   if (Array.isArray(data?.items)) return data.items;
+  // HAL collection — the activity-members / activity-approvers endpoints
+  // wrap candidates as { _embedded: { elements: [...] } }.
+  if (Array.isArray(data?._embedded?.elements)) return data._embedded.elements;
   return [];
 }
 
