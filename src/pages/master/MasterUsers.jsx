@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
 import { renderMappingText } from '../../utils/helpers';
+import { getRoleMeta } from '../../auth/permissions';
 
 export default function MasterUsers() {
   const { users, refresh, loading } = useData();
@@ -39,7 +40,7 @@ export default function MasterUsers() {
                   <td>{u.fullName}</td>
                   <td>{u.employeeId}</td>
                   <td>{u.email}</td>
-                  <td>{u.role}</td>
+                  <td>{getRoleMeta(u.orgRole)?.label || u.orgRole || '—'}</td>
                   <td>{u.vendorName}</td>
                   <td>{u.divisionLabel || u.division}</td>
                   <td>{renderMappingText(u.projectMapping)}</td>
