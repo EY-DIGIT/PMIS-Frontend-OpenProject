@@ -69,12 +69,25 @@ function addDaysISO(iso, n) {
 /* ─── Status badge — DRAFT / SCHEDULED / COMPLETED / CANCELLED ─── */
 const STATUS_CLASS = {
   DRAFT: "st-draft",
-  IN_REVIEW: "st-review",
+  IN_REVIEW: "st-mom",
   FINALIZED: "st-completed",
 };
 function StatusBadge({ status }) {
   const s = String(status || "").toUpperCase();
   return <span className={`badge ${STATUS_CLASS[s] || "st-draft"}`}>{s || "—"}</span>;
+}
+
+/* ─── Action-item status badge — items carry the same three statuses
+   as the MoM (DRAFT / IN_REVIEW / FINALIZED). ─── */
+const AI_STATUS_CLASS = {
+  DRAFT: "st-draft",
+  IN_REVIEW: "ai-progress",
+  FINALIZED: "ai-completed",
+};
+function ActionStatusBadge({ status }) {
+  const s = String(status || "").toUpperCase();
+  if (!s) return <span className="muted">—</span>;
+  return <span className={`badge ${AI_STATUS_CLASS[s] || "st-draft"}`}>{s.replace(/_/g, " ")}</span>;
 }
 
 /* ─── Info tile (date / time / location) ─── */
@@ -154,46 +167,46 @@ export default function MeetingDetailPage() {
   });
   const [momRemote, setMomRemote] = useState(null);
   const [savingMom, setSavingMom] = useState(false);
-  const [editingId, setEditingId] = useState("");
+
+  /* A MoM has a SINGLE status — edited once for the whole record, not
+     per action item. These drive that one inline editor. */
+  const [editingStatus, setEditingStatus] = useState(false);
   const [statusDraft, setStatusDraft] = useState("");
+  const [savingStatus, setSavingStatus] = useState(false);
 
   /* Attendance is tracked locally and persisted via PUT when Mark Present is clicked. */
   const [presentSelection, setPresentSelection] = useState([]);
   const [updatingAttendance, setUpdatingAttendance] = useState(false);
   const taskSectionRef = useRef(null);
-  const [savingId, setSavingId] = useState("");
 
-  const startStatusEdit = (m) => {
-    setEditingId(m.id);
-    setStatusDraft(String(m.status || "").toUpperCase() || STATUS_OPTIONS[0]);
+  const startStatusEdit = () => {
+    /* A FINALIZED MoM is locked — guard here too in case the button is
+       ever reachable. */
+    if (String(momRemote?.status || "").toUpperCase() === "FINALIZED") return;
+    setStatusDraft(String(momRemote?.status || "").toUpperCase() || STATUS_OPTIONS[0]);
+    setEditingStatus(true);
   };
-  const cancelStatusEdit = () => { setEditingId(""); setStatusDraft(""); };
+  const cancelStatusEdit = () => { setEditingStatus(false); setStatusDraft(""); };
   const saveStatus = async () => {
-    if (!momRemote?.id) {
-      show("MoM ID missing", "warn");
+    const momId = momRemote?.id ?? momRemote?.momId;
+    if (!momId) {
+      show("MoM ID missing.", "warn");
       return;
     }
-
-    if (savingId) return;
-
+    if (savingStatus) return;
     try {
-      setSavingId(momRemote.id);
-
-      await momUpdateStatus(momRemote.id, statusDraft); // ✅ FIX HERE
-
-      setRows((list) =>
-        list.map((r) =>
-          r.id === momRemote.id ? { ...r, status: statusDraft } : r
-        )
-      );
-
-      setEditingId("");
+      setSavingStatus(true);
+      await momUpdateStatus(momId, statusDraft);
+      /* Patch the loaded record in place so the badge reflects the new
+         status without a reload. */
+      setMomRemote((prev) => (prev ? { ...prev, status: statusDraft } : prev));
+      setEditingStatus(false);
       setStatusDraft("");
       show("Status updated.", "ok");
     } catch (e) {
       show(e.message || "Failed to update status.", "warn");
     } finally {
-      setSavingId("");
+      setSavingStatus(false);
     }
   };
 
@@ -706,6 +719,82 @@ export default function MeetingDetailPage() {
         <div ref={taskSectionRef}>
           {momRemote ? (
             <>
+              {/* MoM header — a single status control for the whole record. */}
+              <div className="card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div className="card-title" style={{ margin: 0 }}>
+                    Minutes of Meeting
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span
+                      className="muted"
+                      style={{ fontSize: 12.5, fontWeight: 700, letterSpacing: ".2px" }}
+                    >
+                      STATUS
+                    </span>
+                    {editingStatus ? (
+                      <>
+                        <select
+                          value={statusDraft}
+                          onChange={(e) => setStatusDraft(e.target.value)}
+                          disabled={savingStatus}
+                          style={{ minWidth: 150 }}
+                        >
+                          {STATUS_OPTIONS.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn small-btn"
+                          onClick={saveStatus}
+                          disabled={savingStatus}
+                        >
+                          {savingStatus ? "Saving…" : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn ghost small-btn"
+                          onClick={cancelStatusEdit}
+                          disabled={savingStatus}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <StatusBadge status={momRemote.status} />
+                        {String(momRemote.status || "").toUpperCase() === "FINALIZED" ? (
+                          <span
+                            className="muted"
+                            style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
+                            title="A finalized MoM cannot be edited."
+                          >
+                            🔒 Locked
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn ghost small-btn"
+                            onClick={startStatusEdit}
+                          >
+                            ✎ Edit
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {decisions.length > 0 && (
                 <div className="card">
                   <div className="card-title">Decisions</div>
@@ -735,7 +824,7 @@ export default function MeetingDetailPage() {
                           <th style={{ minWidth: 240 }}>Description</th>
                           <th>Owner</th>
                           <th>Due</th>
-                          <th>Status</th>
+                          {/* <th>Status</th> */}
                         </tr>
                       </thead>
                       <tbody>
@@ -744,49 +833,9 @@ export default function MeetingDetailPage() {
                             <td>{a.description}</td>
                             <td>{labelFor(a.assignedToUserId)}</td>
                             <td>{fmtDate(a.dueDate)}</td>
-                            <td>
-                              {editingId === meeting.id ? (
-                                <>
-                                  <select
-                                    value={statusDraft}
-                                    onChange={(e) => setStatusDraft(e.target.value)}
-                                  >
-                                    {STATUS_OPTIONS.map((s) => (
-                                      <option key={s} value={s}>{s}</option>
-                                    ))}
-                                  </select>
-
-                                  <button
-                                    className="btn small-btn"
-                                    onClick={() => saveStatus(meeting)}
-                                    disabled={savingId === meeting.id}
-                                  >
-                                    Save
-                                  </button>
-
-                                  <button
-                                    className="btn ghost small-btn"
-                                    onClick={cancelStatusEdit}
-                                  >
-                                    Cancel
-                                  </button>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="badge ai-open">
-                                    {meeting.status}
-                                  </span>
-
-                                  <button
-                                    type="button"
-                                    className="btn ghost small-btn"
-                                    onClick={() => startStatusEdit(meeting)}
-                                  >
-                                    Edit
-                                  </button>
-                                </>
-                              )}
-                            </td>
+                            {/* <td>
+                              <ActionStatusBadge status={a.status} />
+                            </td> */}
                           </tr>
                         ))}
                       </tbody>

@@ -145,7 +145,7 @@ export default function ActivitySlasPage() {
     // Prefill the Activity ID when we're launched from an activity's node modal
     // (it navigates here with ?activityId=…), so the user lands ready to map.
     const [searchParams] = useSearchParams();
-    const activityLabel=searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
+    const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
 
     // ---- API configuration ----
     const [baseUrl, setBaseUrl] = useState("http://10.1.131.199/contracts");
@@ -585,384 +585,385 @@ export default function ActivitySlasPage() {
 
             {/* PICKER — find & view an SLA (filters + typeahead search) */}
             {view === "picker" && (
-            <div className="uidai-pmis-card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
-                    <div style={{ ...sectionHead, marginBottom: 0 }}>Select an SLA</div>
-                    <button type="button" className="uidai-pmis-filter-toggle" onClick={backToMapping}>← Back to mapping</button>
-                </div>
-                {listError && <Banner text={listError} />}
-
-                {/* Filters */}
-                <div className="uidai-pmis-filter-shell">
-                    <div className="uidai-pmis-filter-head">
-                        <div className="uidai-pmis-filter-title">Filters</div>
-                        {(filtersActive || slaSearch) && (
-                            <button type="button" className="uidai-pmis-filter-toggle"
-                                onClick={() => { setSlaFilters({ contract_type: "", formula_type: "", status: "" }); setSlaSearch(""); }}>
-                                ✕ Clear
-                            </button>
-                        )}
+                <div className="uidai-pmis-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
+                        <div style={{ ...sectionHead, marginBottom: 0 }}>Select an SLA</div>
+                        <button type="button" className="uidai-pmis-filter-toggle" onClick={backToMapping}>← Back to mapping</button>
                     </div>
-                    <div className="uidai-pmis-filter-body">
-                        <div>
+                    {listError && <Banner text={listError} />}
+
+                    {/* Filters */}
+                    <div className="uidai-pmis-filter-shell">
+                        <div className="uidai-pmis-filter-head">
+                            <div className="uidai-pmis-filter-title">Filters</div>
+                            {(filtersActive || slaSearch) && (
+                                <button type="button" className="uidai-pmis-filter-toggle"
+                                    onClick={() => { setSlaFilters({ contract_type: "", formula_type: "", status: "" }); setSlaSearch(""); }}>
+                                    ✕ Clear
+                                </button>
+                            )}
+                        </div>
+                        <div className="uidai-pmis-filter-body" style={{display:"flex",flexDirection:"row",width:"100%"}}>
+                            {/* <div>
                             <div style={filterFieldLabel}>Contract Type</div>
                             <select className="uidai-pmis-filter-select" value={slaFilters.contract_type}
                                 onChange={(e) => setSlaFilters((f) => ({ ...f, contract_type: e.target.value }))}>
                                 <option value="">All</option>
                                 {filterOptions.contract.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
-                        </div>
-                        <div>
-                            <div style={filterFieldLabel}>Formula</div>
-                            <select className="uidai-pmis-filter-select" value={slaFilters.formula_type}
-                                onChange={(e) => setSlaFilters((f) => ({ ...f, formula_type: e.target.value }))}>
-                                <option value="">All</option>
-                                {filterOptions.formula.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div>
-                        <div>
+                        </div> */}
+                            <div style={{ marginTop: 16,    width: "stretch" }}>
+                                <label style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>Search SLA</label>
+                                <div style={{ position: "relative" }}>
+                                    <input
+                                        className="uidai-pmis-filter-input"
+                                        type="text"
+                                        placeholder="Type to search by ref, title, contract, formula…"
+                                        value={slaSearch}
+                                        onChange={(e) => { setSlaSearch(e.target.value); setPickerOpen(true); }}
+                                        onFocus={() => setPickerOpen(true)}
+                                        onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
+                                    />
+                                    {pickerOpen && (
+                                        <div style={{
+                                            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
+                                            background: "#fff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
+                                            boxShadow: "var(--uidai-pmis-shadow, 0 4px 12px rgba(0,0,0,.08))",
+                                            maxHeight: 280, overflowY: "auto",
+                                        }}>
+                                            {listLoading ? (
+                                                <div style={{ padding: 12, ...muted, fontSize: 13 }}>Loading SLAs…</div>
+                                            ) : pickerResults.length === 0 ? (
+                                                <div style={{ padding: 12, ...muted, fontSize: 13 }}>
+                                                    {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
+                                                </div>
+                                            ) : pickerResults.slice(0, 50).map((s) => (
+                                                <button
+                                                    key={s.id}
+                                                    type="button"
+                                                    // onMouseDown fires before the input's onBlur so the click still registers.
+                                                    onMouseDown={() => pickSla(s)}
+                                                    style={{
+                                                        display: "block", width: "100%", textAlign: "left", border: "none",
+                                                        borderBottom: "1px solid #eef3f9", background: s.id === selectedSlaId ? "#eef6ff" : "#fff",
+                                                        padding: "10px 12px", cursor: "pointer", font: "inherit",
+                                                    }}
+                                                >
+                                                    <div style={{ fontWeight: 700, color: "#173e77", fontSize: 13 }}>{s.title || s.sla_ref || "—"}</div>
+                                                    <div style={{ ...muted, fontSize: 11, marginTop: 2 }}>
+                                                        <span style={{ fontFamily: "monospace" }}>{s.sla_ref || "—"}</span>
+                                                        {s.contract_type ? ` · ${s.contract_type}` : ""}{s.formula_type ? ` · ${s.formula_type}` : ""}
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
+                                    {pickerResults.length} match{pickerResults.length === 1 ? "" : "es"}{slaTotal > slaList.length ? ` · searching first ${slaList.length} of ${slaTotal}` : ""}
+                                </div>
+                            </div>
+                            <div style={{width:"250px",marginTop:"16px"}}>
+                                <div style={filterFieldLabel} style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>Formula</div>
+                                <select className="uidai-pmis-filter-select" value={slaFilters.formula_type}
+                                    onChange={(e) => setSlaFilters((f) => ({ ...f, formula_type: e.target.value }))}>
+                                    <option value="">All</option>
+                                    {filterOptions.formula.map((c) => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            {/* <div>
                             <div style={filterFieldLabel}>Status</div>
                             <select className="uidai-pmis-filter-select" value={slaFilters.status}
                                 onChange={(e) => setSlaFilters((f) => ({ ...f, status: e.target.value }))}>
                                 <option value="">All</option>
                                 {filterOptions.status.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
+                        </div> */}
                         </div>
                     </div>
-                </div>
 
-                {/* Search combobox — matches appear in a dropdown (filtered by the above) */}
-                <div style={{ marginTop: 16, maxWidth: 560 }}>
-                    <label style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>Search SLA</label>
-                    <div style={{ position: "relative" }}>
-                        <input
-                            className="uidai-pmis-filter-input"
-                            type="text"
-                            placeholder="Type to search by ref, title, contract, formula…"
-                            value={slaSearch}
-                            onChange={(e) => { setSlaSearch(e.target.value); setPickerOpen(true); }}
-                            onFocus={() => setPickerOpen(true)}
-                            onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
-                        />
-                        {pickerOpen && (
-                            <div style={{
-                                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
-                                background: "#fff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
-                                boxShadow: "var(--uidai-pmis-shadow, 0 4px 12px rgba(0,0,0,.08))",
-                                maxHeight: 280, overflowY: "auto",
-                            }}>
-                                {listLoading ? (
-                                    <div style={{ padding: 12, ...muted, fontSize: 13 }}>Loading SLAs…</div>
-                                ) : pickerResults.length === 0 ? (
-                                    <div style={{ padding: 12, ...muted, fontSize: 13 }}>
-                                        {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
-                                    </div>
-                                ) : pickerResults.slice(0, 50).map((s) => (
-                                    <button
-                                        key={s.id}
-                                        type="button"
-                                        // onMouseDown fires before the input's onBlur so the click still registers.
-                                        onMouseDown={() => pickSla(s)}
-                                        style={{
-                                            display: "block", width: "100%", textAlign: "left", border: "none",
-                                            borderBottom: "1px solid #eef3f9", background: s.id === selectedSlaId ? "#eef6ff" : "#fff",
-                                            padding: "10px 12px", cursor: "pointer", font: "inherit",
-                                        }}
-                                    >
-                                        <div style={{ fontWeight: 700, color: "#173e77", fontSize: 13 }}>{s.title || s.sla_ref || "—"}</div>
-                                        <div style={{ ...muted, fontSize: 11, marginTop: 2 }}>
-                                            <span style={{ fontFamily: "monospace" }}>{s.sla_ref || "—"}</span>
-                                            {s.contract_type ? ` · ${s.contract_type}` : ""}{s.formula_type ? ` · ${s.formula_type}` : ""}
-                                        </div>
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                    <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                        {pickerResults.length} match{pickerResults.length === 1 ? "" : "es"}{slaTotal > slaList.length ? ` · searching first ${slaList.length} of ${slaTotal}` : ""}
-                    </div>
+                    {/* Search combobox — matches appear in a dropdown (filtered by the above) */}
+
                 </div>
-            </div>
             )}
 
             {/* PICKER — selected SLA details + "Map this SLA" action */}
             {view === "picker" && selectedSlaId && (
-            <div className="uidai-pmis-card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: "#173e77" }}>SLA Details</div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => setShowMappingEdit((v) => !v)}>
-                            {showMappingEdit ? "Hide mapping fields" : "✎ Edit mapping"}
-                        </button>
-                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={createMapping} disabled={createLoading || detailLoading || !slaDetail}>
-                            {createLoading ? "Mapping…" : "Map this SLA →"}
-                        </button>
+                <div className="uidai-pmis-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#173e77" }}>SLA Details</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => setShowMappingEdit((v) => !v)}>
+                                {showMappingEdit ? "Hide mapping fields" : "✎ Edit mapping"}
+                            </button>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={createMapping} disabled={createLoading || detailLoading || !slaDetail}>
+                                {createLoading ? "Mapping…" : "Map this SLA →"}
+                            </button>
+                        </div>
                     </div>
-                </div>
 
-                {/* Map SLA to Activity — the activity mapping (activity + effective window)
+                    {/* Map SLA to Activity — the activity mapping (activity + effective window)
                     that gets POSTed. "Edit mapping" reveals the editable fields; the rest
                     of the SLA fields would go under overrides (not built yet). */}
-                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: showMappingEdit ? 12 : 0 }}>
-                        Map SLA to Activity
-                        <span style={{ ...muted, fontWeight: 400, marginLeft: 8 }}>
-                            activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>
-                            {!showMappingEdit && ` · ${effFrom} → ${effUntil}`}
-                        </span>
-                    </div>
-                    {showMappingEdit && (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
-                            <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                <label>Activity ID</label>
-                                <input type="text" value={activityLabel} readOnly style={{background:"#f1f6fd"}}
-                                // onChange={(e) => setActivityIdInput(e.target.value)} 
-                                />
-                            </div>
-                            <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                <label>Effective From</label>
-                                <input type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
-                            </div>
-                            <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                <label>Effective Until</label>
-                                <input type="date" value={effUntil} onChange={(e) => setEffUntil(e.target.value)} />
-                            </div>
+                    <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: showMappingEdit ? 12 : 0 }}>
+                            Map SLA to Activity
+                            <span style={{ ...muted, fontWeight: 400, marginLeft: 8 }}>
+                                activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>
+                                {!showMappingEdit && ` · ${effFrom} → ${effUntil}`}
+                            </span>
                         </div>
-                    )}
-                </div>
-                {createMessage && <Banner text={createMessage} />}
-                {detailError && <Banner text={detailError} />}
-                {detailLoading ? (
-                    <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
-                ) : slaDetail ? (
-                    <div>
-                        <div className="uidai-pmis-grid-4" style={{ gap: 16 }}>
-                            {[
-                                ["SLA Ref", slaDetail.sla_ref], ["Title", slaDetail.title], ["Description", slaDetail.description],
-                                ["Contract Type", slaDetail.contract_type], ["Formula Type", slaDetail.formula_type], ["Measurement", slaDetail.measurement_interval],
-                                ["Reporting", slaDetail.reporting_interval], ["Baseline", slaDetail.baseline_type], ["LD Aggregation", slaDetail.ld_aggregation_method],
-                                ["LD Base", slaDetail.ld_computation_base], ["Status", slaDetail.status], ["Effective", `${slaDetail.effective_from || "—"} → ${slaDetail.effective_until || "—"}`],
-                            ].map(([k, v]) => (
-                                <div key={k}>
-                                    <div style={{ ...muted, fontWeight: 600, marginBottom: 4, fontSize: 12 }}>{k}</div>
-                                    <div style={{ color: "#173e77", fontWeight: 700, wordBreak: "break-word", fontSize: 13 }}>{v || "—"}</div>
+                        {showMappingEdit && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                    <label>Activity ID</label>
+                                    <input type="text" value={activityLabel} readOnly style={{ background: "#f1f6fd" }}
+                                    // onChange={(e) => setActivityIdInput(e.target.value)} 
+                                    />
                                 </div>
-                            ))}
-                        </div>
-                        <NestedTable title="Metrics" rows={slaDetail.metrics} />
-                        <NestedTable title="Condition Bands" rows={slaDetail.condition_bands} />
-                        <NestedTable title="Parameters" rows={slaDetail.parameters} />
-                        <NestedTable title="Guard Conditions" rows={slaDetail.guard_conditions} />
-                        <NestedTable title="Lookup Table" rows={slaDetail.lookup_table} />
+                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                    <label>Effective From</label>
+                                    <input type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
+                                </div>
+                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                    <label>Effective Until</label>
+                                    <input type="date" value={effUntil} onChange={(e) => setEffUntil(e.target.value)} />
+                                </div>
+                            </div>
+                        )}
                     </div>
-                ) : null}
-            </div>
+                    {createMessage && <Banner text={createMessage} />}
+                    {detailError && <Banner text={detailError} />}
+                    {detailLoading ? (
+                        <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
+                    ) : slaDetail ? (
+                        <div>
+                            <div className="uidai-pmis-grid-4" style={{ gap: 16 }}>
+                                {[
+                                    ["SLA Ref", slaDetail.sla_ref], ["Title", slaDetail.title], ["Description", slaDetail.description],
+                                    ["Contract Type", slaDetail.contract_type], ["Formula Type", slaDetail.formula_type], ["Measurement", slaDetail.measurement_interval],
+                                    ["Reporting", slaDetail.reporting_interval], ["Baseline", slaDetail.baseline_type], ["LD Aggregation", slaDetail.ld_aggregation_method],
+                                    ["LD Base", slaDetail.ld_computation_base], ["Status", slaDetail.status], ["Effective", `${slaDetail.effective_from || "—"} → ${slaDetail.effective_until || "—"}`],
+                                ].map(([k, v]) => (
+                                    <div key={k}>
+                                        <div style={{ ...muted, fontWeight: 600, marginBottom: 4, fontSize: 12 }}>{k}</div>
+                                        <div style={{ color: "#173e77", fontWeight: 700, wordBreak: "break-word", fontSize: 13 }}>{v || "—"}</div>
+                                    </div>
+                                ))}
+                            </div>
+                            <NestedTable title="Metrics" rows={slaDetail.metrics} />
+                            <NestedTable title="Condition Bands" rows={slaDetail.condition_bands} />
+                            <NestedTable title="Parameters" rows={slaDetail.parameters} />
+                            <NestedTable title="Guard Conditions" rows={slaDetail.guard_conditions} />
+                            <NestedTable title="Lookup Table" rows={slaDetail.lookup_table} />
+                        </div>
+                    ) : null}
+                </div>
             )}
 
             {/* MAPPING — activity's current SLA mappings */}
             {view === "mapping" && (
-            <div className="uidai-pmis-card">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
-                    <div style={{ ...sectionHead, marginBottom: 0 }}>Activity SLA Mappings</div>
-                    <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                        <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-                            <input type="checkbox" style={{ width: "auto" }} checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active only
-                        </label>
-                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadMappings} disabled={mappingsLoading}>
-                            {mappingsLoading ? "Loading…" : "↻ Reload"}
-                        </button>
-                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>
-                            + Map SLA
-                        </button>
+                <div className="uidai-pmis-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
+                        <div style={{ ...sectionHead, marginBottom: 0 }}>Activity SLA Mappings</div>
+                        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                            <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                                <input type="checkbox" style={{ width: "auto" }} checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active only
+                            </label>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadMappings} disabled={mappingsLoading}>
+                                {mappingsLoading ? "Loading…" : "↻ Reload"}
+                            </button>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>
+                                + Map SLA
+                            </button>
+                        </div>
+                    </div>
+                    {mappingsError && <Banner text={mappingsError} />}
+                    {editMessage && <Banner text={editMessage} />}
+                    <div className="uidai-pmis-table-wrap">
+                        <table className="uidai-pmis-table">
+                            <thead>
+                                <tr>
+                                    <th>SLA Ref</th><th>SLA Title</th><th>Contract</th><th>Status</th><th>Effective From</th><th>Effective Until</th><th style={{ textAlign: "center" }}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {mappingsLoading ? (
+                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
+                                ) : mappings.length === 0 ? (
+                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>
+                                        <div style={{ marginBottom: 10 }}>No mapped SLA — please map SLA.</div>
+                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>+ Map SLA</button>
+                                    </td></tr>
+                                ) : mappings.map((m) => {
+                                    const isEditing = editingId === m.id;
+                                    return (
+                                        <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
+                                            <td style={{ fontFamily: "monospace", fontSize: 11, ...muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</td>
+                                            <td>{m.sla_title || "—"}</td>
+                                            <td>{m.contract_type || "—"}</td>
+                                            <td>
+                                                {isEditing ? (
+                                                    <select style={ctrl} value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
+                                                        {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                                                    </select>
+                                                ) : <StatusBadge status={m.status} />}
+                                            </td>
+                                            <td>{m.effective_from || "—"}</td>
+                                            <td>
+                                                {isEditing ? (
+                                                    <input type="date" style={ctrl} value={editForm.effective_until || ""} onChange={(e) => setEditForm((f) => ({ ...f, effective_until: e.target.value }))} />
+                                                ) : (m.effective_until || "—")}
+                                            </td>
+                                            <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                                                {isEditing ? (
+                                                    <span style={{ display: "inline-flex", gap: 6 }}>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => saveEdit(m.id)} disabled={editLoading}>{editLoading ? "Saving…" : "Save"}</button>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={cancelEdit} disabled={editLoading}>Cancel</button>
+                                                    </span>
+                                                ) : (
+                                                    <span style={{ display: "inline-flex", gap: 6 }}>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Evaluate</button>
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-                {mappingsError && <Banner text={mappingsError} />}
-                {editMessage && <Banner text={editMessage} />}
-                <div className="uidai-pmis-table-wrap">
-                    <table className="uidai-pmis-table">
-                        <thead>
-                            <tr>
-                                <th>SLA Ref</th><th>SLA Title</th><th>Contract</th><th>Status</th><th>Effective From</th><th>Effective Until</th><th style={{ textAlign: "center" }}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {mappingsLoading ? (
-                                <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
-                            ) : mappings.length === 0 ? (
-                                <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>
-                                    <div style={{ marginBottom: 10 }}>No mapped SLA — please map SLA.</div>
-                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>+ Map SLA</button>
-                                </td></tr>
-                            ) : mappings.map((m) => {
-                                const isEditing = editingId === m.id;
-                                return (
-                                    <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
-                                        <td style={{ fontFamily: "monospace", fontSize: 11, ...muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</td>
-                                        <td>{m.sla_title || "—"}</td>
-                                        <td>{m.contract_type || "—"}</td>
-                                        <td>
-                                            {isEditing ? (
-                                                <select style={ctrl} value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
-                                                    {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                                                </select>
-                                            ) : <StatusBadge status={m.status} />}
-                                        </td>
-                                        <td>{m.effective_from || "—"}</td>
-                                        <td>
-                                            {isEditing ? (
-                                                <input type="date" style={ctrl} value={editForm.effective_until || ""} onChange={(e) => setEditForm((f) => ({ ...f, effective_until: e.target.value }))} />
-                                            ) : (m.effective_until || "—")}
-                                        </td>
-                                        <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                                            {isEditing ? (
-                                                <span style={{ display: "inline-flex", gap: 6 }}>
-                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => saveEdit(m.id)} disabled={editLoading}>{editLoading ? "Saving…" : "Save"}</button>
-                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={cancelEdit} disabled={editLoading}>Cancel</button>
-                                                </span>
-                                            ) : (
-                                                <span style={{ display: "inline-flex", gap: 6 }}>
-                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
-                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Evaluate</button>
-                                                </span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
             )}
 
             {/* MAPPING — evaluation, two panels side by side */}
             {view === "mapping" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 22, alignItems: "start" }}>
-                {/* Single-mapping evaluate */}
-                <div className="uidai-pmis-card" style={{ marginBottom: 0,width:"100%" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                        <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
-                        {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
-                    </div>
-                    {!singleEval ? (
-                        <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
-                    ) : (
-                        <>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 10 }}>
-                                {singleEval.slaTitle || "Mapping"}
-                                <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
-                            </div>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16,maxWidth:640 }}>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Period Start</label>
-                                    <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
-                                </div>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Period End</label>
-                                    <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
-                                </div>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>LD Base Amount</label>
-                                    <input type="number" value={singleEval.ld_base_amount} onChange={(e) => setSingleEval((s) => ({ ...s, ld_base_amount: e.target.value }))} />
-                                </div>
-                            </div>
-                            <div style={{ marginTop: 14 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 8 }}>
-                                    Metric Observations {singleEval.loadingMetrics && <span style={{ ...muted, fontWeight: 400 }}>(loading metric keys…)</span>}
-                                </div>
-                                <ObservationEditor
-                                    observations={singleEval.observations}
-                                    onChange={(obs) => setSingleEval((s) => ({ ...s, observations: obs }))}
-                                />
-                            </div>
-                            <div style={{ marginTop: 14 }}>
-                                <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
-                                    {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
-                                </button>
-                            </div>
-                            {singleEvalError && <Banner text={singleEvalError} />}
-                            {singleEvalResult !== null && (
-                                <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Evaluation Result</div>
-                                    <ResultView data={singleEvalResult} />
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
-
-                {/* Whole-activity evaluate */}
-                <div className="uidai-pmis-card" style={{ marginBottom: 0,width:"100%"}}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                        <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate Whole Activity</div>
-                        {!actEval ? (
-                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openActivityEval} disabled={actEvalBuilding}>
-                                {actEvalBuilding ? "Preparing…" : "Configure & Evaluate"}
-                            </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 22, alignItems: "start" }}>
+                    {/* Single-mapping evaluate */}
+                    <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                            <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
+                            {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
+                        </div>
+                        {!singleEval ? (
+                            <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
                         ) : (
-                            <button type="button" className="uidai-pmis-filter-toggle" onClick={closeActivityEval}>✕ Close</button>
+                            <>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 10 }}>
+                                    {singleEval.slaTitle || "Mapping"}
+                                    <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, maxWidth: 640 }}>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Period Start</label>
+                                        <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
+                                    </div>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Period End</label>
+                                        <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
+                                    </div>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>LD Base Amount</label>
+                                        <input type="number" value={singleEval.ld_base_amount} onChange={(e) => setSingleEval((s) => ({ ...s, ld_base_amount: e.target.value }))} />
+                                    </div>
+                                </div>
+                                <div style={{ marginTop: 14 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 8 }}>
+                                        Metric Observations {singleEval.loadingMetrics && <span style={{ ...muted, fontWeight: 400 }}>(loading metric keys…)</span>}
+                                    </div>
+                                    <ObservationEditor
+                                        observations={singleEval.observations}
+                                        onChange={(obs) => setSingleEval((s) => ({ ...s, observations: obs }))}
+                                    />
+                                </div>
+                                <div style={{ marginTop: 14 }}>
+                                    <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
+                                        {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
+                                    </button>
+                                </div>
+                                {singleEvalError && <Banner text={singleEvalError} />}
+                                {singleEvalResult !== null && (
+                                    <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
+                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Evaluation Result</div>
+                                        <ResultView data={singleEvalResult} />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
-                    <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                        Evaluates every active SLA mapping on activity{" "}
-                        <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
-                    </div>
-                    {actEvalError && <Banner text={actEvalError} />}
 
-                    {actEval && (
-                        <div style={{ marginTop: 14 }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 ,maxWidth:440}}>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Period Start</label>
-                                    <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />
-                                </div>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Period End</label>
-                                    <input type="date" value={actEval.period_end} onChange={(e) => setActEval((a) => ({ ...a, period_end: e.target.value }))} />
-                                </div>
-                            </div>
+                    {/* Whole-activity evaluate */}
+                    <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                            <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate Whole Activity</div>
+                            {!actEval ? (
+                                <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openActivityEval} disabled={actEvalBuilding}>
+                                    {actEvalBuilding ? "Preparing…" : "Configure & Evaluate"}
+                                </button>
+                            ) : (
+                                <button type="button" className="uidai-pmis-filter-toggle" onClick={closeActivityEval}>✕ Close</button>
+                            )}
+                        </div>
+                        <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
+                            Evaluates every active SLA mapping on activity{" "}
+                            <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
+                        </div>
+                        {actEvalError && <Banner text={actEvalError} />}
 
-                            {actEval.groups.map((g, gi) => (
-                                <div key={g.sla_ref} className="uidai-pmis-filter-shell" style={{ marginTop: 14 }}>
-                                    <div className="uidai-pmis-filter-head">
-                                        <div className="uidai-pmis-filter-title">
-                                            {g.sla_title || "SLA"}
-                                            <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{g.sla_ref}</span>
+                        {actEval && (
+                            <div style={{ marginTop: 14 }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440 }}>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Period Start</label>
+                                        <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />
+                                    </div>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Period End</label>
+                                        <input type="date" value={actEval.period_end} onChange={(e) => setActEval((a) => ({ ...a, period_end: e.target.value }))} />
+                                    </div>
+                                </div>
+
+                                {actEval.groups.map((g, gi) => (
+                                    <div key={g.sla_ref} className="uidai-pmis-filter-shell" style={{ marginTop: 14 }}>
+                                        <div className="uidai-pmis-filter-head">
+                                            <div className="uidai-pmis-filter-title">
+                                                {g.sla_title || "SLA"}
+                                                <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{g.sla_ref}</span>
+                                            </div>
+                                            <div className="uidai-pmis-field" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                                                <label style={{ marginBottom: 0, whiteSpace: "nowrap", fontSize: 12 }}>LD Base Override</label>
+                                                <input
+                                                    type="number" style={{ width: 140 }} placeholder="(optional)" value={g.ld_base_amount}
+                                                    onChange={(e) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, ld_base_amount: e.target.value } : x) }))}
+                                                />
+                                            </div>
                                         </div>
-                                        <div className="uidai-pmis-field" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                                            <label style={{ marginBottom: 0, whiteSpace: "nowrap", fontSize: 12 }}>LD Base Override</label>
-                                            <input
-                                                type="number" style={{ width: 140 }} placeholder="(optional)" value={g.ld_base_amount}
-                                                onChange={(e) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, ld_base_amount: e.target.value } : x) }))}
+                                        <div style={{ marginTop: 12 }}>
+                                            <ObservationEditor
+                                                observations={g.observations}
+                                                onChange={(obs) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, observations: obs } : x) }))}
                                             />
                                         </div>
                                     </div>
-                                    <div style={{ marginTop: 12 }}>
-                                        <ObservationEditor
-                                            observations={g.observations}
-                                            onChange={(obs) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, observations: obs } : x) }))}
-                                        />
-                                    </div>
+                                ))}
+
+                                <div style={{ marginTop: 14 }}>
+                                    <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitActivityEval} disabled={actEvalLoading}>
+                                        {actEvalLoading ? "Evaluating…" : "⚡ Evaluate All Active SLAs"}
+                                    </button>
                                 </div>
-                            ))}
-
-                            <div style={{ marginTop: 14 }}>
-                                <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitActivityEval} disabled={actEvalLoading}>
-                                    {actEvalLoading ? "Evaluating…" : "⚡ Evaluate All Active SLAs"}
-                                </button>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {actEvalResult !== null && (
-                        <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Activity Evaluation Result</div>
-                            <ResultView data={actEvalResult} />
-                        </div>
-                    )}
+                        {actEvalResult !== null && (
+                            <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
+                                <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Activity Evaluation Result</div>
+                                <ResultView data={actEvalResult} />
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
             )}
 
         </div>

@@ -203,7 +203,7 @@ export default function CreateMeetingPage() {
   const [extInput, setExtInput] = useState("");
   const [showExt, setShowExt] = useState(false);
   const [files, setFiles] = useState([]); /* raw File objects */
-  const [errors, setErrors] = useState({ date: false, time: false });
+  const [errors, setErrors] = useState({ date: false, time: false, attendees: false });
   const [submitting, setSubmitting] = useState(false);
 
   /* Master data fetched from existing APIs. */
@@ -286,7 +286,7 @@ export default function CreateMeetingPage() {
 
   const submit = async () => {
     let ok = true;
-    const nextErr = { date: false, time: false };
+    const nextErr = { date: false, time: false, attendees: false };
     if (!draft.projectId) { show("Select a project.", "warn"); ok = false; }
     if (!draft.title.trim()) { show("Meeting Title is required.", "warn"); ok = false; }
     if (!draft.date) { nextErr.date = true; ok = false; }
@@ -294,7 +294,11 @@ export default function CreateMeetingPage() {
       show("Start and End time are required.", "warn");
       ok = false;
     }
-    if(!draft.attendees || draft.attendees.length === 0){ show("Select at least one attendee.", "warn"); ok = false; }
+    if (!draft.attendees || draft.attendees.length === 0) {
+      nextErr.attendees = true;
+      show("Select at least one attendee.", "warn");
+      ok = false;
+    }
     if (!validateTimes()) { nextErr.time = true; ok = false; }
     setErrors(nextErr);
     if (!ok) return;
@@ -334,31 +338,38 @@ export default function CreateMeetingPage() {
 
   return (
     <div className="pmis-mtg">
-      <div className="card">
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-            gap: 10,
-            alignItems: "center",
-            marginBottom: 16,
-            margin:0
-          }}
-        >
-          {/* <div className="card-title" style={{ margin: 0 }}>
-            Create a New Meeting Invite
-          </div> */}
+      {/* ── Page header ── */}
+      <div className="page-header">
+        <div>
+          <div className="pm-title">Create Meeting</div>
+          <div className="pm-subtitle">
+            Schedule a meeting and invite attendees
+          </div>
+        </div>
+        <div className="page-header-actions">
           {projectForTag && (
             <span className="pill-link">
               {projectForTag.projectCode || projectForTag.projectId} —{" "}
               {projectForTag.projectName}
             </span>
           )}
+          <button
+            type="button"
+            className="btn cancel"
+            onClick={() => navigate("/meetings")}
+            disabled={submitting}
+          >
+            ← All Meetings
+          </button>
         </div>
+      </div>
 
-        <div className="grid grid-3">
-          {/* Row 1 — Project | Title | (spacer) */}
+      <div className="card">
+        {/* ── Meeting details ── */}
+        <div className="mt-section-label" style={{ marginTop: 0 }}>
+          Meeting Details
+        </div>
+        <div className="grid">
           <div className="field">
             <label htmlFor="projSel">
               Project <span className="required">*</span>
@@ -370,7 +381,7 @@ export default function CreateMeetingPage() {
               disabled={loadingProjects}
             >
               <option value="" disabled>
-                {loadingProjects ? "Loading…" : "Select…"}
+                {loadingProjects ? "Loading…" : "Select a project…"}
               </option>
               {projects.map((p) => (
                 <option key={p.projectId} value={p.projectId}>
@@ -393,9 +404,14 @@ export default function CreateMeetingPage() {
               placeholder="e.g. Q2 Governance Committee Review"
             />
           </div>
+        </div>
+
+        {/* ── Schedule ── */}
+        <div className="mt-section-label">Schedule</div>
+        <div className="grid grid-3">
           <div className="field">
             <label htmlFor="mDate">
-              Meeting Date <span className="required">*</span>
+              Date <span className="required">*</span>
             </label>
             <input
               id="mDate"
@@ -410,10 +426,6 @@ export default function CreateMeetingPage() {
               Please select a date.
             </div>
           </div>
-          
-
-          {/* Row 2 — Date | Start | End */}
-          
           <div className="field">
             <label htmlFor="mStart">
               Start Time (IST) <span className="required">*</span>
@@ -443,54 +455,110 @@ export default function CreateMeetingPage() {
               End time must be after start time.
             </div>
           </div>
+        </div>
 
-          {/* Row 3 — Location | (spacer) | (spacer) */}
-          <div className="field">
-            <label htmlFor="mLoc">Meeting Location / Link</label>
-            <input
-              id="mLoc"
-              type="text"
-              maxLength={300}
-              value={draft.location}
-              onChange={(e) => updateDraft({ location: e.target.value })}
-              placeholder="MS Teams / Google Meet link or location"
-            />
+        {/* ── Location & agenda ── */}
+        <div className="mt-section-label">Location &amp; Agenda</div>
+        <div className="field">
+          <label htmlFor="mLoc">Meeting Location / Link</label>
+          <input
+            id="mLoc"
+            type="text"
+            maxLength={300}
+            value={draft.location}
+            onChange={(e) => updateDraft({ location: e.target.value })}
+            placeholder="MS Teams / Google Meet link or physical location"
+          />
+          <div className="help">
+            Paste a video-call link or type a room / venue.
           </div>
-
-          {/* Row 4 — Agenda | Attachments | (External slot, blank until
-              the user clicks "Add External Attendees"). */}
-          <div className="field">
-            <label htmlFor="mDesc">Agenda</label>
-            <textarea
-              id="mDesc"
-              maxLength={1000}
-              value={draft.agenda}
-              onChange={(e) => updateDraft({ agenda: e.target.value })}
-              placeholder="Agenda and items to be discussed…"
-            />
+        </div>
+        <div className="field" style={{ marginTop: 14 }}>
+          <label htmlFor="mDesc">Agenda</label>
+          <textarea
+            id="mDesc"
+            className="mom-textarea"
+            style={{ height: 120 }}
+            maxLength={1000}
+            value={draft.agenda}
+            onChange={(e) => updateDraft({ agenda: e.target.value })}
+            placeholder="Agenda and items to be discussed…"
+          />
+          <div className="help">
+            {draft.agenda.length}/1000 characters
           </div>
+        </div>
 
-          <div className="field">
-            <label htmlFor="mFiles">Attachments</label>
-            <input
-              id="mFiles"
-              type="file"
-              multiple
-              onChange={onFilesPicked}
-            />
+        {/* ── Attendees ── */}
+        <div className="mt-section-label">Attendees</div>
+        <div className="field">
+          <label>
+            Internal Attendees <span className="required">*</span>
+          </label>
+          <GroupedMultiSelect
+            groups={attendeeGroups}
+            selected={draft.attendees}
+            onChange={(sel) => {
+              updateDraft({ attendees: sel });
+              setErrors((er) => ({ ...er, attendees: false }));
+            }}
+            placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
+          />
+          <div className={`field-err${errors.attendees ? " show" : ""}`}>
+            Select at least one attendee.
+          </div>
+          {!showExt && (
+            <button
+              type="button"
+              className="btn ghost small-btn"
+              style={{ marginTop: 10 }}
+              onClick={() => setShowExt(true)}
+            >
+              + Add External Attendees
+            </button>
+          )}
+        </div>
+
+        {showExt && (
+          <div className="field" style={{ marginTop: 14 }}>
+            <label htmlFor="extInput">External Attendees</label>
+            <div className="ext-row">
+              <input
+                id="extInput"
+                type="text"
+                placeholder="name@xyz.com, another@xyz.com…"
+                value={extInput}
+                onChange={(e) => setExtInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addExt();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn ghost small-btn"
+                onClick={addExt}
+              >
+                Add
+              </button>
+            </div>
+            <div className="help">
+              Press Enter or comma to add. Separate multiple e-mails with commas.
+            </div>
             <div className="attendee-chips" style={{ marginTop: 8 }}>
-              {files.length === 0 ? (
-                <span className="muted">No attachments added.</span>
+              {draft.external.length === 0 ? (
+                <span className="muted">No external attendees added yet.</span>
               ) : (
-                files.map((f, i) => (
-                  <span key={f.name + ":" + f.size + ":" + i} className="chip">
-                    {f.name}
-                    <span className="sub">{formatBytes(f.size)}</span>
+                draft.external.map((v) => (
+                  <span key={v} className="chip">
+                    {v}{" "}
                     <button
                       type="button"
                       className="chip-remove"
                       title="Remove"
-                      onClick={() => removeFile(i)}
+                      onClick={() => removeExt(v)}
                     >
                       ×
                     </button>
@@ -499,75 +567,33 @@ export default function CreateMeetingPage() {
               )}
             </div>
           </div>
+        )}
 
-          <div className="field">
-            <label>Attendees<span className="required">*</span>
-            </label>
-            <GroupedMultiSelect
-              groups={attendeeGroups}
-              selected={draft.attendees}
-              onChange={(sel) => {updateDraft({ attendees: sel });
-              setErrors((er) => ({ ...er, attendees: false }))}}
-              placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
-            />
-            {!showExt && (
-              <button
-                type="button"
-                className="btn ghost small-btn"
-                style={{ marginTop: 8 }}
-                onClick={() => setShowExt(true)}
-              >
-                + Add External Attendees
-              </button>
+        {/* ── Attachments ── */}
+        <div className="mt-section-label">Attachments</div>
+        <div className="field">
+          <label htmlFor="mFiles">Files</label>
+          <input id="mFiles" type="file" multiple onChange={onFilesPicked} />
+          <div className="attendee-chips" style={{ marginTop: 8 }}>
+            {files.length === 0 ? (
+              <span className="muted">No attachments added.</span>
+            ) : (
+              files.map((f, i) => (
+                <span key={f.name + ":" + f.size + ":" + i} className="chip">
+                  {f.name}
+                  <span className="sub">{formatBytes(f.size)}</span>
+                  <button
+                    type="button"
+                    className="chip-remove"
+                    title="Remove"
+                    onClick={() => removeFile(i)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
             )}
           </div>
-
-          {showExt && (
-            <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label htmlFor="extInput">External Attendees</label>
-              <div className="ext-row">
-                <input
-                  id="extInput"
-                  type="text"
-                  placeholder="name@xyz.com, abc.com…"
-                  value={extInput}
-                  onChange={(e) => setExtInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") {
-                      e.preventDefault();
-                      addExt();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="btn ghost small-btn"
-                  onClick={addExt}
-                >
-                  Add
-                </button>
-              </div>
-              <div className="attendee-chips" style={{ marginTop: 8 }}>
-                {draft.external.length === 0 ? (
-                  <span className="muted">No external attendees added yet.</span>
-                ) : (
-                  draft.external.map((v) => (
-                    <span key={v} className="chip">
-                      {v}{" "}
-                      <button
-                        type="button"
-                        className="chip-remove"
-                        title="Remove"
-                        onClick={() => removeExt(v)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="form-actions">
@@ -587,6 +613,9 @@ export default function CreateMeetingPage() {
           >
             Cancel
           </button>
+          <span className="muted" style={{ fontSize: 12.5, marginLeft: "auto" }}>
+            <span className="required">*</span> Required fields
+          </span>
         </div>
       </div>
       {toastNode}
