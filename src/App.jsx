@@ -74,6 +74,7 @@ import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
 import ManageTeam from "./pages/users/ManageUsers";
 import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
+import AssistantPage from "./pages/AssistantPage";
 import { usePageContext } from "./utils/pageContext";
 /* ─────────────────────────────────────────────────────────────
    PageTitle — kept as a no-op stub. All route-driven page headings
@@ -519,6 +520,7 @@ export default function MainApp() {
                                                     }
                                                 />
                                                 <Route path="/profile" element={<Profile />} />
+                                                <Route path="/assistant" element={<AssistantPage />} />
 
                                                 <Route path="/projects" element={<RequirePermission action="viewProjects"><ProjectsListPage /></RequirePermission>} />
 

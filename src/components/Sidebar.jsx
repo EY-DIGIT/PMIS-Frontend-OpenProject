@@ -14,7 +14,8 @@ import {
   FiCheckCircle,
   FiCalendar,
   FiChevronRight,
-  FiChevronDown
+  FiChevronDown,
+  FiMessageSquare
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
 import { userHasRole } from "../auth/roleNormalize";
@@ -110,6 +111,8 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const inboxAoActive = isUnder("/approvals/activity-owner");
   const inboxActive = inboxCdActive || inboxAoActive;
 
+  const assistantActive = isUnder("/assistant");
+
   // Auto-expand the section that matches the current route so the active
   // child is visible without the user having to click the parent first.
   useEffect(() => {
@@ -128,6 +131,15 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   return (
     <div className={`pmis-sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="pmis-menu">
+        {/* Assistant — full-page "Aadhaar Genius" chat (no submenu). */}
+        <a
+          className={assistantActive ? "active" : ""}
+          onClick={() => navigate("/assistant")}
+        >
+          <FiMessageSquare size={ICON_SIZE} />
+          <span className="pmis-text">Assistant</span>
+        </a>
+
         {/* Dashboard */}
         {canViewDashboard && (
           <>
