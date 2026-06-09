@@ -488,6 +488,8 @@ function DetailView({
 
   return (
     <div className="pmis-apinbox-detail">
+      <div className="pmis-apinbox-cols">
+        <div className="pmis-apinbox-col">
       <div className="pmis-apinbox-detail-title-block">
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <div className="pmis-apinbox-detail-eyebrow">Approval Request</div>
@@ -553,51 +555,6 @@ function DetailView({
         </div>
       </div>
 
-      {item.submissions.length > 0 && (
-        <div className="pmis-apinbox-section">
-          <div className="pmis-apinbox-section-head">
-            <h3>Organization Submission</h3>
-          </div>
-          {item.submissions.map((c, i) => (
-            <div key={i} className="pmis-apinbox-cmt">
-              <div className="pmis-apinbox-cmt-meta">
-                <span className="pmis-apinbox-who">{c.who}</span>
-                <span>{formatDateTime(c.when)}</span>
-              </div>
-              <div className="pmis-apinbox-cmt-text">{c.text}</div>
-              {c.attachments.length > 0 && (
-                <div className="pmis-apinbox-cmt-atts">
-                  {c.attachments.map((att, j) =>
-                    att.url ? (
-                      <a
-                        key={j}
-                        href={att.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="pmis-apinbox-att"
-                        title={att.name}
-                      >
-                        📎 {att.name}{" "}
-                        {att.size && (
-                          <span className="pmis-apinbox-att-size">{att.size}</span>
-                        )}
-                      </a>
-                    ) : (
-                      <span key={j} className="pmis-apinbox-att" title={att.name}>
-                        📎 {att.name}{" "}
-                        {att.size && (
-                          <span className="pmis-apinbox-att-size">{att.size}</span>
-                        )}
-                      </span>
-                    )
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
       <div className="pmis-apinbox-section">
         <div className="pmis-apinbox-section-head">
           <h3>Your Status</h3>
@@ -643,6 +600,62 @@ function DetailView({
           )}
         </div>
       </div>
+        </div>{/* left column */}
+
+        <div className="pmis-apinbox-col">
+      {item.submissions.length > 0 ? (
+        <div className="pmis-apinbox-section">
+          <div className="pmis-apinbox-section-head">
+            <h3>Organization Submission</h3>
+          </div>
+          {item.submissions.map((c, i) => (
+            <div key={i} className="pmis-apinbox-cmt">
+              <div className="pmis-apinbox-cmt-meta">
+                <span className="pmis-apinbox-who">{c.who}</span>
+                <span>{formatDateTime(c.when)}</span>
+              </div>
+              <div className="pmis-apinbox-cmt-text">{c.text}</div>
+              {c.attachments.length > 0 && (
+                <div className="pmis-apinbox-cmt-atts">
+                  {c.attachments.map((att, j) =>
+                    att.url ? (
+                      <a
+                        key={j}
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="pmis-apinbox-att"
+                        title={att.name}
+                      >
+                        📎 {att.name}{" "}
+                        {att.size && (
+                          <span className="pmis-apinbox-att-size">{att.size}</span>
+                        )}
+                      </a>
+                    ) : (
+                      <span key={j} className="pmis-apinbox-att" title={att.name}>
+                        📎 {att.name}{" "}
+                        {att.size && (
+                          <span className="pmis-apinbox-att-size">{att.size}</span>
+                        )}
+                      </span>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="pmis-apinbox-section">
+          <div className="pmis-apinbox-section-head">
+            <h3>Organization Submission</h3>
+          </div>
+          <div className="pmis-apinbox-empty">No submission provided.</div>
+        </div>
+      )}
+        </div>{/* right column */}
+      </div>{/* cols */}
 
       {error && (
         <div
