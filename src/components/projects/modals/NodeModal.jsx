@@ -886,6 +886,9 @@ export default function NodeModal({
               activity={node}
               form={form}
               editable={editable}
+              projectPublished={
+                String(project && project.status || "").toLowerCase() === "published"
+              }
               onChange={(next) => setForm(next)}
             />
           </div>

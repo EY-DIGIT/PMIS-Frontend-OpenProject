@@ -17,7 +17,7 @@ import { api } from "../../../api/client";
 import { ENDPOINTS } from "../../../api/endpoint";
 import { useCan } from "../../../auth/permissions";
 
-export default function StartActivityBanner({ activity, form, editable, onChange }) {
+export default function StartActivityBanner({ activity, form, editable, projectPublished, onChange }) {
   /* Start Activity is part of the approval-workflow pipeline (it gates
      Mark Ready), so it follows the same permission as the timeline
      buttons: super_admin / admin / org_admin / project_admin can start
@@ -89,7 +89,7 @@ export default function StartActivityBanner({ activity, form, editable, onChange
                 the panel on the right.
               </div>
             </div>
-            {canSubmit && (
+            {canSubmit && projectPublished && (
               <button
                 type="button"
                 className="pmis-awf-start-banner__btn"
