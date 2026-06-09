@@ -311,6 +311,7 @@ export default function NodeModal({
      workflow service for activity edit mode. `refreshKey` triggers a
      refetch after any transition action (Mark Ready, Approve, etc.). */
   const [processInstances, setProcessInstances] = useState([]);
+  const [timeline, setTimeline] = useState([]);
   const [processLoading, setProcessLoading] = useState(false);
   const [processError, setProcessError] = useState("");
   const [processRefreshKey, setProcessRefreshKey] = useState(0);
@@ -477,15 +478,15 @@ export default function NodeModal({
           ? auditRes.value : [];
         const gate = gateRes.status === "fulfilled" && gateRes.value && typeof gateRes.value === "object"
           ? gateRes.value : null;
-        const timeline = timelineRes.status === "fulfilled" && Array.isArray(timelineRes.value)
+        const timelineEvents = timelineRes.status === "fulfilled" && Array.isArray(timelineRes.value)
           ? timelineRes.value : [];
 
-        /* Timeline display source priority: the purpose-built timeline
-           feed first, then the audit-log rows, then legacy instances.
-           State derivation below still runs off auditLogs / instances. */
-        setProcessInstances(
-          timeline.length ? timeline : auditLogs.length ? auditLogs : instances
-        );
+        /* Audit-log rows drive the Activity Audit Trail list (fall back
+           to legacy instances). The purpose-built timeline feed drives
+           the separate Timeline section. State derivation below runs off
+           auditLogs / instances. */
+        setProcessInstances(auditLogs.length ? auditLogs : instances);
+        setTimeline(timelineEvents);
 
         const consentDivisions = parseDivisionList(node && node.concernedDivision);
         /* State derivation source priority: audit logs first (carry
@@ -1320,6 +1321,7 @@ export default function NodeModal({
             <ActivityAuditTrail
               form={form}
               processInstances={processInstances}
+              timeline={timeline}
               loading={processLoading}
               error={processError}
             />
