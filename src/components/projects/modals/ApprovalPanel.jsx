@@ -78,7 +78,9 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
         </span>
       </span>
       {actions && <span className="pmis-awf-target__actions">{actions}</span>}
-      {reason && (
+      {/* Reason is only meaningful for a rejection — approvals don't carry
+         (or display) a reason in the timeline. */}
+      {status === "rejected" && reason && (
         <div className="pmis-awf-target__reason">
           <b>Reason:</b> {reason}
         </div>
