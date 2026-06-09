@@ -87,13 +87,38 @@ function mapListRow(raw) {
   };
 }
 
-function mapDetail(raw) {
+function mapDetail(raw, currentUserUuid) {
   if (!raw || typeof raw !== "object") return null;
-  const status = normalizeVote(raw.yourStatus);
   const plannedDates =
     raw.startDate && raw.endDate
       ? `${String(raw.startDate).slice(0, 10)} to ${String(raw.endDate).slice(0, 10)}`
       : "";
+  /* The owner detail payload carries the owner's own vote inside
+     `yourStatusBreakdown` rather than a top-level `yourStatus`. Mark the
+     owner's row (backend `isYou` can be unreliable, so also match the
+     logged-in user's uuid against approverUserUuid) and derive the
+     owner's decision from it — that's what hides the Approve/Reject
+     buttons once a vote is recorded. */
+  const statusBreakdown = safeArr(raw.yourStatusBreakdown).map((b) => {
+    const approverUuid = b.approverUserUuid || b.approverUuid || "";
+    const isYou =
+      !!b.isYou || (!!currentUserUuid && approverUuid === currentUserUuid);
+    return {
+      divisionCode: b.divisionCode || "",
+      divisionName: b.divisionName || "",
+      approverName: b.approverName || "",
+      approverUserUuid: approverUuid,
+      status: normalizeVote(b.voteStatus),
+      isYou
+    };
+  });
+  const myRow = statusBreakdown.find((b) => b.isYou);
+  const status =
+    raw.yourStatus != null && String(raw.yourStatus) !== ""
+      ? normalizeVote(raw.yourStatus)
+      : myRow
+      ? myRow.status
+      : "pending";
   return {
     activityId: raw.activityId,
     projectId: raw.projectId,
@@ -121,13 +146,7 @@ function mapDetail(raw) {
         url: a.url || ""
       }))
     })),
-    statusBreakdown: safeArr(raw.yourStatusBreakdown).map((b) => ({
-      divisionCode: b.divisionCode || "",
-      divisionName: b.divisionName || "",
-      approverName: b.approverName || "",
-      status: normalizeVote(b.voteStatus),
-      isYou: !!b.isYou
-    })),
+    statusBreakdown,
     stateName: WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION
   };
 }
@@ -213,7 +232,7 @@ export default function ApprovalInboxActivityOwner() {
     setDetailLoading(true);
     try {
       const raw = await getActivityWorkflowInboxDetail(row.activityId, CURRENT_USER.uuid);
-      const mapped = mapDetail(raw) || {};
+      const mapped = mapDetail(raw, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || row.projectId;
       mapped.stateName = mapped.stateName || row.stateName;
       setActiveDetail(mapped);
@@ -283,7 +302,7 @@ export default function ApprovalInboxActivityOwner() {
         activeDetail.activityId,
         CURRENT_USER.uuid
       );
-      const mapped = mapDetail(refreshed) || {};
+      const mapped = mapDetail(refreshed, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;
       mapped.stateName = mapped.stateName || activeDetail.stateName;
       setActiveDetail(mapped);
@@ -324,7 +343,7 @@ export default function ApprovalInboxActivityOwner() {
         activeDetail.activityId,
         CURRENT_USER.uuid
       );
-      const mapped = mapDetail(refreshed) || {};
+      const mapped = mapDetail(refreshed, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;
       mapped.stateName = mapped.stateName || activeDetail.stateName;
       setActiveDetail(mapped);
