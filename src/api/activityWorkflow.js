@@ -291,11 +291,12 @@ export async function requestOwnerApprovalParallel({
    Pulls the queue of activities awaiting THIS user's vote. Falls
    back to [] on a malformed body so the list page can render empty.
    ───────────────────────────────────────────────────────────────── */
-export async function getActivityWorkflowInbox(userUuid) {
+export async function getActivityWorkflowInbox(userUuid, stateName) {
   const uuid = userUuid || pickUserUuid(tokenStore.getUser() || {});
   if (!uuid) throw new ApiError("Missing userUuid for activity-workflow inbox.");
 
-  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.inbox}?userUuid=${encodeURIComponent(uuid)}`;
+  let url = `${API_BASE}${ENDPOINTS.activityWorkflow.inbox}?userUuid=${encodeURIComponent(uuid)}`;
+  if (stateName) url += `&stateName=${encodeURIComponent(stateName)}`;
   const res = await fetch(url, {
     method: "GET",
     headers: authHeaders(),

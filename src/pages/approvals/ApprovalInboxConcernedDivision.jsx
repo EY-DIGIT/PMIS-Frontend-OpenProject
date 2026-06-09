@@ -168,7 +168,7 @@ export default function ApprovalInboxConcernedDivision() {
     let cancelled = false;
     setListLoading(true);
     setListError("");
-    getActivityWorkflowInbox(CURRENT_USER.uuid)
+    getActivityWorkflowInbox(CURRENT_USER.uuid, WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION)
       .then((rows) => {
         if (cancelled) return;
         setItems(rows.map(mapListRow).filter(Boolean));

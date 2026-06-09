@@ -188,7 +188,7 @@ export default function ApprovalInboxActivityOwner() {
     let cancelled = false;
     setListLoading(true);
     setListError("");
-    getActivityWorkflowInbox(CURRENT_USER.uuid)
+    getActivityWorkflowInbox(CURRENT_USER.uuid, WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION)
       .then((rows) => {
         if (cancelled) return;
         const mapped = rows.map(mapListRow).filter(Boolean);
