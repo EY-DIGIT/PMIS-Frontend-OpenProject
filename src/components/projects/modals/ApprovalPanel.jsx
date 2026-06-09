@@ -370,16 +370,19 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     return `Activity: ${actName}. Add a comment and/or attachments for each reviewer separately, then click Send Request.`;
   })();
 
-  function handleResubmit() {
-    /* Resend after a rejection — opens the same per-target popup as
-       Request Division Approval. The popup submit handler dispatches
-       SUBMIT and applies the resubmit transition. */
+  async function handleResubmit() {
+    /* Resend after a rejection — fires SUBMIT directly (no popup), just
+       like Mark Ready for Approval, and applies the local resubmit
+       transition. */
     if (!consentDivisions.length) {
       setError("No Concerned Divisions configured — cannot resubmit.");
       return;
     }
-    setError("");
-    setRequestPopup({ open: true, kind: "resubmit" });
+    await runTransition({
+      action: WORKFLOW_ACTIONS.SUBMIT,
+      comment: "Activity re-submitted after rejection.",
+      transform: () => resubmitAfterRejection(form, consentDivisions)
+    });
   }
 
   /* Division Approve/Reject and Owner Approve/Reject are NOT issued from
