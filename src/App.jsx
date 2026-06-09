@@ -114,7 +114,8 @@ function Breadcrumbs() {
         new: "New",
         dashboard: "Dashboard",
         "manage-users": "Manage Team",
-        meetings: "Meetings"
+        meetings: "Meetings",
+        assistant: "Aadhaar Genius"
     };
 
     /* Some "new" routes are conceptually a single step from the Dashboard,
