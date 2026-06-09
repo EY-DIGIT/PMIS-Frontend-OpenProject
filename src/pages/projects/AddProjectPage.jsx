@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
 import {
@@ -113,6 +113,7 @@ function extractDivisions(raw) {
 
 export default function AddProjectPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const existingDraft = useDraft();
   const canManageDocuments = useCan("manageProjectDocuments");
 
@@ -120,11 +121,15 @@ export default function AddProjectPage() {
   // when a partial/stale draft arrives (e.g. restored from localStorage with
   // description undefined).
   // If a draft with projectId is in play, the user has already gone through
-  // "Save & Next" — landing here again means they're starting a brand-new
-  // project, not editing the saved one. Drop the cached draft and render an
-  // empty form so the inputs aren't pre-filled with the previous submission.
+  // "Save & Next". Landing here again normally means they're starting a
+  // brand-new project, so we drop the cached draft and render an empty form.
+  // The exception is the "Back" button on the Milestone Config step, which
+  // navigates here with { state: { fromConfig: true } } — in that case keep
+  // the draft so every field is pre-filled and "Save & Next" updates the
+  // already-created project (see goNext) instead of creating a new one.
+  const cameFromConfig = !!(location.state && location.state.fromConfig);
   const [form, setForm] = useState(() => {
-    if (existingDraft && existingDraft.projectId) {
+    if (existingDraft && existingDraft.projectId && !cameFromConfig) {
       draftStore.clear();
       return makeEmpty();
     }
@@ -398,8 +403,15 @@ export default function AddProjectPage() {
 
     setSubmitting(true);
     try {
-      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.create}`, {
-        method: "POST",
+      // When the draft already carries a projectId the user came back from
+      // the Milestone Config step to edit — PATCH the existing project
+      // instead of creating a new one.
+      const isEditing = !!form.projectId;
+      const endpoint = isEditing
+        ? ENDPOINTS.projects.update(form.projectId)
+        : ENDPOINTS.projects.create;
+      const res = await authorizedFetch(`${API_BASE}${endpoint}`, {
+        method: isEditing ? "PATCH" : "POST",
         headers: { accept: "application/json" },
         body: buildPayload()
       });
@@ -423,8 +435,8 @@ export default function AddProjectPage() {
 
       const next = {
         ...form,
-        projectId: created.id ?? created._id ?? created.projectId ?? null,
-        projectCode: created.projectCode ?? created.project_code ?? "",
+        projectId: created.id ?? created._id ?? created.projectId ?? form.projectId ?? null,
+        projectCode: created.projectCode ?? created.project_code ?? form.projectCode ?? "",
         projectName: (form.projectName || "").trim(),
         description: (form.description || "").trim(),
         owner: (form.owner || "").trim(),

@@ -1316,7 +1316,7 @@ export default function MilestoneConfigPage({ mode }) {
       <button
         type="button"
         className="uidai-btn uidai-btn--cancel"
-        onClick={() => navigate("/projects/add")}
+        onClick={() => navigate("/projects/add", { state: { fromConfig: true } })}
       >
         Back
       </button>
