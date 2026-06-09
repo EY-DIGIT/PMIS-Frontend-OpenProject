@@ -4,8 +4,10 @@ import { FaTrashAlt } from 'react-icons/fa';
 import { useData } from '../../data/DataContext';
 import { tokenStore } from '../../api/client';
 import * as usersApi from '../../api/users';
+import * as divisionsApi from '../../api/divisions';
+import * as vendorsApi from '../../api/vendors';
+import * as projectsApi from '../../api/projects';
 import { normalizeText, renderMappingText, uniqueSorted } from '../../utils/helpers';
-import { DIVISION_OPTIONS } from '../../data/demoData';
 import FilterShell from '../../components/FilterShell';
 import MultiSelect from '../../components/MultiSelect';
 import MilestonePagination from '../../components/projects/MilestonePagination';
@@ -19,6 +21,29 @@ export default function UserList() {
   const [loading, setLoading] = useState(false);
   const canDeleteUser = useCan('deleteUser');
   const canCreateUser = useCan('createUser');
+
+  // Filter dropdown sources fetched from their own master endpoints so the
+  // Division / Organization / Project Mapping options are complete — the
+  // user list is paginated, so deriving options from it alone misses any
+  // value not present on the loaded page.
+  const [divisionList, setDivisionList] = useState([]);
+  const [vendorList, setVendorList] = useState([]);
+  const [projectList, setProjectList] = useState([]);
+
+  useEffect(() => {
+    if (!tokenStore.get()) return;
+    let cancelled = false;
+    divisionsApi.list()
+      .then((d) => { if (!cancelled) setDivisionList(Array.isArray(d) ? d : []); })
+      .catch(() => {});
+    vendorsApi.list()
+      .then((v) => { if (!cancelled) setVendorList(Array.isArray(v) ? v : []); })
+      .catch(() => {});
+    projectsApi.list({ pageSize: 500 })
+      .then((p) => { if (!cancelled) setProjectList(Array.isArray(p) ? p : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Directly hit the list endpoint on every mount/navigation. No token guard
   // here — if the token is missing, the request still fires (and surfaces as
@@ -83,19 +108,35 @@ export default function UserList() {
     [users]
   );
   const statusOptions = useMemo(() => uniqueSorted(users.map((u) => u.status)), [users]);
-  // Distinct organization names from the loaded users — feeds the
-  // Organization filter dropdown.
-  const vendorOptions = useMemo(
-    () => uniqueSorted(users.map((u) => u.vendorName).filter(Boolean)),
-    [users]
-  );
-  // Distinct project names — feeds the Project Mapping multi-select.
+  // Organization filter — sourced from the vendors master list so every
+  // organization shows up, not just those on the loaded user page. Falls
+  // back to the user-derived names if the vendors fetch is empty.
+  const vendorOptions = useMemo(() => {
+    if (vendorList.length) {
+      return uniqueSorted(vendorList.map((v) => v.vendorName).filter(Boolean));
+    }
+    return uniqueSorted(users.map((u) => u.vendorName).filter(Boolean));
+  }, [vendorList, users]);
+  // Division filter — sourced from the divisions master list. Falls back to
+  // the divisions seen on loaded users.
+  const divisionOptions = useMemo(() => {
+    if (divisionList.length) {
+      return uniqueSorted(divisionList.map((d) => d.label || d.code).filter(Boolean));
+    }
+    return uniqueSorted(users.map((u) => u.divisionLabel || u.division).filter(Boolean));
+  }, [divisionList, users]);
+  // Project Mapping multi-select — sourced from the projects list. Falls
+  // back to project names found on loaded users.
   const projectOptions = useMemo(() => {
+    if (projectList.length) {
+      return uniqueSorted(projectList.map((p) => p.projectName).filter(Boolean))
+        .map((n) => ({ label: n, value: n }));
+    }
     const names = users.flatMap((u) =>
       Array.isArray(u.projectMapping) ? u.projectMapping : []
     );
     return uniqueSorted(names).map((n) => ({ label: n, value: n }));
-  }, [users]);
+  }, [projectList, users]);
 
   const filtered = users.filter((u) => {
     const q = normalizeText(search);
@@ -118,7 +159,7 @@ export default function UserList() {
       contains(u.email, filters.email) &&
       exact(u.orgRole, filters.role) &&
       exact(u.vendorName, filters.vendorName) &&
-      exact(u.division, filters.division) &&
+      (exact(u.division, filters.division) || exact(u.divisionLabel, filters.division)) &&
       hasAnyMapping(u.projectMapping, filters.mapping) &&
       exact(u.status, filters.status)
     );
@@ -202,7 +243,7 @@ export default function UserList() {
               onChange={(e) => updateFilter('division', e.target.value)}
             >
               <option value="">All</option>
-              {DIVISION_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+              {divisionOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div className="uidai-pmis-field">
