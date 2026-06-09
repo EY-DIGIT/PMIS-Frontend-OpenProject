@@ -1424,9 +1424,10 @@ export default function ProjectDetailsPage() {
                   const when = normalizedCreatedAt ? new Date(normalizedCreatedAt) : null;
                   const whenLabel =
                     when && !Number.isNaN(when.getTime())
-                      ? `${when
-                          .toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" })
-                          .replace(/\//g, "-")} ${when.toLocaleTimeString("en-IN", {
+                      ? `${when.toLocaleString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
                         hour12: true,

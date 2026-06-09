@@ -18,7 +18,7 @@ const ACTION_OPTIONS = [
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50, 100];
 
-// Format an ISO timestamp to "DD-MM-YYYY HH:MM" in IST. Falls back to
+// Format an ISO timestamp to "DD-MMM-YYYY HH:MM" in IST. Falls back to
 // the raw input if parsing fails.
 function formatIstTime(iso) {
   if (!iso) return "—";
@@ -26,7 +26,7 @@ function formatIstTime(iso) {
   if (Number.isNaN(d.getTime())) return String(iso);
   const ist = new Date(d.getTime() + 330 * 60000);
   const day = String(ist.getUTCDate()).padStart(2, "0");
-  const month = String(ist.getUTCMonth() + 1).padStart(2, "0");
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][ist.getUTCMonth()];
   const year = ist.getUTCFullYear();
   const hh = String(ist.getUTCHours()).padStart(2, "0");
   const mm = String(ist.getUTCMinutes()).padStart(2, "0");
@@ -84,6 +84,8 @@ function isScalar(v) {
   return v == null || ["string", "number", "boolean"].includes(typeof v);
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 // The From/To search fields take a DD/MM/YYYY string. As the user types,
 // strip non-digits and auto-insert slashes so the field always reads
 // "dd/mm/yyyy".
@@ -106,21 +108,21 @@ function dmyToIso(s) {
 // full datetime "2026-06-08T00:00:00+05:30").
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/;
 
-// Format an ISO date / datetime audit value to "DD-MM-YYYY" (or
-// "DD-MM-YYYY HH:MM" in IST when it carries a meaningful time). Returns
+// Format an ISO date / datetime audit value to "DD-MMM-YYYY" (or
+// "DD-MMM-YYYY HH:MM" in IST when it carries a meaningful time). Returns
 // null if it isn't a parseable date so the caller can fall back to raw.
 function fmtIsoValue(v) {
   const s = String(v);
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (dateOnly) {
     const [, y, m, d] = dateOnly;
-    return `${d}-${m}-${y}`;
+    return `${d}-${MONTHS[Number(m) - 1]}-${y}`;
   }
   const dt = new Date(s);
   if (Number.isNaN(dt.getTime())) return null;
   const ist = new Date(dt.getTime() + 330 * 60000);
   const day = String(ist.getUTCDate()).padStart(2, "0");
-  const month = String(ist.getUTCMonth() + 1).padStart(2, "0");
+  const month = MONTHS[ist.getUTCMonth()];
   const year = ist.getUTCFullYear();
   const hh = ist.getUTCHours();
   const mm = ist.getUTCMinutes();

@@ -85,28 +85,6 @@ function toIsoEnd(d) {
   return `${d}T23:59:59${IST_OFFSET}`;
 }
 
-/* Date fields are shown as DD-MM-YYYY text. State stays canonical
-   (YYYY-MM-DD) so validation + the payload are unaffected — these
-   helpers convert between the two. */
-function maskDmy(raw) {
-  const x = String(raw || "").replace(/\D/g, "").slice(0, 8);
-  if (x.length <= 2) return x;
-  if (x.length <= 4) return `${x.slice(0, 2)}-${x.slice(2)}`;
-  return `${x.slice(0, 2)}-${x.slice(2, 4)}-${x.slice(4)}`;
-}
-function dmyToIso(s) {
-  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(s || "").trim());
-  if (!m) return "";
-  const [, dd, mm, yyyy] = m;
-  return `${yyyy}-${mm}-${dd}`;
-}
-function isoToDmy(s) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ""));
-  if (!m) return "";
-  const [, yyyy, mm, dd] = m;
-  return `${dd}-${mm}-${yyyy}`;
-}
-
 function extractVendors(raw) {
   const elements =
     raw?.data?._embedded?.elements ??
@@ -158,11 +136,6 @@ export default function AddProjectPage() {
     return normalizeFormShape(existingDraft);
   });
   const [submitting, setSubmitting] = useState(false);
-  // DD-MM-YYYY display text for the date inputs; canonical YYYY-MM-DD lives
-  // in form.startDate / form.endDate. Seeded from the form so a prefilled
-  // (back-to-edit) draft shows its dates.
-  const [startText, setStartText] = useState(() => isoToDmy(form.startDate));
-  const [endText, setEndText] = useState(() => isoToDmy(form.endDate));
 
   const [vendorOptions, setVendorOptions] = useState(() => safeArray(VENDOR_MASTER));
   const [vendorNameToId, setVendorNameToId] = useState(() => {
@@ -595,15 +568,10 @@ export default function AddProjectPage() {
             </label>
             <input
               className="uidai-input"
-              type="text"
-              inputMode="numeric"
-              placeholder="dd-mm-yyyy"
-              maxLength={10}
-              value={startText}
+              type="date"
+              value={form.startDate || ""}
               onChange={(e) => {
-                const text = maskDmy(e.target.value);
-                setStartText(text);
-                update({ startDate: dmyToIso(text) });
+                update({ startDate: e.target.value });
                 clearFieldError("startDate");
               }}
             />
@@ -618,15 +586,11 @@ export default function AddProjectPage() {
             </label>
             <input
               className="uidai-input"
-              type="text"
-              inputMode="numeric"
-              placeholder="dd-mm-yyyy"
-              maxLength={10}
-              value={endText}
+              type="date"
+              min={form.startDate || undefined}
+              value={form.endDate || ""}
               onChange={(e) => {
-                const text = maskDmy(e.target.value);
-                setEndText(text);
-                update({ endDate: dmyToIso(text) });
+                update({ endDate: e.target.value });
                 clearFieldError("endDate");
               }}
             />

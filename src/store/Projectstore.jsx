@@ -8,7 +8,7 @@ export const deepClone   = (o) => JSON.parse(JSON.stringify(o));
 export const safeArr     = (v) => (Array.isArray(v) ? v : []);
 export const uid         = (p) => `${p}-${Math.random().toString(36).slice(2, 11)}-${Date.now().toString(36)}`;
 export const fmtDate     = (d) => { if (!d || d === "-") return "-"; const p = String(d).split("-"); return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : d; };
-export const fmtDT       = (iso) => { if (!iso) return "-"; const d = new Date(iso); if (isNaN(d.getTime())) return iso; const pad = (n) => String(n).padStart(2, "0"); return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+export const fmtDT       = (iso) => { if (!iso) return "-"; const d = new Date(iso); return isNaN(d.getTime()) ? iso : d.toLocaleString("en-GB"); };
 
 export function ensureFlags(n, exp) {
   if (!n) return n;
