@@ -74,6 +74,29 @@ export async function list({ offset = 1, pageSize = 50, status } = {}) {
   return unwrap(res).map(fromApi);
 }
 
+/* Fetch EVERY user by walking the paginated collection until the
+   server-reported `total` is reached. The list endpoint caps a single
+   page (default 50), so callers that need the full directory (e.g. the
+   Search User list) use this instead of list(). `offset` is a 1-based
+   page index per the /api/v3 contract. */
+export async function listAll({ status, pageSize = 100 } = {}) {
+  const all = [];
+  let offset = 1;
+  let total = Infinity;
+  // Hard cap on iterations as a runaway guard.
+  for (let i = 0; i < 1000 && all.length < total; i++) {
+    const res = await api.get(ENDPOINTS.users.list, { query: { offset, pageSize, status } });
+    const elements = unwrap(res);
+    const reported = Number(res?.data?.total ?? res?.total);
+    if (Number.isFinite(reported)) total = reported;
+    if (!elements.length) break;
+    all.push(...elements);
+    if (elements.length < pageSize) break;
+    offset += 1;
+  }
+  return all.map(fromApi);
+}
+
 export async function get(id) {
   const res = await api.get(ENDPOINTS.users.get(id));
   return fromApi(unwrapOne(res));

@@ -54,7 +54,7 @@ export default function UserList() {
     setLoading(true);
     (async () => {
       try {
-        const list = await usersApi.list();
+        const list = await usersApi.listAll();
         if (!cancelled) setUsers(Array.isArray(list) ? list : []);
       } catch (err) {
         // eslint-disable-next-line no-console
