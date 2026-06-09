@@ -18,8 +18,6 @@ import {
   FiMessageSquare
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
-import { userHasRole } from "../auth/roleNormalize";
-import { tokenStore } from "../api/client";
 
 const ICON_SIZE = 18;
 
@@ -38,21 +36,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canViewUsers = useCan("viewUsers");
   const canCreateUser = useCan("createUser");
 
-  // Approval Inbox role gating. division_approver / division_owner are
-  // workflow roles that live OUTSIDE rolesConfig, so we read them straight
-  // off the user object rather than the normalized identity role.
-  // Subscribing to useCurrentRole() keeps this re-rendering on login /
-  // logout / role refresh.
+  // Approval Inbox visibility. Both sub-items (Concerned Division and
+  // Activity Owner) are always shown regardless of the user's role.
+  // Subscribing to useCurrentRole() keeps the sidebar re-rendering on
+  // login / logout / role refresh.
   useCurrentRole();
-  const currentUser = tokenStore.getUser();
-  const isDivisionApprover = userHasRole(currentUser, "division_approver");
-  const isActivityOwner = userHasRole(currentUser, "division_owner");
-  // A division_approver sees only Concerned Division; a division_owner sees
-  // only Activity Owner. Anyone who carries neither workflow role (admins,
-  // etc.) keeps seeing both, as before.
-  const hasInboxRole = isDivisionApprover || isActivityOwner;
-  const showCdInbox = isDivisionApprover || !hasInboxRole;
-  const showAoInbox = isActivityOwner || !hasInboxRole;
+  const showCdInbox = true;
+  const showAoInbox = true;
 
   // A whole "Management" section is visible only when the user can
   // either view the list or create an item under it. Otherwise the
