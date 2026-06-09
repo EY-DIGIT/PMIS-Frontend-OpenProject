@@ -645,16 +645,12 @@ function DetailView({
           <h3>Division Status</h3>
         </div>
         <div className="pmis-apinbox-div-status">
-          {item.statusBreakdown.filter((b) => !b.isYou).length === 0 ? (
-            <div className="pmis-apinbox-empty">No division decisions yet.</div>
-          ) : (
-            item.statusBreakdown.filter((b) => !b.isYou).map((b, i) => (
-              <div key={`${b.divisionCode}-${i}`} className="pmis-apinbox-ds">
-                <span className="pmis-apinbox-nm">{b.divisionName || b.divisionCode}</span>
-                <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>{cap(b.status)}</span>
-              </div>
-            ))
-          )}
+          {item.statusBreakdown.filter((b) => !b.isYou).map((b, i) => (
+            <div key={`${b.divisionCode}-${i}`} className="pmis-apinbox-ds">
+              <span className="pmis-apinbox-nm">{b.divisionName || b.divisionCode}</span>
+              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>{cap(b.status)}</span>
+            </div>
+          ))}
           <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
             <span className="pmis-apinbox-nm">
               {currentUser.division || item.activityOwnerDivision || "Owner"}{" "}
