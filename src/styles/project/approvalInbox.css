@@ -325,6 +325,23 @@
   border: 1px solid var(--pa-border);
 }
 
+/* Two-column split for the review detail body */
+.pmis-apinbox-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.pmis-apinbox-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .pmis-apinbox-cols { grid-template-columns: 1fr; }
+}
+
 .pmis-apinbox-section {
   background: #fff;
   border: 1px solid var(--pa-border-soft);

@@ -569,6 +569,8 @@ function DetailView({
         </div>
       )}
 
+      <div className="pmis-apinbox-cols">
+        <div className="pmis-apinbox-col">
       <div className="pmis-apinbox-section">
         <div className="pmis-apinbox-section-head">
           <h3>Project</h3>
@@ -607,7 +609,30 @@ function DetailView({
         </div>
       </div>
 
-      {item.submissions.length > 0 && (
+      <div className="pmis-apinbox-section">
+        <div className="pmis-apinbox-section-head">
+          <h3>Division Status</h3>
+        </div>
+        <div className="pmis-apinbox-div-status">
+          {item.statusBreakdown.filter((b) => !b.isYou).map((b, i) => (
+            <div key={`${b.divisionCode}-${i}`} className="pmis-apinbox-ds">
+              <span className="pmis-apinbox-nm">{b.divisionName || b.divisionCode}</span>
+              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>{cap(b.status)}</span>
+            </div>
+          ))}
+          <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
+            <span className="pmis-apinbox-nm">
+              {currentUser.division || item.activityOwnerDivision || "Owner"}{" "}
+              <span className="pmis-apinbox-you">YOU · OWNER</span>
+            </span>
+            <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>{cap(status)}</span>
+          </div>
+        </div>
+      </div>
+        </div>{/* left column */}
+
+        <div className="pmis-apinbox-col">
+      {item.submissions.length > 0 ? (
         <div className="pmis-apinbox-section">
           <div className="pmis-apinbox-section-head">
             <h3>Organization Submission</h3>
@@ -638,28 +663,16 @@ function DetailView({
             </div>
           ))}
         </div>
-      )}
-
-      <div className="pmis-apinbox-section">
-        <div className="pmis-apinbox-section-head">
-          <h3>Division Status</h3>
-        </div>
-        <div className="pmis-apinbox-div-status">
-          {item.statusBreakdown.filter((b) => !b.isYou).map((b, i) => (
-            <div key={`${b.divisionCode}-${i}`} className="pmis-apinbox-ds">
-              <span className="pmis-apinbox-nm">{b.divisionName || b.divisionCode}</span>
-              <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>{cap(b.status)}</span>
-            </div>
-          ))}
-          <div className="pmis-apinbox-ds pmis-apinbox-ds--me">
-            <span className="pmis-apinbox-nm">
-              {currentUser.division || item.activityOwnerDivision || "Owner"}{" "}
-              <span className="pmis-apinbox-you">YOU · OWNER</span>
-            </span>
-            <span className={`pmis-apinbox-pill pmis-apinbox-pill--${status}`}>{cap(status)}</span>
+      ) : (
+        <div className="pmis-apinbox-section">
+          <div className="pmis-apinbox-section-head">
+            <h3>Organization Submission</h3>
           </div>
+          <div className="pmis-apinbox-empty">No submission provided.</div>
         </div>
-      </div>
+      )}
+        </div>{/* right column */}
+      </div>{/* cols */}
 
       {error && (
         <div style={{
