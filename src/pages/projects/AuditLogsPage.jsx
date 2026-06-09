@@ -85,6 +85,25 @@ function isScalar(v) {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// The From/To search fields take a DD/MM/YYYY string. As the user types,
+// strip non-digits and auto-insert slashes so the field always reads
+// "dd/mm/yyyy".
+function maskDmyInput(raw) {
+  const d = String(raw || "").replace(/\D/g, "").slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+}
+
+// Parse a complete "DD/MM/YYYY" string into an ISO date "YYYY-MM-DD".
+// Returns null for partial / invalid input so date filtering ignores it.
+function dmyToIso(s) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(s || "").trim());
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  return `${yyyy}-${mm}-${dd}`;
+}
 // Matches a value that starts with an ISO date (plain "2026-06-08" or a
 // full datetime "2026-06-08T00:00:00+05:30").
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/;
@@ -318,12 +337,10 @@ export default function AuditLogsPage() {
   const filteredRows = useMemo(() => {
     const q = appliedFilters.term.trim().toLowerCase();
     const action = appliedFilters.action.trim().toLowerCase();
-    const fromTs = appliedFilters.from
-      ? new Date(`${appliedFilters.from}T00:00:00`).getTime()
-      : null;
-    const toTs = appliedFilters.to
-      ? new Date(`${appliedFilters.to}T23:59:59`).getTime()
-      : null;
+    const fromIso = dmyToIso(appliedFilters.from);
+    const toIso = dmyToIso(appliedFilters.to);
+    const fromTs = fromIso ? new Date(`${fromIso}T00:00:00`).getTime() : null;
+    const toTs = toIso ? new Date(`${toIso}T23:59:59`).getTime() : null;
     return allRows.filter((r) => {
       if (action) {
         // The dropdown lists single-word actions ("Update", "Delete", …)
@@ -613,9 +630,12 @@ export default function AuditLogsPage() {
             <label htmlFor="al-searchFrom">From date</label>
             <input
               id="al-searchFrom"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              placeholder="dd/mm/yyyy"
+              maxLength={10}
               value={searchFrom}
-              onChange={(e) => setSearchFrom(e.target.value)}
+              onChange={(e) => setSearchFrom(maskDmyInput(e.target.value))}
               onKeyDown={handleSearchKeyDown}
             />
           </div>
@@ -623,9 +643,12 @@ export default function AuditLogsPage() {
             <label htmlFor="al-searchTo">To date</label>
             <input
               id="al-searchTo"
-              type="date"
+              type="text"
+              inputMode="numeric"
+              placeholder="dd/mm/yyyy"
+              maxLength={10}
               value={searchTo}
-              onChange={(e) => setSearchTo(e.target.value)}
+              onChange={(e) => setSearchTo(maskDmyInput(e.target.value))}
               onKeyDown={handleSearchKeyDown}
             />
           </div>
