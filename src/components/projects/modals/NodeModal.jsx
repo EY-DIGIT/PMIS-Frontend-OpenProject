@@ -597,7 +597,9 @@ export default function NodeModal({
   if (!open || !project) return null;
 
   const isAdd = mode === "add";
-  const showStatus = !isAdd;
+  // Activity status is driven entirely by the approval workflow, so the
+  // Status field is hidden for activities in both add and edit modes.
+  const showStatus = !isAdd && kind !== "activity";
   const showActuals = !isAdd;
   // Doc 38: activity / task / subtask no longer have a `type` at the API
   // level (the four /standard, /transactional, /resource/* variants were
@@ -1056,16 +1058,11 @@ export default function NodeModal({
                 className="uidai-select"
                 value={form.status}
                 onChange={(e) => updateField({ status: e.target.value })}
-                disabled={dis || kind === "activity"}
+                disabled={dis}
               >
                 <option>Not Completed</option>
                 <option>Completed</option>
               </select>
-              {kind === "activity" && (
-                <div className="uidai-auto-hint">
-                  Set automatically by the approval workflow below.
-                </div>
-              )}
             </div>
           )}
 
