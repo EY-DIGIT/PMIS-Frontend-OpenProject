@@ -188,6 +188,7 @@ import { useProjects } from "../store/Projectstore";
 import { useCurrentRole } from "../auth/permissions";
 import * as auth from "../api/auth";
 import Sidebar from "../components/Sidebar";
+import ChatWidget from "../components/ChatWidget";
 // import LoaderModal from "../components/LoaderModal";
 // import MessageModal from "../components/MessageModal";
 
@@ -390,6 +391,9 @@ export default function Layout({ children }) {
       {/* ── Global modals ── */}
       {/* {loader && <LoaderModal text={loader} />}
       {msg && <MessageModal msg={msg.text} onOk={clearMsg} />} */}
+
+      {/* ── Floating chat assistant (bottom-right) ── */}
+      <ChatWidget />
 
     </div>
   );
