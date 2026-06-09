@@ -74,16 +74,37 @@ export async function list({ offset = 1, pageSize = 50, status } = {}) {
   return unwrap(res).map(fromApi);
 }
 
-/* Fetch the full user directory WITHOUT offset/pageSize query params —
-   the paginated list() caps a page (default 50), and these callers
-   (e.g. the Search User list) need every user. An optional `status`
-   filter is still forwarded when provided. */
-export async function listAll({ status } = {}) {
-  const res = await api.get(
-    ENDPOINTS.users.list,
-    status ? { query: { status } } : undefined
-  );
-  return unwrap(res).map(fromApi);
+/* Fetch EVERY user. The backend caps a single response at 50 rows no
+   matter what, so we walk the collection page by page (offset is a
+   1-based page index per the /api/v3 contract) until the server-reported
+   `total` is reached, then concatenate. Callers that need the full
+   directory (e.g. the Search User list) use this instead of list(). */
+export async function listAll({ status, pageSize = 50 } = {}) {
+  const all = [];
+  const seen = new Set();
+  let offset = 1;
+  let total = Infinity;
+  // Hard cap on iterations as a runaway guard.
+  for (let i = 0; i < 1000 && all.length < total; i++) {
+    const res = await api.get(ENDPOINTS.users.list, { query: { offset, pageSize, status } });
+    const elements = unwrap(res);
+    const reported = Number(res?.data?.total ?? res?.total);
+    if (Number.isFinite(reported)) total = reported;
+    if (!elements.length) break;
+    // Dedup by id so a backend that ignores `offset` can't loop forever
+    // or surface duplicate rows.
+    const fresh = elements.filter((u) => {
+      const id = u?.id ?? u?.uuid;
+      if (id == null || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    if (!fresh.length) break;
+    all.push(...fresh);
+    if (elements.length < pageSize) break;
+    offset += 1;
+  }
+  return all.map(fromApi);
 }
 
 export async function get(id) {
