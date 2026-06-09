@@ -447,7 +447,9 @@ export function deriveStateFromInstances(instances, consentDivisions) {
      reach pending_division and the per-division rows. */
   if (action === "SUBMIT") return "ready_for_approval";
   if (action === "UPDATE") return "ready_for_approval";
-  if (action === "REJECT") return "rejected_to_vendor";
+  if (action === "REJECT" || action === "RETURN_TO_VENDOR" || action === "RETURNEDTOVENDOR") {
+    return "rejected_to_vendor";
+  }
   if (action === "APPROVE") {
     if (prev === "PENDINGATOWNERDIVISION") return "completed";
     if (prev === "PENDINGATCONCERNEDDIVISION") {
@@ -607,7 +609,18 @@ export function deriveStateFromAuditLogs(auditLogs, consentDivisions) {
      but the UI splits that backend state into two visible steps. Park at
      ready_for_approval so the "Request Division Approval" button surfaces. */
   if (action === "SUBMIT" || action === "UPDATE") return "ready_for_approval";
-  if (action === "REJECT" || action === "ANY_REJECTED") return "rejected_to_vendor";
+  /* RETURN_TO_VENDOR (owner reject-to-vendor) resets the backend state to
+     READYFORAPPROVAL, but it's a rejection — the vendor must Resend for
+     Approval, so map it to rejected_to_vendor rather than letting the
+     resultant switch fall through to ready_for_approval. */
+  if (
+    action === "REJECT" ||
+    action === "ANY_REJECTED" ||
+    action === "RETURN_TO_VENDOR" ||
+    action === "RETURNEDTOVENDOR"
+  ) {
+    return "rejected_to_vendor";
+  }
   /* ALL_APPROVED is the action fired when the activity is forwarded past
      the Concerned Division gate. Map it by where it actually landed:
        • resultantState PENDINGATOWNERDIVISION → owner now has it

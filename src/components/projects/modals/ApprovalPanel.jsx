@@ -373,7 +373,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
   function handleResubmit() {
     /* Resend after a rejection — opens the same per-target popup as
        Request Division Approval. The popup submit handler dispatches
-       UPDATE (not SUBMIT) and applies the resubmit transition. */
+       SUBMIT and applies the resubmit transition. */
     if (!consentDivisions.length) {
       setError("No Concerned Divisions configured — cannot resubmit.");
       return;
