@@ -2,18 +2,18 @@
 // AssistantPage.jsx — "Aadhaar Genius" full-page chat assistant.
 //
 // Opened from the sidebar "Assistant" entry (route: /assistant).
-// Two-column layout: a left rail with the Genius brand + "New Chat",
-// and a chat thread on the right wired to the n8n chat webhook:
+// Single-column chat: an "Aadhaar Genius" branded top bar over a chat
+// thread wired to the n8n chat webhook:
 //
 //   POST {WEBHOOK}  { action:"sendMessage", sessionId, chatInput }
 //        → { output: "<assistant reply>" }
 //
 // One sessionId is generated per conversation so the webhook keeps
-// context; "New Chat" starts a fresh session.
+// context for the session.
 // ============================================================
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiPlus, FiSend, FiX, FiUser, FiSearch, FiChevronDown } from "react-icons/fi";
+import { FiSend, FiX, FiUser } from "react-icons/fi";
 import Aadhaar from "../assets/Aadhaar.png";
 
 const WEBHOOK_URL =
@@ -48,7 +48,6 @@ export default function AssistantPage() {
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [title, setTitle] = useState("New Chat");
 
   const sessionId = useRef(newSessionId());
   const threadRef = useRef(null);
@@ -64,22 +63,9 @@ export default function AssistantPage() {
     if (inputRef.current) inputRef.current.focus();
   }, []);
 
-  const startNewChat = () => {
-    sessionId.current = newSessionId();
-    setMessages([{ ...GREETING, time: nowTime() }]);
-    setTitle("New Chat");
-    setInput("");
-    if (inputRef.current) inputRef.current.focus();
-  };
-
   const send = async () => {
     const text = input.trim();
     if (!text || sending) return;
-
-    // The first user message becomes the conversation title (truncated).
-    setTitle((t) =>
-      t === "New Chat" ? text.slice(0, 40) + (text.length > 40 ? "…" : "") : t
-    );
 
     setMessages((m) => [...m, { role: "user", text, time: nowTime() }]);
     setInput("");
@@ -178,48 +164,6 @@ export default function AssistantPage() {
         margin: "8px 0",
       }}
     >
-      {/* ── Left rail ── */}
-      <aside
-        style={{
-          width: 240,
-          flexShrink: 0,
-          borderRight: "1px solid #eef1f5",
-          display: "flex",
-          flexDirection: "column",
-          padding: 16,
-          gap: 16,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src={Aadhaar} alt="Aadhaar" style={{ width: 34, height: 34, objectFit: "contain" }} />
-          <span style={{ fontSize: 22, fontWeight: 700, color: "#173e77" }}>Genius</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={startNewChat}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: "12px 14px",
-            borderRadius: 12,
-            border: "none",
-            cursor: "pointer",
-            color: "#fff",
-            fontWeight: 600,
-            fontSize: 15,
-            background: BRAND_GRADIENT,
-            boxShadow: "0 4px 12px rgba(23,62,119,0.25)",
-          }}
-        >
-          <FiPlus size={18} /> New Chat
-        </button>
-
-        <div style={{ flex: 1 }} />
-      </aside>
-
       {/* ── Chat column ── */}
       <section style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Top bar */}
@@ -232,31 +176,15 @@ export default function AssistantPage() {
             gap: 12,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "8px 16px",
-              borderRadius: 999,
-              border: "1px solid #d7e3f4",
-              background: "#f3f7fd",
-              color: "#173e77",
-              fontWeight: 600,
-              maxWidth: 360,
-            }}
-          >
-            <FiSearch size={16} />
-            <span
-              style={{
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {title}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img
+              src={Aadhaar}
+              alt="Aadhaar"
+              style={{ width: 32, height: 32, objectFit: "contain" }}
+            />
+            <span style={{ fontSize: 18, fontWeight: 700, color: "#173e77" }}>
+              Aadhaar Genius
             </span>
-            <FiChevronDown size={16} />
           </div>
 
           <button
