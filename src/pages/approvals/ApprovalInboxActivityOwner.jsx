@@ -366,7 +366,6 @@ export default function ApprovalInboxActivityOwner() {
   return (
     <div className="pmis-apinbox">
       <div className="pmis-apinbox-head">
-        <h1>Approval Inbox</h1>
         <div className="pmis-apinbox-sub">
           Activity Owner{CURRENT_USER.division ? ` · ${CURRENT_USER.division}` : ""}
         </div>

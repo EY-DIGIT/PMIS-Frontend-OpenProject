@@ -133,6 +133,25 @@ function resolveNavTitle(segments) {
     }
   }
 
+  /* Approval Inbox — both the Concerned Division and Activity Owner
+     inboxes show "Approval Inbox" in the navbar (like Project Details),
+     with a role-specific tooltip. */
+  if (first === "approvals") {
+    if (segments[1] === "activity-owner") {
+      return {
+        label: "Approval Inbox",
+        tooltip: "Activities awaiting your final decision as Activity Owner."
+      };
+    }
+    if (segments[1] === "concerned-division") {
+      return {
+        label: "Approval Inbox",
+        tooltip: "Activity approval requests routed to your division."
+      };
+    }
+    return { label: "Approval Inbox", tooltip: "Approval requests routed to you." };
+  }
+
   if (first === "master") {
     if (segments[1] === "vendors") {
       return { label: "Organization Data", tooltip: "Reference data — organizations and their attributes." };

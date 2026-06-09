@@ -314,7 +314,6 @@ export default function ApprovalInboxConcernedDivision() {
   return (
     <div className="pmis-apinbox">
       <div className="pmis-apinbox-head">
-        <h1>Approval Inbox</h1>
         <div className="pmis-apinbox-sub">
           {CURRENT_USER.division
             ? `${CURRENT_USER.division} — Concerned Division`
