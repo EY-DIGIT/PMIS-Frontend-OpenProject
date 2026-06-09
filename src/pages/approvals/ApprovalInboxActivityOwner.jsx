@@ -547,6 +547,8 @@ function DetailView({
 
   return (
     <div className="pmis-apinbox-detail">
+      <div className="pmis-apinbox-cols">
+        <div className="pmis-apinbox-col">
       <div className="pmis-apinbox-detail-title-block">
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <div className="pmis-apinbox-detail-eyebrow">Approval Request</div>
@@ -569,8 +571,6 @@ function DetailView({
         </div>
       )}
 
-      <div className="pmis-apinbox-cols">
-        <div className="pmis-apinbox-col">
       <div className="pmis-apinbox-section">
         <div className="pmis-apinbox-section-head">
           <h3>Project</h3>
