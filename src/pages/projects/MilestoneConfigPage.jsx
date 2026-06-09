@@ -1051,9 +1051,13 @@ export default function MilestoneConfigPage({ mode }) {
     };
 
     /* ─── Dispatch to the correct remote branch, then run doLocal ─── */
-    const handleRemote = (promise, failMessage) => {
+    const handleRemote = (promise, failMessage, onSuccess) => {
       promise
-        .then((updated) => { doLocal(updated); loadMilestonesFromApi(); })
+        .then((updated) => {
+          doLocal(updated);
+          loadMilestonesFromApi();
+          if (onSuccess) onSuccess(updated);
+        })
         .catch((err) => {
           uiStore.hideLoader();
           if (err?.isAuth) return handleAuthError(err);
@@ -1062,7 +1066,21 @@ export default function MilestoneConfigPage({ mode }) {
     };
 
     if (shouldCreateMilestoneRemotely) {
-      return handleRemote(createMilestoneApi(project, formData), "Failed to create milestone");
+      // The very first milestone of a project triggers the project-save API
+      // (the same call the manual "Save Project" button fires) on success,
+      // so the project is persisted as soon as it gains its first milestone.
+      const isFirstMilestone = safeArray(project.milestones).length === 0;
+      return handleRemote(
+        createMilestoneApi(project, formData),
+        "Failed to create milestone",
+        () => {
+          if (isFirstMilestone && project.projectId && getToken()) {
+            saveProjectApi(project.projectId)
+              .then(() => { try { hydrateProjects({ force: true }); } catch (e) {} })
+              .catch(() => {});
+          }
+        }
+      );
     }
     if (shouldUpdateMilestoneRemotely) {
       return handleRemote(updateMilestoneApi(milestoneServerId, formData, project), "Failed to update milestone");
