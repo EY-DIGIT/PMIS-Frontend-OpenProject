@@ -313,7 +313,11 @@ export default function ApprovalInboxActivityOwner() {
       await transitionActivity({
         activityId: activeDetail.activityId,
         projectId: activeDetail.projectId,
-        action: WORKFLOW_ACTIONS.REJECT,
+        /* Revert to vendor sends RETURN_TO_VENDOR; the per-division
+           revert keeps the generic REJECT transition. */
+        action: rejection.revertKind === "vendor"
+          ? WORKFLOW_ACTIONS.RETURN_TO_VENDOR
+          : WORKFLOW_ACTIONS.REJECT,
         comment
       });
       const refreshed = await getActivityWorkflowInboxDetail(
