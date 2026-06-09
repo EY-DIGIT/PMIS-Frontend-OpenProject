@@ -413,13 +413,6 @@ export default function AuditLogsPage() {
       projectInfo && (projectInfo.projectCode || projectInfo.projectId)
         ? (projectInfo.projectCode || projectInfo.projectId)
         : "";
-    const status = statusLabel(projectInfo && projectInfo.projectStatus);
-    const owner = (projectInfo && projectInfo.owner) || "—";
-    const generatedAt = new Date().toLocaleString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit"
-    });
-
     const rowsHtml = pageRows.map((r) => `
       <tr>
         <td><span class="userid">${escape(r.userId)}</span></td>
@@ -466,15 +459,6 @@ export default function AuditLogsPage() {
   }
 </style>
 </head><body>
-  <h1>Audit Logs</h1>
-  <div class="subtitle">Every change, fully traceable.</div>
-  <div class="ctx"><div class="ctx-row">
-    <div class="ctx-item"><span class="ctx-label">Project ID</span><span class="ctx-id">${escape(projectCode || "—")}</span></div>
-    <div class="ctx-item"><span class="ctx-label">Project Name</span><span class="ctx-name">${escape(projectName || "—")}</span></div>
-    <div class="ctx-item"><span class="ctx-label">Status</span><span class="pill status">${escape(status)}</span></div>
-    <div class="ctx-item"><span class="ctx-label">Owner</span><span class="ctx-value">${escape(owner)}</span></div>
-  </div></div>
-  <div class="meta">Generated ${escape(generatedAt)} · ${pageRows.length} ${pageRows.length === 1 ? "entry" : "entries"}${hasFilter ? " (filtered)" : ""}</div>
   <table>
     <thead><tr>
       <th>User ID</th><th>Username</th><th>Role</th><th>Action</th>
