@@ -131,15 +131,6 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   return (
     <div className={`pmis-sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="pmis-menu">
-        {/* Assistant — full-page "Aadhaar Genius" chat (no submenu). */}
-        <a
-          className={assistantActive ? "active" : ""}
-          onClick={() => navigate("/assistant")}
-        >
-          <FiMessageSquare size={ICON_SIZE} />
-          <span className="pmis-text">Assistant</span>
-        </a>
-
         {/* Dashboard */}
         {canViewDashboard && (
           <>
@@ -402,6 +393,16 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </div>
           )}
         </div>
+
+        {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
+            Pinned at the bottom of the menu. */}
+        <a
+          className={assistantActive ? "active" : ""}
+          onClick={() => navigate("/assistant")}
+        >
+          <FiMessageSquare size={ICON_SIZE} />
+          <span className="pmis-text">Assistant</span>
+        </a>
       </div>
     </div>
   );
