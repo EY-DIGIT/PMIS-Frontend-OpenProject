@@ -9,6 +9,7 @@ import StartActivityBanner from "./StartActivityBanner";
 import {
   getProcessInstances,
   getActivityWorkflowAuditLogs,
+  getActivityWorkflowTimeline,
   getParallelGateStatus
 } from "../../../api/activityWorkflow";
 import {
@@ -465,9 +466,10 @@ export default function NodeModal({
     Promise.allSettled([
       getProcessInstances(businessId),
       getActivityWorkflowAuditLogs(businessId),
-      getParallelGateStatus(businessId)
+      getParallelGateStatus(businessId),
+      getActivityWorkflowTimeline(businessId)
     ])
-      .then(([piRes, auditRes, gateRes]) => {
+      .then(([piRes, auditRes, gateRes, timelineRes]) => {
         if (cancelled) return;
         const instances = piRes.status === "fulfilled" && Array.isArray(piRes.value)
           ? piRes.value : [];
@@ -475,10 +477,15 @@ export default function NodeModal({
           ? auditRes.value : [];
         const gate = gateRes.status === "fulfilled" && gateRes.value && typeof gateRes.value === "object"
           ? gateRes.value : null;
+        const timeline = timelineRes.status === "fulfilled" && Array.isArray(timelineRes.value)
+          ? timelineRes.value : [];
 
-        /* Prefer the new audit-log rows for the timeline; fall back to
-           legacy instances when the audit endpoint is empty. */
-        setProcessInstances(auditLogs.length ? auditLogs : instances);
+        /* Timeline display source priority: the purpose-built timeline
+           feed first, then the audit-log rows, then legacy instances.
+           State derivation below still runs off auditLogs / instances. */
+        setProcessInstances(
+          timeline.length ? timeline : auditLogs.length ? auditLogs : instances
+        );
 
         const consentDivisions = parseDivisionList(node && node.concernedDivision);
         /* State derivation source priority: audit logs first (carry

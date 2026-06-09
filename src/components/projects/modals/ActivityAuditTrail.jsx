@@ -67,7 +67,37 @@ function fmtAuditTime(ms) {
           performedByUuid, performedByUsername, performedByRoles[],
           comment, createdTime }
    */
+/* Pick the styling variant from a backend action / vote name when it
+   isn't in ACTION_TO_TYPE (e.g. the timeline's VOTE_APPROVED /
+   VOTE_REJECTED). */
+function variantForAction(action, kind) {
+  if (ACTION_TO_TYPE[action]) return ACTION_TO_TYPE[action];
+  if (action.includes("APPROV")) return "approval";
+  if (action.includes("REJECT")) return "rejection";
+  if (action.includes("SUBMIT") || action.includes("REQUEST")) return "request";
+  if (action.includes("COMPLETE")) return "completion";
+  return kind === "VOTE" ? "approval" : "request";
+}
+
 function fromProcessInstance(pi) {
+  /* New timeline-feed shape from /inbox/{id}/timeline:
+       { kind, title, detail, timestamp, actorUsername, previousState,
+         resultantState, actionName, eventId } */
+  const isTimeline = pi && typeof pi === "object"
+    && pi.kind !== undefined && pi.timestamp !== undefined && pi.title !== undefined;
+  if (isTimeline) {
+    const action = String(pi.actionName || "").toUpperCase();
+    return {
+      type: variantForAction(action, pi.kind),
+      headline: pi.title || "",
+      comment: pi.detail || "",
+      who: pi.actorUsername || pi.actorUuid || "System",
+      when: fmtAuditTime(pi.timestamp),
+      escalated: false,
+      id: pi.eventId || pi.id
+    };
+  }
+
   const isNewAudit = pi && typeof pi === "object"
     && (pi.actionName !== undefined || pi.outcome !== undefined);
 

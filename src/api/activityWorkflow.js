@@ -404,6 +404,31 @@ export async function getActivityWorkflowAuditLogs(activityId) {
   return [];
 }
 
+/* GET the purpose-built activity timeline used by the audit-trail UI:
+     GET /activity-workflow/activities/inbox/{activityId}/timeline
+   Returns an ordered array of events shaped as
+     { kind: "VOTE" | "STATE_TRANSITION", title, detail, timestamp (epoch ms),
+       actorUuid, actorUsername, previousState, resultantState, actionName,
+       activityId, projectId, businessService, eventId }
+   Newest-first from the backend. Falls back to [] on error. */
+export async function getActivityWorkflowTimeline(activityId) {
+  if (!activityId) return [];
+  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.timeline(activityId)}`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: authHeaders(),
+      cache: "no-store"
+    });
+    const payload = await parseJsonOrThrow(res, "Activity timeline fetch");
+    if (Array.isArray(payload)) return payload;
+    if (payload && Array.isArray(payload.timeline)) return payload.timeline;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 /* GET the parallel gate status — the authoritative roll-up of the
    Concerned Division votes:
      GET /activity-workflow/activities/parallel/gate-status/ACTIVITY/{activityId}

@@ -348,6 +348,9 @@ export const ENDPOINTS = {
     parallelVote: '/activity-workflow/activities/parallel/vote',
     inbox: '/activity-workflow/activities/inbox',
     inboxDetail: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}`,
+    /* Purpose-built timeline feed for an activity — ordered VOTE /
+       STATE_TRANSITION events with ready title/detail strings. */
+    timeline: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}/timeline`,
     auditLogs: (activityId) => `/activity-workflow/activities/audit/ACTIVITY/${enc(activityId)}`,
     /* Parallel gate status — authoritative roll-up of the Concerned
        Division votes. `readyForOwner: true` means every division approved
