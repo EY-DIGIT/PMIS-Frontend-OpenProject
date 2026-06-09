@@ -312,12 +312,13 @@ export async function getActivityWorkflowInbox(userUuid, stateName) {
    Step 4 — GET /activities/inbox/{activityId}?userUuid=...
    Hydrates the review page with submissions, status breakdown, etc.
    ───────────────────────────────────────────────────────────────── */
-export async function getActivityWorkflowInboxDetail(activityId, userUuid) {
+export async function getActivityWorkflowInboxDetail(activityId, userUuid, stateName) {
   if (!activityId) throw new ApiError("Missing activityId for inbox detail.");
   const uuid = userUuid || pickUserUuid(tokenStore.getUser() || {});
   if (!uuid) throw new ApiError("Missing userUuid for inbox detail.");
 
-  const url = `${API_BASE}${ENDPOINTS.activityWorkflow.inboxDetail(activityId)}?userUuid=${encodeURIComponent(uuid)}`;
+  let url = `${API_BASE}${ENDPOINTS.activityWorkflow.inboxDetail(activityId)}?userUuid=${encodeURIComponent(uuid)}`;
+  if (stateName) url += `&stateName=${encodeURIComponent(stateName)}`;
   const res = await fetch(url, {
     method: "GET",
     headers: authHeaders(),

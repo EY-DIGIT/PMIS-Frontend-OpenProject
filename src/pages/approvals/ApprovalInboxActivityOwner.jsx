@@ -231,7 +231,11 @@ export default function ApprovalInboxActivityOwner() {
     setDetailError("");
     setDetailLoading(true);
     try {
-      const raw = await getActivityWorkflowInboxDetail(row.activityId, CURRENT_USER.uuid);
+      const raw = await getActivityWorkflowInboxDetail(
+        row.activityId,
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION
+      );
       const mapped = mapDetail(raw, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || row.projectId;
       mapped.stateName = mapped.stateName || row.stateName;
@@ -300,7 +304,8 @@ export default function ApprovalInboxActivityOwner() {
       });
       const refreshed = await getActivityWorkflowInboxDetail(
         activeDetail.activityId,
-        CURRENT_USER.uuid
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION
       );
       const mapped = mapDetail(refreshed, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;
@@ -341,7 +346,8 @@ export default function ApprovalInboxActivityOwner() {
       });
       const refreshed = await getActivityWorkflowInboxDetail(
         activeDetail.activityId,
-        CURRENT_USER.uuid
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION
       );
       const mapped = mapDetail(refreshed, CURRENT_USER.uuid) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;

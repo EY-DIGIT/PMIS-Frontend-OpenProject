@@ -207,7 +207,11 @@ export default function ApprovalInboxConcernedDivision() {
     setDetailError("");
     setDetailLoading(true);
     try {
-      const raw = await getActivityWorkflowInboxDetail(row.activityId, CURRENT_USER.uuid);
+      const raw = await getActivityWorkflowInboxDetail(
+        row.activityId,
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION
+      );
       /* The detail endpoint doesn't echo back projectId or stateName in
          every version of the contract — seed both from the list row so
          the vote call still has what it needs. */
@@ -256,7 +260,8 @@ export default function ApprovalInboxConcernedDivision() {
          new vote. */
       const refreshed = await getActivityWorkflowInboxDetail(
         activeDetail.activityId,
-        CURRENT_USER.uuid
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION
       );
       const mapped = mapDetail(refreshed) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;
@@ -289,7 +294,8 @@ export default function ApprovalInboxConcernedDivision() {
       });
       const refreshed = await getActivityWorkflowInboxDetail(
         activeDetail.activityId,
-        CURRENT_USER.uuid
+        CURRENT_USER.uuid,
+        WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION
       );
       const mapped = mapDetail(refreshed) || {};
       mapped.projectId = mapped.projectId || activeDetail.projectId;
