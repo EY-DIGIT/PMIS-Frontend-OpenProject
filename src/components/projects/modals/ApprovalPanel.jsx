@@ -278,7 +278,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         setBusy(false);
       }
     } else if (requestPopup.kind === "resubmit") {
-      /* Resubmit after rejection — fires UPDATE and then applies the
+      /* Resubmit after rejection — fires SUBMIT and then applies the
          local resubmit transition. Concatenate per-target messages into
          the comment so the backend audit log captures every note. */
       const combined = payloads
@@ -288,7 +288,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         .filter(Boolean)
         .join(" | ");
       const ok = await runTransition({
-        action: WORKFLOW_ACTIONS.UPDATE,
+        action: WORKFLOW_ACTIONS.SUBMIT,
         comment: combined || "Activity re-submitted after rejection.",
         transform: () => {
           /* Reuse the per-target comment-emit path so each reviewer sees
