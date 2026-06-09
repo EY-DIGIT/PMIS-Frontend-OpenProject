@@ -207,9 +207,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         return;
       }
       const combined = payloads
-        .map((p) =>
-          p && p.text && p.text.trim() ? `[${p.label}] ${p.text.trim()}` : ""
-        )
+        .map((p) => (p && p.text && p.text.trim() ? p.text.trim() : ""))
         .filter(Boolean)
         .join(" | ");
       const firstFile = (() => {
