@@ -158,7 +158,11 @@ export function mapApiMilestoneToNode(m) {
     ? m.dependsOnDisplay
     : rawDeps;
   return {
-    uid: generateNodeUid("m"),
+    /* Use the stable server id as the uid when present so the node keeps
+       the same uid across reloads / hard refreshes (the node add/edit page
+       carries the uid in its URL, which would otherwise go stale). Falls
+       back to a generated uid for unsaved (onboarding) nodes. */
+    uid: m.id || generateNodeUid("m"),
     apiId: m.id || "",
     id: m.id || "",
     /* Server-assigned WBS code (e.g. "M1"). Preferred over the
@@ -219,7 +223,10 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     : rawDeps;
 
   const node = {
-    uid: generateNodeUid(kindLetter),
+    /* Stable uid from the server id (see milestone builder note) so the
+       node add/edit page URL survives a refresh; generated fallback for
+       unsaved nodes. */
+    uid: a.id || generateNodeUid(kindLetter),
     apiId: a.id || "",
     id: a.id || "",
     /* Server-assigned WBS code (e.g. "S1.1.1.1.1.1" for sub-tasks,
