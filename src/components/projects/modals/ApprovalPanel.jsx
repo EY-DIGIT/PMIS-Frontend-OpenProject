@@ -124,6 +124,10 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
     );
     return (match && (match.label || match.name)) || code;
   };
+  /* Display label for the Activity Owner division — ownerName is the
+     owner division code, so resolve it to the friendly name for the UI
+     (the raw code is still used for the workflow payload). */
+  const ownerLabel = divisionName(ownerName);
 
   function apply(nextForm) {
     if (nextForm && nextForm !== form) onChange(nextForm);
@@ -359,7 +363,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
       }));
     }
     if (requestPopup.kind === "owner") {
-      return [{ id: `owner::${ownerName}`, kind: "owner", label: ownerName }];
+      return [{ id: `owner::${ownerName}`, kind: "owner", label: ownerLabel }];
     }
     return [];
   })();
@@ -612,7 +616,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
     s4Body = (
       <>
         All Concerned Divisions approved. Click{" "}
-        <b>Request Owner Approval</b> above to forward to <b>{ownerName}</b>.
+        <b>Request Owner Approval</b> above to forward to <b>{ownerLabel}</b>.
       </>
     );
   } else if (s4 === "active" && state === "pending_owner") {
@@ -620,11 +624,11 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
        page — the timeline shows the pending owner row, status only. */
     s4Body = (
       <>
-        Awaiting decision from <b>{ownerName}</b>.
+        Awaiting decision from <b>{ownerLabel}</b>.
         <div className="pmis-awf-targets">
           <TargetRow
             icon="👤"
-            name={ownerName}
+            name={ownerLabel}
             status={form.ownerApproval?.status || "pending"}
             decidedAt={form.ownerApproval?.decidedAt}
           />
@@ -634,7 +638,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
   } else if (s4 === "done") {
     s4Body = (
       <>
-        {ownerName} approved on{" "}
+        {ownerLabel} approved on{" "}
         <b>{formatDateTime(form.ownerApproval?.decidedAt || "")}</b>.
       </>
     );
