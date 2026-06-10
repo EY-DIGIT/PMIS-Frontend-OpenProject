@@ -23,6 +23,12 @@ const WEBHOOK_URL =
 const N8N_INSTANCE_ID =
   "fccf52d42441dd9f26257393c3e31924e0849f14611c04622f87dac4d51ca27a";
 
+// Auth token from the n8n session (the curl carried it as the `n8n-auth`
+// cookie). Browsers won't let a cross-origin fetch set the Cookie header,
+// so we forward it as a Bearer token instead.
+const N8N_AUTH_TOKEN =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImYxMTg3MTBiLTBjYmYtNDBlYy1iM2M1LWJiN2E0YTk4N2I4YyIsImhhc2giOiJRZXAwVGMrTmIzIiwiYnJvd3NlcklkIjoiYW5INkdzNGdGaFNZZWdWUHBFYmNoRUN4NVQrS2ZiRTQyYm1KQlh4RkZpND0iLCJ1c2VkTWZhIjpmYWxzZSwiaWF0IjoxNzgwODk4ODIzLCJleHAiOjE3ODE1MDM2MjN9.0RHYv2Vpl4-oEK9zZtUBPzpPxxut9Ur-vCL499o-XcI";
+
 const BRAND_GRADIENT = "linear-gradient(135deg, #173e77 0%, #1a8f99 100%)";
 
 const GREETING = {
@@ -82,6 +88,7 @@ export default function AssistantPage() {
           "Content-Type": "application/json",
           Accept: "*/*",
           "X-Instance-Id": N8N_INSTANCE_ID,
+          Authorization: `Bearer ${N8N_AUTH_TOKEN}`,
         },
         body: JSON.stringify({
           action: "sendMessage",
