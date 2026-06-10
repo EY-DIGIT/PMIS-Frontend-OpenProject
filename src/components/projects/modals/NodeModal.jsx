@@ -856,6 +856,11 @@ export default function NodeModal({
               if(code) params.set("activityCode", code);
               if (loc?.parent?.name) params.set("milestoneName", loc.parent.name);
               if (node?.name) params.set("activityName", node.name);
+              // Carry the activity's node uid + the form mode so the SLA page's
+              // breadcrumb can link back to THIS activity page (not just the
+              // milestone list).
+              if (node?.uid) params.set("nodeUid", node.uid);
+              params.set("activityMode", mode === "view" ? "view" : "edit");
               navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);
             }}
             style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 16px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" ,marginTop:4}}

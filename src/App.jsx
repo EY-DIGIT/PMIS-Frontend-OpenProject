@@ -289,6 +289,14 @@ function Breadcrumbs() {
         const qp = new URLSearchParams(search);
         const msName = qp.get("milestoneName") || "";
         const actName = qp.get("activityName") || "";
+        // The launching activity page passes its node uid + mode so we can link
+        // the Activity crumb back to THAT activity page (the node edit/view
+        // form), not just the milestone list.
+        const nodeUid = qp.get("nodeUid") || "";
+        const activityMode = qp.get("activityMode") || "edit";
+        const activityUrl = nodeUid
+            ? `${configUrl}/node?kind=activity&mode=${encodeURIComponent(activityMode)}&nodeUid=${encodeURIComponent(nodeUid)}`
+            : configUrl;
         const sep = <span style={{ color: "#999" }}>›</span>;
         const linkStyle = { color: "#173e77", textDecoration: "none", fontWeight: 500 };
         return (
@@ -305,9 +313,50 @@ function Breadcrumbs() {
                 {sep}
                 <Link to={projectUrl} style={linkStyle}>Project Detail</Link>
                 {msName && (<>{sep}<Link to={configUrl} style={linkStyle}>{msName}</Link></>)}
-                {actName && (<>{sep}<Link to={configUrl} style={linkStyle}>{actName}</Link></>)}
+                {sep}
+                <Link to={activityUrl} style={linkStyle}>{actName || "Activity"}</Link>
                 {sep}
                 <span style={{ color: "#333", fontWeight: 600 }}>Map SLA</span>
+            </nav>
+        );
+    }
+
+    /* /projects/:projectId/config/node — the milestone/activity/task add &
+       edit form rendered full-page. Trail:
+         Home › Projects › [code] › Milestone Configuration › Add/Edit <Kind>
+       The kind + mode ride along as query params (?kind=&mode=). The
+       "Milestone Configuration" crumb links back to the list so the user can
+       step from the activity form back up to the milestone page. */
+    if (segments[0] === "projects" && segments[2] === "config" && segments[3] === "node") {
+        const pid = decodeURIComponent(segments[1]);
+        const projectUrl = `/projects/${encodeURIComponent(pid)}`;
+        const configUrl = `${projectUrl}/config`;
+        const qp = new URLSearchParams(search);
+        const kind = qp.get("kind") || "";
+        const mode = qp.get("mode") || "add";
+        const kindLabel = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : "Item";
+        const modeLabel = mode === "edit" ? "Edit" : mode === "view" ? "View" : "Add";
+        const sep = <span style={{ color: "#999" }}>›</span>;
+        const linkStyle = { color: "#173e77", textDecoration: "none", fontWeight: 500 };
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={linkStyle}>Home</Link>
+                {sep}
+                <Link to="/projects" style={linkStyle}>Projects</Link>
+                {sep}
+                <Link to={projectUrl} style={linkStyle}>{projectCode || pid}</Link>
+                {sep}
+                <Link to={configUrl} style={linkStyle}>Milestone Configuration</Link>
+                {sep}
+                <span style={{ color: "#333", fontWeight: 600 }}>{`${modeLabel} ${kindLabel}`}</span>
             </nav>
         );
     }
