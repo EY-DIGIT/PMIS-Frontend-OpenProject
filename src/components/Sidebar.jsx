@@ -18,6 +18,8 @@ import {
   FiMessageSquare
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
+import { userHasRole } from "../auth/roleNormalize";
+import { tokenStore } from "../api/client";
 
 const ICON_SIZE = 18;
 
@@ -36,11 +38,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canViewUsers = useCan("viewUsers");
   const canCreateUser = useCan("createUser");
 
-  // Approval Inbox visibility. Both sub-items (Concerned Division and
-  // Activity Owner) are always shown regardless of the user's role.
-  // Subscribing to useCurrentRole() keeps the sidebar re-rendering on
-  // login / logout / role refresh.
+  // Approval Inbox visibility. The whole Approval Inbox section is shown
+  // ONLY to the division_approver workflow role — nobody else sees it.
+  // division_approver lives outside rolesConfig, so read it straight off
+  // the user object. Subscribing to useCurrentRole() keeps the sidebar
+  // re-rendering on login / logout / role refresh.
   useCurrentRole();
+  const showApprovalInbox = userHasRole(tokenStore.getUser(), "division_approver");
   const showCdInbox = true;
   const showAoInbox = true;
 
@@ -350,39 +354,41 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </>
         )}
 
-        {/* Approval Inbox — role-gated sub-items. A division_approver sees
-            only Concerned Division; a division_owner only Activity Owner.
-            Users with neither workflow role (admins, etc.) see both. */}
-        <a
-          className={inboxActive ? "active" : ""}
-          onClick={() => setInboxOpen(!inboxOpen)}
-        >
-          <FiInbox size={ICON_SIZE} />
-          <span className="pmis-text">Approval Inbox</span>
-          <span className="pmis-submenu-arrow">
-            <Chevron open={inboxOpen} />
-          </span>
-        </a>
-        <div className={`pmis-submenu${inboxOpen ? " open" : ""}`}>
-          {showCdInbox && (
-            <div
-              className={inboxCdActive ? "active" : ""}
-              onClick={() => navigate("/approvals/concerned-division")}
+        {/* Approval Inbox — visible ONLY to the division_approver role. */}
+        {showApprovalInbox && (
+          <>
+            <a
+              className={inboxActive ? "active" : ""}
+              onClick={() => setInboxOpen(!inboxOpen)}
             >
-              <FiUsers size={ICON_SIZE} />
-              <span className="pmis-text">Concerned Division</span>
+              <FiInbox size={ICON_SIZE} />
+              <span className="pmis-text">Approval Inbox</span>
+              <span className="pmis-submenu-arrow">
+                <Chevron open={inboxOpen} />
+              </span>
+            </a>
+            <div className={`pmis-submenu${inboxOpen ? " open" : ""}`}>
+              {showCdInbox && (
+                <div
+                  className={inboxCdActive ? "active" : ""}
+                  onClick={() => navigate("/approvals/concerned-division")}
+                >
+                  <FiUsers size={ICON_SIZE} />
+                  <span className="pmis-text">Concerned Division</span>
+                </div>
+              )}
+              {showAoInbox && (
+                <div
+                  className={inboxAoActive ? "active" : ""}
+                  onClick={() => navigate("/approvals/activity-owner")}
+                >
+                  <FiCheckCircle size={ICON_SIZE} />
+                  <span className="pmis-text">Activity Owner</span>
+                </div>
+              )}
             </div>
-          )}
-          {showAoInbox && (
-            <div
-              className={inboxAoActive ? "active" : ""}
-              onClick={() => navigate("/approvals/activity-owner")}
-            >
-              <FiCheckCircle size={ICON_SIZE} />
-              <span className="pmis-text">Activity Owner</span>
-            </div>
-          )}
-        </div>
+          </>
+        )}
 
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}
