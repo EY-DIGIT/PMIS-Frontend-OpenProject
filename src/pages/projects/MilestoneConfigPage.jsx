@@ -10,8 +10,6 @@ import {
   formatDateDisplay,
   activityTasksAllComplete
 } from "../../utils/project/helpers";
-import { markReadyForApproval } from "../../utils/project/approvalWorkflow";
-import { transitionActivity, WORKFLOW_ACTIONS } from "../../api/activityWorkflow";
 import {
   normalizeProject,
   recomputeActualDates,
@@ -51,7 +49,6 @@ import {
   loadPriorities
 } from "../../api/milestoneConfigApi";
 import NodeModal from "../../components/projects/modals/NodeModal";
-import LastTaskConfirmModal, { useLastTaskConfirm } from "../../components/projects/modals/LastTaskConfirmModal";
 import MilestoneGridRow from "../../components/projects/MilestoneGridRow";
 import MilestonePagination from "../../components/projects/MilestonePagination";
 import * as projectsApi from "../../api/projects";
@@ -117,7 +114,6 @@ export default function MilestoneConfigPage({ mode }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
   const [modalCtx, setModalCtx] = useState(null);
-  const lastTaskConfirm = useLastTaskConfirm();
   const [milestonesLoading, setMilestonesLoading] = useState(false);
   const [milestonesError, setMilestonesError] = useState("");
 
@@ -1020,11 +1016,11 @@ export default function MilestoneConfigPage({ mode }) {
       recomputeActualDates(target);
       normalizeProject(target);
 
-      /* Confirm the popup condition AFTER normalization. If the normalizer
-         auto-promoted the activity (status='Completed' / approvalState=
-         'completed') as a side-effect of rollup, roll it back to idle so
-         the user's popup choice controls the outcome. */
-      let openPopupForActivity = null;
+      /* When the last task of an activity completes, the normalizer may
+         auto-promote the activity to completed as a side-effect of rollup.
+         Roll it back to idle so the activity stays open until it's
+         explicitly marked Ready for Approval from the workflow panel.
+         (The previous yes/no "Mark Ready for Approval" popup was removed.) */
       if (pendingLastTaskActivity && activityTasksAllComplete(pendingLastTaskActivity)) {
         if (
           pendingLastTaskActivity.approvalState === "completed" &&
@@ -1035,45 +1031,12 @@ export default function MilestoneConfigPage({ mode }) {
             pendingLastTaskActivity.status = "Not Completed";
           }
         }
-        openPopupForActivity = pendingLastTaskActivity;
       }
 
       commitUpdate(target);
       uiStore.hideLoader();
       closeNodeModal();
       uiStore.showMessage(modeAction === "add" ? "Item added" : "Item updated");
-
-      if (openPopupForActivity) {
-        const activityForPopup = openPopupForActivity;
-        lastTaskConfirm.open(activityForPopup, async () => {
-          lastTaskConfirm.setBusy(true);
-          lastTaskConfirm.setError("");
-          try {
-            const businessId = activityForPopup.apiId || activityForPopup.uid;
-            if (businessId && getToken()) {
-              await transitionActivity({
-                businessId,
-                action: WORKFLOW_ACTIONS.SUBMIT,
-                comment: "Activity marked Ready for Approval (last task completed)."
-              });
-            }
-            const next = markReadyForApproval(activityForPopup, "last-task");
-            /* Mutate in place so the project tree reflects the new state
-               without us having to re-locate the node. */
-            Object.assign(activityForPopup, next);
-            commitUpdate(target);
-            lastTaskConfirm.close();
-            uiStore.showMessage(
-              "Activity is now Ready for Approval. Open the activity and click Request Division Approval to dispatch."
-            );
-          } catch (err) {
-            lastTaskConfirm.setError(
-              err && err.message ? err.message : "Failed to mark ready for approval."
-            );
-            lastTaskConfirm.setBusy(false);
-          }
-        });
-      }
     };
 
     /* ─── Dispatch to the correct remote branch, then run doLocal ─── */
@@ -1403,15 +1366,6 @@ export default function MilestoneConfigPage({ mode }) {
             <div className="uidai-hint">Loading…</div>
           </div>
         )}
-        {lastTaskConfirm.pending && (
-          <LastTaskConfirmModal
-            activity={lastTaskConfirm.pending.activity}
-            busy={lastTaskConfirm.busy}
-            error={lastTaskConfirm.error}
-            onYes={lastTaskConfirm.pending.onYes}
-            onNo={lastTaskConfirm.close}
-          />
-        )}
       </div>
     );
   }
@@ -1515,16 +1469,6 @@ export default function MilestoneConfigPage({ mode }) {
           />
         )}
       </div>
-
-      {lastTaskConfirm.pending && (
-        <LastTaskConfirmModal
-          activity={lastTaskConfirm.pending.activity}
-          busy={lastTaskConfirm.busy}
-          error={lastTaskConfirm.error}
-          onYes={lastTaskConfirm.pending.onYes}
-          onNo={lastTaskConfirm.close}
-        />
-      )}
     </div>
   );
 }
