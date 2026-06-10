@@ -19,6 +19,10 @@ import Aadhaar from "../assets/Aadhaar.png";
 const WEBHOOK_URL =
   "http://10.1.151.228:5678/webhook/595b77a5-75ed-4793-88db-0c2a10e04c4f/chat";
 
+// n8n instance id sent with each chat request (matches the working curl).
+const N8N_INSTANCE_ID =
+  "fccf52d42441dd9f26257393c3e31924e0849f14611c04622f87dac4d51ca27a";
+
 const BRAND_GRADIENT = "linear-gradient(135deg, #173e77 0%, #1a8f99 100%)";
 
 const GREETING = {
@@ -74,7 +78,11 @@ export default function AssistantPage() {
     try {
       const res = await fetch(WEBHOOK_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "*/*" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "*/*",
+          "X-Instance-Id": N8N_INSTANCE_ID,
+        },
         body: JSON.stringify({
           action: "sendMessage",
           sessionId: sessionId.current,
