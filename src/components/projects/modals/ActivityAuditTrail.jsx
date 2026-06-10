@@ -39,6 +39,39 @@ const ACTION_TO_TYPE = {
   COMPLETE: "completion"
 };
 
+/* Map backend ACTION / VOTE name → a short, human-readable label shown
+   in the audit headline. Unknown actions fall back to Title Case of the
+   snake_case key (see prettyAction). */
+const ACTION_LABEL = {
+  SUBMIT: "Submitted for Approval",
+  UPDATE: "Updated",
+  REQUEST_DIVISION_APPROVAL: "Division Approval Requested",
+  REQUEST_OWNER_APPROVAL: "Owner Approval Requested",
+  VOTE_APPROVED: "Division Approved",
+  VOTE_REJECTED: "Division Rejected",
+  GATE_READY: "All Divisions Approved",
+  ALL_APPROVED: "Forwarded to Owner",
+  ANY_REJECTED: "Rejected",
+  APPROVE: "Approved",
+  REJECT: "Rejected",
+  RETURN_TO_VENDOR: "Returned to Vendor",
+  COMPLETE: "Completed"
+};
+
+/* Convert a raw backend action to a readable label: use ACTION_LABEL when
+   known, else Title-Case the snake_case key (FOO_BAR → "Foo Bar"). */
+function prettyAction(action) {
+  const key = String(action || "").toUpperCase();
+  if (!key) return "";
+  if (ACTION_LABEL[key]) return ACTION_LABEL[key];
+  return key
+    .toLowerCase()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 /* Map backend previousStatus → a short, human-readable label. */
 const STATUS_LABEL = {
   READYFORAPPROVAL: "Ready for Approval",
@@ -115,7 +148,7 @@ function fromProcessInstance(pi) {
   const nextLabel = STATUS_LABEL[String(nextRaw || "").toUpperCase()] || nextRaw || "";
 
   const lines = [];
-  if (action) lines.push(action);
+  if (action) lines.push(prettyAction(action));
   if (prevLabel && nextLabel) lines.push(`${prevLabel} → ${nextLabel}`);
   else if (prevLabel) lines.push(`from ${prevLabel}`);
   if (outcome === "FAILED") lines.push("FAILED");
