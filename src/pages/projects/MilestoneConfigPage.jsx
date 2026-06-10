@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
 import { projectsStore, useProject, useProjects } from "../../store/project/projectsStore";
 import { draftStore, useDraft } from "../../store/project/draftStore";
 import { uiStore } from "../../store/project/uiStore";
@@ -64,6 +64,24 @@ import { useCan } from "../../auth/permissions";
 export default function MilestoneConfigPage({ mode }) {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  /* The add/edit form is now a sub-route ( .../config/node?kind=&mode=&
+     parentUid=&nodeUid= ) rendered as a full page instead of a modal.
+     configBase is the URL to return to (the milestone list). */
+  const configBase = mode === "onboarding"
+    ? "/projects/add/config"
+    : `/projects/${encodeURIComponent(projectId || "")}/config`;
+  const isNodeRoute = location.pathname.replace(/\/+$/, "").endsWith("/config/node");
+  const nodeRouteCtx = isNodeRoute
+    ? {
+        kind: searchParams.get("kind") || "",
+        mode: searchParams.get("mode") || "add",
+        parentUid: searchParams.get("parentUid") || null,
+        nodeUid: searchParams.get("nodeUid") || null,
+      }
+    : null;
 
   // Per-action permissions. Milestones + activities are super_admin/admin
   // only; tasks + subtasks are open to org_admin / project_admin /
@@ -544,16 +562,24 @@ export default function MilestoneConfigPage({ mode }) {
     setEditingConfig((v) => !v);
   }
 
+  /* Open the add/edit form — navigate to the node sub-route which renders
+     the form full-page (replacing the milestone list). */
   function openNodeModal(kind, modeAction, parentUid, nodeUid) {
-    setModalCtx({ kind, mode: modeAction, parentUid, nodeUid });
+    const params = new URLSearchParams({ kind, mode: modeAction });
+    if (parentUid) params.set("parentUid", parentUid);
+    if (nodeUid) params.set("nodeUid", nodeUid);
+    navigate(`${configBase}/node?${params.toString()}`);
   }
+  /* Close the form — return to the milestone list. */
   function closeNodeModal() {
     setModalCtx(null);
+    if (isNodeRoute) navigate(configBase);
   }
 
-  function saveNodeFromModal(formData) {
-    if (!modalCtx) return;
-    const { kind, mode: modeAction, parentUid, nodeUid } = modalCtx;
+  function saveNodeFromModal(formData, ctxArg) {
+    const ctx = ctxArg || nodeRouteCtx || modalCtx;
+    if (!ctx) return;
+    const { kind, mode: modeAction, parentUid, nodeUid } = ctx;
     const bounds = formData.bounds;
 
     /* ─── Field validations ─── */
@@ -1352,6 +1378,44 @@ export default function MilestoneConfigPage({ mode }) {
 
   const colSpan = showStatusCol ? 10 : 9;
 
+  /* Node sub-route — render the add/edit form as a full page instead of
+     the milestone list. Reuses the same NodeModal in `asPage` mode and
+     the same save handler. */
+  if (isNodeRoute && nodeRouteCtx) {
+    return (
+      <div>
+        {project ? (
+          <NodeModal
+            open
+            asPage
+            kind={nodeRouteCtx.kind}
+            mode={nodeRouteCtx.mode}
+            project={project}
+            parentUid={nodeRouteCtx.parentUid}
+            nodeUid={nodeRouteCtx.nodeUid}
+            editable={nodeRouteCtx.mode === "view" ? false : canMod}
+            onCancel={closeNodeModal}
+            onSave={saveNodeFromModal}
+            onError={(m) => uiStore.showMessage(m)}
+          />
+        ) : (
+          <div className="uidai-card-project">
+            <div className="uidai-hint">Loading…</div>
+          </div>
+        )}
+        {lastTaskConfirm.pending && (
+          <LastTaskConfirmModal
+            activity={lastTaskConfirm.pending.activity}
+            busy={lastTaskConfirm.busy}
+            error={lastTaskConfirm.error}
+            onYes={lastTaskConfirm.pending.onYes}
+            onNo={lastTaskConfirm.close}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="uidai-page-header" style={{ justifyContent: "flex-end" }}>
@@ -1452,20 +1516,6 @@ export default function MilestoneConfigPage({ mode }) {
         )}
       </div>
 
-      {modalCtx && (
-        <NodeModal
-          open
-          kind={modalCtx.kind}
-          mode={modalCtx.mode}
-          project={project}
-          parentUid={modalCtx.parentUid}
-          nodeUid={modalCtx.nodeUid}
-          editable={modalCtx.mode === "view" ? false : canMod}
-          onCancel={closeNodeModal}
-          onSave={saveNodeFromModal}
-          onError={(m) => uiStore.showMessage(m)}
-        />
-      )}
       {lastTaskConfirm.pending && (
         <LastTaskConfirmModal
           activity={lastTaskConfirm.pending.activity}

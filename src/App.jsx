@@ -349,6 +349,13 @@ function Breadcrumbs() {
         if (segments[0] === "projects" && segments[2] === "track" && segments.length > 3) {
             return segments.slice(0, 3);
         }
+        // Node add/edit page lives at .../config/node — drop the trailing
+        // "node" crumb so the trail ends at "Milestone Configuration"
+        // (which links back to the list).
+        if (segments[0] === "projects" && segments[2] === "config" &&
+            segments[segments.length - 1] === "node") {
+            return segments.slice(0, -1);
+        }
         return segments;
     })();
 
@@ -528,14 +535,14 @@ export default function MainApp() {
                                                 {/* Onboarding — step 1 = details, step 2 = milestone config (draft) */}
                                                 <Route path="/projects/add" element={<RequirePermission action="createProject"><AddProjectPage /></RequirePermission>} />
                                                 <Route
-                                                    path="/projects/add/config"
+                                                    path="/projects/add/config/*"
                                                     element={<RequirePermission action="createProject"><MilestoneConfigPage mode="onboarding" /></RequirePermission>}
                                                 />
 
                                                 {/* Existing project — details / config / track */}
                                                 <Route path="/projects/:projectId" element={<RequirePermission action="viewProjects"><ProjectDetailsPage /></RequirePermission>} />
                                                 <Route
-                                                    path="/projects/:projectId/config"
+                                                    path="/projects/:projectId/config/*"
                                                     element={<RequirePermission action="viewProjects"><MilestoneConfigPage mode="update" /></RequirePermission>}
                                                 />
                                                 <Route path="/projects/:projectId/track" element={<RequirePermission action="viewProjects"><TrackProgressPage /></RequirePermission>} />

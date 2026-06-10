@@ -235,6 +235,7 @@ export default function NodeModal({
   parentUid,
   nodeUid,
   editable,
+  asPage = false,
   onCancel,
   onSave
 }) {
@@ -787,6 +788,12 @@ export default function NodeModal({
       }
     : { position: "relative" };
 
+  /* Page mode: drop the modal's fixed sizing/scroll so the form flows in
+     the page and the page itself scrolls. */
+  const effectiveBoxStyle = asPage
+    ? { position: "relative", width: "100%", maxWidth: "100%", maxHeight: "none", overflow: "visible", margin: 0 }
+    : boxStyle;
+
   /* Body layout for activity-edit: a single flex row with two scrolling
      columns. Left column stacks banner → form → comments; right column
      holds the approval panel + audit trail. Outside activity edit, the
@@ -832,8 +839,8 @@ export default function NodeModal({
   };
 
   return (
-    <div className="uidai-modal">
-      <div className="uidai-modal__box uidai-modal__box--wide" style={boxStyle}>
+    <div className={asPage ? "uidai-nodeedit-page" : "uidai-modal"}>
+      <div className="uidai-modal__box uidai-modal__box--wide" style={effectiveBoxStyle}>
         {kind === "activity" && node?.apiId && (
           <button
             type="button"
