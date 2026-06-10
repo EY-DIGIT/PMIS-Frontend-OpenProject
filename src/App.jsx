@@ -58,6 +58,7 @@ import TrackProgressPage from "./pages/projects/TrackProgressPage";
 import AuditLogsPage from "./pages/projects/AuditLogsPage";
 import SeverityPage from "./pages/severity/severity";
 import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
+import SlaMastersPage from "./pages/sla/SlaMastersPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
@@ -586,6 +587,9 @@ export default function MainApp() {
                                                     No role gating yet; everyone with auth can access. */}
                                                 <Route path="meetings" element={<MeetingsListPage />} />
                                                 <Route path="meetings/new" element={<CreateMeetingPage />} />
+
+                                                {/*SLA Masters*/}
+                                                <Route path="sla-masters" element={<SlaMastersPage />} />
                                                 <Route path="meetings/:id" element={<MeetingDetailPage />} />
                                             </Routes>
                                         </Layout>

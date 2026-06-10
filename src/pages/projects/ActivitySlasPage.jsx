@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import "../../styles/global.css";
@@ -49,6 +49,41 @@ const ctrl = {
     boxSizing: "border-box",
 };
 
+// ---------------------------------------------------------------------------
+// Human-readable labels for raw API enum values (e.g. "band_accumulation",
+// "point_accumulation", "calendar_days"). Add the exact display text you want
+// for each raw value here — anything not listed falls back to a generic
+// snake_case / kebab-case → "Title Case" conversion.
+//
+// >>> FILL ME IN <<< : map each raw API value to its confirmed label, e.g.
+//   band_accumulation: "Band Accumulation",
+//   point_accumulation: "Point Accumulation",
+// ---------------------------------------------------------------------------
+const VALUE_LABELS = {
+    // raw_value: "Display Text",
+};
+
+// Convert a raw enum-ish value to readable text (via VALUE_LABELS or fallback).
+function humanize(value) {
+    if (value === null || value === undefined || value === "") return "—";
+    const key = String(value);
+    if (Object.prototype.hasOwnProperty.call(VALUE_LABELS, key)) return VALUE_LABELS[key];
+    return key.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// True for snake_case-looking values that are safe to humanize (avoids
+// mangling UUIDs, dates, refs, numbers).
+function looksEnum(v) {
+    return typeof v === "string" && /^[a-z0-9]+(_[a-z0-9]+)+$/.test(v);
+}
+
+// Render any cell/scalar: humanize enum-looking strings, pass the rest through.
+function maybeHumanize(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (looksEnum(v)) return humanize(v);
+    return String(v);
+}
+
 function StatusBadge({ status }) {
     const s = (status || "").toUpperCase();
     const cls =
@@ -73,7 +108,7 @@ function ResultView({ data }) {
                     {scalars.map(([k, v]) => (
                         <div key={k}>
                             <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)", fontWeight: 600, marginBottom: 4 }}>{k}</div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#173e77", wordBreak: "break-word" }}>{String(v ?? "—")}</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#173e77", wordBreak: "break-word" }}>{maybeHumanize(v)}</div>
                         </div>
                     ))}
                 </div>
@@ -102,6 +137,14 @@ function ObservationEditor({ observations, onChange }) {
             {observations.length === 0 && (
                 <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)", fontStyle: "italic", marginBottom: 8 }}>
                     No metric observations — add one.
+                </div>
+            )}
+            {observations.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1.2fr auto", gap: 8, marginBottom: 6, fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>
+                    <div>Metric Key</div>
+                    <div>Shape</div>
+                    <div>Value</div>
+                    <div />
                 </div>
             )}
             {observations.map((o, i) => (
@@ -141,21 +184,405 @@ function ObservationEditor({ observations, onChange }) {
     );
 }
 
+// Small pill used on the SLA cards for contract / formula tags.
+const cardChip = {
+    display: "inline-flex", alignItems: "center", padding: "3px 9px", borderRadius: 999,
+    background: "#eef4ff", border: "1px solid #d8e6f8", color: "#1f4e87",
+    fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+};
+
+// ---------------------------------------------------------------------------
+// SLA card — one box in the "View SLA" grid. On hover it shows the richer
+// detail as a floating popup (absolutely positioned overlay) so the grid cell
+// keeps its size and nothing below/beside it stretches. Click to open details.
+// ---------------------------------------------------------------------------
+function SlaCard({ sla, selected, onPick }) {
+    const [hover, setHover] = useState(false);
+    const s = sla;
+
+    // Shared header — `expanded` adds the hover-only detail block.
+    const body = (expanded) => (
+        <>
+            <div style={{ height: 4, background: "linear-gradient(90deg,#0b3c88,#19b6c9)" }} />
+            <div style={{ padding: "12px 13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ fontWeight: 800, color: "#173e77", fontSize: 13.5, lineHeight: 1.3 }}>{s.title || s.sla_ref || "—"}</div>
+                    <StatusBadge status={s.status} />
+                </div>
+                <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--uidai-pmis-muted)", marginTop: 4 }}>{s.sla_ref || "—"}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                    {s.contract_type && <span style={cardChip}>{humanize(s.contract_type)}</span>}
+                    {s.formula_type && <span style={cardChip}>{humanize(s.formula_type)}</span>}
+                </div>
+                {expanded && (
+                    <div style={{ marginTop: 10, borderTop: "1px dashed var(--uidai-pmis-border)", paddingTop: 10 }}>
+                        {s.description && (
+                            <div style={{ fontSize: 12, color: "var(--uidai-pmis-text)", lineHeight: 1.5 }}>{s.description}</div>
+                        )}
+                        {(s.measurement_interval || s.reporting_interval) && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: s.description ? 8 : 0, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
+                                {s.measurement_interval && <span>Measurement: <b style={{ color: "#173e77" }}>{humanize(s.measurement_interval)}</b></span>}
+                                {s.reporting_interval && <span>Reporting: <b style={{ color: "#173e77" }}>{humanize(s.reporting_interval)}</b></span>}
+                            </div>
+                        )}
+                        <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, color: "#2f6fb0" }}>View details →</div>
+                    </div>
+                )}
+            </div>
+        </>
+    );
+
+    const baseBorder = selected ? "#2f6fb0" : "var(--uidai-pmis-border)";
+
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            onClick={onPick}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
+            onMouseEnter={() => setHover(true)}
+            onMouseLeave={() => setHover(false)}
+            onFocus={() => setHover(true)}
+            onBlur={() => setHover(false)}
+            style={{ position: "relative", cursor: "pointer" }}
+        >
+            {/* Base card — stays in flow so the grid cell keeps its height. */}
+            <div
+                style={{
+                    border: `1px solid ${baseBorder}`, borderRadius: 10, background: "#fff", overflow: "hidden",
+                    boxShadow: "0 1px 3px rgba(11,60,136,.06)",
+                    outline: selected ? "2px solid rgba(47,111,176,.25)" : "none",
+                    visibility: hover ? "hidden" : "visible",
+                }}
+            >
+                {body(false)}
+            </div>
+
+            {/* Hover popup — floats above neighbours; never affects layout. */}
+            {hover && (
+                <div
+                    style={{
+                        position: "absolute", top: 0, left: 0, right: 0, zIndex: 50,
+                        border: "1px solid #2f6fb0", borderRadius: 10, background: "#fff", overflow: "hidden",
+                        boxShadow: "0 16px 34px rgba(11,60,136,.22)",
+                        transform: "translateY(-4px)",
+                    }}
+                >
+                    {body(true)}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Collapsible section for the SLA Details panel. Controlled internally so the
+// caret can rotate; `defaultOpen` decides the initial state.
+function Accordion({ title, badge, defaultOpen = false, children }) {
+    const [open, setOpen] = useState(!!defaultOpen);
+    return (
+        <div style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, marginTop: 12, background: "#fff", overflow: "hidden" }}>
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                style={{
+                    width: "100%", textAlign: "left", border: "none", background: open ? "#eef4ff" : "#f6f9fd",
+                    padding: "11px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", font: "inherit",
+                }}
+            >
+                <span style={{ transition: "transform .15s ease", transform: open ? "rotate(90deg)" : "none", color: "var(--uidai-pmis-muted)", fontSize: 11 }}>▶</span>
+                <span style={{ fontWeight: 800, color: "#173e77", fontSize: 13.5 }}>{title}</span>
+                {badge != null && (
+                    <span style={{ marginLeft: 8, background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 8px", fontSize: 11, fontWeight: 800 }}>{badge}</span>
+                )}
+            </button>
+            {open && <div style={{ padding: 14 }}>{children}</div>}
+        </div>
+    );
+}
+
+// Label/value grid used inside the detail accordions. `[label, value]` pairs;
+// entries with an undefined value are dropped.
+function DetailGrid({ fields }) {
+    const shown = fields.filter(([, v]) => v !== undefined);
+    if (shown.length === 0) return null;
+    return (
+        <div className="uidai-pmis-grid-4" style={{ gap: 16 }}>
+            {shown.map(([k, v]) => (
+                <div key={k}>
+                    <div style={{ color: "var(--uidai-pmis-muted)", fontWeight: 600, marginBottom: 4, fontSize: 12 }}>{k}</div>
+                    <div style={{ color: "#173e77", fontWeight: 700, wordBreak: "break-word", fontSize: 13 }}>
+                        {v === null || v === undefined || v === "" ? "—" : v}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation result rendering — turns a MappingEvaluation response (or a list
+// of them, for the whole-activity evaluate) into headline metric tiles plus
+// collapsible sections (Summary / Breaches / Guards / Notes / Overrides),
+// mirroring the SLA Details accordions. All enum-ish values are humanized.
+// ---------------------------------------------------------------------------
+
+// The four key outputs surfaced as big tiles at the top of a result.
+const EVAL_HEADLINE = [
+    { key: "severity_level", label: "Severity Level", kind: "severity" },
+    { key: "accumulated_points", label: "Accumulated Points" },
+    { key: "ld_percent", label: "LD Percent", suffix: "%" },
+    { key: "ld_amount", label: "LD Amount", kind: "ld" },
+];
+// Keys we never want to dump into the Summary grid (ids, links, nested blocks).
+const EVAL_INTERNAL = new Set([
+    "_type", "mapping_id", "activity_id", "sla_id", "project_id",
+    "breaches", "guards", "notes", "overrides_applied",
+    "evaluations", "mappings", "mapping_evaluations", "results",
+]);
+
+function evalNum(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    const n = Number(v);
+    if (Number.isNaN(n)) return String(v);
+    return n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+// Prettify a field key into a label, fixing common acronyms.
+function labelize(k) {
+    return String(k)
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .replace(/\bSla\b/g, "SLA").replace(/\bLd\b/g, "LD").replace(/\bId\b/g, "ID").replace(/\bPct\b/g, "%");
+}
+
+// Higher severity = worse → warmer colour for the headline tile.
+function severityAccent(level) {
+    const n = Number(level);
+    if (!Number.isFinite(n)) return "#173e77";
+    if (n >= 3) return "#c0392b";
+    if (n === 2) return "#c77700";
+    return "#1f8a4c";
+}
+
+function bandBadgeClass(label) {
+    const s = String(label || "").toLowerCase();
+    if (/crit|breach|severe|fail|red|high/.test(s)) return "uidai-pmis-badge-red";
+    if (/major|warn|amber|medium|moderate/.test(s)) return "uidai-pmis-badge-orange";
+    if (/minor|ok|green|pass|low|none/.test(s)) return "uidai-pmis-badge-green";
+    return "uidai-pmis-badge-orange";
+}
+
+function EvalStatTile({ label, value, accent }) {
+    return (
+        <div style={{ background: "#f6f9fd", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".3px" }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: accent || "#173e77", lineHeight: 1.1, wordBreak: "break-word" }}>{value}</div>
+        </div>
+    );
+}
+
+const BREACH_COLS = [
+    { key: "metric_key", label: "Metric", humanize: true },
+    { key: "band_label", label: "Band", band: true },
+    { key: "observed_value", label: "Observed", num: true },
+    { key: "days_in_band", label: "Days in Band", num: true },
+    { key: "severity_level", label: "Severity", num: true },
+    { key: "points_contribution", label: "Points", num: true },
+    { key: "rate_percent", label: "Rate %", num: true },
+    { key: "contribution_percent", label: "Contribution %", num: true },
+    { key: "note", label: "Note" },
+];
+
+function BreachTable({ rows }) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return <div style={{ fontSize: 12.5, color: "#1f8a4c", fontWeight: 600 }}>✓ No breaches recorded for this period.</div>;
+    }
+    const has = (k) => rows.some((r) => r[k] !== null && r[k] !== undefined && r[k] !== "");
+    const cols = BREACH_COLS.filter((c) => has(c.key));
+    return (
+        <div className="uidai-pmis-table-wrap">
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0 }}>
+                <thead>
+                    <tr>{cols.map((c) => <th key={c.key} style={c.num ? { textAlign: "right" } : undefined}>{c.label}</th>)}</tr>
+                </thead>
+                <tbody>
+                    {rows.map((r, i) => (
+                        <tr key={i}>
+                            {cols.map((c) => {
+                                const v = r[c.key];
+                                if (c.band) return <td key={c.key}><span className={`uidai-pmis-badge ${bandBadgeClass(v)}`}>{v || "—"}</span></td>;
+                                if (c.num) return <td key={c.key} style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{evalNum(v)}</td>;
+                                if (c.humanize) return <td key={c.key}>{maybeHumanize(v)}</td>;
+                                return <td key={c.key}>{v === null || v === undefined || v === "" ? "—" : String(v)}</td>;
+                            })}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+// Generic table for guards / other arrays of objects.
+function EvalRowsTable({ rows }) {
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const cols = Object.keys(rows[0]).filter((k) => !["id", "created_at"].includes(k));
+    return (
+        <div className="uidai-pmis-table-wrap">
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0 }}>
+                <thead><tr>{cols.map((c) => <th key={c}>{labelize(c)}</th>)}</tr></thead>
+                <tbody>
+                    {rows.map((r, i) => (
+                        <tr key={i}>{cols.map((c) => <td key={c}>{typeof r[c] === "object" ? JSON.stringify(r[c]) : maybeHumanize(r[c])}</td>)}</tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function isMappingEval(d) {
+    return d && typeof d === "object" && !Array.isArray(d) &&
+        (d._type === "MappingEvaluation" || "accumulated_points" in d || "breaches" in d || "ld_amount" in d);
+}
+
+// A result section: a standalone Accordion normally, or a plain titled block
+// when it already sits inside an activity-level accordion (no double nesting).
+function EvalSection({ title, badge, nested, defaultOpen, children }) {
+    if (nested) {
+        return (
+            <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#173e77", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                    {title}
+                    {badge != null && <span style={{ background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 8px", fontSize: 11, fontWeight: 800 }}>{badge}</span>}
+                </div>
+                {children}
+            </div>
+        );
+    }
+    return <Accordion title={title} badge={badge} defaultOpen={defaultOpen}>{children}</Accordion>;
+}
+
+// One MappingEvaluation: headline tiles + Summary/Breaches/Guards/Notes/Overrides.
+function SingleEvaluation({ ev, nested }) {
+    const headline = EVAL_HEADLINE.filter((h) => ev[h.key] !== undefined && ev[h.key] !== null);
+    const summary = Object.entries(ev).filter(([k, v]) =>
+        !EVAL_INTERNAL.has(k) && !EVAL_HEADLINE.some((h) => h.key === k) && (v === null || typeof v !== "object"));
+    const guards = Array.isArray(ev.guards) ? ev.guards : [];
+    const notes = Array.isArray(ev.notes) ? ev.notes : [];
+    const overrides = ev.overrides_applied && typeof ev.overrides_applied === "object" ? Object.entries(ev.overrides_applied) : [];
+
+    return (
+        <div style={{ marginTop: nested ? 8 : 12 }}>
+            {headline.length > 0 && (
+                <div className="uidai-pmis-grid-4" style={{ gap: 12 }}>
+                    {headline.map((h) => (
+                        <EvalStatTile
+                            key={h.key}
+                            label={h.label}
+                            value={h.suffix ? `${evalNum(ev[h.key])}${h.suffix}` : evalNum(ev[h.key])}
+                            accent={h.kind === "severity" ? severityAccent(ev[h.key]) : (h.kind === "ld" ? "#c0392b" : "#173e77")}
+                        />
+                    ))}
+                </div>
+            )}
+
+            <EvalSection title="Summary" nested={nested} defaultOpen>
+                <DetailGrid fields={summary.map(([k, v]) => [labelize(k), maybeHumanize(v)])} />
+            </EvalSection>
+
+            <EvalSection title="Breaches" badge={Array.isArray(ev.breaches) ? ev.breaches.length : 0} nested={nested}>
+                <BreachTable rows={ev.breaches} />
+            </EvalSection>
+
+            {guards.length > 0 && (
+                <EvalSection title="Guards" badge={guards.length} nested={nested}>
+                    <EvalRowsTable rows={guards} />
+                </EvalSection>
+            )}
+
+            {notes.length > 0 && (
+                <EvalSection title="Notes" badge={notes.length} nested={nested}>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--uidai-pmis-text)", lineHeight: 1.6 }}>
+                        {notes.map((n, i) => <li key={i}>{typeof n === "object" ? JSON.stringify(n) : String(n)}</li>)}
+                    </ul>
+                </EvalSection>
+            )}
+
+            {overrides.length > 0 && (
+                <EvalSection title="Overrides Applied" badge={overrides.length} nested={nested}>
+                    <DetailGrid fields={overrides.map(([k, v]) => [labelize(k), maybeHumanize(typeof v === "object" ? JSON.stringify(v) : v)])} />
+                </EvalSection>
+            )}
+        </div>
+    );
+}
+
+// Entry point: a single MappingEvaluation, a list of them (whole-activity
+// evaluate → one accordion per SLA), or an unknown shape (→ ResultView).
+function EvaluationResult({ data }) {
+    if (data === null || data === undefined) return null;
+    const list =
+        Array.isArray(data) ? data :
+            Array.isArray(data?.evaluations) ? data.evaluations :
+                Array.isArray(data?.mappings) ? data.mappings :
+                    Array.isArray(data?.mapping_evaluations) ? data.mapping_evaluations :
+                        Array.isArray(data?.results) ? data.results : null;
+
+    if (list) {
+        const meta = !Array.isArray(data)
+            ? Object.entries(data).filter(([k, v]) => !EVAL_INTERNAL.has(k) && (v === null || typeof v !== "object"))
+            : [];
+        return (
+            <div>
+                {meta.length > 0 && (
+                    <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
+                        {meta.map(([k, v]) => <EvalStatTile key={k} label={labelize(k)} value={maybeHumanize(v)} accent={/ld/i.test(k) ? "#c0392b" : "#173e77"} />)}
+                    </div>
+                )}
+                {list.length === 0 ? (
+                    <div style={{ marginTop: 12, fontSize: 13, color: "var(--uidai-pmis-muted)", fontStyle: "italic" }}>No SLA evaluations returned for this period.</div>
+                ) : list.map((ev, i) => (
+                    <Accordion
+                        key={ev?.mapping_id || ev?.sla_ref || i}
+                        title={`${ev?.sla_title || ev?.sla_ref || `SLA ${i + 1}`}`}
+                        badge={isMappingEval(ev) && ev.ld_amount != null ? `LD ${evalNum(ev.ld_amount)}` : null}
+                        defaultOpen={list.length === 1}
+                    >
+                        {isMappingEval(ev) ? <SingleEvaluation ev={ev} /> : <ResultView data={ev} />}
+                    </Accordion>
+                ))}
+            </div>
+        );
+    }
+
+    if (isMappingEval(data)) return <SingleEvaluation ev={data} />;
+    return <ResultView data={data} />;
+}
+
 export default function ActivitySlasPage() {
     // Prefill the Activity ID when we're launched from an activity's node modal
     // (it navigates here with ?activityId=…), so the user lands ready to map.
     const [searchParams] = useSearchParams();
     const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
 
+    // The project's contract type (e.g. "PMU", "MSAP") — when present, only SLAs
+    // of this contract type are shown, so the user never sees irrelevant SLAs.
+    // TODO(launching page): append &contractType=<PROJECT_CONTRACT_TYPE> to the
+    // navigation URL (alongside activityId) so this pre-filter kicks in. Falls
+    // back to showing all SLAs when not provided.
+    const projectContractType = searchParams.get("contractType") || "";
+
     // ---- API configuration ----
-    const [baseUrl, setBaseUrl] = useState("http://10.1.131.199/contracts");
+    const [baseUrl] = useState("http://10.1.131.199/contracts");
 
     // ---- Two-view flow: the mapping screen (default) and the SLA picker. ----
     const [view, setView] = useState("mapping"); // "mapping" | "picker"
-    // Picker search combobox open state, and whether the mapping (effective
-    // dates) editor is expanded in the SLA Details panel.
-    const [pickerOpen, setPickerOpen] = useState(false);
+    // Whether the mapping (effective dates) editor is expanded in the SLA
+    // Details panel.
     const [showMappingEdit, setShowMappingEdit] = useState(false);
+    // The SLA Details card — so picking a card scrolls it into view.
+    const detailRef = useRef(null);
 
     // ---- SLA masters list (loaded once, searched/filtered client-side) ----
     const [slaList, setSlaList] = useState([]);
@@ -520,7 +947,7 @@ export default function ActivitySlasPage() {
                             {rows.map((r, i) => (
                                 <tr key={r.id || i}>
                                     {cols.map((c) => (
-                                        <td key={c}>{typeof r[c] === "object" ? JSON.stringify(r[c]) : String(r[c] ?? "—")}</td>
+                                        <td key={c}>{typeof r[c] === "object" ? JSON.stringify(r[c]) : maybeHumanize(r[c])}</td>
                                     ))}
                                 </tr>
                             ))}
@@ -538,13 +965,14 @@ export default function ActivitySlasPage() {
         return { contract: uniq("contract_type"), formula: uniq("formula_type"), status: uniq("status") };
     }, [slaList]);
 
-    const filtersActive = !!(slaFilters.contract_type || slaFilters.formula_type || slaFilters.status);
+    const filtersActive = !!slaFilters.formula_type;
 
     const filteredSlaList = useMemo(() => slaList.filter((s) =>
-        (!slaFilters.contract_type || s.contract_type === slaFilters.contract_type) &&
-        (!slaFilters.formula_type || s.formula_type === slaFilters.formula_type) &&
-        (!slaFilters.status || s.status === slaFilters.status)
-    ), [slaList, slaFilters]);
+        // Pre-filter by the project's contract type (if supplied), then by the
+        // only user-facing filter left: Formula.
+        (!projectContractType || s.contract_type === projectContractType) &&
+        (!slaFilters.formula_type || s.formula_type === slaFilters.formula_type)
+    ), [slaList, slaFilters, projectContractType]);
 
     // Picker results: filters + free-text typeahead over ref/title/contract/formula.
     const pickerResults = useMemo(() => {
@@ -565,12 +993,11 @@ export default function ActivitySlasPage() {
     }
     function backToMapping() { setView("mapping"); }
 
-    // Pick an SLA from the search dropdown: load its details, reflect the
-    // choice in the search box, and close the dropdown.
+    // Pick an SLA card: load its full details and scroll the details panel
+    // into view (it renders below the grid, which can be long).
     function pickSla(s) {
-        setSlaSearch(s.title || s.sla_ref || "");
-        setPickerOpen(false);
         selectSla(s.id);
+        setTimeout(() => detailRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 60);
     }
 
     return (
@@ -603,93 +1030,55 @@ export default function ActivitySlasPage() {
                                 </button>
                             )}
                         </div>
-                        <div className="uidai-pmis-filter-body" style={{display:"flex",flexDirection:"row",width:"100%"}}>
-                            {/* <div>
-                            <div style={filterFieldLabel}>Contract Type</div>
-                            <select className="uidai-pmis-filter-select" value={slaFilters.contract_type}
-                                onChange={(e) => setSlaFilters((f) => ({ ...f, contract_type: e.target.value }))}>
-                                <option value="">All</option>
-                                {filterOptions.contract.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div> */}
-                            <div style={{ marginTop: 16,    width: "stretch" }}>
-                                <label style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>Search SLA</label>
-                                <div style={{ position: "relative" }}>
-                                    <input
-                                        className="uidai-pmis-filter-input"
-                                        type="text"
-                                        placeholder="Type to search by ref, title, contract, formula…"
-                                        value={slaSearch}
-                                        onChange={(e) => { setSlaSearch(e.target.value); setPickerOpen(true); }}
-                                        onFocus={() => setPickerOpen(true)}
-                                        onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
-                                    />
-                                    {pickerOpen && (
-                                        <div style={{
-                                            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
-                                            background: "#fff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
-                                            boxShadow: "var(--uidai-pmis-shadow, 0 4px 12px rgba(0,0,0,.08))",
-                                            maxHeight: 280, overflowY: "auto",
-                                        }}>
-                                            {listLoading ? (
-                                                <div style={{ padding: 12, ...muted, fontSize: 13 }}>Loading SLAs…</div>
-                                            ) : pickerResults.length === 0 ? (
-                                                <div style={{ padding: 12, ...muted, fontSize: 13 }}>
-                                                    {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
-                                                </div>
-                                            ) : pickerResults.slice(0, 50).map((s) => (
-                                                <button
-                                                    key={s.id}
-                                                    type="button"
-                                                    // onMouseDown fires before the input's onBlur so the click still registers.
-                                                    onMouseDown={() => pickSla(s)}
-                                                    style={{
-                                                        display: "block", width: "100%", textAlign: "left", border: "none",
-                                                        borderBottom: "1px solid #eef3f9", background: s.id === selectedSlaId ? "#eef6ff" : "#fff",
-                                                        padding: "10px 12px", cursor: "pointer", font: "inherit",
-                                                    }}
-                                                >
-                                                    <div style={{ fontWeight: 700, color: "#173e77", fontSize: 13 }}>{s.title || s.sla_ref || "—"}</div>
-                                                    <div style={{ ...muted, fontSize: 11, marginTop: 2 }}>
-                                                        <span style={{ fontFamily: "monospace" }}>{s.sla_ref || "—"}</span>
-                                                        {s.contract_type ? ` · ${s.contract_type}` : ""}{s.formula_type ? ` · ${s.formula_type}` : ""}
-                                                    </div>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                                <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                                    {pickerResults.length} match{pickerResults.length === 1 ? "" : "es"}{slaTotal > slaList.length ? ` · searching first ${slaList.length} of ${slaTotal}` : ""}
-                                </div>
+                        <div className="uidai-pmis-filter-body" style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end", width: "100%" }}>
+                            <div style={{ flex: "3 1 280px", minWidth: 220 }}>
+                                <div style={filterFieldLabel}>Search</div>
+                                <input
+                                    className="uidai-pmis-filter-input"
+                                    type="text"
+                                    placeholder="Search by ref, title, contract, formula…"
+                                    value={slaSearch}
+                                    onChange={(e) => setSlaSearch(e.target.value)}
+                                />
                             </div>
-                            <div style={{width:"250px",marginTop:"16px"}}>
-                                <div style={filterFieldLabel} style={{ fontWeight: 600, display: "block", marginBottom: 8 }}>Formula</div>
+                            <div style={{ flex: "1 1 180px", minWidth: 160 }}>
+                                <div style={filterFieldLabel}>Formula</div>
                                 <select className="uidai-pmis-filter-select" value={slaFilters.formula_type}
                                     onChange={(e) => setSlaFilters((f) => ({ ...f, formula_type: e.target.value }))}>
                                     <option value="">All</option>
-                                    {filterOptions.formula.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    {filterOptions.formula.map((c) => <option key={c} value={c}>{humanize(c)}</option>)}
                                 </select>
                             </div>
-                            {/* <div>
-                            <div style={filterFieldLabel}>Status</div>
-                            <select className="uidai-pmis-filter-select" value={slaFilters.status}
-                                onChange={(e) => setSlaFilters((f) => ({ ...f, status: e.target.value }))}>
-                                <option value="">All</option>
-                                {filterOptions.status.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div> */}
                         </div>
                     </div>
 
-                    {/* Search combobox — matches appear in a dropdown (filtered by the above) */}
+                    {/* Result count */}
+                    <div style={{ fontSize: 12, ...muted, margin: "14px 2px 10px" }}>
+                        {pickerResults.length} SLA{pickerResults.length === 1 ? "" : "s"}
+                        {projectContractType ? ` · contract: ${humanize(projectContractType)}` : ""}
+                        {slaTotal > slaList.length ? ` · showing first ${slaList.length} of ${slaTotal}` : ""}
+                    </div>
 
+                    {/* View SLA — card grid (filters + search drive it live; hover a card to peek, click to open) */}
+                    {listLoading ? (
+                        <div style={{ padding: 28, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLAs…</div>
+                    ) : pickerResults.length === 0 ? (
+                        <div style={{ padding: 28, textAlign: "center", ...muted, fontSize: 13 }}>
+                            {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
+                        </div>
+                    ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14, alignItems: "start" }}>
+                            {pickerResults.map((s) => (
+                                <SlaCard key={s.id} sla={s} selected={s.id === selectedSlaId} onPick={() => pickSla(s)} />
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* PICKER — selected SLA details + "Map this SLA" action */}
             {view === "picker" && selectedSlaId && (
-                <div className="uidai-pmis-card">
+                <div className="uidai-pmis-card" ref={detailRef}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: "#173e77" }}>SLA Details</div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -738,24 +1127,78 @@ export default function ActivitySlasPage() {
                         <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
                     ) : slaDetail ? (
                         <div>
-                            <div className="uidai-pmis-grid-4" style={{ gap: 16 }}>
-                                {[
-                                    ["SLA Ref", slaDetail.sla_ref], ["Title", slaDetail.title], ["Description", slaDetail.description],
-                                    ["Contract Type", slaDetail.contract_type], ["Formula Type", slaDetail.formula_type], ["Measurement", slaDetail.measurement_interval],
-                                    ["Reporting", slaDetail.reporting_interval], ["Baseline", slaDetail.baseline_type], ["LD Aggregation", slaDetail.ld_aggregation_method],
-                                    ["LD Base", slaDetail.ld_computation_base], ["Status", slaDetail.status], ["Effective", `${slaDetail.effective_from || "—"} → ${slaDetail.effective_until || "—"}`],
-                                ].map(([k, v]) => (
-                                    <div key={k}>
-                                        <div style={{ ...muted, fontWeight: 600, marginBottom: 4, fontSize: 12 }}>{k}</div>
-                                        <div style={{ color: "#173e77", fontWeight: 700, wordBreak: "break-word", fontSize: 13 }}>{v || "—"}</div>
-                                    </div>
-                                ))}
+                            {/* Title strip — the at-a-glance line above the accordions */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+                                <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77" }}>{slaDetail.title || slaDetail.sla_ref || "SLA"}</div>
+                                <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--uidai-pmis-muted)" }}>{slaDetail.sla_ref || "—"}</span>
+                                <StatusBadge status={slaDetail.status} />
                             </div>
-                            <NestedTable title="Metrics" rows={slaDetail.metrics} />
-                            <NestedTable title="Condition Bands" rows={slaDetail.condition_bands} />
-                            <NestedTable title="Parameters" rows={slaDetail.parameters} />
-                            <NestedTable title="Guard Conditions" rows={slaDetail.guard_conditions} />
-                            <NestedTable title="Lookup Table" rows={slaDetail.lookup_table} />
+
+                            <Accordion title="Overview" defaultOpen>
+                                <DetailGrid
+                                    fields={[
+                                        ["SLA Ref", slaDetail.sla_ref],
+                                        ["Contract Type", slaDetail.contract_type ? humanize(slaDetail.contract_type) : undefined],
+                                        ["Formula Type", slaDetail.formula_type ? humanize(slaDetail.formula_type) : undefined],
+                                        ["Effective", `${slaDetail.effective_from || "—"} → ${slaDetail.effective_until || "—"}`],
+                                    ]}
+                                />
+                                {slaDetail.description && (
+                                    <div style={{ marginTop: 14 }}>
+                                        <div style={{ ...muted, fontWeight: 600, marginBottom: 4, fontSize: 12 }}>Description</div>
+                                        <div style={{ color: "var(--uidai-pmis-text)", fontSize: 13, lineHeight: 1.55 }}>{slaDetail.description}</div>
+                                    </div>
+                                )}
+                            </Accordion>
+
+                            <Accordion title="Measurement & Baseline">
+                                <DetailGrid
+                                    fields={[
+                                        ["Measurement Interval", slaDetail.measurement_interval ? humanize(slaDetail.measurement_interval) : undefined],
+                                        ["Reporting Interval", slaDetail.reporting_interval ? humanize(slaDetail.reporting_interval) : undefined],
+                                        ["Baseline Type", slaDetail.baseline_type ? humanize(slaDetail.baseline_type) : undefined],
+                                    ]}
+                                />
+                            </Accordion>
+
+                            <Accordion title="LD Configuration">
+                                <DetailGrid
+                                    fields={[
+                                        ["LD Aggregation Method", slaDetail.ld_aggregation_method ? humanize(slaDetail.ld_aggregation_method) : undefined],
+                                        ["LD Computation Base", slaDetail.ld_computation_base ? humanize(slaDetail.ld_computation_base) : undefined],
+                                    ]}
+                                />
+                            </Accordion>
+
+                            <Accordion title="Metrics" badge={Array.isArray(slaDetail.metrics) ? slaDetail.metrics.length : null}>
+                                {Array.isArray(slaDetail.metrics) && slaDetail.metrics.length > 0
+                                    ? <NestedTable title="Metrics" rows={slaDetail.metrics} />
+                                    : <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No metrics defined.</div>}
+                            </Accordion>
+
+                            <Accordion title="Condition Bands" badge={Array.isArray(slaDetail.condition_bands) ? slaDetail.condition_bands.length : null}>
+                                {Array.isArray(slaDetail.condition_bands) && slaDetail.condition_bands.length > 0
+                                    ? <NestedTable title="Condition Bands" rows={slaDetail.condition_bands} />
+                                    : <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No condition bands defined.</div>}
+                            </Accordion>
+
+                            <Accordion title="Parameters · Guards · Lookup">
+                                {(() => {
+                                    const params = Array.isArray(slaDetail.parameters) ? slaDetail.parameters : [];
+                                    const guards = Array.isArray(slaDetail.guard_conditions) ? slaDetail.guard_conditions : [];
+                                    const lookup = Array.isArray(slaDetail.lookup_table) ? slaDetail.lookup_table : [];
+                                    if (!params.length && !guards.length && !lookup.length) {
+                                        return <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No parameters, guard conditions or lookup table.</div>;
+                                    }
+                                    return (
+                                        <>
+                                            <NestedTable title="Parameters" rows={params} />
+                                            <NestedTable title="Guard Conditions" rows={guards} />
+                                            <NestedTable title="Lookup Table" rows={lookup} />
+                                        </>
+                                    );
+                                })()}
+                            </Accordion>
                         </div>
                     ) : null}
                 </div>
@@ -801,7 +1244,7 @@ export default function ActivitySlasPage() {
                                         <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
                                             <td style={{ fontFamily: "monospace", fontSize: 11, ...muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</td>
                                             <td>{m.sla_title || "—"}</td>
-                                            <td>{m.contract_type || "—"}</td>
+                                            <td>{m.contract_type ? humanize(m.contract_type) : "—"}</td>
                                             <td>
                                                 {isEditing ? (
                                                     <select style={ctrl} value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
@@ -850,34 +1293,54 @@ export default function ActivitySlasPage() {
                             <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
                         ) : (
                             <>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 10 }}>
-                                    {singleEval.slaTitle || "Mapping"}
-                                    <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
-                                </div>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, maxWidth: 640 }}>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>Period Start</label>
-                                        <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
-                                    </div>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>Period End</label>
-                                        <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
-                                    </div>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>LD Base Amount</label>
-                                        <input type="number" value={singleEval.ld_base_amount} onChange={(e) => setSingleEval((s) => ({ ...s, ld_base_amount: e.target.value }))} />
+                                {/* Which mapping we're evaluating */}
+                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                                    <div>
+                                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Mapping</div>
+                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>
+                                            {singleEval.slaTitle || "Mapping"}
+                                            <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div style={{ marginTop: 14 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 8 }}>
-                                        Metric Observations {singleEval.loadingMetrics && <span style={{ ...muted, fontWeight: 400 }}>(loading metric keys…)</span>}
+
+                                {/* Period & LD base */}
+                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                    <div className="uidai-pmis-filter-head">
+                                        <div className="uidai-pmis-filter-title">Evaluation Period &amp; LD Base</div>
                                     </div>
-                                    <ObservationEditor
-                                        observations={singleEval.observations}
-                                        onChange={(obs) => setSingleEval((s) => ({ ...s, observations: obs }))}
-                                    />
+                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, maxWidth: 640, marginTop: 12 }}>
+                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                            <label>Period Start</label>
+                                            <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
+                                        </div>
+                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                            <label>Period End</label>
+                                            <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
+                                        </div>
+                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                            <label>LD Base Amount</label>
+                                            <input type="number" value={singleEval.ld_base_amount} onChange={(e) => setSingleEval((s) => ({ ...s, ld_base_amount: e.target.value }))} />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div style={{ marginTop: 14 }}>
+
+                                {/* Metric observations */}
+                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                    <div className="uidai-pmis-filter-head">
+                                        <div className="uidai-pmis-filter-title">
+                                            Metric Observations {singleEval.loadingMetrics && <span style={{ ...muted, fontWeight: 400 }}>(loading metric keys…)</span>}
+                                        </div>
+                                    </div>
+                                    <div style={{ marginTop: 12 }}>
+                                        <ObservationEditor
+                                            observations={singleEval.observations}
+                                            onChange={(obs) => setSingleEval((s) => ({ ...s, observations: obs }))}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
                                     <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
                                         {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
                                     </button>
@@ -885,8 +1348,10 @@ export default function ActivitySlasPage() {
                                 {singleEvalError && <Banner text={singleEvalError} />}
                                 {singleEvalResult !== null && (
                                     <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Evaluation Result</div>
-                                        <ResultView data={singleEvalResult} />
+                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
+                                            <span aria-hidden="true">📊</span> Evaluation Result
+                                        </div>
+                                        <EvaluationResult data={singleEvalResult} />
                                     </div>
                                 )}
                             </>
@@ -913,15 +1378,24 @@ export default function ActivitySlasPage() {
 
                         {actEval && (
                             <div style={{ marginTop: 14 }}>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440 }}>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>Period Start</label>
-                                        <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />
+                                <div className="uidai-pmis-filter-shell">
+                                    <div className="uidai-pmis-filter-head">
+                                        <div className="uidai-pmis-filter-title">Evaluation Period</div>
                                     </div>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>Period End</label>
-                                        <input type="date" value={actEval.period_end} onChange={(e) => setActEval((a) => ({ ...a, period_end: e.target.value }))} />
+                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
+                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                            <label>Period Start</label>
+                                            <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />
+                                        </div>
+                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                            <label>Period End</label>
+                                            <input type="date" value={actEval.period_end} onChange={(e) => setActEval((a) => ({ ...a, period_end: e.target.value }))} />
+                                        </div>
                                     </div>
+                                </div>
+
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", margin: "18px 2px 2px" }}>
+                                    SLAs to evaluate ({actEval.groups.length})
                                 </div>
 
                                 {actEval.groups.map((g, gi) => (
@@ -940,6 +1414,7 @@ export default function ActivitySlasPage() {
                                             </div>
                                         </div>
                                         <div style={{ marginTop: 12 }}>
+                                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 8 }}>Metric Observations</div>
                                             <ObservationEditor
                                                 observations={g.observations}
                                                 onChange={(obs) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, observations: obs } : x) }))}
@@ -958,8 +1433,11 @@ export default function ActivitySlasPage() {
 
                         {actEvalResult !== null && (
                             <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>Activity Evaluation Result</div>
-                                <ResultView data={actEvalResult} />
+                                <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span aria-hidden="true">📊</span> Activity Evaluation Result
+                                    <span style={{ ...muted, fontWeight: 400, fontSize: 12 }}>· one section per SLA</span>
+                                </div>
+                                <EvaluationResult data={actEvalResult} />
                             </div>
                         )}
                     </div>
