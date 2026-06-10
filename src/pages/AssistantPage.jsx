@@ -92,7 +92,10 @@ export default function AssistantPage() {
         },
         body: JSON.stringify({
           action: "sendMessage",
-          sessionId: sessionId.current,
+          // Send the n8n auth token as the sessionId so the workflow can
+          // read it from the request body (the browser can't forward it as
+          // the n8n-auth cookie cross-origin).
+          sessionId: N8N_AUTH_TOKEN,
           chatInput: text,
         }),
       });
