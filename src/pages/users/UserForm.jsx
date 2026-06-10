@@ -375,7 +375,6 @@ export default function UserForm() {
           fullName: fullName.trim(),
           vendor_id: vendorId,
           division,
-          division_other: divisionRequiresOther ? divisionOther.trim() : '',
           orgRole: orgRole || null,
           project_ids: projectIds,
           projectAssignments: projectIds.map((projectId) => ({ projectId })),
