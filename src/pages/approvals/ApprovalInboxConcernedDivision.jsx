@@ -313,17 +313,6 @@ export default function ApprovalInboxConcernedDivision() {
 
   return (
     <div className="pmis-apinbox">
-      <div className="pmis-apinbox-head">
-        <div className="pmis-apinbox-sub">
-          {CURRENT_USER.division
-            ? `${CURRENT_USER.division} — Concerned Division`
-            : "Concerned Division Reviewer"}
-        </div>
-        <div className="pmis-apinbox-desc">
-          Activity approval requests routed to your division. Click Review to
-          inspect the submission and decide.
-        </div>
-      </div>
 
       <div className="pmis-apinbox-card">
         {!activeKey && (

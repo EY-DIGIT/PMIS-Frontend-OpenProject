@@ -365,15 +365,6 @@ export default function ApprovalInboxActivityOwner() {
 
   return (
     <div className="pmis-apinbox">
-      <div className="pmis-apinbox-head">
-        <div className="pmis-apinbox-sub">
-          Activity Owner{CURRENT_USER.division ? ` · ${CURRENT_USER.division}` : ""}
-        </div>
-        <div className="pmis-apinbox-desc">
-          Activities awaiting your final decision. All consent divisions have
-          already approved.
-        </div>
-      </div>
 
       <div className="pmis-apinbox-card">
         {!activeKey && (
