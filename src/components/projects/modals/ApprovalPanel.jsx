@@ -89,7 +89,7 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
   );
 }
 
-export default function ApprovalPanel({ activity, form, editable, onChange, onTransition, projectId }) {
+export default function ApprovalPanel({ activity, form, editable, divisions, onChange, onTransition, projectId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   /* Per-target Request popup state. `kind` is 'division' or 'owner'
@@ -114,6 +114,16 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     ? safeArray(form.concernedDivision)
     : safeArray(activity.consentDivisions);
   const businessId = activity.apiId || activity.uid || "";
+
+  /* Map a division code to its friendly name using the divisions master
+     list; falls back to the code itself when no match is found. */
+  const divisionName = (code) => {
+    const c = String(code || "").toLowerCase();
+    const match = safeArray(divisions).find(
+      (d) => String(d.code || "").toLowerCase() === c
+    );
+    return (match && (match.label || match.name)) || code;
+  };
 
   function apply(nextForm) {
     if (nextForm && nextForm !== form) onChange(nextForm);
@@ -345,7 +355,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
       return consentDivisions.map((d) => ({
         id: `div::${d}`,
         kind: "division",
-        label: d
+        label: divisionName(d)
       }));
     }
     if (requestPopup.kind === "owner") {
@@ -518,7 +528,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
     s2Body = "Activity is in the approval workflow.";
   } else if (s2 === "active") {
     const targets = consentDivisions.length
-      ? consentDivisions.join(", ")
+      ? consentDivisions.map(divisionName).join(", ")
       : "(no targets — add Concerned Divisions on the activity)";
     s2Body = (
       <>
@@ -557,7 +567,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
           {rows.map((r) => (
             <TargetRow
               key={r.division}
-              name={r.division}
+              name={divisionName(r.division)}
               status={r.status}
               decidedAt={r.decidedAt}
               reason={r.reason}
@@ -593,7 +603,7 @@ export default function ApprovalPanel({ activity, form, editable, onChange, onTr
         {rj.revertTo === "divisions" && safeArray(rj.revertDivisions).length > 0 && (
           <div className="pmis-awf-step__meta">
             <b>Reverted to Concerned Division(s):</b>{" "}
-            {rj.revertDivisions.join(", ")}
+            {rj.revertDivisions.map(divisionName).join(", ")}
           </div>
         )}
       </>

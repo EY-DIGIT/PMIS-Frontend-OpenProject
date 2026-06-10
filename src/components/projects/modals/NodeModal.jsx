@@ -1314,6 +1314,7 @@ export default function NodeModal({
               activity={node}
               form={form}
               editable={editable}
+              divisions={divisions}
               onChange={(next) => setForm(next)}
               onTransition={refreshProcessInstances}
               projectId={project.projectId}
