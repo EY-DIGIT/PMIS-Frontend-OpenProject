@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import "../../styles/global.css";
+import SLA1Image from "../../assets/DemoSlaImage.png";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
 const SHAPE_OPTIONS = ["SINGLE_VALUE", "DAILY_VALUES", "BAND_COUNTS", "WAC_BREAKDOWN"];
@@ -9,6 +10,7 @@ const SHAPE_OPTIONS = ["SINGLE_VALUE", "DAILY_VALUES", "BAND_COUNTS", "WAC_BREAK
 function today() {
     return new Date().toISOString().slice(0, 10);
 }
+console.log(SLA1Image);
 
 // Pull the collection array regardless of which envelope shape the API uses.
 function extractElements(payload) {
@@ -184,93 +186,89 @@ function ObservationEditor({ observations, onChange }) {
     );
 }
 
-// Small pill used on the SLA cards for contract / formula tags.
-const cardChip = {
-    display: "inline-flex", alignItems: "center", padding: "3px 9px", borderRadius: 999,
-    background: "#eef4ff", border: "1px solid #d8e6f8", color: "#1f4e87",
-    fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
-};
+// ---------------------------------------------------------------------------
+// Demo SLA "screenshot" — a lightweight inline SVG that resembles a table so
+// the image-card grid has something to show until real screenshots are wired
+// in. Replace by setting `image_url` (or `screenshot_url`) on the SLA record;
+// the card uses that when present and falls back to this generated demo.
+// ---------------------------------------------------------------------------
+function demoTableImage(s) {
+    const esc = (t) => String(t || "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])).slice(0, 30);
+    const ref = esc(s.sla_ref || "SLA");
+    const title = esc(s.title || "SLA definition");
+    const ct = esc(s.contract_type || "");
+    const rows = [
+        ["Formula", esc(humanize(s.formula_type))],
+        ["Measurement", esc(s.measurement_interval || "—")],
+        ["Reporting", esc(s.reporting_interval || "—")],
+        ["Status", esc(s.status || "ACTIVE")],
+    ];
+    const rowSvg = rows.map((r, i) => {
+        const y = 96 + i * 22;
+        const bg = i % 2 === 0 ? "#f6f9fd" : "#ffffff";
+        return `<rect x='10' y='${y - 14}' width='300' height='20' fill='${bg}'/>`
+            + `<text x='18' y='${y}' fill='#5a6680' font-family='Arial' font-size='10'>${r[0]}</text>`
+            + `<text x='150' y='${y}' fill='#173e77' font-family='Arial' font-size='10' font-weight='700'>${r[1]}</text>`;
+    }).join("");
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='320' height='200' viewBox='0 0 320 200'>`
+        + `<rect width='320' height='200' fill='#ffffff'/>`
+        + `<rect x='0' y='0' width='320' height='32' fill='#0b3c88'/>`
+        + `<rect x='0' y='32' width='320' height='3' fill='#19b6c9'/>`
+        + `<text x='12' y='21' fill='#ffffff' font-family='Arial' font-size='12' font-weight='700'>${ref}</text>`
+        + `<text x='310' y='20' fill='#bcdcff' font-family='Arial' font-size='10' text-anchor='end'>${ct}</text>`
+        + `<text x='12' y='56' fill='#173e77' font-family='Arial' font-size='12' font-weight='700'>${title}</text>`
+        + `<rect x='10' y='68' width='300' height='1' fill='#dbe5f1'/>`
+        + rowSvg
+        + `<rect x='0.5' y='0.5' width='319' height='199' fill='none' stroke='#dbe5f1'/>`
+        + `</svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
 
 // ---------------------------------------------------------------------------
-// SLA card — one box in the "View SLA" grid. On hover it shows the richer
-// detail as a floating popup (absolutely positioned overlay) so the grid cell
-// keeps its size and nothing below/beside it stretches. Click to open details.
+// SLA image card — the card IS a screenshot of the SLA table. Hovering scales
+// it up (transform only → no reflow; it floats over neighbours), clicking
+// opens the details side-panel. A thin caption keeps look-alike demos
+// identifiable. Real screenshots: set `image_url` on the SLA.
 // ---------------------------------------------------------------------------
 function SlaCard({ sla, selected, onPick }) {
     const [hover, setHover] = useState(false);
-    const s = sla;
-
-    // Shared header — `expanded` adds the hover-only detail block.
-    const body = (expanded) => (
-        <>
-            <div style={{ height: 4, background: "linear-gradient(90deg,#0b3c88,#19b6c9)" }} />
-            <div style={{ padding: "12px 13px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
-                    <div style={{ fontWeight: 800, color: "#173e77", fontSize: 13.5, lineHeight: 1.3 }}>{s.title || s.sla_ref || "—"}</div>
-                    <StatusBadge status={s.status} />
-                </div>
-                <div style={{ fontFamily: "monospace", fontSize: 11, color: "var(--uidai-pmis-muted)", marginTop: 4 }}>{s.sla_ref || "—"}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-                    {s.contract_type && <span style={cardChip}>{humanize(s.contract_type)}</span>}
-                    {s.formula_type && <span style={cardChip}>{humanize(s.formula_type)}</span>}
-                </div>
-                {expanded && (
-                    <div style={{ marginTop: 10, borderTop: "1px dashed var(--uidai-pmis-border)", paddingTop: 10 }}>
-                        {s.description && (
-                            <div style={{ fontSize: 12, color: "var(--uidai-pmis-text)", lineHeight: 1.5 }}>{s.description}</div>
-                        )}
-                        {(s.measurement_interval || s.reporting_interval) && (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: s.description ? 8 : 0, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
-                                {s.measurement_interval && <span>Measurement: <b style={{ color: "#173e77" }}>{humanize(s.measurement_interval)}</b></span>}
-                                {s.reporting_interval && <span>Reporting: <b style={{ color: "#173e77" }}>{humanize(s.reporting_interval)}</b></span>}
-                            </div>
-                        )}
-                        <div style={{ marginTop: 10, fontSize: 12, fontWeight: 800, color: "#2f6fb0" }}>View details →</div>
-                    </div>
-                )}
-            </div>
-        </>
-    );
-
-    const baseBorder = selected ? "#2f6fb0" : "var(--uidai-pmis-border)";
-
+    const src = sla.image_url || sla.screenshot_url || demoTableImage(sla);
     return (
         <div
             role="button"
             tabIndex={0}
+            title={sla.title || sla.sla_ref || "SLA"}
             onClick={onPick}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(); } }}
             onMouseEnter={() => setHover(true)}
             onMouseLeave={() => setHover(false)}
             onFocus={() => setHover(true)}
             onBlur={() => setHover(false)}
-            style={{ position: "relative", cursor: "pointer" }}
+            style={{ position: "relative", cursor: "pointer", borderRadius: 10, zIndex: hover ? 5 : 1 }}
         >
-            {/* Base card — stays in flow so the grid cell keeps its height. */}
             <div
                 style={{
-                    border: `1px solid ${baseBorder}`, borderRadius: 10, background: "#fff", overflow: "hidden",
-                    boxShadow: "0 1px 3px rgba(11,60,136,.06)",
-                    outline: selected ? "2px solid rgba(47,111,176,.25)" : "none",
-                    visibility: hover ? "hidden" : "visible",
+                    border: `1px solid ${selected ? "#2f6fb0" : "var(--uidai-pmis-border)"}`,
+                    borderRadius: 10, overflow: "hidden", background: "#fff",
+                    boxShadow: hover
+                        ? "0 14px 30px rgba(11,60,136,.22)"
+                        : (selected ? "0 0 0 2px rgba(47,111,176,.35)" : "0 1px 3px rgba(11,60,136,.06)"),
+                    transform: hover ? "translateY(-3px) scale(1.03)" : "none",
+                    transformOrigin: "center",
+                    transition: "transform .16s ease, box-shadow .16s ease, border-color .16s ease",
                 }}
             >
-                {body(false)}
-            </div>
-
-            {/* Hover popup — floats above neighbours; never affects layout. */}
-            {hover && (
-                <div
-                    style={{
-                        position: "absolute", top: 0, left: 0, right: 0, zIndex: 50,
-                        border: "1px solid #2f6fb0", borderRadius: 10, background: "#fff", overflow: "hidden",
-                        boxShadow: "0 16px 34px rgba(11,60,136,.22)",
-                        transform: "translateY(-4px)",
-                    }}
-                >
-                    {body(true)}
+                <img
+                    src={src}
+                    alt={sla.title || sla.sla_ref || "SLA"}
+                    loading="lazy"
+                    style={{ display: "block", width: "100%", aspectRatio: "16 / 10", objectFit: "cover", objectPosition: "top" }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 9px", borderTop: "1px solid var(--uidai-pmis-border)", background: "#fbfdff" }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 10.5, color: "var(--uidai-pmis-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sla.sla_ref || "—"}</span>
+                    <StatusBadge status={sla.status} />
                 </div>
-            )}
+            </div>
         </div>
     );
 }
@@ -306,7 +304,7 @@ function DetailGrid({ fields }) {
     const shown = fields.filter(([, v]) => v !== undefined);
     if (shown.length === 0) return null;
     return (
-        <div className="uidai-pmis-grid-4" style={{ gap: 16 }}>
+        <div className="uidai-pmis-grid-4" style={{ gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
             {shown.map(([k, v]) => (
                 <div key={k}>
                     <div style={{ color: "var(--uidai-pmis-muted)", fontWeight: 600, marginBottom: 4, fontSize: 12 }}>{k}</div>
@@ -581,8 +579,6 @@ export default function ActivitySlasPage() {
     // Whether the mapping (effective dates) editor is expanded in the SLA
     // Details panel.
     const [showMappingEdit, setShowMappingEdit] = useState(false);
-    // The SLA Details card — so picking a card scrolls it into view.
-    const detailRef = useRef(null);
 
     // ---- SLA masters list (loaded once, searched/filtered client-side) ----
     const [slaList, setSlaList] = useState([]);
@@ -679,23 +675,35 @@ export default function ActivitySlasPage() {
     // Step 1 — GET /api/v3/sla-masters
     // ---------------------------------------------------------------------------
     async function loadSlaMasters() {
-        setListLoading(true);
-        setListError("");
-        try {
-            const res = await authorizedFetch(
-                `${baseUrl}/api/v3/sla-masters?offset=1&pageSize=${pageSize}`,
-                { method: "GET", headers: { Accept: "application/json" } }
-            );
-            const payload = await readJson(res);
-            setSlaList(extractElements(payload));
-            setSlaTotal(payload?.data?.total ?? 0);
-        } catch (err) {
-            setListError(err?.message || "Failed to load SLA masters");
-            setSlaList([]);
-        } finally {
-            setListLoading(false);
-        }
+    setListLoading(true);
+    setListError("");
+
+    try {
+        const res = await authorizedFetch(
+            `${baseUrl}/api/v3/sla-masters?offset=1&pageSize=${pageSize}`,
+            { method: "GET", headers: { Accept: "application/json" } }
+        );
+
+        const payload = await readJson(res);
+        const data = extractElements(payload);
+
+        // ✅ ADD IMAGE HERE
+        const updated = data.map((s) => ({
+            ...s,
+            image_url: SLA1Image
+        }));
+
+        setSlaList(updated);
+        setSlaTotal(payload?.data?.total ?? 0);
+
+    } catch (err) {
+        setListError(err?.message || "Failed to load SLA masters");
+        setSlaList([]);
+    } finally {
+        setListLoading(false);
     }
+}
+``
 
     // ---------------------------------------------------------------------------
     // Step 2 — GET /api/v3/sla-masters/{slaId}
@@ -993,11 +1001,15 @@ export default function ActivitySlasPage() {
     }
     function backToMapping() { setView("mapping"); }
 
-    // Pick an SLA card: load its full details and scroll the details panel
-    // into view (it renders below the grid, which can be long).
+    // Pick an SLA card: load its full details into the right-hand panel.
     function pickSla(s) {
         selectSla(s.id);
-        setTimeout(() => detailRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 60);
+    }
+    // Dismiss the details side-panel.
+    function closeDetail() {
+        setSelectedSlaId("");
+        setSlaDetail(null);
+        setShowMappingEdit(false);
     }
 
     return (
@@ -1010,9 +1022,13 @@ export default function ActivitySlasPage() {
                     : "Review the SLAs mapped to this activity, map new ones, and evaluate."}
             </div>
 
-            {/* PICKER — find & view an SLA (filters + typeahead search) */}
+            {/* PICKER — browse cards (left) + SLA details side-panel (right) */}
             {view === "picker" && (
-                <div className="uidai-pmis-card">
+                <div style={{ display: "flex", gap: 18, alignItems: "stretch", height: "calc(100vh - 200px)", minHeight: 460 }}>
+                    <div style={{ flex: selectedSlaId ? "1 1 55%" : "1 1 100%", minWidth: 320, minHeight: 0, display: "flex" }}>
+                        <div className="uidai-pmis-card" style={{ marginBottom: 0, display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", minHeight: 0 }}>
+                    {/* Fixed top — header, filters, count (stay put while the cards scroll) */}
+                    <div style={{ flex: "0 0 auto" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
                         <div style={{ ...sectionHead, marginBottom: 0 }}>Select an SLA</div>
                         <button type="button" className="uidai-pmis-filter-toggle" onClick={backToMapping}>← Back to mapping</button>
@@ -1058,8 +1074,10 @@ export default function ActivitySlasPage() {
                         {projectContractType ? ` · contract: ${humanize(projectContractType)}` : ""}
                         {slaTotal > slaList.length ? ` · showing first ${slaList.length} of ${slaTotal}` : ""}
                     </div>
+                    </div>{/* /fixed top */}
 
-                    {/* View SLA — card grid (filters + search drive it live; hover a card to peek, click to open) */}
+                    {/* Scrollable card grid — scrolls on its own, independent of the details panel */}
+                    <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
                     {listLoading ? (
                         <div style={{ padding: 28, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLAs…</div>
                     ) : pickerResults.length === 0 ? (
@@ -1067,18 +1085,22 @@ export default function ActivitySlasPage() {
                             {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
                         </div>
                     ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 14, alignItems: "start" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${selectedSlaId ? 2 : 4}, minmax(0, 1fr))`, gap: 16, alignItems: "start", padding: "4px 2px 8px" }}>
                             {pickerResults.map((s) => (
                                 <SlaCard key={s.id} sla={s} selected={s.id === selectedSlaId} onPick={() => pickSla(s)} />
                             ))}
                         </div>
                     )}
-                </div>
-            )}
+                    </div>{/* /scroll grid */}
+                        </div>
+                    </div>
 
-            {/* PICKER — selected SLA details + "Map this SLA" action */}
-            {view === "picker" && selectedSlaId && (
-                <div className="uidai-pmis-card" ref={detailRef}>
+                    {/* RIGHT — SLA details side-panel; own scroll, independent of the cards */}
+                    {selectedSlaId && (
+                    <div style={{ flex: "1 1 45%", minWidth: 340, minHeight: 0, display: "flex" }}>
+                        <div className="uidai-pmis-card" style={{ marginBottom: 0, display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", minHeight: 0 }}>
+                    {/* Fixed top — title, actions, mapping fields, banners */}
+                    <div style={{ flex: "0 0 auto" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: "#173e77" }}>SLA Details</div>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1088,6 +1110,7 @@ export default function ActivitySlasPage() {
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={createMapping} disabled={createLoading || detailLoading || !slaDetail}>
                                 {createLoading ? "Mapping…" : "Map this SLA →"}
                             </button>
+                            <button type="button" className="uidai-pmis-filter-toggle" onClick={closeDetail} title="Close panel" style={{ padding: "6px 10px" }}>✕</button>
                         </div>
                     </div>
 
@@ -1103,7 +1126,7 @@ export default function ActivitySlasPage() {
                             </span>
                         </div>
                         {showMappingEdit && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                     <label>Activity ID</label>
                                     <input type="text" value={activityLabel} readOnly style={{ background: "#f1f6fd" }}
@@ -1123,6 +1146,10 @@ export default function ActivitySlasPage() {
                     </div>
                     {createMessage && <Banner text={createMessage} />}
                     {detailError && <Banner text={detailError} />}
+                    </div>{/* /fixed top */}
+
+                    {/* Scrollable details body — opening accordions scrolls here, never the cards */}
+                    <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4, marginTop: 4 }}>
                     {detailLoading ? (
                         <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
                     ) : slaDetail ? (
@@ -1201,6 +1228,10 @@ export default function ActivitySlasPage() {
                             </Accordion>
                         </div>
                     ) : null}
+                    </div>{/* /scroll details body */}
+                        </div>
+                    </div>
+                    )}
                 </div>
             )}
 
