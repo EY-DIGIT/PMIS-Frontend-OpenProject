@@ -71,7 +71,7 @@
         "editSubtask": true,
         "deleteSubtask": true,
         "editPriority": true,
-        "submitActivityForApproval": true,
+        "submitActivityForApproval": false,
         "viewUsers": true,
         "createUser": true,
         "editUser": true,

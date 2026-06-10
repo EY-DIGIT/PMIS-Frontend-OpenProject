@@ -102,7 +102,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
   const hasTasks = !activityHasNoTasks(activity);
   /* Mark Ready / Request Division / Request Owner / Resend are gated on
      the submitActivityForApproval permission (granted to super_admin,
-     admin, org_admin, project_admin) — NOT on the form's editable flag.
+     org_admin, project_admin only) — NOT on the form's editable flag.
      This lets org_admin / project_admin drive the workflow even though
      they can't edit the activity's fields. The activity also has to be
      started (actualStartDate stamped) so the Start banner gates buttons
