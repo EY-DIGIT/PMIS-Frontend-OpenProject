@@ -1085,7 +1085,13 @@ export default function MilestoneConfigPage({ mode }) {
       return handleRemote(updateMilestoneApi(milestoneServerId, formData, project), "Failed to update milestone");
     }
     if (shouldCreateActivityRemotely) {
-      return handleRemote(createActivityApi(activityParentMilestoneApiId, formData, project), "Failed to create activity");
+      return handleRemote(
+        createActivityApi(activityParentMilestoneApiId, formData, project),
+        "Failed to create activity",
+        /* After adding an activity (edit mode), send the user to Manage
+           Team so they can assign the activity's owner / members. */
+        () => navigate(`/manage-users/${encodeURIComponent(project.projectId)}`)
+      );
     }
     if (shouldUpdateActivityRemotely) {
       return handleRemote(updateActivityApi(activityServerId, formData, project), "Failed to update activity");
