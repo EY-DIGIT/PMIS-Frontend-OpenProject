@@ -758,7 +758,7 @@ export default function NodeModal({
   const disableSave = !isAdd && !editDirty;
   const projectVendors = safeArray(project.vendors);
   const title = !editable
-    ? `View ${TITLE_MAP[kind] || ""} (Baseline — read-only)`
+    ? `View ${TITLE_MAP[kind] || ""} `
     : `${isAdd ? "Add" : "View/Update"} ${TITLE_MAP[kind] || ""}`;
   const hintText = !editable
     ? "This item is part of the published baseline and cannot be edited within a version."
