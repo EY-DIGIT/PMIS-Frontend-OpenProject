@@ -560,10 +560,18 @@ export default function MilestoneConfigPage({ mode }) {
   }
 
   function toggleEdit() {
-    // Pure UI toggle — never hits the network. Per-node saves (via the
-    // modal) fire their own PATCH/POST; this button just flips the
-    // page-level edit flag so the row buttons appear/disappear.
-    setEditingConfig((v) => !v);
+    // Per-node saves (via the form) fire their own PATCH/POST; this button
+    // flips the page-level edit flag so the row buttons appear/disappear.
+    // Clicking "Save" (i.e. while editing) exits edit mode and routes to
+    // Manage Team so the user can assign owners / members.
+    if (editingConfig) {
+      setEditingConfig(false);
+      if (!isOnboarding && projectId) {
+        navigate(`/manage-users/${encodeURIComponent(projectId)}`);
+      }
+      return;
+    }
+    setEditingConfig(true);
   }
 
   /* Open the add/edit form — navigate to the node sub-route which renders
