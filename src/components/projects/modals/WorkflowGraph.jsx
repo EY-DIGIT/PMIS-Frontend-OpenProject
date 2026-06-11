@@ -35,6 +35,7 @@ const GRAPH_COLORS = {
   active: { fill: "#ffffff", stroke: "#d32f2f", text: "#b3261e" },
   done: { fill: "#ecf9f0", stroke: "#1a8a3d", text: "#1b6a3a" },
   todo: { fill: "#f7f9fc", stroke: "#cdd7e6", text: "#6b7890" },
+  rejected: { fill: "#fdecea", stroke: "#d32f2f", text: "#b3261e" },
 };
 const GREY = "#c7d0de";
 const GREEN = "#1a8a3d";
@@ -126,7 +127,12 @@ export default function WorkflowGraph({ form, divisions }) {
   const nmid = (i) => ny(i) + NH / 2;
 
   const isCompleted = state === "completed";
+  /* Furthest stage the flow actually REACHED — drives green arrows. The arrow
+     INTO a reached stage is green even if that stage later rejected (e.g. the
+     Divisions-Approved → Owner-Review arrow stays green when the owner rejects). */
+  const reachedIdx = isCompleted ? 5 : isRejected ? rejIdx : Math.max(doneIdx, activeIdx);
   const kindOf = (i) => {
+    if (isRejected && i === rejIdx) return "rejected"; // the stage that rejected → red
     if (i <= doneIdx) return "done"; // approved/passed → green (stays green after a later reject)
     if (!isRejected && i === activeIdx) return "active";
     return "todo";
@@ -222,23 +228,24 @@ export default function WorkflowGraph({ form, divisions }) {
           {/* main flow connectors (vertical) + the action that drives each
              transition, labelled beside the arrow. */}
           {FLOW_STEPS.slice(0, -1).map((_, i) => {
-            const passed = i < doneIdx; // both ends approved/passed → green
+            // Green ONLY once the transition was actually completed (the flow
+            // reached the next stage); gray by default otherwise.
+            const passed = i < reachedIdx;
             const isNext = !isRejected && i === activeIdx; // the action the user does next
             // Rows 2 (Concerned Division) and 4 (Owner Review) exit on the
-            // APPROVE outcome — draw the forward arrow green and labelled
-            // "✓ Approve".
+            // APPROVE outcome — once passed, mark them "✓".
             const isApprove = i === 2 || i === 4;
-            const col = passed || isApprove ? GREEN : isNext ? "#0b3c88" : GREY;
+            const col = passed ? GREEN : isNext ? "#0b3c88" : GREY;
             const midY = ny(i) + NH + VGAP / 2;
-            const label = isApprove ? `✓ ${SEGMENT_LABELS[i]}` : SEGMENT_LABELS[i];
+            const label = passed && isApprove ? `✓ ${SEGMENT_LABELS[i]}` : SEGMENT_LABELS[i];
             return (
               <g key={`c${i}`}>
                 <line x1={ncx} y1={ny(i) + NH} x2={ncx} y2={ny(i + 1)}
                   stroke={col} strokeWidth={2}
-                  markerEnd={passed || isApprove ? "url(#awfArrGreen)" : "url(#awfArr)"} />
+                  markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
                 <text x={ncx + 12} y={midY} dominantBaseline="middle" fontSize="9.5"
-                  fontWeight={isNext || isApprove ? 700 : 600}
-                  fill={isApprove ? "#1b6a3a" : passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
+                  fontWeight={isNext || (passed && isApprove) ? 700 : 600}
+                  fill={passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
                   {label}
                 </text>
               </g>
