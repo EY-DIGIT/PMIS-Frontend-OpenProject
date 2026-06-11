@@ -199,16 +199,6 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activityId, reloadKey]);
 
-  /* Auto-refresh while the activity is in flight so division boxes turn
-     green as soon as a division approves. */
-  useEffect(() => {
-    const st = form.approvalState;
-    const inFlight = st && st !== "idle" && st !== "completed";
-    if (!activityId || !inFlight) return undefined;
-    const id = setInterval(() => setReloadKey((k) => k + 1), 10000);
-    return () => clearInterval(id);
-  }, [activityId, form.approvalState]);
-
   return (
     <div className="pmis-awf-scope">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
