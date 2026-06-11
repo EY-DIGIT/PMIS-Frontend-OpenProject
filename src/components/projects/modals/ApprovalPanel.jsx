@@ -711,7 +711,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       {toolbarNode}
       {error && <div className="pmis-awf-error">{error}</div>}
       {view === "graph" ? (
-        <WorkflowGraph form={form} />
+        <WorkflowGraph form={form} divisions={divisions} />
       ) : (
       <div className="pmis-awf-stepper">
         <StepRow index={1} state={s1} title={hasTasks ? "Tasks Completed" : "No Tasks Required"}>

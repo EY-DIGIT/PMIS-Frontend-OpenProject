@@ -909,3 +909,52 @@
   margin-bottom: 4px;
 }
 .pmis-awf-graph__reject-info b { color: #b3261e; }
+
+/* ─── Workflow graph: concerned division boxes ─── */
+.pmis-awf-graph__divs {
+  margin: 12px 4px 0;
+  padding: 10px 12px;
+  background: #f7f9fc;
+  border: 1px solid #e2e8f2;
+  border-radius: 8px;
+}
+.pmis-awf-graph__divs-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #66788f;
+  margin-bottom: 8px;
+}
+.pmis-awf-graph__divs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pmis-awf-graph__divbox {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 96px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1.5px solid;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.pmis-awf-graph__divbox b { font-size: 12px; font-weight: 700; }
+.pmis-awf-graph__divbox--approved {
+  border-color: #1a8a3d;
+  background: #ecf9f0;
+  color: #1b6a3a;
+}
+.pmis-awf-graph__divbox--rejected {
+  border-color: #d32f2f;
+  background: #fdecea;
+  color: #b3261e;
+}
+.pmis-awf-graph__divbox--pending {
+  border-color: #e0a93b;
+  background: #fff7e8;
+  color: #8a5a00;
+}

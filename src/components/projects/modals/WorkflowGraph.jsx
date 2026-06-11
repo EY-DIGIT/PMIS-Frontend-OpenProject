@@ -30,8 +30,14 @@ const GREY = "#c7d0de";
 const GREEN = "#1a8a3d";
 const RED = "#d32f2f";
 
-export default function WorkflowGraph({ form }) {
+export default function WorkflowGraph({ form, divisions }) {
   const state = String((form && form.approvalState) || "idle");
+  const divApprovals = safeArray(form && form.divisionApprovals);
+  const divisionName = (code) => {
+    const c = String(code || "").toLowerCase();
+    const m = safeArray(divisions).find((d) => String(d.code || "").toLowerCase() === c);
+    return (m && (m.label || m.name)) || code;
+  };
   const rejection = (form && form.lastRejection) || {};
   const rejectedFrom = String(rejection.byKind || "").toLowerCase();
   const divisionRejected = safeArray(form && form.divisionApprovals).some(
@@ -196,6 +202,27 @@ export default function WorkflowGraph({ form }) {
           {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
         </svg>
       </div>
+
+      {divApprovals.length > 0 && (
+        <div className="pmis-awf-graph__divs">
+          <div className="pmis-awf-graph__divs-title">Concerned Divisions</div>
+          <div className="pmis-awf-graph__divs-list">
+            {divApprovals.map((d, i) => {
+              const st = String(d.status || "pending").toLowerCase();
+              const label = st === "approved" ? "✓ Approved" : st === "rejected" ? "✕ Rejected" : "⏳ Pending";
+              return (
+                <span
+                  key={`${d.division}-${i}`}
+                  className={`pmis-awf-graph__divbox pmis-awf-graph__divbox--${st}`}
+                >
+                  <b>{divisionName(d.division)}</b>
+                  <span>{label}</span>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {isRejected && (
         <div className="pmis-awf-graph__reject-info">
