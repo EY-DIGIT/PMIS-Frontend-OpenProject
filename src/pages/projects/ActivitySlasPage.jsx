@@ -4,7 +4,6 @@ import { authorizedFetch } from "../../api/client";
 import "../../styles/global.css";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
-const SHAPE_OPTIONS = ["SINGLE_VALUE", "DAILY_VALUES", "BAND_COUNTS", "WAC_BREAKDOWN"];
 
 function today() {
     return new Date().toISOString().slice(0, 10);
@@ -18,21 +17,6 @@ function extractElements(payload) {
         payload?.data ||
         [];
     return Array.isArray(el) ? el : [];
-}
-
-function parseJsonSafe(text, fallback) {
-    if (!text || !text.trim()) return fallback;
-    try { return JSON.parse(text); } catch { return fallback; }
-}
-
-// Turn one editor row into the API observation object based on its `shape`.
-function buildObservation(o) {
-    const obs = { metric_key: o.metric_key, shape: o.shape };
-    if (o.shape === "SINGLE_VALUE") obs.single_value = Number(o.single_value) || 0;
-    else if (o.shape === "DAILY_VALUES") obs.daily_values = parseJsonSafe(o.raw, []);
-    else if (o.shape === "BAND_COUNTS") obs.band_counts = parseJsonSafe(o.raw, {});
-    else if (o.shape === "WAC_BREAKDOWN") obs.wac_breakdown = parseJsonSafe(o.raw, {});
-    return obs;
 }
 
 // Small inline input/select styling for controls that live OUTSIDE a
@@ -122,64 +106,6 @@ function ResultView({ data }) {
                     }}>{JSON.stringify(v, null, 2)}</pre>
                 </details>
             ))}
-        </div>
-    );
-}
-
-// Reusable metric-observation editor (used by both evaluate flows).
-function ObservationEditor({ observations, onChange }) {
-    const update = (i, patch) => onChange(observations.map((o, idx) => (idx === i ? { ...o, ...patch } : o)));
-    const add = () => onChange([...observations, { metric_key: "", shape: "SINGLE_VALUE", single_value: "", raw: "" }]);
-    const remove = (i) => onChange(observations.filter((_, idx) => idx !== i));
-
-    return (
-        <div>
-            {observations.length === 0 && (
-                <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)", fontStyle: "italic", marginBottom: 8 }}>
-                    No metric observations — add one.
-                </div>
-            )}
-            {observations.length > 0 && (
-                <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1.2fr auto", gap: 8, marginBottom: 6, fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>
-                    <div>Metric Key</div>
-                    <div>Shape</div>
-                    <div>Value</div>
-                    <div />
-                </div>
-            )}
-            {observations.map((o, i) => (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1.2fr auto", gap: 8, marginBottom: 8, alignItems: "start" }}>
-                    <input
-                        style={ctrl}
-                        placeholder="metric_key"
-                        value={o.metric_key}
-                        onChange={(e) => update(i, { metric_key: e.target.value })}
-                    />
-                    <select style={ctrl} value={o.shape} onChange={(e) => update(i, { shape: e.target.value })}>
-                        {SHAPE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    {o.shape === "SINGLE_VALUE" ? (
-                        <input
-                            style={ctrl}
-                            type="number"
-                            placeholder="single_value"
-                            value={o.single_value}
-                            onChange={(e) => update(i, { single_value: e.target.value })}
-                        />
-                    ) : (
-                        <input
-                            style={{ ...ctrl, fontFamily: "monospace" }}
-                            placeholder={o.shape === "DAILY_VALUES" ? "[1, 2, 3]" : '{"key": 0}'}
-                            value={o.raw}
-                            onChange={(e) => update(i, { raw: e.target.value })}
-                        />
-                    )}
-                    <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Remove" onClick={() => remove(i)}>✕</button>
-                </div>
-            ))}
-            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={add}>
-                + Add observation
-            </button>
         </div>
     );
 }
@@ -548,6 +474,65 @@ function isMappingEval(d) {
         (d._type === "MappingEvaluation" || "accumulated_points" in d || "breaches" in d || "ld_amount" in d);
 }
 
+// ---------------------------------------------------------------------------
+// Schema-driven inputs — render one control from a form-schema `inputs[]` item
+// (type: number / money / integer / date / select / textarea / text).
+// ---------------------------------------------------------------------------
+function SchemaInput({ input, value, onChange }) {
+    const type = String(input.type || "text").toLowerCase();
+    const common = { value: value ?? "", onChange: (e) => onChange(e.target.value), placeholder: input.placeholder || "" };
+    if (type === "select" && Array.isArray(input.options)) {
+        return (
+            <select {...common}>
+                <option value="">— Select —</option>
+                {input.options.map((o) => {
+                    const val = (o && typeof o === "object") ? (o.value ?? o.key) : o;
+                    const label = (o && typeof o === "object") ? (o.label ?? humanize(o.value ?? o.key)) : humanize(o);
+                    return <option key={String(val)} value={val}>{label}</option>;
+                })}
+            </select>
+        );
+    }
+    if (type === "textarea") return <textarea {...common} style={{ height: 80, resize: "vertical" }} />;
+    if (type === "date") return <input type="date" {...common} />;
+    if (type === "number" || type === "money" || type === "integer") {
+        return <input type="number" {...common} min={input.minimum ?? undefined} max={input.maximum ?? undefined} step={type === "integer" ? 1 : "any"} />;
+    }
+    return <input type="text" {...common} />;
+}
+
+// Scoring-bands reference table from a form-schema `bands[]` (display only).
+function EvalBandsReference({ bands }) {
+    if (!Array.isArray(bands) || bands.length === 0) return null;
+    const showSeverity = bands.some((b) => b.severity != null);
+    const showRange = bands.some((b) => b.range_min != null || b.range_max != null);
+    const showRate = bands.some((b) => b.rate_percent != null);
+    return (
+        <div className="uidai-pmis-table-wrap">
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0 }}>
+                <thead>
+                    <tr>
+                        {showSeverity && <th>Severity</th>}
+                        <th>Band</th>
+                        {showRange && <th>Range</th>}
+                        {showRate && <th style={{ textAlign: "right" }}>Rate %</th>}
+                    </tr>
+                </thead>
+                <tbody>
+                    {bands.map((b, i) => (
+                        <tr key={i}>
+                            {showSeverity && <td>{b.severity != null ? `L${b.severity}` : "—"}</td>}
+                            <td>{b.label || "—"}</td>
+                            {showRange && <td>{(b.range_min != null || b.range_max != null) ? `${b.range_min ?? "−∞"} – ${b.range_max ?? "∞"}${b.unit ? " " + b.unit : ""}` : "—"}</td>}
+                            {showRate && <td style={{ textAlign: "right" }}>{b.rate_percent != null ? `${b.rate_percent}%` : "—"}</td>}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 // A result section: a standalone Accordion normally, or a plain titled block
 // when it already sits inside an activity-level accordion (no double nesting).
 function EvalSection({ title, badge, nested, defaultOpen, children }) {
@@ -571,8 +556,6 @@ function SingleEvaluation({ ev, nested }) {
     // the response actually carries them.
     const ALWAYS = new Set(["severity_level", "accumulated_points"]);
     const headline = EVAL_HEADLINE.filter((h) => ALWAYS.has(h.key) || (ev[h.key] !== undefined && ev[h.key] !== null));
-    const summary = Object.entries(ev).filter(([k, v]) =>
-        !EVAL_INTERNAL.has(k) && !EVAL_HEADLINE.some((h) => h.key === k) && (v === null || typeof v !== "object"));
     const guards = Array.isArray(ev.guards) ? ev.guards : [];
     const notes = Array.isArray(ev.notes) ? ev.notes : [];
     const overrides = ev.overrides_applied && typeof ev.overrides_applied === "object" ? Object.entries(ev.overrides_applied) : [];
@@ -629,10 +612,11 @@ function EvaluationResult({ data }) {
     if (data === null || data === undefined) return null;
     const list =
         Array.isArray(data) ? data :
-            Array.isArray(data?.evaluations) ? data.evaluations :
-                Array.isArray(data?.mappings) ? data.mappings :
-                    Array.isArray(data?.mapping_evaluations) ? data.mapping_evaluations :
-                        Array.isArray(data?.results) ? data.results : null;
+            Array.isArray(data?.mapping_results) ? data.mapping_results :
+                Array.isArray(data?.evaluations) ? data.evaluations :
+                    Array.isArray(data?.mappings) ? data.mappings :
+                        Array.isArray(data?.mapping_evaluations) ? data.mapping_evaluations :
+                            Array.isArray(data?.results) ? data.results : null;
 
     if (list) {
         const meta = !Array.isArray(data)
@@ -769,25 +753,6 @@ export default function ActivitySlasPage() {
         const payload = await res.json().catch(() => null);
         if (!res.ok) throw new Error(payload?.error?.message || payload?.message || `Request failed (${res.status})`);
         return payload;
-    }
-
-    // Fetch a single SLA's metric_keys (used to prefill observation editors).
-    async function fetchSlaMetrics(slaId) {
-        try {
-            const res = await authorizedFetch(`${baseUrl}/api/v3/sla-masters/${encodeURIComponent(slaId)}`, {
-                method: "GET", headers: { Accept: "application/json" },
-            });
-            const payload = await readJson(res);
-            const metrics = payload?.data?.metrics || [];
-            return metrics.map((m) => m.metric_key).filter(Boolean);
-        } catch {
-            return [];
-        }
-    }
-
-    function blankObservations(metricKeys) {
-        if (!metricKeys.length) return [{ metric_key: "", shape: "SINGLE_VALUE", single_value: "", raw: "" }];
-        return metricKeys.map((k) => ({ metric_key: k, shape: "SINGLE_VALUE", single_value: "", raw: "" }));
     }
 
     // ---------------------------------------------------------------------------
@@ -929,37 +894,89 @@ export default function ActivitySlasPage() {
     }
 
     // ---------------------------------------------------------------------------
-    // Step 5a — POST /api/v3/sla-activity-mappings/{mappingId}/evaluate
+    // Step 5a — schema-driven single evaluate:
+    //   GET  /activities/{id}/sla-evaluate/{sla_ref}/form-schema   (render form)
+    //   POST /activities/{id}/sla-evaluate/{sla_ref}               (run)
+    // The user fills human-friendly inputs; the backend builds the technical
+    // metric_observations itself.
     // ---------------------------------------------------------------------------
     async function openSingleEval(m) {
         setSingleEvalResult(null);
         setSingleEvalError("");
         setSingleEval({
-            mappingId: m.id, slaRef: m.sla_ref, slaTitle: m.sla_title,
-            period_start: today(), period_end: today(), ld_base_amount: "",
-            observations: [], loadingMetrics: true,
+            sla_ref: m.sla_ref, sla_title: m.sla_title,
+            schema: null, loadingSchema: true, schemaError: "",
+            period_start: today(), period_end: today(), values: {},
         });
-        const keys = await fetchSlaMetrics(m.sla_id);
-        setSingleEval((s) => (s && s.mappingId === m.id ? { ...s, observations: blankObservations(keys), loadingMetrics: false } : s));
+        const activityId = activityIdInput.trim();
+        if (!activityId || !m.sla_ref) {
+            setSingleEval((s) => (s ? { ...s, loadingSchema: false, schemaError: "Missing activity id or SLA ref." } : s));
+            return;
+        }
+        try {
+            const res = await authorizedFetch(
+                `${baseUrl}/api/v3/activities/${encodeURIComponent(activityId)}/sla-evaluate/${encodeURIComponent(m.sla_ref)}/form-schema`,
+                { method: "GET", headers: { Accept: "application/json" } }
+            );
+            const payload = await readJson(res);
+            const schema = payload?.data || payload;
+            setSingleEval((s) => (s && s.sla_ref === m.sla_ref ? {
+                ...s,
+                schema,
+                loadingSchema: false,
+                period_start: schema?.start_default || s.period_start,
+                period_end: schema?.end_default || s.period_end,
+                values: {},
+            } : s));
+        } catch (err) {
+            setSingleEval((s) => (s && s.sla_ref === m.sla_ref ? { ...s, loadingSchema: false, schemaError: err?.message || "Failed to load the evaluation form." } : s));
+        }
     }
     function closeSingleEval() { setSingleEval(null); setSingleEvalResult(null); setSingleEvalError(""); }
 
     async function submitSingleEval() {
-        if (!singleEval) return;
+        if (!singleEval || !singleEval.schema) return;
         setSingleEvalLoading(true);
         setSingleEvalError("");
         setSingleEvalResult(null);
         try {
-            // New API shape: only period + metric_observations (no ld_base_amount).
+            const schema = singleEval.schema;
+            // Build the body from the filled inputs. Empty values are OMITTED
+            // (never sent as null — the backend rejects null with a 422), required
+            // inputs are validated up-front, and numeric inputs are coerced.
             const body = {
                 period_start: singleEval.period_start,
                 period_end: singleEval.period_end,
-                metric_observations: singleEval.observations.map(buildObservation),
             };
-            const res = await authorizedFetch(
-                `${baseUrl}/api/v3/sla-activity-mappings/${encodeURIComponent(singleEval.mappingId)}/evaluate`,
-                { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) }
-            );
+            const missing = [];
+            (schema.inputs || []).forEach((inp) => {
+                let v = singleEval.values[inp.name];
+                const t = String(inp.type || "").toLowerCase();
+                const isNum = (t === "number" || t === "money" || t === "integer");
+                if (v === "" || v === undefined || v === null) {
+                    if (inp.required) missing.push(inp.label || inp.name);
+                    return; // omit empty values entirely
+                }
+                if (isNum) {
+                    const n = Number(v);
+                    if (Number.isNaN(n)) { missing.push(`${inp.label || inp.name} (must be a number)`); return; }
+                    v = n;
+                }
+                body[inp.name] = v;
+            });
+            if (!singleEval.period_start || !singleEval.period_end) missing.push("Reporting period");
+            if (missing.length) {
+                setSingleEvalError(`Please enter: ${missing.join(", ")}.`);
+                return; // `finally` resets the loading flag
+            }
+            const url = schema.submit?.url
+                ? `${baseUrl}${schema.submit.url}`
+                : `${baseUrl}/api/v3/activities/${encodeURIComponent(activityIdInput.trim())}/sla-evaluate/${encodeURIComponent(singleEval.sla_ref)}`;
+            const res = await authorizedFetch(url, {
+                method: schema.submit?.method || "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify(body),
+            });
             const payload = await readJson(res);
             setSingleEvalResult(payload?.data ?? payload);
         } catch (err) {
@@ -970,29 +987,52 @@ export default function ActivitySlasPage() {
     }
 
     // ---------------------------------------------------------------------------
-    // Step 5b — POST /api/v3/activities/{activityId}/evaluate
+    // Step 5b — schema-driven bulk evaluate:
+    //   GET  …/sla-evaluate/{sla_ref}/form-schema  (per active SLA, for inputs)
+    //   POST /activities/{id}/sla-evaluate          { observations, period }
     // ---------------------------------------------------------------------------
     async function openActivityEval() {
         setActEvalResult(null);
         setActEvalError("");
-        if (!mappings.length) { setActEvalError("Load this activity's mappings first (Step 4)."); return; }
+        if (!mappings.length) { setActEvalError("Load this activity's mappings first."); return; }
+        const activityId = activityIdInput.trim();
+        if (!activityId) { setActEvalError("Missing activity id."); return; }
         setActEvalBuilding(true);
         try {
-            // One group per unique sla_ref among the loaded (active) mappings.
+            // One entry per unique sla_ref among the loaded (active) mappings.
             const byRef = new Map();
             for (const m of mappings) {
                 if (!m.sla_ref || byRef.has(m.sla_ref)) continue;
                 byRef.set(m.sla_ref, m);
             }
-            const groups = [];
-            for (const [ref, m] of byRef) {
-                const keys = await fetchSlaMetrics(m.sla_id);
-                groups.push({
-                    sla_ref: ref, sla_id: m.sla_id, sla_title: m.sla_title,
-                    ld_base_amount: "", observations: blankObservations(keys),
-                });
-            }
-            setActEval({ period_start: today(), period_end: today(), groups });
+            const refs = [...byRef.keys()];
+            // Pull each SLA's form-schema in parallel so we render simple inputs
+            // (no metric keys / shape) instead of the technical editor.
+            const schemas = await Promise.all(refs.map(async (ref) => {
+                try {
+                    const res = await authorizedFetch(
+                        `${baseUrl}/api/v3/activities/${encodeURIComponent(activityId)}/sla-evaluate/${encodeURIComponent(ref)}/form-schema`,
+                        { method: "GET", headers: { Accept: "application/json" } }
+                    );
+                    const payload = await readJson(res);
+                    return payload?.data || payload;
+                } catch { return null; }
+            }));
+            let ps = today(), pe = today();
+            const groups = refs.map((ref, i) => {
+                const sc = schemas[i];
+                const m = byRef.get(ref);
+                if (sc?.start_default) ps = sc.start_default;
+                if (sc?.end_default) pe = sc.end_default;
+                return {
+                    sla_ref: ref,
+                    sla_title: m?.sla_title || sc?.sla_title || ref,
+                    inputs: Array.isArray(sc?.inputs) ? sc.inputs : [],
+                    schemaError: sc ? "" : "Could not load this SLA's form.",
+                    values: {},
+                };
+            });
+            setActEval({ period_start: ps, period_end: pe, groups });
         } finally {
             setActEvalBuilding(false);
         }
@@ -1005,22 +1045,39 @@ export default function ActivitySlasPage() {
         setActEvalError("");
         setActEvalResult(null);
         try {
-            const ld_base_amount_overrides = {};
-            const observations_by_sla_ref = {};
+            // observations = { sla_ref: <bare value | { input.name: value }> }.
+            // Single-input SLAs send a bare scalar; multi-input send an object.
+            // SLAs left blank are omitted (the backend notes "no observation").
+            const observations = {};
+            const bad = [];
             for (const g of actEval.groups) {
-                if (g.ld_base_amount !== "" && g.ld_base_amount !== null) {
-                    ld_base_amount_overrides[g.sla_ref] = Number(g.ld_base_amount) || 0;
+                const inputs = g.inputs || [];
+                const filled = {};
+                let count = 0;
+                for (const inp of inputs) {
+                    let v = g.values[inp.name];
+                    const t = String(inp.type || "").toLowerCase();
+                    const isNum = (t === "number" || t === "money" || t === "integer");
+                    if (v === "" || v === undefined || v === null) continue;
+                    if (isNum) {
+                        const n = Number(v);
+                        if (Number.isNaN(n)) { bad.push(`${g.sla_ref}: ${inp.label || inp.name} must be a number`); continue; }
+                        v = n;
+                    }
+                    filled[inp.name] = v;
+                    count += 1;
                 }
-                observations_by_sla_ref[g.sla_ref] = g.observations.map(buildObservation);
+                if (count === 0) continue;
+                observations[g.sla_ref] = inputs.length === 1 ? filled[inputs[0].name] : filled;
             }
+            if (bad.length) { setActEvalError(bad.join("; ")); return; }
             const body = {
+                observations,
                 period_start: actEval.period_start,
                 period_end: actEval.period_end,
-                ld_base_amount_overrides,
-                observations_by_sla_ref,
             };
             const res = await authorizedFetch(
-                `${baseUrl}/api/v3/activities/${encodeURIComponent(activityIdInput.trim())}/evaluate`,
+                `${baseUrl}/api/v3/activities/${encodeURIComponent(activityIdInput.trim())}/sla-evaluate`,
                 { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) }
             );
             const payload = await readJson(res);
@@ -1427,50 +1484,89 @@ export default function ActivitySlasPage() {
                                     <div>
                                         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Mapping</div>
                                         <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>
-                                            {singleEval.slaTitle || "Mapping"}
-                                            <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.slaRef}</span>
+                                            {singleEval.sla_title || "Mapping"}
+                                            <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.sla_ref}</span>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Evaluation period (the new API takes no LD base here) */}
-                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
-                                    <div className="uidai-pmis-filter-head">
-                                        <div className="uidai-pmis-filter-title">Evaluation Period</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
-                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                            <label>Period Start</label>
-                                            <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
-                                        </div>
-                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                            <label>Period End</label>
-                                            <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
-                                        </div>
-                                    </div>
-                                </div>
+                                {singleEval.loadingSchema ? (
+                                    <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>Loading evaluation form…</div>
+                                ) : singleEval.schemaError ? (
+                                    <Banner text={singleEval.schemaError} />
+                                ) : singleEval.schema ? (
+                                    <>
+                                        {/* Question + explanation from the schema */}
+                                        {(singleEval.schema.question || singleEval.schema.explanation) && (
+                                            <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                                {singleEval.schema.question && <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>{singleEval.schema.question}</div>}
+                                                {singleEval.schema.explanation && <div style={{ fontSize: 12.5, ...muted, marginTop: 6, lineHeight: 1.5 }}>{singleEval.schema.explanation}</div>}
+                                            </div>
+                                        )}
 
-                                {/* Metric observations */}
-                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
-                                    <div className="uidai-pmis-filter-head">
-                                        <div className="uidai-pmis-filter-title">
-                                            Metric Observations {singleEval.loadingMetrics && <span style={{ ...muted, fontWeight: 400 }}>(loading metric keys…)</span>}
+                                        {/* Reporting period (labels + defaults from the schema) */}
+                                        <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                            <div className="uidai-pmis-filter-head">
+                                                <div className="uidai-pmis-filter-title">Reporting Period</div>
+                                            </div>
+                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
+                                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                                    <label>{singleEval.schema.label_start || "Period Start"}</label>
+                                                    <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
+                                                </div>
+                                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                                    <label>{singleEval.schema.label_end || "Period End"}</label>
+                                                    <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div style={{ marginTop: 12 }}>
-                                        <ObservationEditor
-                                            observations={singleEval.observations}
-                                            onChange={(obs) => setSingleEval((s) => ({ ...s, observations: obs }))}
-                                        />
-                                    </div>
-                                </div>
 
-                                <div>
-                                    <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
-                                        {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
-                                    </button>
-                                </div>
-                                {singleEvalError && <Banner text={singleEvalError} />}
+                                        {/* Dynamic inputs — no metric keys; just what to measure */}
+                                        {Array.isArray(singleEval.schema.inputs) && singleEval.schema.inputs.length > 0 && (
+                                            <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                                <div className="uidai-pmis-filter-head">
+                                                    <div className="uidai-pmis-filter-title">What you observed</div>
+                                                </div>
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginTop: 12 }}>
+                                                    {singleEval.schema.inputs.map((inp) => (
+                                                        <div key={inp.name} className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                                            <label>
+                                                                {inp.label || inp.name}
+                                                                {inp.required && <span style={{ color: "var(--uidai-pmis-red, #d32f2f)" }}> *</span>}
+                                                                {inp.unit ? <span style={{ ...muted, fontWeight: 400 }}> ({inp.unit})</span> : null}
+                                                            </label>
+                                                            <SchemaInput
+                                                                input={inp}
+                                                                value={singleEval.values[inp.name]}
+                                                                onChange={(v) => setSingleEval((s) => ({ ...s, values: { ...s.values, [inp.name]: v } }))}
+                                                            />
+                                                            {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Scoring bands — reference only */}
+                                        {Array.isArray(singleEval.schema.bands) && singleEval.schema.bands.length > 0 && (
+                                            <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                                <div className="uidai-pmis-filter-head">
+                                                    <div className="uidai-pmis-filter-title">Scoring Bands <span style={{ ...muted, fontWeight: 400, fontSize: 11, textTransform: "none", letterSpacing: 0 }}>(reference)</span></div>
+                                                </div>
+                                                <div style={{ marginTop: 12 }}>
+                                                    <EvalBandsReference bands={singleEval.schema.bands} />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div>
+                                            <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
+                                                {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
+                                            </button>
+                                        </div>
+                                        {singleEvalError && <Banner text={singleEvalError} />}
+                                    </>
+                                ) : null}
                                 </div>{/* /form column */}
 
                                 {singleEvalResult !== null && (
@@ -1535,20 +1631,30 @@ export default function ActivitySlasPage() {
                                                 {g.sla_title || "SLA"}
                                                 <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{g.sla_ref}</span>
                                             </div>
-                                            <div className="uidai-pmis-field" style={{ marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                                                <label style={{ marginBottom: 0, whiteSpace: "nowrap", fontSize: 12 }}>LD Base Override</label>
-                                                <input
-                                                    type="number" style={{ width: 140 }} placeholder="(optional)" value={g.ld_base_amount}
-                                                    onChange={(e) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, ld_base_amount: e.target.value } : x) }))}
-                                                />
-                                            </div>
                                         </div>
                                         <div style={{ marginTop: 12 }}>
-                                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 8 }}>Metric Observations</div>
-                                            <ObservationEditor
-                                                observations={g.observations}
-                                                onChange={(obs) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, observations: obs } : x) }))}
-                                            />
+                                            {g.schemaError ? (
+                                                <div style={{ ...muted, fontSize: 12.5, fontStyle: "italic" }}>{g.schemaError}</div>
+                                            ) : g.inputs.length === 0 ? (
+                                                <div style={{ ...muted, fontSize: 12.5, fontStyle: "italic" }}>No input needed for this SLA.</div>
+                                            ) : (
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+                                                    {g.inputs.map((inp) => (
+                                                        <div key={inp.name} className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                                            <label>
+                                                                {inp.label || inp.name}
+                                                                {inp.unit ? <span style={{ ...muted, fontWeight: 400 }}> ({inp.unit})</span> : null}
+                                                            </label>
+                                                            <SchemaInput
+                                                                input={inp}
+                                                                value={g.values[inp.name]}
+                                                                onChange={(v) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, values: { ...x.values, [inp.name]: v } } : x) }))}
+                                                            />
+                                                            {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
