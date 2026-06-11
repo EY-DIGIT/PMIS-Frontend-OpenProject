@@ -5,13 +5,14 @@
    uidai-pmis design system. Backed by the contracts API:
      GET    /api/v3/sla-masters?offset=1&pageSize=200   list
      GET    /api/v3/sla-masters/{id}                    detail
-     POST   /api/v3/sla-masters                         create (full schema)
+     POST   /api/v3/sla-masters/from-rfp                create (multipart: payload + mandatory image)
      PATCH  /api/v3/sla-masters/{id}                    update (subset)
      DELETE /api/v3/sla-masters/{id}                    delete
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { authorizedFetch } from "../../api/client";
+import { listAll as listAllProjects } from "../../api/projects";
 import "../../styles/global.css";
 
 const DEFAULT_BASE = "http://10.1.131.199/contracts";
@@ -198,7 +199,7 @@ const GUARD_COLS = [
 ];
 
 const EMPTY_FORM = {
-    sla_ref: "", title: "", contract_type: "PMU", category: "", formula_type: "point_accumulation",
+    sla_ref: "", title: "", contract_type: "PMU", project_id: "", category_code: "", category: "", formula_type: "point_accumulation",
     description: "", scope_text: "", data_source: "", calculation_method: "", reports_submitted_to: "",
     measurement_interval: "MONTHLY", reporting_interval: "QUARTERLY", baseline_type: "STATIC",
     compound_metric_rule: "INDEPENDENT", ld_aggregation_method: "SUM", ld_computation_base: "QUARTERLY_PAYMENT",
@@ -211,6 +212,10 @@ export default function SlaMastersPage() {
 
     const [slas, setSlas] = useState([]);
     const [loading, setLoading] = useState(false);
+
+    // Dropdown sources for the onboard form's required from-rfp fields.
+    const [projects, setProjects] = useState([]);       // project_id options
+    const [slaCategories, setSlaCategories] = useState([]); // category_code options
 
     const [search, setSearch] = useState("");
     const [filters, setFilters] = useState({ contract_type: "", category: "", status: "" });
@@ -226,6 +231,7 @@ export default function SlaMastersPage() {
     const [bands, setBands] = useState([]);
     const [lookup, setLookup] = useState([]);
     const [guards, setGuards] = useState([]);
+    const [rfpFile, setRfpFile] = useState(null); // mandatory image for POST /from-rfp
     const [saving, setSaving] = useState(false);
 
     // View modal
@@ -277,9 +283,33 @@ export default function SlaMastersPage() {
         }
     }
 
+    /* ─── Dropdown sources for the onboard form ─── */
+    // Projects live on a different gateway (API_BASE :8000), so go through the
+    // projects API helper rather than the contracts `api()` base.
+    async function loadProjects() {
+        try {
+            const rows = await listAllProjects();
+            setProjects((Array.isArray(rows) ? rows : []).filter((p) => p?.projectId));
+        } catch {
+            /* non-fatal — onboard just won't have project options */
+        }
+    }
+    // SLA categories live on the contracts base alongside the masters.
+    async function loadCategories() {
+        try {
+            const res = await authorizedFetch(api("/api/v3/sla-categories"), { method: "GET", headers: { Accept: "application/json" } });
+            const payload = await readJson(res);
+            setSlaCategories(extractElements(payload).map(unwrap).filter((c) => c?.code));
+        } catch {
+            /* non-fatal */
+        }
+    }
+
     useEffect(() => {
         loadSlas();
         checkHealth();
+        loadProjects();
+        loadCategories();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -312,6 +342,7 @@ export default function SlaMastersPage() {
         setEditingId(null);
         setForm({ ...EMPTY_FORM });
         setMetrics([]); setParameters([]); setBands([]); setLookup([]); setGuards([]);
+        setRfpFile(null);
         setFormOpen(true);
     }
 
@@ -323,6 +354,7 @@ export default function SlaMastersPage() {
             setEditingId(id);
             setForm({
                 sla_ref: d.sla_ref || "", title: d.title || d.name || "", contract_type: d.contract_type || "PMU",
+                project_id: d.project_id || "", category_code: d.category_code || "",
                 category: d.category || "", formula_type: d.formula_type || "point_accumulation",
                 description: d.description || "", scope_text: d.scope_text || "", data_source: d.data_source || "",
                 calculation_method: d.calculation_method || "", reports_submitted_to: d.reports_submitted_to || "",
@@ -339,6 +371,7 @@ export default function SlaMastersPage() {
             setBands(toStr(d.condition_bands || d.bands, BAND_COLS));
             setLookup(toStr(d.lookup_table || d.lookup_rows, LOOKUP_COLS));
             setGuards(toStr(d.guard_conditions || d.guards, GUARD_COLS));
+            setRfpFile(null); // not used on edit (PATCH stays JSON)
             setFormOpen(true);
         } catch (e) {
             showToast("Load failed", e.message, "error");
@@ -368,6 +401,33 @@ export default function SlaMastersPage() {
             showToast("Missing fields", "SLA Ref and Title are required.", "error");
             return;
         }
+        if (!editingId) {
+            if (!form.project_id) {
+                showToast("Missing project", "Select the project this SLA belongs to.", "error");
+                return;
+            }
+            if (!form.category_code) {
+                showToast("Missing category", "Select an SLA category.", "error");
+                return;
+            }
+            if (!rfpFile) {
+                showToast("Missing file", "An RFP image is required to onboard an SLA.", "error");
+                return;
+            }
+            // Each formula scores off a specific sub-table, and the backend
+            // rejects the payload when that table is empty. Catch it up front.
+            if (form.formula_type === "fixed_escalation" && cleanRows(lookup, LOOKUP_COLS).length === 0) {
+                showToast("Lookup required", "Fixed-escalation formula needs at least one Lookup Table row.", "error");
+                return;
+            }
+            if (
+                (form.formula_type === "point_accumulation" || form.formula_type === "band_accumulation") &&
+                cleanRows(bands, BAND_COLS).length === 0
+            ) {
+                showToast("Condition band required", "This formula needs at least one Condition Band row.", "error");
+                return;
+            }
+        }
         setSaving(true);
         try {
             if (editingId) {
@@ -388,15 +448,18 @@ export default function SlaMastersPage() {
                 await readJson(res);
                 showToast("Saved", "SLA updated.");
             } else {
-                // POST — full schema.
+                // POST — full schema. The /from-rfp endpoint additionally requires
+                // project_id, category_code and measurement.
                 const body = {
-                    contract_type: form.contract_type, formula_type: form.formula_type, sla_ref: form.sla_ref.trim(),
-                    title: form.title.trim(), description: form.description.trim() || null,
+                    project_id: form.project_id, contract_type: form.contract_type, formula_type: form.formula_type,
+                    sla_ref: form.sla_ref.trim(), title: form.title.trim(), description: form.description.trim() || null,
+                    // `measurement` is a SlaSimpleMeasurement object, not a bare string.
+                    measurement: { measurement_interval: form.measurement_interval, display_name: form.measurement_interval },
                     measurement_interval: form.measurement_interval, reporting_interval: form.reporting_interval,
                     baseline_type: form.baseline_type, compound_metric_rule: form.compound_metric_rule,
                     ld_aggregation_method: form.ld_aggregation_method, ld_computation_base: form.ld_computation_base,
                     effective_from: form.effective_from, effective_until: form.effective_until || null, metadata: {},
-                    category: form.category || null, scope_text: form.scope_text.trim() || null,
+                    category_code: form.category_code, category: form.category || null, scope_text: form.scope_text.trim() || null,
                     data_source: form.data_source.trim() || null, calculation_method: form.calculation_method.trim() || null,
                     reports_submitted_to: form.reports_submitted_to.trim() || null,
                     metrics: cleanRows(metrics, METRIC_COLS),
@@ -405,8 +468,14 @@ export default function SlaMastersPage() {
                     lookup_table: cleanRows(lookup, LOOKUP_COLS),
                     guard_conditions: cleanRows(guards, GUARD_COLS),
                 };
-                const res = await authorizedFetch(api("/api/v3/sla-masters"), {
-                    method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body),
+                // multipart/form-data: same JSON payload as before, now alongside a
+                // mandatory image. Don't set Content-Type — the browser adds the
+                // multipart boundary automatically.
+                const fd = new FormData();
+                fd.append("payload", JSON.stringify(body));
+                fd.append("files", rfpFile, rfpFile.name);
+                const res = await authorizedFetch(api("/api/v3/sla-masters/from-rfp"), {
+                    method: "POST", headers: { Accept: "application/json" }, body: fd,
                 });
                 await readJson(res);
                 showToast("Saved", "SLA onboarded.");
@@ -573,8 +642,30 @@ export default function SlaMastersPage() {
                     </>
                 }
             >
+                {!editingId && (
+                    <SubSection title="RFP Document">
+                        <Field label="RFP Image" required full hint="Upload the source RFP image (PNG/JPG). Required to onboard.">
+                            <input
+                                style={inputStyle}
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => setRfpFile(e.target.files?.[0] || null)}
+                            />
+                            {rfpFile && <div style={{ fontSize: 11.5, ...muted, marginTop: 4 }}>Selected: {rfpFile.name}</div>}
+                        </Field>
+                    </SubSection>
+                )}
+
                 <SubSection title="SLA Identification">
                     <div className="uidai-pmis-grid-4" style={{ gap: 14 }}>
+                        {!editingId && (
+                            <Field label="Project" required hint="The project this SLA is onboarded under">
+                                <select style={inputStyle} value={form.project_id} onChange={(e) => setF({ project_id: e.target.value })}>
+                                    <option value="">Select project…</option>
+                                    {projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName || p.projectId}</option>)}
+                                </select>
+                            </Field>
+                        )}
                         <Field label="SLA Number" required><input style={inputStyle} value={form.sla_ref} disabled={!!editingId} onChange={(e) => setF({ sla_ref: e.target.value })} placeholder="PMU-SLA001" /></Field>
                         <Field label="Title" required><input style={inputStyle} value={form.title} onChange={(e) => setF({ title: e.target.value })} placeholder="Non-submission of deliverable" /></Field>
                         <Field label="Contract Type" required>
@@ -587,7 +678,26 @@ export default function SlaMastersPage() {
                                 {FORMULA_TYPES.map((c) => <option key={c} value={c}>{humanize(c)}</option>)}
                             </select>
                         </Field>
-                        <Field label="Category"><input style={inputStyle} value={form.category} onChange={(e) => setF({ category: e.target.value })} placeholder="Resource Management" /></Field>
+                        <Field label="Category" required>
+                            <select
+                                style={inputStyle}
+                                value={form.category_code}
+                                onChange={(e) => {
+                                    const code = e.target.value;
+                                    const cat = slaCategories.find((c) => c.code === code);
+                                    // A category carries its canonical formula_type — sync it
+                                    // (still editable below) and keep the display name for `category`.
+                                    setF({
+                                        category_code: code,
+                                        category: cat?.display_name || "",
+                                        ...(cat?.formula_type ? { formula_type: cat.formula_type } : {}),
+                                    });
+                                }}
+                            >
+                                <option value="">Select category…</option>
+                                {slaCategories.map((c) => <option key={c.code} value={c.code}>{c.display_name || c.code}</option>)}
+                            </select>
+                        </Field>
                         <Field label="Status">
                             <select style={inputStyle} value={form.status} onChange={(e) => setF({ status: e.target.value })}>
                                 {STATUS_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}

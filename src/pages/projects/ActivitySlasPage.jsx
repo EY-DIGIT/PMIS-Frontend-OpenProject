@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import "../../styles/global.css";
-import SLA1Image from "../../assets/DemoSlaImage.png";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
 const SHAPE_OPTIONS = ["SINGLE_VALUE", "DAILY_VALUES", "BAND_COUNTS", "WAC_BREAKDOWN"];
@@ -10,7 +9,6 @@ const SHAPE_OPTIONS = ["SINGLE_VALUE", "DAILY_VALUES", "BAND_COUNTS", "WAC_BREAK
 function today() {
     return new Date().toISOString().slice(0, 10);
 }
-console.log(SLA1Image);
 
 // Pull the collection array regardless of which envelope shape the API uses.
 function extractElements(payload) {
@@ -228,11 +226,27 @@ function demoTableImage(s) {
 // SLA image card — the card IS a screenshot of the SLA table. Hovering scales
 // it up (transform only → no reflow; it floats over neighbours), clicking
 // opens the details side-panel. A thin caption keeps look-alike demos
-// identifiable. Real screenshots: set `image_url` on the SLA.
+// identifiable. The real screenshot comes from the SLA's first image
+// attachment (attachments[].file_url); otherwise a themed demo is generated.
 // ---------------------------------------------------------------------------
+
+// Resolve the screenshot URL for an SLA master: prefer an explicit
+// image_url/screenshot_url, then the first image attachment's file_url.
+// Returns null when nothing real is available (caller falls back to the demo).
+function slaImageUrl(s) {
+    if (!s) return null;
+    if (s.image_url) return s.image_url;
+    if (s.screenshot_url) return s.screenshot_url;
+    const atts = Array.isArray(s.attachments) ? s.attachments : [];
+    const img = atts.find((a) => String(a?.mime_type || "").startsWith("image/")) || atts[0];
+    return img?.file_url || null;
+}
+
 function SlaCard({ sla, selected, onPick }) {
     const [hover, setHover] = useState(false);
-    const src = sla.image_url || sla.screenshot_url || demoTableImage(sla);
+    const real = slaImageUrl(sla);
+    const fallback = demoTableImage(sla);
+    const src = real || fallback;
     return (
         <div
             role="button"
@@ -265,6 +279,7 @@ function SlaCard({ sla, selected, onPick }) {
                     src={src}
                     alt={sla.title || sla.sla_ref || "SLA"}
                     loading="lazy"
+                    onError={(e) => { if (real && e.currentTarget.src !== fallback) e.currentTarget.src = fallback; }}
                     style={{ display: "block", width: "100%", aspectRatio: "16 / 10", objectFit: "cover", objectPosition: "top" }}
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 9px", borderTop: "1px solid var(--uidai-pmis-border)", background: "#fbfdff" }}>
@@ -316,6 +331,71 @@ function DetailGrid({ fields }) {
                     </div>
                 </div>
             ))}
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
+// RFP-style SLA detail — mirrors the "View" card from SLA Master.html: a flat
+// 2-column table showing only the contract-document fields, plus the Target
+// (severity thresholds) sub-table built from condition_bands / lookup_table.
+// ---------------------------------------------------------------------------
+
+// Friendly label for the LD computation base ("Applied On" row).
+const APPLIED_ON_LABEL = {
+    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (NPQP)",
+    ANNUAL_PAYMENT: "Annual Contract Value",
+    FIXED_AMOUNT: "Deliverable Cost (set per mapping)",
+};
+
+// One label/value row in the RFP detail table.
+function RfpRow({ label, value, mono }) {
+    const empty = value === null || value === undefined || value === "";
+    return (
+        <tr>
+            <th style={{ width: 170, background: "#f1f6fd", padding: "10px 12px", textAlign: "left", verticalAlign: "top", color: "#173e77", fontWeight: 700, fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".3px" }}>{label}</th>
+            <td style={{ padding: "10px 12px", verticalAlign: "top", lineHeight: 1.5, fontSize: 13, fontFamily: mono ? "monospace" : "inherit", color: "var(--uidai-pmis-text)" }}>
+                {empty ? <span style={{ color: "var(--uidai-pmis-muted)", fontStyle: "italic" }}>—</span> : value}
+            </td>
+        </tr>
+    );
+}
+
+// Plain-English threshold derived from a band's range bounds (RFP wording).
+function bandThreshold(b) {
+    const unit = b.range_unit || "";
+    const lo = b.range_min, hi = b.range_max;
+    if (lo == null && hi != null) return `≤ ${hi} ${unit}`.trim();
+    if (lo != null && hi == null) return `> ${lo} ${unit}`.trim();
+    if (lo != null && hi != null) return `${lo}${unit ? " " + unit : ""} < x ≤ ${hi}${unit ? " " + unit : ""}`;
+    return "—";
+}
+
+// Target (severity thresholds) table — bands (severity/rate/points) + lookup tiers.
+function TargetTable({ bands, lookup }) {
+    const b = (Array.isArray(bands) ? bands : []).slice().sort((a, z) => (a.sort_order || 0) - (z.sort_order || 0));
+    const l = (Array.isArray(lookup) ? lookup : []).slice().sort((a, z) => (a.sort_order || 0) - (z.sort_order || 0));
+    if (!b.length && !l.length) {
+        return <span style={{ color: "var(--uidai-pmis-muted)", fontStyle: "italic", fontSize: 12.5 }}>No target table defined.</span>;
+    }
+    return (
+        <div className="uidai-pmis-table-wrap" style={{ marginTop: 0 }}>
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0, minWidth: 0 }}>
+                <thead><tr><th style={{ width: 110 }}>Scoring</th><th>Threshold</th><th>Label</th><th>Measure</th></tr></thead>
+                <tbody>
+                    {b.map((bd, i) => {
+                        let outcome;
+                        if (bd.severity_level != null && bd.severity_level !== "") outcome = <strong>Severity {bd.severity_level}</strong>;
+                        else if (bd.rate_percent != null && bd.rate_percent !== "") outcome = <span><strong>{bd.rate_percent}%</strong> <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>LD/day</span></span>;
+                        else if (bd.points_contribution != null && bd.points_contribution !== "") outcome = <strong>{bd.points_contribution} pts</strong>;
+                        else outcome = <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>;
+                        return <tr key={`b${i}`}><td>{outcome}</td><td>{bandThreshold(bd)}</td><td>{bd.band_label || "—"}</td><td>{bd.metric_key || "—"}</td></tr>;
+                    })}
+                    {l.map((lk, i) => (
+                        <tr key={`l${i}`}><td><strong>Tier {lk.sort_order ?? "—"}</strong></td><td>{(lk.lookup_value ?? lk.threshold ?? "—")}%</td><td>{lk.lookup_key || lk.tier_label || "—"}</td><td>linear escalation</td></tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 }
@@ -424,17 +504,38 @@ function BreachTable({ rows }) {
     );
 }
 
-// Generic table for guards / other arrays of objects.
-function EvalRowsTable({ rows }) {
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    const cols = Object.keys(rows[0]).filter((k) => !["id", "created_at"].includes(k));
+// Guard conditions — readable table: metric · condition (op + threshold) ·
+// observed · state (triggered/OK) · action · description.
+const GUARD_OP_LABEL = { LT: "<", LTE: "≤", GT: ">", GTE: "≥", EQ: "=", NEQ: "≠" };
+function GuardsTable({ rows }) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return <div style={{ fontSize: 12.5, color: "var(--uidai-pmis-muted)", fontStyle: "italic" }}>No guard conditions.</div>;
+    }
     return (
         <div className="uidai-pmis-table-wrap">
             <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0 }}>
-                <thead><tr>{cols.map((c) => <th key={c}>{labelize(c)}</th>)}</tr></thead>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Condition</th>
+                        <th style={{ textAlign: "right" }}>Observed</th>
+                        <th>State</th>
+                        <th>Action</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
                 <tbody>
-                    {rows.map((r, i) => (
-                        <tr key={i}>{cols.map((c) => <td key={c}>{typeof r[c] === "object" ? JSON.stringify(r[c]) : maybeHumanize(r[c])}</td>)}</tr>
+                    {rows.map((g, i) => (
+                        <tr key={i}>
+                            <td>{maybeHumanize(g.metric_key)}</td>
+                            <td style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                                {(GUARD_OP_LABEL[g.operator] || g.operator || "")}{g.threshold_value != null && g.threshold_value !== "" ? ` ${g.threshold_value}` : ""}
+                            </td>
+                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{g.observed_value == null || g.observed_value === "" ? "—" : evalNum(g.observed_value)}</td>
+                            <td><span className={`uidai-pmis-badge ${g.triggered ? "uidai-pmis-badge-red" : "uidai-pmis-badge-green"}`}>{g.triggered ? "Triggered" : "OK"}</span></td>
+                            <td>{g.action ? maybeHumanize(g.action) : "—"}</td>
+                            <td style={{ minWidth: 220, color: "var(--uidai-pmis-text)" }}>{g.action_description || "—"}</td>
+                        </tr>
                     ))}
                 </tbody>
             </table>
@@ -466,7 +567,10 @@ function EvalSection({ title, badge, nested, defaultOpen, children }) {
 
 // One MappingEvaluation: headline tiles + Summary/Breaches/Guards/Notes/Overrides.
 function SingleEvaluation({ ev, nested }) {
-    const headline = EVAL_HEADLINE.filter((h) => ev[h.key] !== undefined && ev[h.key] !== null);
+    // Always surface Severity + Points (show "—" when null); LD tiles only when
+    // the response actually carries them.
+    const ALWAYS = new Set(["severity_level", "accumulated_points"]);
+    const headline = EVAL_HEADLINE.filter((h) => ALWAYS.has(h.key) || (ev[h.key] !== undefined && ev[h.key] !== null));
     const summary = Object.entries(ev).filter(([k, v]) =>
         !EVAL_INTERNAL.has(k) && !EVAL_HEADLINE.some((h) => h.key === k) && (v === null || typeof v !== "object"));
     const guards = Array.isArray(ev.guards) ? ev.guards : [];
@@ -488,9 +592,9 @@ function SingleEvaluation({ ev, nested }) {
                 </div>
             )}
 
-            <EvalSection title="Summary" nested={nested} defaultOpen>
+            {/* <EvalSection title="Summary" nested={nested} defaultOpen>
                 <DetailGrid fields={summary.map(([k, v]) => [labelize(k), maybeHumanize(v)])} />
-            </EvalSection>
+            </EvalSection> */}
 
             <EvalSection title="Breaches" badge={Array.isArray(ev.breaches) ? ev.breaches.length : 0} nested={nested}>
                 <BreachTable rows={ev.breaches} />
@@ -498,7 +602,7 @@ function SingleEvaluation({ ev, nested }) {
 
             {guards.length > 0 && (
                 <EvalSection title="Guards" badge={guards.length} nested={nested}>
-                    <EvalRowsTable rows={guards} />
+                    <GuardsTable rows={guards} />
                 </EvalSection>
             )}
 
@@ -565,6 +669,11 @@ export default function ActivitySlasPage() {
     // Prefill the Activity ID when we're launched from an activity's node modal
     // (it navigates here with ?activityId=…), so the user lands ready to map.
     const [searchParams] = useSearchParams();
+    // The route is /projects/:projectId/activity-slas — that id scopes the SLA
+    // library to this project (sent as ?project_id= to the masters API). Allow a
+    // ?project_id= query override too, in case the page is opened standalone.
+    const { projectId: routeProjectId } = useParams();
+    const projectId = routeProjectId || searchParams.get("project_id") || "";
     const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
 
     // The project's contract type (e.g. "PMU", "MSAP") — when present, only SLAs
@@ -584,8 +693,11 @@ export default function ActivitySlasPage() {
     const [showMappingEdit, setShowMappingEdit] = useState(false);
     // Width (px) of the SLA details side-panel — user-resizable via the drag handle.
     const [panelWidth, setPanelWidth] = useState(460);
-    // A mapping row whose SLA image is shown in the popup (null = closed).
+    // A mapping row whose SLA image is shown in the popup (null = closed), plus
+    // the resolved image URL (fetched from the SLA detail so it always carries
+    // the real attachment).
     const [previewSla, setPreviewSla] = useState(null);
+    const [previewSrc, setPreviewSrc] = useState("");
 
     // ---- SLA masters list (loaded once, searched/filtered client-side) ----
     const [slaList, setSlaList] = useState([]);
@@ -682,35 +794,27 @@ export default function ActivitySlasPage() {
     // Step 1 — GET /api/v3/sla-masters
     // ---------------------------------------------------------------------------
     async function loadSlaMasters() {
-    setListLoading(true);
-    setListError("");
-
-    try {
-        const res = await authorizedFetch(
-            `${baseUrl}/api/v3/sla-masters?offset=1&pageSize=${pageSize}`,
-            { method: "GET", headers: { Accept: "application/json" } }
-        );
-
-        const payload = await readJson(res);
-        const data = extractElements(payload);
-
-        // ✅ ADD IMAGE HERE
-        const updated = data.map((s) => ({
-            ...s,
-            image_url: SLA1Image
-        }));
-
-        setSlaList(updated);
-        setSlaTotal(payload?.data?.total ?? 0);
-
-    } catch (err) {
-        setListError(err?.message || "Failed to load SLA masters");
-        setSlaList([]);
-    } finally {
-        setListLoading(false);
+        setListLoading(true);
+        setListError("");
+        try {
+            // Scope the SLA library to this project — the backend returns only the
+            // SLAs associated with project_id (each with its image attachments).
+            const qs = new URLSearchParams({ offset: "1", pageSize: String(pageSize) });
+            if (projectId) qs.set("project_id", projectId);
+            const res = await authorizedFetch(
+                `${baseUrl}/api/v3/sla-masters?${qs.toString()}`,
+                { method: "GET", headers: { Accept: "application/json" } }
+            );
+            const payload = await readJson(res);
+            setSlaList(extractElements(payload));
+            setSlaTotal(payload?.data?.total ?? 0);
+        } catch (err) {
+            setListError(err?.message || "Failed to load SLA masters");
+            setSlaList([]);
+        } finally {
+            setListLoading(false);
+        }
     }
-}
-``
 
     // ---------------------------------------------------------------------------
     // Step 2 — GET /api/v3/sla-masters/{slaId}
@@ -846,10 +950,10 @@ export default function ActivitySlasPage() {
         setSingleEvalError("");
         setSingleEvalResult(null);
         try {
+            // New API shape: only period + metric_observations (no ld_base_amount).
             const body = {
                 period_start: singleEval.period_start,
                 period_end: singleEval.period_end,
-                ld_base_amount: Number(singleEval.ld_base_amount) || 0,
                 metric_observations: singleEval.observations.map(buildObservation),
             };
             const res = await authorizedFetch(
@@ -945,34 +1049,6 @@ export default function ActivitySlasPage() {
         );
     }
 
-    function NestedTable({ title, rows }) {
-        if (!Array.isArray(rows) || rows.length === 0) return null;
-        const cols = Object.keys(rows[0]).filter((k) => k !== "sla_id" && k !== "id" && k !== "created_at");
-        return (
-            <div style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: 8 }}>
-                    {title} <span style={{ ...muted, fontWeight: 400 }}>({rows.length})</span>
-                </div>
-                <div className="uidai-pmis-table-wrap">
-                    <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0, minWidth: 0 }}>
-                        <thead>
-                            <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
-                        </thead>
-                        <tbody>
-                            {rows.map((r, i) => (
-                                <tr key={r.id || i}>
-                                    {cols.map((c) => (
-                                        <td key={c}>{typeof r[c] === "object" ? JSON.stringify(r[c]) : maybeHumanize(r[c])}</td>
-                                    ))}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        );
-    }
-
     // Filter options are derived from whatever SLA masters are loaded, so they
     // always reflect the real data without a separate metadata call.
     const filterOptions = useMemo(() => {
@@ -1033,10 +1109,31 @@ export default function ActivitySlasPage() {
         window.addEventListener("mouseup", onUp);
         document.body.style.userSelect = "none";
     }
-    // Resolve the screenshot for a mapping row (real image or generated demo).
-    function mappingImage(m) {
-        return SLA1Image ||m.image_url || m.screenshot_url || demoTableImage({ ...m, title: m.sla_title });
+    // Open the SLA image popup for a mapping row. Resolve the real attachment
+    // image: try the already-loaded master, else fetch the SLA detail (which
+    // always carries attachments), else fall back to the generated demo.
+    async function openImagePreview(m) {
+        setPreviewSla(m);
+        setPreviewSrc("");
+        const demo = demoTableImage({ ...m, title: m.sla_title });
+        let url = slaImageUrl(slaList.find((s) => s.id === m.sla_id));
+        if (!url && m.sla_id) {
+            try {
+                const res = await authorizedFetch(
+                    `${baseUrl}/api/v3/sla-masters/${encodeURIComponent(m.sla_id)}`,
+                    { method: "GET", headers: { Accept: "application/json" } }
+                );
+                const payload = await readJson(res);
+                url = slaImageUrl(payload?.data || payload);
+            } catch { /* fall through to the demo */ }
+        }
+        // Guard against a race if the user closed/changed selection meanwhile.
+        setPreviewSla((cur) => {
+            if (cur && cur.id === m.id) setPreviewSrc(url || demo);
+            return cur;
+        });
     }
+    function closePreview() { setPreviewSla(null); setPreviewSrc(""); }
 
     return (
         <div className="uidai-pmis-content">
@@ -1192,78 +1289,39 @@ export default function ActivitySlasPage() {
                         <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
                     ) : slaDetail ? (
                         <div>
-                            {/* Title strip — the at-a-glance line above the accordions */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+                            {/* Title strip */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
                                 <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77" }}>{slaDetail.title || slaDetail.sla_ref || "SLA"}</div>
                                 <span style={{ fontFamily: "monospace", fontSize: 12, color: "var(--uidai-pmis-muted)" }}>{slaDetail.sla_ref || "—"}</span>
                                 <StatusBadge status={slaDetail.status} />
                             </div>
 
-                            <Accordion title="Overview" defaultOpen>
-                                <DetailGrid
-                                    fields={[
-                                        ["SLA Ref", slaDetail.sla_ref],
-                                        ["Contract Type", slaDetail.contract_type ? humanize(slaDetail.contract_type) : undefined],
-                                        ["Formula Type", slaDetail.formula_type ? humanize(slaDetail.formula_type) : undefined],
-                                        ["Effective", `${slaDetail.effective_from || "—"} → ${slaDetail.effective_until || "—"}`],
-                                    ]}
-                                />
-                                {slaDetail.description && (
-                                    <div style={{ marginTop: 14 }}>
-                                        <div style={{ ...muted, fontWeight: 600, marginBottom: 4, fontSize: 12 }}>Description</div>
-                                        <div style={{ color: "var(--uidai-pmis-text)", fontSize: 13, lineHeight: 1.55 }}>{slaDetail.description}</div>
-                                    </div>
-                                )}
-                            </Accordion>
-
-                            <Accordion title="Measurement & Baseline">
-                                <DetailGrid
-                                    fields={[
-                                        ["Measurement Interval", slaDetail.measurement_interval ? humanize(slaDetail.measurement_interval) : undefined],
-                                        ["Reporting Interval", slaDetail.reporting_interval ? humanize(slaDetail.reporting_interval) : undefined],
-                                        ["Baseline Type", slaDetail.baseline_type ? humanize(slaDetail.baseline_type) : undefined],
-                                    ]}
-                                />
-                            </Accordion>
-
-                            <Accordion title="LD Configuration">
-                                <DetailGrid
-                                    fields={[
-                                        ["LD Aggregation Method", slaDetail.ld_aggregation_method ? humanize(slaDetail.ld_aggregation_method) : undefined],
-                                        ["LD Computation Base", slaDetail.ld_computation_base ? humanize(slaDetail.ld_computation_base) : undefined],
-                                    ]}
-                                />
-                            </Accordion>
-
-                            <Accordion title="Metrics" badge={Array.isArray(slaDetail.metrics) ? slaDetail.metrics.length : null}>
-                                {Array.isArray(slaDetail.metrics) && slaDetail.metrics.length > 0
-                                    ? <NestedTable title="Metrics" rows={slaDetail.metrics} />
-                                    : <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No metrics defined.</div>}
-                            </Accordion>
-
-                            <Accordion title="Condition Bands" badge={Array.isArray(slaDetail.condition_bands) ? slaDetail.condition_bands.length : null}>
-                                {Array.isArray(slaDetail.condition_bands) && slaDetail.condition_bands.length > 0
-                                    ? <NestedTable title="Condition Bands" rows={slaDetail.condition_bands} />
-                                    : <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No condition bands defined.</div>}
-                            </Accordion>
-
-                            <Accordion title="Parameters · Guards · Lookup">
-                                {(() => {
-                                    const params = Array.isArray(slaDetail.parameters) ? slaDetail.parameters : [];
-                                    const guards = Array.isArray(slaDetail.guard_conditions) ? slaDetail.guard_conditions : [];
-                                    const lookup = Array.isArray(slaDetail.lookup_table) ? slaDetail.lookup_table : [];
-                                    if (!params.length && !guards.length && !lookup.length) {
-                                        return <div style={{ ...muted, fontSize: 13, fontStyle: "italic" }}>No parameters, guard conditions or lookup table.</div>;
-                                    }
-                                    return (
-                                        <>
-                                            <NestedTable title="Parameters" rows={params} />
-                                            <NestedTable title="Guard Conditions" rows={guards} />
-                                            <NestedTable title="Lookup Table" rows={lookup} />
-                                        </>
-                                    );
-                                })()}
-                            </Accordion>
+                            {/* RFP-style detail card — only the contract-document fields */}
+                            <div className="uidai-pmis-table-wrap" style={{ marginTop: 0 }}>
+                                <table className="uidai-pmis-table" style={{ minWidth: 0 }}>
+                                    <tbody>
+                                        <RfpRow label="SLA Number" value={slaDetail.sla_ref} mono />
+                                        <RfpRow label="Title" value={slaDetail.title || slaDetail.name} />
+                                        <RfpRow label="Category" value={slaDetail.category || (slaDetail.formula_type ? humanize(slaDetail.formula_type) : null)} />
+                                        <RfpRow label="Contract Type" value={slaDetail.contract_type ? humanize(slaDetail.contract_type) : null} />
+                                        <RfpRow label="Definition of SLA" value={slaDetail.description} />
+                                        <RfpRow label="Scope of SLA" value={slaDetail.scope_text} />
+                                        <RfpRow label="Source of Data" value={slaDetail.data_source} />
+                                        <RfpRow label="SLA Calculation" value={slaDetail.calculation_method} />
+                                        <tr>
+                                            <th style={{ width: 170, background: "#f1f6fd", padding: "10px 12px", textAlign: "left", verticalAlign: "top", color: "#173e77", fontWeight: 700, fontSize: 11.5, textTransform: "uppercase", letterSpacing: ".3px" }}>Target (severity thresholds)</th>
+                                            <td style={{ padding: "10px 12px", verticalAlign: "top" }}><TargetTable bands={slaDetail.condition_bands} lookup={slaDetail.lookup_table} /></td>
+                                        </tr>
+                                        <RfpRow label="Measurement Interval" value={slaDetail.measurement_interval ? humanize(slaDetail.measurement_interval) : null} />
+                                        <RfpRow label="Reporting Interval" value={slaDetail.reporting_interval ? humanize(slaDetail.reporting_interval) : null} />
+                                        <RfpRow label="Applied On" value={APPLIED_ON_LABEL[slaDetail.ld_computation_base] || (slaDetail.ld_computation_base ? humanize(slaDetail.ld_computation_base) : null)} />
+                                        <RfpRow label="Reports submitted to" value={slaDetail.reports_submitted_to} />
+                                        <RfpRow label="Active From" value={(slaDetail.effective_from || "").slice(0, 10) || null} />
+                                        <RfpRow label="Active Until" value={slaDetail.effective_until ? slaDetail.effective_until.slice(0, 10) : null} />
+                                        <RfpRow label="Status" value={<StatusBadge status={slaDetail.status} />} />
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     ) : null}
                     </div>{/* /scroll details body */}
@@ -1335,7 +1393,7 @@ export default function ActivitySlasPage() {
                                                     </span>
                                                 ) : (
                                                     <span style={{ display: "inline-flex", gap: 6 }}>
-                                                        <button type="button" className="uidai-pm-icon-btn" title="View SLA image" onClick={() => setPreviewSla(m)}>👁</button>
+                                                        <button type="button" className="uidai-pm-icon-btn" title="View SLA image" onClick={() => openImagePreview(m)}>👁</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Evaluate</button>
                                                     </span>
@@ -1375,12 +1433,12 @@ export default function ActivitySlasPage() {
                                     </div>
                                 </div>
 
-                                {/* Period & LD base */}
+                                {/* Evaluation period (the new API takes no LD base here) */}
                                 <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
                                     <div className="uidai-pmis-filter-head">
-                                        <div className="uidai-pmis-filter-title">Evaluation Period &amp; LD Base</div>
+                                        <div className="uidai-pmis-filter-title">Evaluation Period</div>
                                     </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 16, maxWidth: 640, marginTop: 12 }}>
+                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
                                         <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                             <label>Period Start</label>
                                             <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
@@ -1388,10 +1446,6 @@ export default function ActivitySlasPage() {
                                         <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                             <label>Period End</label>
                                             <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
-                                        </div>
-                                        <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                            <label>LD Base Amount</label>
-                                            <input type="number" value={singleEval.ld_base_amount} onChange={(e) => setSingleEval((s) => ({ ...s, ld_base_amount: e.target.value }))} />
                                         </div>
                                     </div>
                                 </div>
@@ -1526,7 +1580,7 @@ export default function ActivitySlasPage() {
             {/* SLA image popup — opened from the eye button on a mapping row */}
             {previewSla && (
                 <div
-                    onMouseDown={(e) => { if (e.target === e.currentTarget) setPreviewSla(null); }}
+                    onMouseDown={(e) => { if (e.target === e.currentTarget) closePreview(); }}
                     style={{ position: "fixed", inset: 0, background: "rgba(7,26,52,.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 20 }}
                 >
                     <div style={{ position: "relative", background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,.3)", maxWidth: "min(900px, 95vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
@@ -1535,10 +1589,12 @@ export default function ActivitySlasPage() {
                                 {previewSla.sla_title || previewSla.sla_ref || "SLA"}
                                 <span style={{ fontFamily: "monospace", fontWeight: 400, fontSize: 12, color: "var(--uidai-pmis-muted)", marginLeft: 8 }}>{previewSla.sla_ref}</span>
                             </div>
-                            <button type="button" onClick={() => setPreviewSla(null)} title="Close" style={{ width: 30, height: 30, borderRadius: "50%", background: "#fdecec", border: "none", color: "#b42318", cursor: "pointer", fontSize: 15, fontWeight: 700, flex: "0 0 auto" }}>✕</button>
+                            <button type="button" onClick={closePreview} title="Close" style={{ width: 30, height: 30, borderRadius: "50%", background: "#fdecec", border: "none", color: "#b42318", cursor: "pointer", fontSize: 15, fontWeight: 700, flex: "0 0 auto" }}>✕</button>
                         </div>
-                        <div style={{ padding: 14, overflow: "auto", background: "#f6f9fd" }}>
-                            <img src={mappingImage(previewSla)} alt={previewSla.sla_ref || "SLA"} style={{ display: "block", maxWidth: "100%", borderRadius: 8, border: "1px solid var(--uidai-pmis-border)" }} />
+                        <div style={{ padding: 14, overflow: "auto", background: "#f6f9fd", minHeight: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {previewSrc
+                                ? <img src={previewSrc} alt={previewSla.sla_ref || "SLA"} style={{ display: "block", maxWidth: "100%", borderRadius: 8, border: "1px solid var(--uidai-pmis-border)" }} />
+                                : <div style={{ ...muted, fontSize: 13 }}>Loading image…</div>}
                         </div>
                     </div>
                 </div>
