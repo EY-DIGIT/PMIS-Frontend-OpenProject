@@ -95,82 +95,165 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
    done (green), later ones pending (grey). Shown in place of the stepper
    when the user toggles to the Graph view. */
 const FLOW_STEPS = [
-  { key: "start", label: "Start", sub: "Activity started", states: ["idle"] },
-  { key: "ready", label: "Ready for Approval", sub: "Submitted", states: ["ready_for_approval"] },
-  { key: "division", label: "Concerned Division", sub: "Division review", states: ["pending_division"], reject: "division" },
-  { key: "divApproved", label: "Divisions Approved", sub: "All divisions approved", states: ["division_approved"] },
-  { key: "owner", label: "Owner Review", sub: "Activity owner decides", states: ["pending_owner"], reject: "owner" },
-  { key: "completed", label: "Completed", sub: "Activity completed", states: ["completed"] },
+  { key: "start", lines: ["Start"], states: ["idle"] },
+  { key: "ready", lines: ["Ready for", "Approval"], states: ["ready_for_approval"] },
+  { key: "division", lines: ["Concerned", "Division"], states: ["pending_division"], reject: "division" },
+  { key: "divApproved", lines: ["Divisions", "Approved"], states: ["division_approved"] },
+  { key: "owner", lines: ["Owner", "Review"], states: ["pending_owner"], reject: "owner" },
+  { key: "completed", lines: ["Completed"], states: ["completed"] },
 ];
 
+const GRAPH_COLORS = {
+  active: { fill: "#ffffff", stroke: "#d32f2f", text: "#b3261e" },
+  done: { fill: "#ecf9f0", stroke: "#1a8a3d", text: "#1b6a3a" },
+  todo: { fill: "#f7f9fc", stroke: "#cdd7e6", text: "#6b7890" },
+};
+const GREY = "#c7d0de";
+const GREEN = "#1a8a3d";
+const RED = "#d32f2f";
+
+/* BPMN-style SVG diagram of the activity approval workflow. The happy
+   path runs left→right; the Concerned Division and Owner stages each have
+   a reject branch that converges into a "Rejected" node, which loops back
+   (via "Returned to Vendor") to "Ready for Approval". The current stage and
+   the path actually taken on a rejection are drawn in red. */
 function WorkflowGraph({ form }) {
   const state = String((form && form.approvalState) || "idle");
   const isRejected = state === "rejected_to_vendor";
   const rejection = (form && form.lastRejection) || {};
-  const rejectedFrom = String(rejection.byKind || "").toLowerCase(); // division | owner | vendor
-  const activeIdx = isRejected
-    ? -1
-    : FLOW_STEPS.findIndex((s) => s.states.includes(state));
+  const rejectedFrom = String(rejection.byKind || "").toLowerCase();
+  const activeIdx = isRejected ? -1 : FLOW_STEPS.findIndex((s) => s.states.includes(state));
+  const rejIdx = rejectedFrom === "owner" ? 4 : 2; // which stage rejected
+
+  // ── geometry ──
+  const NW = 150, NH = 48, GAP = 30, PAD = 18;
+  const sx = (i) => PAD + i * (NW + GAP);
+  const scx = (i) => sx(i) + NW / 2;
+  const TOP = 16, topMid = TOP + NH / 2;
+  const laneY = TOP + NH + 66, laneH = 42, laneMid = laneY + laneH / 2;
+  const W = sx(5) + NW + PAD;
+  const H = laneY + laneH + 26;
+
+  const kindOf = (i) =>
+    i === activeIdx ? "active" : activeIdx >= 0 && i < activeIdx ? "done" : "todo";
+
+  const Node = ({ i }) => {
+    const c = GRAPH_COLORS[kindOf(i)];
+    const x = sx(i), y = TOP, cx = x + NW / 2, lines = FLOW_STEPS[i].lines;
+    return (
+      <g>
+        <rect x={x} y={y} width={NW} height={NH} rx={11} fill={c.fill} stroke={c.stroke} strokeWidth={2} />
+        <text x={cx} y={y + NH / 2} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.text}>
+          {lines.length === 1 ? (
+            <tspan x={cx} dy="0.35em">{lines[0]}</tspan>
+          ) : (
+            lines.map((ln, j) => (
+              <tspan key={j} x={cx} dy={j === 0 ? "-0.15em" : "1.15em"}>{ln}</tspan>
+            ))
+          )}
+        </text>
+        {i === activeIdx && (
+          <circle cx={x + NW - 3} cy={y + 3} r={6} fill={RED} stroke="#fff" strokeWidth={2} />
+        )}
+      </g>
+    );
+  };
+
+  // reject node geometry (converged target)
+  const rjW = 132, rjH = laneH;
+  const rjX = scx(3) - rjW / 2, rjY = laneY, rjCX = scx(3);
+  // returned-to-vendor node geometry
+  const rvW = 150, rvX = sx(1), rvY = laneY, rvCX = rvX + rvW / 2;
+
+  const branchOn = (i) =>
+    isRejected && ((i === 2 && rejIdx === 2) || (i === 4 && rejIdx === 4));
+
+  const RejectBranch = ({ i }) => {
+    const on = branchOn(i);
+    const col = on ? RED : GREY;
+    const dash = on ? "0" : "5 4";
+    const cx = scx(i);
+    const bendY = laneY - 18;
+    // elbow from stage bottom down into the Rejected node's top
+    const targetX = i === 2 ? rjCX - 28 : rjCX + 28;
+    const d = `M ${cx} ${TOP + NH} V ${bendY} H ${targetX} V ${rjY}`;
+    return (
+      <g>
+        <path d={d} fill="none" stroke={col} strokeWidth={2} strokeDasharray={dash}
+          markerEnd={on ? "url(#awfR)" : "url(#awfG0)"} />
+        <text x={cx + 6} y={TOP + NH + 16} fontSize="10" fontWeight="700" fill={col}>Reject</text>
+      </g>
+    );
+  };
 
   return (
     <div className="pmis-awf-graph">
-      <div className="pmis-awf-graph__flow">
-        {FLOW_STEPS.map((s, i) => {
-          const done = activeIdx >= 0 && i < activeIdx;
-          const active = i === activeIdx;
-          const cls = active ? "active" : done ? "done" : "todo";
-          /* A reject branch lights up red if the activity was rejected at
-             this stage. When byKind isn't recorded, assume the division
-             stage (the most common rejection source). */
-          const rejHere =
-            isRejected &&
-            ((s.reject === "division" && (rejectedFrom === "division" || !rejectedFrom)) ||
-              (s.reject === "owner" && rejectedFrom === "owner"));
-          return (
-            <React.Fragment key={s.key}>
-              <div className="pmis-awf-graph__col">
-                <div className={`pmis-awf-graph__node pmis-awf-graph__node--${cls}`}>
-                  {active && <span className="pmis-awf-graph__dot" aria-hidden="true" />}
-                  <span className="pmis-awf-graph__icon" aria-hidden="true">
-                    {done ? "✓" : active ? "●" : "○"}
-                  </span>
-                  <span className="pmis-awf-graph__text">
-                    <span className="pmis-awf-graph__label">{s.label}</span>
-                    {s.sub && <span className="pmis-awf-graph__sub">{s.sub}</span>}
-                  </span>
-                </div>
-                {s.reject && (
-                  <div className={`pmis-awf-graph__branch${rejHere ? " is-on" : ""}`}>
-                    <span className="pmis-awf-graph__down" aria-hidden="true">▼</span>
-                    <div className={`pmis-awf-graph__reject${rejHere ? " is-on" : ""}`}>
-                      ✕ Reject
-                    </div>
-                  </div>
-                )}
-              </div>
-              {i < FLOW_STEPS.length - 1 && (
-                <span className="pmis-awf-graph__arrow" aria-hidden="true">→</span>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
+      <div className="pmis-awf-graph__scroll">
+        <svg className="pmis-awf-graph__svg" viewBox={`0 0 ${W} ${H}`} role="img"
+          aria-label="Activity approval workflow diagram">
+          <defs>
+            {[["awfArr", GREY], ["awfArrGreen", GREEN], ["awfR", RED], ["awfG0", GREY]].map(([id, col]) => (
+              <marker key={id} id={id} markerWidth="9" markerHeight="9" refX="7" refY="4.5"
+                orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L9,4.5 L0,9 Z" fill={col} />
+              </marker>
+            ))}
+          </defs>
 
-      {isRejected && (
-        <div className="pmis-awf-graph__return">
-          <span className="pmis-awf-graph__return-arrow" aria-hidden="true">↩</span>
-          <div className="pmis-awf-graph__return-node">
-            <b>Returned to Vendor</b>
-            <span>Resubmit required{rejection.reason ? ` — ${rejection.reason}` : ""}</span>
-          </div>
-        </div>
-      )}
+          {/* main flow connectors */}
+          {FLOW_STEPS.slice(0, -1).map((_, i) => {
+            const passed = activeIdx >= 0 && i < activeIdx;
+            const col = passed ? GREEN : GREY;
+            return (
+              <line key={`c${i}`} x1={sx(i) + NW} y1={topMid} x2={sx(i + 1)} y2={topMid}
+                stroke={col} strokeWidth={2}
+                markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
+            );
+          })}
+
+          {/* reject branches (always shown; active one is red) */}
+          <RejectBranch i={2} />
+          <RejectBranch i={4} />
+
+          {/* Rejected node */}
+          <rect x={rjX} y={rjY} width={rjW} height={rjH} rx={rjH / 2}
+            fill={isRejected ? "#fdecea" : "#fff"} stroke={isRejected ? RED : GREY}
+            strokeWidth={isRejected ? 2 : 1.5} strokeDasharray={isRejected ? "0" : "5 4"} />
+          <text x={rjCX} y={rjY + rjH / 2} textAnchor="middle" dominantBaseline="middle"
+            fontSize="11.5" fontWeight="700" fill={isRejected ? RED : "#8a97ab"}>✕ Rejected</text>
+
+          {isRejected && (
+            <>
+              {/* Rejected → Returned to Vendor */}
+              <line x1={rjX} y1={laneMid} x2={rvX + rvW} y2={laneMid}
+                stroke={RED} strokeWidth={2} markerEnd="url(#awfR)" />
+              {/* Returned to Vendor node */}
+              <rect x={rvX} y={rvY} width={rvW} height={laneH} rx={10}
+                fill="#fdecea" stroke={RED} strokeWidth={2} />
+              <text x={rvCX} y={rvY + laneH / 2} textAnchor="middle" dominantBaseline="middle"
+                fontSize="11" fontWeight="700" fill={RED}>
+                <tspan x={rvCX} dy="-0.15em">Returned to Vendor</tspan>
+                <tspan x={rvCX} dy="1.2em" fontWeight="500">Resubmit required</tspan>
+              </text>
+              {/* Returned to Vendor → loop back up to Ready for Approval */}
+              <path d={`M ${rvCX} ${rvY} V ${TOP + NH}`} fill="none" stroke={RED}
+                strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#awfR)" />
+              <text x={rvCX + 6} y={(rvY + TOP + NH) / 2} fontSize="10" fontWeight="700" fill={RED}>
+                Resubmit
+              </text>
+            </>
+          )}
+
+          {/* stage nodes on top */}
+          {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
+        </svg>
+      </div>
 
       <div className="pmis-awf-graph__legend">
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--active" /> Current</span>
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--todo" /> Pending</span>
-        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--reject" /> Rejection</span>
+        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--reject" /> Rejection path</span>
       </div>
     </div>
   );
