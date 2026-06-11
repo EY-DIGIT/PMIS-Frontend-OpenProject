@@ -236,6 +236,7 @@ export default function NodeModal({
   nodeUid,
   editable,
   asPage = false,
+  readOnly = false,
   onCancel,
   onSave
 }) {
@@ -904,6 +905,7 @@ export default function NodeModal({
               activity={node}
               form={form}
               editable={editable}
+              readOnly={readOnly}
               projectPublished={
                 String(project && project.status || "").toLowerCase() === "published"
               }
@@ -1332,6 +1334,7 @@ export default function NodeModal({
               activity={node}
               form={form}
               editable={editable}
+              readOnly={readOnly}
               divisions={divisions}
               onChange={(next) => setForm(next)}
               onTransition={refreshProcessInstances}

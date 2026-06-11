@@ -91,7 +91,7 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
 }
 
 
-export default function ApprovalPanel({ activity, form, editable, divisions, onChange, onTransition, projectId }) {
+export default function ApprovalPanel({ activity, form, editable, readOnly, divisions, onChange, onTransition, projectId }) {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState("steps");
   const [error, setError] = useState("");
@@ -111,7 +111,9 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
      started (actualStartDate stamped) so the Start banner gates buttons
      until the work has actually begun. */
   const canSubmitForApproval = useCan('submitActivityForApproval');
-  const workflowEnabled = canSubmitForApproval && !busy && isStarted;
+  // readOnly (e.g. opened from the Approval Inbox) hides every action —
+  // the panel + graph stay visible but no transition can be triggered.
+  const workflowEnabled = canSubmitForApproval && !busy && isStarted && !readOnly;
   const ownerName = form.ownerDivision || activity.owner || "Owner";
   const consentDivisions = safeArray(form.concernedDivision).length
     ? safeArray(form.concernedDivision)

@@ -212,7 +212,9 @@ export default function ApprovalInboxConcernedDivision() {
     const params = new URLSearchParams({
       kind: "activity",
       mode: "edit",
-      nodeUid: row.activityId
+      nodeUid: row.activityId,
+      // Opened from the inbox = view only; no workflow / edit actions.
+      readonly: "1"
     });
     navigate(
       `/projects/${encodeURIComponent(row.projectId)}/config/node?${params.toString()}`

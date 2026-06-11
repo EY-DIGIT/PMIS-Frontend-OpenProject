@@ -77,6 +77,9 @@ export default function MilestoneConfigPage({ mode }) {
         mode: searchParams.get("mode") || "add",
         parentUid: searchParams.get("parentUid") || null,
         nodeUid: searchParams.get("nodeUid") || null,
+        // ?readonly=1 (e.g. opened from the Approval Inbox) → view only,
+        // no edit / workflow actions.
+        readOnly: searchParams.get("readonly") === "1",
       }
     : null;
 
@@ -1363,7 +1366,8 @@ export default function MilestoneConfigPage({ mode }) {
             project={project}
             parentUid={nodeRouteCtx.parentUid}
             nodeUid={nodeRouteCtx.nodeUid}
-            editable={nodeRouteCtx.mode === "view" ? false : canMod}
+            editable={(nodeRouteCtx.mode === "view" || nodeRouteCtx.readOnly) ? false : canMod}
+            readOnly={nodeRouteCtx.readOnly}
             onCancel={closeNodeModal}
             onSave={saveNodeFromModal}
             onError={(m) => uiStore.showMessage(m)}
