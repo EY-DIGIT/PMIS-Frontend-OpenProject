@@ -89,8 +89,71 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
   );
 }
 
+/* ─── Workflow graph ───
+   Ordered stages of the activity approval workflow. The current stage
+   (from form.approvalState) gets a red indicator; earlier stages render
+   done (green), later ones pending (grey). Shown in place of the stepper
+   when the user toggles to the Graph view. */
+const FLOW_STEPS = [
+  { key: "start", label: "Start", states: ["idle"] },
+  { key: "ready", label: "Ready for Approval", states: ["ready_for_approval"] },
+  { key: "division", label: "Concerned Division Review", states: ["pending_division"] },
+  { key: "divApproved", label: "Divisions Approved", states: ["division_approved"] },
+  { key: "owner", label: "Owner Review", states: ["pending_owner"] },
+  { key: "completed", label: "Completed", states: ["completed"] },
+];
+
+function WorkflowGraph({ form }) {
+  const state = String((form && form.approvalState) || "idle");
+  const isRejected = state === "rejected_to_vendor";
+  const activeIdx = isRejected
+    ? 0
+    : FLOW_STEPS.findIndex((s) => s.states.includes(state));
+
+  return (
+    <div className="pmis-awf-graph">
+      {isRejected && (
+        <div className="pmis-awf-graph__banner">
+          ✕ Rejected — returned to vendor for resubmission
+        </div>
+      )}
+      <div className="pmis-awf-graph__row">
+        {FLOW_STEPS.map((s, i) => {
+          const done = activeIdx >= 0 && i < activeIdx && !isRejected;
+          const active = i === activeIdx;
+          const variant = active
+            ? "pmis-awf-graph__node--active"
+            : done
+            ? "pmis-awf-graph__node--done"
+            : "pmis-awf-graph__node--todo";
+          return (
+            <React.Fragment key={s.key}>
+              <div className={`pmis-awf-graph__node ${variant}`}>
+                {active && <span className="pmis-awf-graph__dot" aria-hidden="true" />}
+                <span className="pmis-awf-graph__icon" aria-hidden="true">
+                  {done ? "✓" : active ? "●" : "○"}
+                </span>
+                <span className="pmis-awf-graph__label">{s.label}</span>
+              </div>
+              {i < FLOW_STEPS.length - 1 && (
+                <span className="pmis-awf-graph__arrow" aria-hidden="true">→</span>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+      <div className="pmis-awf-graph__legend">
+        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
+        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--active" /> Current</span>
+        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--todo" /> Pending</span>
+      </div>
+    </div>
+  );
+}
+
 export default function ApprovalPanel({ activity, form, editable, divisions, onChange, onTransition, projectId }) {
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState("steps");
   const [error, setError] = useState("");
   /* Per-target Request popup state. `kind` is 'division' or 'owner'
      while the popup is open; null when closed. */
@@ -674,12 +737,31 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
     <div className="pmis-awf-panel pmis-awf-scope">
       <div className="pmis-awf-panel__head">
         <h4>Activity Approval Workflow</h4>
+        <div className="pmis-awf-viewtoggle">
+          <button
+            type="button"
+            className={`pmis-awf-viewtoggle__btn${view === "steps" ? " is-active" : ""}`}
+            onClick={() => setView("steps")}
+          >
+            Steps
+          </button>
+          <button
+            type="button"
+            className={`pmis-awf-viewtoggle__btn${view === "graph" ? " is-active" : ""}`}
+            onClick={() => setView("graph")}
+          >
+            Graph
+          </button>
+        </div>
         <span className="pmis-awf-panel__state">
           State: <b>{APPROVAL_STATE_LABELS[state] || state}</b>
         </span>
       </div>
       {toolbarNode}
       {error && <div className="pmis-awf-error">{error}</div>}
+      {view === "graph" ? (
+        <WorkflowGraph form={form} />
+      ) : (
       <div className="pmis-awf-stepper">
         <StepRow index={1} state={s1} title={hasTasks ? "Tasks Completed" : "No Tasks Required"}>
           {s1Body}
@@ -697,6 +779,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
           {s5Body}
         </StepRow>
       </div>
+      )}
       <ApprovalRequestModal
         open={requestPopup.open}
         title={requestPopupTitle}

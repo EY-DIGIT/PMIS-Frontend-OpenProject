@@ -14,71 +14,8 @@
    the unique `pmis-awf-` prefix.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useState } from "react";
+import React from "react";
 import { safeArray, formatDateTime } from "../../../utils/project/helpers";
-
-/* ─── Workflow graph ───
-   Ordered stages of the activity approval workflow. The current stage
-   (derived from form.approvalState) is highlighted with a red indicator;
-   earlier stages render as done (green), later ones as pending (grey). */
-const FLOW_STEPS = [
-  { key: "start", label: "Start", states: ["idle"] },
-  { key: "ready", label: "Ready for Approval", states: ["ready_for_approval"] },
-  { key: "division", label: "Concerned Division Review", states: ["pending_division"] },
-  { key: "divApproved", label: "Divisions Approved", states: ["division_approved"] },
-  { key: "owner", label: "Owner Review", states: ["pending_owner"] },
-  { key: "completed", label: "Completed", states: ["completed"] },
-];
-
-function WorkflowGraph({ form }) {
-  const state = String((form && form.approvalState) || "idle");
-  const isRejected = state === "rejected_to_vendor";
-  // On a rejection the activity is back with the vendor to resend, so the
-  // indicator sits on the first stage; otherwise find the matching stage.
-  const activeIdx = isRejected
-    ? 0
-    : FLOW_STEPS.findIndex((s) => s.states.includes(state));
-
-  return (
-    <div className="pmis-awf-graph">
-      {isRejected && (
-        <div className="pmis-awf-graph__banner">
-          ✕ Rejected — returned to vendor for resubmission
-        </div>
-      )}
-      <div className="pmis-awf-graph__row">
-        {FLOW_STEPS.map((s, i) => {
-          const done = activeIdx >= 0 && i < activeIdx && !isRejected;
-          const active = i === activeIdx;
-          const variant = active
-            ? "pmis-awf-graph__node--active"
-            : done
-            ? "pmis-awf-graph__node--done"
-            : "pmis-awf-graph__node--todo";
-          return (
-            <React.Fragment key={s.key}>
-              <div className={`pmis-awf-graph__node ${variant}`}>
-                {active && <span className="pmis-awf-graph__dot" aria-hidden="true" />}
-                <span className="pmis-awf-graph__icon" aria-hidden="true">
-                  {done ? "✓" : active ? "●" : "○"}
-                </span>
-                <span className="pmis-awf-graph__label">{s.label}</span>
-              </div>
-              {i < FLOW_STEPS.length - 1 && (
-                <span className="pmis-awf-graph__arrow" aria-hidden="true">→</span>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-      <div className="pmis-awf-graph__legend">
-        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
-        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--active" /> Current</span>
-        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--todo" /> Pending</span>
-      </div>
-    </div>
-  );
-}
 
 /* ─── Glyph + variant per event type ─── */
 const SYSTEM_GLYPH = {
@@ -252,9 +189,6 @@ function fromSystemComment(c) {
 }
 
 export default function ActivityAuditTrail({ form, processInstances, loading, error }) {
-  // "timeline" shows the chronological event list; "graph" shows the
-  // workflow stage diagram with the current step marked in red.
-  const [view, setView] = useState("timeline");
   const apiEntries = safeArray(processInstances).map(fromProcessInstance);
   const localEntries = safeArray(form && form.comments)
     .filter((c) => c && c.kind === "system")
@@ -263,34 +197,33 @@ export default function ActivityAuditTrail({ form, processInstances, loading, er
      Only show local system comments when we have no API data at all. */
   const entries = apiEntries.length ? apiEntries : localEntries;
 
+  const counts = entries.reduce(
+    (acc, e) => {
+      if (e.type === "approval") acc.approvals += 1;
+      else if (e.type === "rejection") acc.rejections += 1;
+      else if (e.type === "request" || e.type === "update") acc.requests += 1;
+      return acc;
+    },
+    { approvals: 0, rejections: 0, requests: 0 }
+  );
+
   return (
     <div className="pmis-awf-audit pmis-awf-scope">
       <div className="pmis-awf-audit__head">
-        <h4>{view === "graph" ? "🔀 Workflow Graph" : "📜 Activity Audit Trail"}</h4>
+        <h4>📜 Activity Audit Trail</h4>
         <div className="pmis-awf-audit__summary">
-          <div className="pmis-awf-viewtoggle">
-            <button
-              type="button"
-              className={`pmis-awf-viewtoggle__btn${view === "timeline" ? " is-active" : ""}`}
-              onClick={() => setView("timeline")}
-            >
-              Timeline
-            </button>
-            <button
-              type="button"
-              className={`pmis-awf-viewtoggle__btn${view === "graph" ? " is-active" : ""}`}
-              onClick={() => setView("graph")}
-            >
-              Graph
-            </button>
-          </div>
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--req">
+            <b>{counts.requests}</b> request{counts.requests === 1 ? "" : "s"}
+          </span>
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--ok">
+            <b>{counts.approvals}</b> approval{counts.approvals === 1 ? "" : "s"}
+          </span>
+          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--bad">
+            <b>{counts.rejections}</b> rejection{counts.rejections === 1 ? "" : "s"}
+          </span>
         </div>
       </div>
 
-      {view === "graph" ? (
-        <WorkflowGraph form={form} />
-      ) : (
-      <>
       {loading && (
         <div className="pmis-awf-audit__empty">Loading workflow history…</div>
       )}
@@ -351,8 +284,6 @@ export default function ActivityAuditTrail({ form, processInstances, loading, er
           ))}
         </ol>
       ) : null}
-      </>
-      )}
     </div>
   );
 }
