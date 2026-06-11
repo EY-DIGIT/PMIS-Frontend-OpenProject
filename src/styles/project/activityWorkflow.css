@@ -849,7 +849,7 @@
 .pmis-awf-graph__svg {
   display: block;
   width: 100%;
-  max-width: 440px;
+  min-width: 540px;
   height: auto;
   margin: 0 auto;
   font-family: inherit;
