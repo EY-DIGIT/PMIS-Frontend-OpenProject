@@ -22,6 +22,7 @@ import {
   deriveDivisionApprovalsFromInstances,
   deriveOwnerApprovalFromInstances
 } from "../../utils/project/approvalWorkflow";
+import { safeArray } from "../../utils/project/helpers";
 import "../../styles/project/activityWorkflow.css";
 
 const EMPTY_FORM = {
@@ -30,6 +31,46 @@ const EMPTY_FORM = {
   ownerApproval: null,
   lastRejection: null
 };
+
+/* Pull the latest rejection out of the workflow events so the graph can
+   show who rejected and where it was routed. Handles both audit-log rows
+   ({ actionName, comment, performedByUsername }) and timeline events
+   ({ actionName, detail, actorUsername }). The owner reject comment
+   encodes the revert target, e.g.
+     "Revert to Vendor (full restart) — <reason>"
+     "Revert to Concerned Divisions: tmd1, tmd2 — <reason>" */
+function deriveLastRejection(events) {
+  const rejs = safeArray(events).filter((e) => {
+    const a = String((e && (e.actionName || e.action)) || "").toUpperCase();
+    return a.includes("REJECT") || a === "RETURN_TO_VENDOR" || a === "ANY_REJECTED";
+  });
+  if (!rejs.length) return null;
+  const ts = (e) => Number((e && (e.createdTime || e.timestamp)) || 0);
+  const last = rejs.reduce((a, b) => (ts(b) >= ts(a) ? b : a));
+  const action = String((last.actionName || last.action) || "").toUpperCase();
+  const comment = String(last.comment || last.detail || "");
+  const byName =
+    last.performedByUsername || last.actorUsername || last.performedByUuid || "";
+  const byKind = action.includes("VOTE")
+    ? "division"
+    : action === "RETURN_TO_VENDOR" || /vendor/i.test(comment)
+      ? "owner"
+      : "owner";
+
+  let revertTo = "vendor";
+  let revertDivisions = [];
+  let reason = comment;
+  const dm = comment.match(/concerned divisions?:?\s*([^—\-]+)/i);
+  if (dm) {
+    revertTo = "divisions";
+    revertDivisions = dm[1].split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  const sep = comment.split(/\s*—\s*|\s-\s/);
+  if (sep.length > 1) reason = sep.slice(1).join(" ").trim();
+  else if (/revert to/i.test(comment)) reason = "";
+
+  return { byKind, byName, reason, revertTo, revertDivisions };
+}
 
 export default function ActivityWorkflowViewer({ activityId, concernedDivisions = [] }) {
   const [view, setView] = useState("timeline");
@@ -78,11 +119,12 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
           st = "division_approved";
         }
 
+        const rejSource = auditLogs.length ? auditLogs : instances.length ? instances : tl;
         setForm({
           approvalState: st || "idle",
           divisionApprovals: divs,
           ownerApproval: owner,
-          lastRejection: null
+          lastRejection: deriveLastRejection(rejSource)
         });
       })
       .finally(() => { if (!cancelled) setLoading(false); });

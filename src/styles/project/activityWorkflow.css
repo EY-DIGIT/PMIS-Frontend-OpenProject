@@ -890,3 +890,22 @@
 }
 .pmis-awf-refresh:hover:not(:disabled) { background: #e4eefb; border-color: #c4d3e8; }
 .pmis-awf-refresh:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ─── Workflow graph: rejection details ─── */
+.pmis-awf-graph__reject-info {
+  margin: 12px 4px 0;
+  padding: 10px 14px;
+  background: #fdecec;
+  border: 1px solid #f4b8b8;
+  border-left: 4px solid #d32f2f;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #7a2e2a;
+  line-height: 1.55;
+}
+.pmis-awf-graph__reject-info-title {
+  font-weight: 800;
+  color: #b3261e;
+  margin-bottom: 4px;
+}
+.pmis-awf-graph__reject-info b { color: #b3261e; }

@@ -45,6 +45,19 @@ export default function WorkflowGraph({ form }) {
   const rejIdx = ownerRejected || rejectedFrom === "owner" ? 4 : 2;
   const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
+  /* Where a rejection routes to: the owner can send it back to the vendor
+     (full restart) or to specific Concerned Divisions for re-examination;
+     a division rejection goes back to the vendor to resubmit. */
+  const revertTo = String(rejection.revertTo || "").toLowerCase();
+  const revertDivisions = safeArray(rejection.revertDivisions).filter(Boolean);
+  const toDivisions = revertTo === "divisions" && revertDivisions.length > 0;
+  const returnTitle = toDivisions ? "Back to Division(s)" : "Returned to Vendor";
+  const returnSub = toDivisions
+    ? revertDivisions.join(", ")
+    : "Resubmit required";
+  const rejectedBy = rejection.byName || rejection.by || "";
+  const rejectReason = rejection.reason || "";
+
   // ── geometry (vertical top → bottom flow) ──
   const NW = 188, NH = 46, VGAP = 30, PADX = 16, PADY = 14;
   const nx = PADX, ncx = nx + NW / 2, nRight = nx + NW;
@@ -149,8 +162,10 @@ export default function WorkflowGraph({ form }) {
                 fill="#fdecea" stroke={RED} strokeWidth={2} />
               <text x={rjCX} y={retY + NH / 2} textAnchor="middle" dominantBaseline="middle"
                 fontSize="11" fontWeight="700" fill={RED}>
-                <tspan x={rjCX} dy="-0.15em">Returned to Vendor</tspan>
-                <tspan x={rjCX} dy="1.2em" fontWeight="500">Resubmit required</tspan>
+                <tspan x={rjCX} dy="-0.15em">{returnTitle}</tspan>
+                <tspan x={rjCX} dy="1.2em" fontWeight="500">
+                  {returnSub.length > 22 ? returnSub.slice(0, 21) + "…" : returnSub}
+                </tspan>
               </text>
               <line x1={rjX} y1={nmid(1)} x2={nRight} y2={nmid(1)} stroke={RED}
                 strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#awfR)" />
@@ -162,6 +177,24 @@ export default function WorkflowGraph({ form }) {
           {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
         </svg>
       </div>
+
+      {isRejected && (
+        <div className="pmis-awf-graph__reject-info">
+          <div className="pmis-awf-graph__reject-info-title">✕ Rejection details</div>
+          <div>
+            <b>Rejected by:</b> {rejectedBy || (ownerRejected ? "Activity Owner" : "Concerned Division")}
+          </div>
+          <div>
+            <b>Returned to:</b>{" "}
+            {toDivisions
+              ? `Concerned Division(s) — ${revertDivisions.join(", ")}`
+              : "Vendor (resubmit required)"}
+          </div>
+          {rejectReason && (
+            <div><b>Reason:</b> {rejectReason}</div>
+          )}
+        </div>
+      )}
 
       <div className="pmis-awf-graph__legend">
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
