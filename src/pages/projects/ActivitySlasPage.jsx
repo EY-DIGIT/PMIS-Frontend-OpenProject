@@ -246,14 +246,17 @@ function SlaCard({ sla, selected, onPick }) {
             onBlur={() => setHover(false)}
             style={{ position: "relative", cursor: "pointer", borderRadius: 10, zIndex: hover ? 5 : 1 }}
         >
+            {selected && (
+                <div style={{ position: "absolute", top: 6, right: 6, zIndex: 3, background: "#2f6fb0", color: "#fff", borderRadius: 999, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, boxShadow: "0 2px 6px rgba(0,0,0,.28)" }}>✓</div>
+            )}
             <div
                 style={{
-                    border: `1px solid ${selected ? "#2f6fb0" : "var(--uidai-pmis-border)"}`,
-                    borderRadius: 10, overflow: "hidden", background: "#fff",
+                    border: selected ? "2px solid #2f6fb0" : "1px solid var(--uidai-pmis-border)",
+                    borderRadius: 10, overflow: "hidden", background: selected ? "#eef4ff" : "#fff",
                     boxShadow: hover
                         ? "0 14px 30px rgba(11,60,136,.22)"
-                        : (selected ? "0 0 0 2px rgba(47,111,176,.35)" : "0 1px 3px rgba(11,60,136,.06)"),
-                    transform: hover ? "translateY(-3px) scale(1.03)" : "none",
+                        : (selected ? "0 0 0 3px rgba(47,111,176,.30), inset 0 2px 8px rgba(11,60,136,.16)" : "0 1px 3px rgba(11,60,136,.06)"),
+                    transform: hover ? "translateY(-3px) scale(1.03)" : (selected ? "scale(0.97)" : "none"),
                     transformOrigin: "center",
                     transition: "transform .16s ease, box-shadow .16s ease, border-color .16s ease",
                 }}
@@ -579,6 +582,10 @@ export default function ActivitySlasPage() {
     // Whether the mapping (effective dates) editor is expanded in the SLA
     // Details panel.
     const [showMappingEdit, setShowMappingEdit] = useState(false);
+    // Width (px) of the SLA details side-panel — user-resizable via the drag handle.
+    const [panelWidth, setPanelWidth] = useState(460);
+    // A mapping row whose SLA image is shown in the popup (null = closed).
+    const [previewSla, setPreviewSla] = useState(null);
 
     // ---- SLA masters list (loaded once, searched/filtered client-side) ----
     const [slaList, setSlaList] = useState([]);
@@ -1011,6 +1018,25 @@ export default function ActivitySlasPage() {
         setSlaDetail(null);
         setShowMappingEdit(false);
     }
+    // Drag the splitter to resize the details panel (wider / narrower), tab-style.
+    function startResize(e) {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = panelWidth;
+        const onMove = (ev) => setPanelWidth(Math.min(Math.max(startW - (ev.clientX - startX), 320), 920));
+        const onUp = () => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+            document.body.style.userSelect = "";
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+        document.body.style.userSelect = "none";
+    }
+    // Resolve the screenshot for a mapping row (real image or generated demo).
+    function mappingImage(m) {
+        return SLA1Image ||m.image_url || m.screenshot_url || demoTableImage({ ...m, title: m.sla_title });
+    }
 
     return (
         <div className="uidai-pmis-content">
@@ -1024,8 +1050,8 @@ export default function ActivitySlasPage() {
 
             {/* PICKER — browse cards (left) + SLA details side-panel (right) */}
             {view === "picker" && (
-                <div style={{ display: "flex", gap: 18, alignItems: "stretch", height: "calc(100vh - 200px)", minHeight: 460 }}>
-                    <div style={{ flex: selectedSlaId ? "1 1 55%" : "1 1 100%", minWidth: 320, minHeight: 0, display: "flex" }}>
+                <div style={{ display: "flex", gap: 14, alignItems: "stretch", height: "calc(100vh - 200px)", minHeight: 460 }}>
+                    <div style={{ flex: "1 1 auto", minWidth: 320, minHeight: 0, display: "flex" }}>
                         <div className="uidai-pmis-card" style={{ marginBottom: 0, display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", minHeight: 0 }}>
                     {/* Fixed top — header, filters, count (stay put while the cards scroll) */}
                     <div style={{ flex: "0 0 auto" }}>
@@ -1085,7 +1111,7 @@ export default function ActivitySlasPage() {
                             {slaList.length === 0 ? "No SLA masters found." : "No SLAs match your search / filters."}
                         </div>
                     ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${selectedSlaId ? 2 : 4}, minmax(0, 1fr))`, gap: 16, alignItems: "start", padding: "4px 2px 8px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: selectedSlaId ? "repeat(auto-fill, minmax(200px, 1fr))" : "repeat(4, minmax(0, 1fr))", gap: 16, alignItems: "start", padding: "4px 2px 8px" }}>
                             {pickerResults.map((s) => (
                                 <SlaCard key={s.id} sla={s} selected={s.id === selectedSlaId} onPick={() => pickSla(s)} />
                             ))}
@@ -1095,9 +1121,21 @@ export default function ActivitySlasPage() {
                         </div>
                     </div>
 
-                    {/* RIGHT — SLA details side-panel; own scroll, independent of the cards */}
+                    {/* Drag handle — resize the details panel like a tab */}
                     {selectedSlaId && (
-                    <div style={{ flex: "1 1 45%", minWidth: 340, minHeight: 0, display: "flex" }}>
+                        <div
+                            onMouseDown={startResize}
+                            title="Drag to resize the panel"
+                            style={{ flex: "0 0 10px", alignSelf: "stretch", cursor: "col-resize", display: "flex", alignItems: "center", justifyContent: "center" }}
+                        >
+                            <div style={{ width: 4, height: 54, borderRadius: 3, background: "#c2d2e8" }} />
+                        </div>
+                    )}
+
+                    {/* RIGHT — SLA details side-panel; own scroll, independent of the cards.
+                        Width is user-resizable via the drag handle above. */}
+                    {selectedSlaId && (
+                    <div style={{ flex: `0 0 ${panelWidth}px`, maxWidth: "72%", minWidth: 320, minHeight: 0, display: "flex" }}>
                         <div className="uidai-pmis-card" style={{ marginBottom: 0, display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", minHeight: 0 }}>
                     {/* Fixed top — title, actions, mapping fields, banners */}
                     <div style={{ flex: "0 0 auto" }}>
@@ -1297,6 +1335,7 @@ export default function ActivitySlasPage() {
                                                     </span>
                                                 ) : (
                                                     <span style={{ display: "inline-flex", gap: 6 }}>
+                                                        <button type="button" className="uidai-pm-icon-btn" title="View SLA image" onClick={() => setPreviewSla(m)}>👁</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Evaluate</button>
                                                     </span>
@@ -1323,7 +1362,8 @@ export default function ActivitySlasPage() {
                         {!singleEval ? (
                             <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
                         ) : (
-                            <>
+                            <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+                                <div style={{ flex: singleEvalResult !== null ? "1 1 380px" : "1 1 100%", minWidth: 0 }}>
                                 {/* Which mapping we're evaluating */}
                                 <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                                     <div>
@@ -1377,15 +1417,19 @@ export default function ActivitySlasPage() {
                                     </button>
                                 </div>
                                 {singleEvalError && <Banner text={singleEvalError} />}
+                                </div>{/* /form column */}
+
                                 {singleEvalResult !== null && (
-                                    <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
-                                            <span aria-hidden="true">📊</span> Evaluation Result
+                                    <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                                        <div className="uidai-pmis-card" style={{ marginTop: 0, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
+                                                <span aria-hidden="true">📊</span> Evaluation Result
+                                            </div>
+                                            <EvaluationResult data={singleEvalResult} />
                                         </div>
-                                        <EvaluationResult data={singleEvalResult} />
                                     </div>
                                 )}
-                            </>
+                            </div>
                         )}
                     </div>
 
@@ -1408,7 +1452,8 @@ export default function ActivitySlasPage() {
                         {actEvalError && <Banner text={actEvalError} />}
 
                         {actEval && (
-                            <div style={{ marginTop: 14 }}>
+                            <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginTop: 14 }}>
+                                <div style={{ flex: actEvalResult !== null ? "1 1 380px" : "1 1 100%", minWidth: 0 }}>
                                 <div className="uidai-pmis-filter-shell">
                                     <div className="uidai-pmis-filter-head">
                                         <div className="uidai-pmis-filter-title">Evaluation Period</div>
@@ -1459,18 +1504,42 @@ export default function ActivitySlasPage() {
                                         {actEvalLoading ? "Evaluating…" : "⚡ Evaluate All Active SLAs"}
                                     </button>
                                 </div>
-                            </div>
-                        )}
+                                </div>{/* /form column */}
 
-                        {actEvalResult !== null && (
-                            <div className="uidai-pmis-card" style={{ marginTop: 14, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
-                                    <span aria-hidden="true">📊</span> Activity Evaluation Result
-                                    <span style={{ ...muted, fontWeight: 400, fontSize: 12 }}>· one section per SLA</span>
-                                </div>
-                                <EvaluationResult data={actEvalResult} />
+                                {actEvalResult !== null && (
+                                    <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                                        <div className="uidai-pmis-card" style={{ marginTop: 0, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
+                                            <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
+                                                <span aria-hidden="true">📊</span> Activity Evaluation Result
+                                                <span style={{ ...muted, fontWeight: 400, fontSize: 12 }}>· one section per SLA</span>
+                                            </div>
+                                            <EvaluationResult data={actEvalResult} />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* SLA image popup — opened from the eye button on a mapping row */}
+            {previewSla && (
+                <div
+                    onMouseDown={(e) => { if (e.target === e.currentTarget) setPreviewSla(null); }}
+                    style={{ position: "fixed", inset: 0, background: "rgba(7,26,52,.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 20 }}
+                >
+                    <div style={{ position: "relative", background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,.3)", maxWidth: "min(900px, 95vw)", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: "1px solid var(--uidai-pmis-border)" }}>
+                            <div style={{ fontWeight: 800, color: "#173e77", fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {previewSla.sla_title || previewSla.sla_ref || "SLA"}
+                                <span style={{ fontFamily: "monospace", fontWeight: 400, fontSize: 12, color: "var(--uidai-pmis-muted)", marginLeft: 8 }}>{previewSla.sla_ref}</span>
+                            </div>
+                            <button type="button" onClick={() => setPreviewSla(null)} title="Close" style={{ width: 30, height: 30, borderRadius: "50%", background: "#fdecec", border: "none", color: "#b42318", cursor: "pointer", fontSize: 15, fontWeight: 700, flex: "0 0 auto" }}>✕</button>
+                        </div>
+                        <div style={{ padding: 14, overflow: "auto", background: "#f6f9fd" }}>
+                            <img src={mappingImage(previewSla)} alt={previewSla.sla_ref || "SLA"} style={{ display: "block", maxWidth: "100%", borderRadius: 8, border: "1px solid var(--uidai-pmis-border)" }} />
+                        </div>
                     </div>
                 </div>
             )}
