@@ -25,6 +25,7 @@ import {
   WORKFLOW_ACTIONS,
   WORKFLOW_STATES
 } from "../../api/activityWorkflow";
+import { syncApprovalInbox } from "../../api/approvalInbox";
 import "../../styles/project/approvalInbox.css";
 
 function cap(s) {
@@ -322,6 +323,14 @@ export default function ApprovalInboxActivityOwner() {
         action: WORKFLOW_ACTIONS.APPROVE,
         comment: "Final approval granted by owner."
       });
+      // Reconcile the approval-inbox record downstream once the owner's
+      // final approval lands. Best-effort — a sync hiccup must not block
+      // the approval itself.
+      try {
+        await syncApprovalInbox(activeDetail.activityId);
+      } catch (syncErr) {
+        console.warn("approval-inbox sync failed", syncErr);
+      }
       const refreshed = await getActivityWorkflowInboxDetail(
         activeDetail.activityId,
         CURRENT_USER.uuid,

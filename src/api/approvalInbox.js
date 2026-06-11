@@ -70,3 +70,12 @@ export async function transitionApprovalInbox(businessId, { action, comment } = 
   });
   return unwrap(res);
 }
+
+/* Push the completed activity downstream (empty-body POST). Called after
+   the Activity Owner's final APPROVE succeeds so the approval-inbox state
+   is reconciled with the rest of the system. */
+export async function syncApprovalInbox(businessId) {
+  if (!businessId) throw new Error("Missing businessId");
+  const res = await api.post(ENDPOINTS.approvalInbox.sync(businessId));
+  return unwrap(res);
+}

@@ -327,6 +327,7 @@ export const ENDPOINTS = {
     list: '/projects/api/v3/approval-inbox',
     detail: (id) => `/projects/api/v3/approval-inbox/${enc(id)}`,
     transition: (id) => `/projects/api/v3/approval-inbox/${enc(id)}/_transition`,
+    sync: (id) => `/projects/api/v3/approval-inbox/${enc(id)}/_sync`,
   },
 
   /* ──────────────────────────────────────────────────────────────────
