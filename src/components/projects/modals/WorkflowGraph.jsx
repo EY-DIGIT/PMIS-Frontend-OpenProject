@@ -61,7 +61,16 @@ export default function WorkflowGraph({ form, divisions }) {
   const isRejected =
     state !== "completed" &&
     (stateRejected || divisionRejected || ownerRejected || hasRejectionRecord);
-  const rejIdx = ownerRejected || rejectedFrom === "owner" ? 4 : 2;
+  // If every division approved but the activity was still rejected, the
+  // rejection came from the Owner stage.
+  const allDivisionsApproved =
+    divApprovals.length > 0 &&
+    divApprovals.every((d) => String(d.status || "").toLowerCase() === "approved");
+  const ownerStageReject =
+    ownerRejected ||
+    rejectedFrom === "owner" ||
+    (isRejected && !divisionRejected && allDivisionsApproved);
+  const rejIdx = ownerStageReject ? 4 : 2;
   const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
   /* Where a rejection routes to: the owner can send it back to the vendor
@@ -114,9 +123,10 @@ export default function WorkflowGraph({ form, divisions }) {
         : { stroke: "#e0a93b", fill: "#fff7e8", text: "#8a5a00" };
 
   // owner box (left lane, aligned with Owner Review stage / row 4)
-  const ownerStatus = String(
-    (form && form.ownerApproval && form.ownerApproval.status) || "pending"
-  ).toLowerCase();
+  const ownerStatus =
+    ownerStageReject && isRejected
+      ? "rejected"
+      : String((form && form.ownerApproval && form.ownerApproval.status) || "pending").toLowerCase();
   const ownerDivLabel =
     form && form.ownerDivision ? divisionName(form.ownerDivision) : "Activity Owner";
   const ownerBoxY = nmid(4) - DIVB_H / 2;
@@ -155,16 +165,16 @@ export default function WorkflowGraph({ form, divisions }) {
 
   const RejectBranch = ({ i }) => {
     const on = branchOn(i);
-    // Always draw the reject path in red so the "✕ Reject → Vendor" outcome
-    // is clear; solid + arrow when actually taken, dashed otherwise.
-    const col = RED;
+    // Gray (dashed) by default; turns red + solid only when this stage was
+    // actually rejected.
+    const col = on ? RED : GREY;
     const dash = on ? "0" : "5 4";
     const enterY = i === 2 ? rjY : rjY + rjH;
     const d = `M ${nRight} ${nmid(i)} H ${rjCX} V ${enterY}`;
     return (
       <g>
         <path d={d} fill="none" stroke={col} strokeWidth={on ? 2 : 1.5} strokeDasharray={dash}
-          markerEnd="url(#awfR)" opacity={on ? 1 : 0.8} />
+          markerEnd={on ? "url(#awfR)" : "url(#awfG0)"} opacity={on ? 1 : 0.8} />
         <text x={nRight + 8} y={nmid(i) - 5} fontSize="9.5" fontWeight="700" fill={col}>
           ✕ Reject → Vendor
         </text>
