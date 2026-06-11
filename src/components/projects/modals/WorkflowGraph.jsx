@@ -48,6 +48,13 @@ export default function WorkflowGraph({ form, divisions }) {
     const m = safeArray(divisions).find((d) => String(d.code || "").toLowerCase() === c);
     return (m && (m.label || m.name)) || code;
   };
+  const shortWhen = (iso) => {
+    if (!iso) return "";
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(dt.getDate())}-${pad(dt.getMonth() + 1)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  };
   const rejection = (form && form.lastRejection) || {};
   const rejectedFrom = String(rejection.byKind || "").toLowerCase();
   const divisionRejected = safeArray(form && form.divisionApprovals).some(
@@ -92,7 +99,7 @@ export default function WorkflowGraph({ form, divisions }) {
   const NW = 188, NH = 46, VGAP = 46, PADX = 16, PADY = 14;
   // Concerned-division boxes get their own lane on the left, branching into
   // the "Concerned Division" stage; the main flow shifts right to make room.
-  const DIVB_W = 132, DIVB_H = 32, DIVB_GAP = 8;
+  const DIVB_W = 156, DIVB_H = 46, DIVB_GAP = 9;
   const hasDivs = divApprovals.length > 0;
   // The left lane holds the concerned-division boxes AND the owner box, so
   // it's always reserved.
@@ -284,10 +291,18 @@ export default function WorkflowGraph({ form, divisions }) {
                       opacity="0.85" />
                     <rect x={divbX} y={y} width={DIVB_W} height={DIVB_H} rx={7}
                       fill={c.fill} stroke={c.stroke} strokeWidth={1.5} />
-                    <text x={divbX + 9} y={my} dominantBaseline="middle" fontSize="10.5"
-                      fontWeight="700" fill={c.text}>
-                      {glyph} {String(divisionName(d.division)).slice(0, 14)}
+                    <text x={divbX + 9} y={y + 16} fontSize="10.5" fontWeight="700" fill={c.text}>
+                      {glyph} {String(divisionName(d.division)).slice(0, 16)}
                     </text>
+                    <text x={divbX + 9} y={y + 30} fontSize="8.5" fill={c.text} opacity="0.95">
+                      {st === "approved" ? "Approved" : st === "rejected" ? "Rejected" : "Pending"}
+                      {d.decidedBy ? ` · ${String(d.decidedBy).slice(0, 12)}` : ""}
+                    </text>
+                    {d.decidedAt && (
+                      <text x={divbX + 9} y={y + 41} fontSize="8" fill={c.text} opacity="0.8">
+                        {shortWhen(d.decidedAt)}
+                      </text>
+                    )}
                   </g>
                 );
               })}
@@ -310,10 +325,20 @@ export default function WorkflowGraph({ form, divisions }) {
                   opacity="0.85" />
                 <rect x={divbX} y={ownerBoxY} width={DIVB_W} height={DIVB_H} rx={7}
                   fill={c.fill} stroke={c.stroke} strokeWidth={1.5} />
-                <text x={divbX + 9} y={my} dominantBaseline="middle" fontSize="10.5"
-                  fontWeight="700" fill={c.text}>
-                  {glyph} {String(ownerDivLabel).slice(0, 14)}
+                <text x={divbX + 9} y={ownerBoxY + 16} fontSize="10.5" fontWeight="700" fill={c.text}>
+                  {glyph} {String(ownerDivLabel).slice(0, 16)}
                 </text>
+                <text x={divbX + 9} y={ownerBoxY + 30} fontSize="8.5" fill={c.text} opacity="0.95">
+                  {ownerStatus === "approved" ? "Approved" : ownerStatus === "rejected" ? "Rejected" : "Pending"}
+                  {form && form.ownerApproval && form.ownerApproval.decidedBy
+                    ? ` · ${String(form.ownerApproval.decidedBy).slice(0, 12)}`
+                    : ""}
+                </text>
+                {form && form.ownerApproval && form.ownerApproval.decidedAt && (
+                  <text x={divbX + 9} y={ownerBoxY + 41} fontSize="8" fill={c.text} opacity="0.8">
+                    {shortWhen(form.ownerApproval.decidedAt)}
+                  </text>
+                )}
               </>
             );
           })()}
