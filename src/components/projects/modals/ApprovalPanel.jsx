@@ -119,11 +119,21 @@ const RED = "#d32f2f";
    the path actually taken on a rejection are drawn in red. */
 function WorkflowGraph({ form }) {
   const state = String((form && form.approvalState) || "idle");
-  const isRejected = state === "rejected_to_vendor";
   const rejection = (form && form.lastRejection) || {};
   const rejectedFrom = String(rejection.byKind || "").toLowerCase();
-  const activeIdx = isRejected ? -1 : FLOW_STEPS.findIndex((s) => s.states.includes(state));
-  const rejIdx = rejectedFrom === "owner" ? 4 : 2; // which stage rejected
+  /* A rejection shows in the graph as soon as ANY reviewer rejects — a
+     Concerned Division voting Reject, or the Activity Owner rejecting —
+     not only once the activity has fully returned to the vendor. */
+  const divisionRejected = safeArray(form && form.divisionApprovals).some(
+    (d) => d && String(d.status || "").toLowerCase() === "rejected"
+  );
+  const ownerRejected =
+    String((form && form.ownerApproval && form.ownerApproval.status) || "").toLowerCase() ===
+    "rejected";
+  const stateRejected = state === "rejected_to_vendor";
+  const isRejected = stateRejected || divisionRejected || ownerRejected;
+  const rejIdx = ownerRejected || rejectedFrom === "owner" ? 4 : 2; // which stage rejected
+  const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
   // ── geometry ──
   const NW = 150, NH = 48, GAP = 30, PAD = 18;
@@ -166,7 +176,8 @@ function WorkflowGraph({ form }) {
   const rvW = 150, rvX = sx(1), rvY = laneY, rvCX = rvX + rvW / 2;
 
   const branchOn = (i) =>
-    isRejected && ((i === 2 && rejIdx === 2) || (i === 4 && rejIdx === 4));
+    (i === 2 && (divisionRejected || (stateRejected && rejIdx === 2))) ||
+    (i === 4 && (ownerRejected || (stateRejected && rejIdx === 4)));
 
   const RejectBranch = ({ i }) => {
     const on = branchOn(i);
