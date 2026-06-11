@@ -272,13 +272,6 @@ export default function WorkflowGraph({ form, divisions }) {
                   </g>
                 );
               })}
-              {/* routing hint for the divisions */}
-              <text x={divbX} y={divStartY + divTotalH + 13} fontSize="8.5" fill="#1b6a3a" fontWeight="700">
-                ✓ approve → forward
-              </text>
-              <text x={divbX} y={divStartY + divTotalH + 25} fontSize="8.5" fill="#b3261e" fontWeight="700">
-                ✕ reject → back to vendor
-              </text>
             </>
           )}
 
@@ -301,12 +294,6 @@ export default function WorkflowGraph({ form, divisions }) {
                 <text x={divbX + 9} y={my} dominantBaseline="middle" fontSize="10.5"
                   fontWeight="700" fill={c.text}>
                   {glyph} {String(ownerDivLabel).slice(0, 14)}
-                </text>
-                <text x={divbX} y={ownerBoxY + DIVB_H + 12} fontSize="8.5" fill="#1b6a3a" fontWeight="700">
-                  ✓ approve → completed
-                </text>
-                <text x={divbX} y={ownerBoxY + DIVB_H + 24} fontSize="8.5" fill="#b3261e" fontWeight="700">
-                  ✕ reject → back to vendor
                 </text>
               </>
             );
