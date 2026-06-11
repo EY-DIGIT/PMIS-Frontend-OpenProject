@@ -155,33 +155,43 @@ export default function WorkflowGraph({ form }) {
           <RejectBranch i={2} />
           <RejectBranch i={4} />
 
-          {/* Rejected node */}
-          <rect x={rjX} y={rjY} width={rjW} height={rjH} rx={rjH / 2}
-            fill={isRejected ? "#fdecea" : "#fff"} stroke={isRejected ? RED : GREY}
-            strokeWidth={isRejected ? 2 : 1.5} strokeDasharray={isRejected ? "0" : "5 4"} />
-          <text x={rjCX} y={rjY + rjH / 2} textAnchor="middle" dominantBaseline="middle"
-            fontSize="11.5" fontWeight="700" fill={isRejected ? RED : "#8a97ab"}>✕ Rejected</text>
+          {/* Reject routing — shown UP FRONT as a faint dashed path (where a
+             rejection would go and where it restarts) and lit red once a
+             rejection actually happens. */}
+          {(() => {
+            const col = isRejected ? RED : GREY;
+            const dash = isRejected ? "0" : "5 4";
+            const marker = isRejected ? "url(#awfR)" : "url(#awfG0)";
+            const fill = isRejected ? "#fdecea" : "#fff";
+            const textFill = isRejected ? RED : "#8a97ab";
+            const sub = returnSub.length > 22 ? returnSub.slice(0, 21) + "…" : returnSub;
+            return (
+              <>
+                {/* Rejected convergence node */}
+                <rect x={rjX} y={rjY} width={rjW} height={rjH} rx={rjH / 2}
+                  fill={fill} stroke={col} strokeWidth={isRejected ? 2 : 1.5} strokeDasharray={dash} />
+                <text x={rjCX} y={rjY + rjH / 2} textAnchor="middle" dominantBaseline="middle"
+                  fontSize="11.5" fontWeight="700" fill={textFill}>✕ Rejected</text>
 
-          {isRejected && (
-            <>
-              <path d={`M ${rjX + 30} ${rjY} V ${retY + NH}`} fill="none" stroke={RED}
-                strokeWidth={2} markerEnd="url(#awfR)" />
-              <rect x={rjX} y={retY} width={rjW} height={NH} rx={10}
-                fill="#fdecea" stroke={RED} strokeWidth={2} />
-              <text x={rjCX} y={retY + NH / 2} textAnchor="middle" dominantBaseline="middle"
-                fontSize="11" fontWeight="700" fill={RED}>
-                <tspan x={rjCX} dy="-0.15em">{returnTitle}</tspan>
-                <tspan x={rjCX} dy="1.2em" fontWeight="500">
-                  {returnSub.length > 22 ? returnSub.slice(0, 21) + "…" : returnSub}
-                </tspan>
-              </text>
-              {/* loop back to the stage the workflow restarts from */}
-              <line x1={rjX} y1={nmid(restartIdx)} x2={nRight} y2={nmid(restartIdx)} stroke={RED}
-                strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#awfR)" />
-              <text x={(rjX + nRight) / 2} y={nmid(restartIdx) - 6} textAnchor="middle"
-                fontSize="10" fontWeight="700" fill={RED}>Restart</text>
-            </>
-          )}
+                {/* Rejected → Returned */}
+                <path d={`M ${rjX + 30} ${rjY} V ${retY + NH}`} fill="none" stroke={col}
+                  strokeWidth={2} strokeDasharray={dash} markerEnd={marker} />
+                {/* Returned-to node */}
+                <rect x={rjX} y={retY} width={rjW} height={NH} rx={10}
+                  fill={fill} stroke={col} strokeWidth={isRejected ? 2 : 1.5} strokeDasharray={dash} />
+                <text x={rjCX} y={retY + NH / 2} textAnchor="middle" dominantBaseline="middle"
+                  fontSize="11" fontWeight="700" fill={textFill}>
+                  <tspan x={rjCX} dy="-0.15em">{returnTitle}</tspan>
+                  <tspan x={rjCX} dy="1.2em" fontWeight="500">{sub}</tspan>
+                </text>
+                {/* loop back to the stage the workflow restarts from */}
+                <line x1={rjX} y1={nmid(restartIdx)} x2={nRight} y2={nmid(restartIdx)} stroke={col}
+                  strokeWidth={2} strokeDasharray="5 4" markerEnd={marker} />
+                <text x={(rjX + nRight) / 2} y={nmid(restartIdx) - 6} textAnchor="middle"
+                  fontSize="10" fontWeight="700" fill={textFill}>Restart</text>
+              </>
+            );
+          })()}
 
           {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
         </svg>
