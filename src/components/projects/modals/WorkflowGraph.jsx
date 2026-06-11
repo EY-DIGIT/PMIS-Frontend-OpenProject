@@ -155,15 +155,19 @@ export default function WorkflowGraph({ form, divisions }) {
 
   const RejectBranch = ({ i }) => {
     const on = branchOn(i);
-    const col = on ? RED : GREY;
+    // Always draw the reject path in red so the "✕ Reject → Vendor" outcome
+    // is clear; solid + arrow when actually taken, dashed otherwise.
+    const col = RED;
     const dash = on ? "0" : "5 4";
     const enterY = i === 2 ? rjY : rjY + rjH;
     const d = `M ${nRight} ${nmid(i)} H ${rjCX} V ${enterY}`;
     return (
       <g>
-        <path d={d} fill="none" stroke={col} strokeWidth={2} strokeDasharray={dash}
-          markerEnd={on ? "url(#awfR)" : "url(#awfG0)"} />
-        <text x={nRight + 8} y={nmid(i) - 5} fontSize="10" fontWeight="700" fill={col}>Reject</text>
+        <path d={d} fill="none" stroke={col} strokeWidth={on ? 2 : 1.5} strokeDasharray={dash}
+          markerEnd="url(#awfR)" opacity={on ? 1 : 0.8} />
+        <text x={nRight + 8} y={nmid(i) - 5} fontSize="9.5" fontWeight="700" fill={col}>
+          ✕ Reject → Vendor
+        </text>
       </g>
     );
   };
@@ -187,17 +191,22 @@ export default function WorkflowGraph({ form, divisions }) {
           {FLOW_STEPS.slice(0, -1).map((_, i) => {
             const passed = activeIdx >= 0 && i < activeIdx;
             const isNext = i === activeIdx; // the action the user does next
-            const col = passed ? GREEN : isNext ? "#0b3c88" : GREY;
+            // Rows 2 (Concerned Division) and 4 (Owner Review) exit on the
+            // APPROVE outcome — draw the forward arrow green and labelled
+            // "✓ Approve".
+            const isApprove = i === 2 || i === 4;
+            const col = passed || isApprove ? GREEN : isNext ? "#0b3c88" : GREY;
             const midY = ny(i) + NH + VGAP / 2;
+            const label = isApprove ? `✓ ${SEGMENT_LABELS[i]}` : SEGMENT_LABELS[i];
             return (
               <g key={`c${i}`}>
                 <line x1={ncx} y1={ny(i) + NH} x2={ncx} y2={ny(i + 1)}
                   stroke={col} strokeWidth={2}
-                  markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
+                  markerEnd={passed || isApprove ? "url(#awfArrGreen)" : "url(#awfArr)"} />
                 <text x={ncx + 12} y={midY} dominantBaseline="middle" fontSize="9.5"
-                  fontWeight={isNext ? 700 : 600}
-                  fill={passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
-                  {SEGMENT_LABELS[i]}
+                  fontWeight={isNext || isApprove ? 700 : 600}
+                  fill={isApprove ? "#1b6a3a" : passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
+                  {label}
                 </text>
               </g>
             );
