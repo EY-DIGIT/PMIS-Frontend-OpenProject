@@ -353,10 +353,24 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
     return { ...nextForm, comments };
   }
 
+  /* Divisions that have already approved — they don't need to re-review on
+     a resend, so they're excluded from the request popup (only the
+     pending / rejected divisions get a comment + attachment row). */
+  const approvedDivisionCodes = new Set(
+    safeArray(form.divisionApprovals)
+      .filter((d) => d && String(d.status || "").toLowerCase() === "approved")
+      .map((d) => String(d.division || "").toLowerCase())
+  );
+
   const requestPopupRows = (() => {
     if (!requestPopup.open) return [];
     if (requestPopup.kind === "division" || requestPopup.kind === "resubmit") {
-      return consentDivisions.map((d) => ({
+      const pending = consentDivisions.filter(
+        (d) => !approvedDivisionCodes.has(String(d).toLowerCase())
+      );
+      // If every division somehow already approved, fall back to the full
+      // list so the popup is never empty.
+      return (pending.length ? pending : consentDivisions).map((d) => ({
         id: `div::${d}`,
         kind: "division",
         label: divisionName(d)

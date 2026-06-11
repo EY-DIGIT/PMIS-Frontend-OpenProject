@@ -14,6 +14,7 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { formatDateTime } from "../../utils/project/helpers";
 import { tokenStore } from "../../api/client";
 import {
@@ -152,6 +153,7 @@ function mapDetail(raw, currentUserUuid) {
 }
 
 export default function ApprovalInboxActivityOwner() {
+  const navigate = useNavigate();
   const storedUser = tokenStore.getUser() || {};
   const CURRENT_USER = useMemo(
     () => ({
@@ -224,6 +226,21 @@ export default function ApprovalInboxActivityOwner() {
       );
     });
   }, [items, filterText, filterStatus]);
+
+  /* Clicking the activity name jumps to that activity's page in the
+     project's milestone config (where its details + approval workflow
+     live). */
+  function goToActivity(row) {
+    if (!row || !row.projectId || !row.activityId) return;
+    const params = new URLSearchParams({
+      kind: "activity",
+      mode: "edit",
+      nodeUid: row.activityId
+    });
+    navigate(
+      `/projects/${encodeURIComponent(row.projectId)}/config/node?${params.toString()}`
+    );
+  }
 
   async function openReview(row) {
     setActiveKey(row.activityId);
@@ -443,7 +460,7 @@ export default function ApprovalInboxActivityOwner() {
                         <button
                           type="button"
                           className="pmis-apinbox-link pmis-apinbox-cell-name"
-                          onClick={() => openReview(it)}
+                          onClick={() => goToActivity(it)}
                         >
                           {it.activityName}
                         </button>
