@@ -21,6 +21,16 @@ const FLOW_STEPS = [
   { key: "completed", lines: ["Completed"], states: ["completed"] },
 ];
 
+/* Action that drives each transition (label on the arrow between stage i
+   and i+1). */
+const SEGMENT_LABELS = [
+  "Mark Ready for Approval",
+  "Request Division Approval",
+  "All Divisions Approved",
+  "Request Owner Approval",
+  "Owner Approves",
+];
+
 const GRAPH_COLORS = {
   active: { fill: "#ffffff", stroke: "#d32f2f", text: "#b3261e" },
   done: { fill: "#ecf9f0", stroke: "#1a8a3d", text: "#1b6a3a" },
@@ -64,16 +74,13 @@ export default function WorkflowGraph({ form, divisions }) {
   const returnSub = toDivisions
     ? revertDivisions.join(", ")
     : "Resubmit required";
-  const rejectedBy = rejection.byName || rejection.by || "";
-  const rejectReason = rejection.reason || "";
   /* Where the workflow restarts after the rejection: a division revert
      re-enters at Concerned Division; otherwise the vendor resubmits from
      Ready for Approval. */
   const restartIdx = toDivisions ? 2 : 1;
-  const restartLabel = toDivisions ? "Concerned Division" : "Ready for Approval";
 
   // ── geometry (vertical top → bottom flow) ──
-  const NW = 188, NH = 46, VGAP = 30, PADX = 16, PADY = 14;
+  const NW = 188, NH = 46, VGAP = 46, PADX = 16, PADY = 14;
   // Concerned-division boxes get their own lane on the left, branching into
   // the "Concerned Division" stage; the main flow shifts right to make room.
   const DIVB_W = 132, DIVB_H = 32, DIVB_GAP = 8;
@@ -165,14 +172,24 @@ export default function WorkflowGraph({ form, divisions }) {
             ))}
           </defs>
 
-          {/* main flow connectors (vertical) */}
+          {/* main flow connectors (vertical) + the action that drives each
+             transition, labelled beside the arrow. */}
           {FLOW_STEPS.slice(0, -1).map((_, i) => {
             const passed = activeIdx >= 0 && i < activeIdx;
-            const col = passed ? GREEN : GREY;
+            const isNext = i === activeIdx; // the action the user does next
+            const col = passed ? GREEN : isNext ? "#0b3c88" : GREY;
+            const midY = ny(i) + NH + VGAP / 2;
             return (
-              <line key={`c${i}`} x1={ncx} y1={ny(i) + NH} x2={ncx} y2={ny(i + 1)}
-                stroke={col} strokeWidth={2}
-                markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
+              <g key={`c${i}`}>
+                <line x1={ncx} y1={ny(i) + NH} x2={ncx} y2={ny(i + 1)}
+                  stroke={col} strokeWidth={2}
+                  markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
+                <text x={ncx + 12} y={midY} dominantBaseline="middle" fontSize="9.5"
+                  fontWeight={isNext ? 700 : 600}
+                  fill={passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
+                  {SEGMENT_LABELS[i]}
+                </text>
+              </g>
             );
           })}
 
@@ -251,27 +268,6 @@ export default function WorkflowGraph({ form, divisions }) {
           {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
         </svg>
       </div>
-
-      {isRejected && (
-        <div className="pmis-awf-graph__reject-info">
-          <div className="pmis-awf-graph__reject-info-title">✕ Rejection details</div>
-          <div>
-            <b>Rejected by:</b> {rejectedBy || (ownerRejected ? "Activity Owner" : "Concerned Division")}
-          </div>
-          <div>
-            <b>Returned to:</b>{" "}
-            {toDivisions
-              ? `Concerned Division(s) — ${revertDivisions.join(", ")}`
-              : "Vendor (resubmit required)"}
-          </div>
-          <div>
-            <b>Restarts from:</b> {restartLabel}
-          </div>
-          {rejectReason && (
-            <div><b>Reason:</b> {rejectReason}</div>
-          )}
-        </div>
-      )}
 
       <div className="pmis-awf-graph__legend">
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
