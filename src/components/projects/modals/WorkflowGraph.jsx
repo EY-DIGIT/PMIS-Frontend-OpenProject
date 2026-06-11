@@ -41,7 +41,10 @@ export default function WorkflowGraph({ form }) {
     String((form && form.ownerApproval && form.ownerApproval.status) || "").toLowerCase() ===
     "rejected";
   const stateRejected = state === "rejected_to_vendor";
-  const isRejected = stateRejected || divisionRejected || ownerRejected;
+  const hasRejectionRecord = !!(rejection.revertTo || rejection.byName || rejection.reason);
+  const isRejected =
+    state !== "completed" &&
+    (stateRejected || divisionRejected || ownerRejected || hasRejectionRecord);
   const rejIdx = ownerRejected || rejectedFrom === "owner" ? 4 : 2;
   const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
@@ -57,6 +60,11 @@ export default function WorkflowGraph({ form }) {
     : "Resubmit required";
   const rejectedBy = rejection.byName || rejection.by || "";
   const rejectReason = rejection.reason || "";
+  /* Where the workflow restarts after the rejection: a division revert
+     re-enters at Concerned Division; otherwise the vendor resubmits from
+     Ready for Approval. */
+  const restartIdx = toDivisions ? 2 : 1;
+  const restartLabel = toDivisions ? "Concerned Division" : "Ready for Approval";
 
   // ── geometry (vertical top → bottom flow) ──
   const NW = 188, NH = 46, VGAP = 30, PADX = 16, PADY = 14;
@@ -74,7 +82,7 @@ export default function WorkflowGraph({ form }) {
 
   const rjW = 140, rjX = nRight + 78, rjCX = rjX + rjW / 2;
   const rjY = ny(3), rjH = NH;
-  const retY = ny(1);
+  const retY = ny(restartIdx);
   const W = rjX + rjW + PADX;
   const H = ny(5) + NH + PADY;
 
@@ -167,10 +175,11 @@ export default function WorkflowGraph({ form }) {
                   {returnSub.length > 22 ? returnSub.slice(0, 21) + "…" : returnSub}
                 </tspan>
               </text>
-              <line x1={rjX} y1={nmid(1)} x2={nRight} y2={nmid(1)} stroke={RED}
+              {/* loop back to the stage the workflow restarts from */}
+              <line x1={rjX} y1={nmid(restartIdx)} x2={nRight} y2={nmid(restartIdx)} stroke={RED}
                 strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#awfR)" />
-              <text x={(rjX + nRight) / 2} y={nmid(1) - 6} textAnchor="middle"
-                fontSize="10" fontWeight="700" fill={RED}>Resubmit</text>
+              <text x={(rjX + nRight) / 2} y={nmid(restartIdx) - 6} textAnchor="middle"
+                fontSize="10" fontWeight="700" fill={RED}>Restart</text>
             </>
           )}
 
@@ -189,6 +198,9 @@ export default function WorkflowGraph({ form }) {
             {toDivisions
               ? `Concerned Division(s) — ${revertDivisions.join(", ")}`
               : "Vendor (resubmit required)"}
+          </div>
+          <div>
+            <b>Restarts from:</b> {restartLabel}
           </div>
           {rejectReason && (
             <div><b>Reason:</b> {rejectReason}</div>
