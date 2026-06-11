@@ -866,7 +866,7 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
             className={`pmis-awf-viewtoggle__btn${view === "steps" ? " is-active" : ""}`}
             onClick={() => setView("steps")}
           >
-            Steps
+            Timeline
           </button>
           <button
             type="button"
