@@ -586,6 +586,18 @@ export default function NodeModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mode, kind, node && (node.apiId || node.uid), processRefreshKey]);
 
+  /* Auto-refresh the workflow while the activity is in flight (e.g. waiting
+     on Concerned Division / Owner votes) so a division box turns green as
+     soon as that division approves, without a manual refresh. */
+  useEffect(() => {
+    if (!open || kind !== "activity" || mode === "add") return undefined;
+    const st = form && form.approvalState;
+    const inFlight = st && st !== "idle" && st !== "completed";
+    if (!inFlight) return undefined;
+    const id = setInterval(() => setProcessRefreshKey((k) => k + 1), 10000);
+    return () => clearInterval(id);
+  }, [open, kind, mode, form && form.approvalState]);
+
   /* Load existing comments + attachments for the node so they appear in
      the Comments panel when the modal opens — for both view and edit
      modes (only skipped on add, since the entity doesn't exist yet). */
