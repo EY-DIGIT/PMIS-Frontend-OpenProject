@@ -135,45 +135,51 @@ function WorkflowGraph({ form }) {
   const rejIdx = ownerRejected || rejectedFrom === "owner" ? 4 : 2; // which stage rejected
   const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
-  // ── geometry ──
-  const NW = 150, NH = 48, GAP = 30, PAD = 18;
-  const sx = (i) => PAD + i * (NW + GAP);
-  const scx = (i) => sx(i) + NW / 2;
-  const TOP = 16, topMid = TOP + NH / 2;
-  const laneY = TOP + NH + 66, laneH = 42, laneMid = laneY + laneH / 2;
-  const W = sx(5) + NW + PAD;
-  const H = laneY + laneH + 26;
+  // ── geometry (vertical top → bottom flow) ──
+  const NW = 188, NH = 46, VGAP = 30, PADX = 16, PADY = 14;
+  const nx = PADX, ncx = nx + NW / 2, nRight = nx + NW;
+  const ny = (i) => PADY + i * (NH + VGAP);
+  const nmid = (i) => ny(i) + NH / 2;
 
-  const kindOf = (i) =>
-    i === activeIdx ? "active" : activeIdx >= 0 && i < activeIdx ? "done" : "todo";
+  const isCompleted = state === "completed";
+  /* When the activity is completed everything is green (success) — no red.
+     Otherwise the current stage (the one it's sitting on, before completed)
+     is red to indicate where it is. */
+  const kindOf = (i) => {
+    if (isCompleted) return "done";
+    if (i === activeIdx) return "active";
+    if (activeIdx >= 0 && i < activeIdx) return "done";
+    return "todo";
+  };
+
+  // reject lane to the right
+  const rjW = 140, rjX = nRight + 78, rjCX = rjX + rjW / 2;
+  const rjY = ny(3), rjH = NH;          // Rejected node aligned with row 3
+  const retY = ny(1);                    // Returned node aligned with Ready (row 1)
+  const W = rjX + rjW + PADX;
+  const H = ny(5) + NH + PADY;
 
   const Node = ({ i }) => {
     const c = GRAPH_COLORS[kindOf(i)];
-    const x = sx(i), y = TOP, cx = x + NW / 2, lines = FLOW_STEPS[i].lines;
+    const x = nx, y = ny(i), lines = FLOW_STEPS[i].lines;
     return (
       <g>
         <rect x={x} y={y} width={NW} height={NH} rx={11} fill={c.fill} stroke={c.stroke} strokeWidth={2} />
-        <text x={cx} y={y + NH / 2} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.text}>
+        <text x={ncx} y={y + NH / 2} textAnchor="middle" fontSize="12.5" fontWeight="700" fill={c.text}>
           {lines.length === 1 ? (
-            <tspan x={cx} dy="0.35em">{lines[0]}</tspan>
+            <tspan x={ncx} dy="0.35em">{lines[0]}</tspan>
           ) : (
             lines.map((ln, j) => (
-              <tspan key={j} x={cx} dy={j === 0 ? "-0.15em" : "1.15em"}>{ln}</tspan>
+              <tspan key={j} x={ncx} dy={j === 0 ? "-0.15em" : "1.15em"}>{ln}</tspan>
             ))
           )}
         </text>
-        {i === activeIdx && (
+        {i === activeIdx && !isCompleted && (
           <circle cx={x + NW - 3} cy={y + 3} r={6} fill={RED} stroke="#fff" strokeWidth={2} />
         )}
       </g>
     );
   };
-
-  // reject node geometry (converged target)
-  const rjW = 132, rjH = laneH;
-  const rjX = scx(3) - rjW / 2, rjY = laneY, rjCX = scx(3);
-  // returned-to-vendor node geometry
-  const rvW = 150, rvX = sx(1), rvY = laneY, rvCX = rvX + rvW / 2;
 
   const branchOn = (i) =>
     (i === 2 && (divisionRejected || (stateRejected && rejIdx === 2))) ||
@@ -183,16 +189,15 @@ function WorkflowGraph({ form }) {
     const on = branchOn(i);
     const col = on ? RED : GREY;
     const dash = on ? "0" : "5 4";
-    const cx = scx(i);
-    const bendY = laneY - 18;
-    // elbow from stage bottom down into the Rejected node's top
-    const targetX = i === 2 ? rjCX - 28 : rjCX + 28;
-    const d = `M ${cx} ${TOP + NH} V ${bendY} H ${targetX} V ${rjY}`;
+    // elbow from stage right edge across to the reject lane, then into the
+    // Rejected node (top from division, bottom from owner)
+    const enterY = i === 2 ? rjY : rjY + rjH;
+    const d = `M ${nRight} ${nmid(i)} H ${rjCX} V ${enterY}`;
     return (
       <g>
         <path d={d} fill="none" stroke={col} strokeWidth={2} strokeDasharray={dash}
           markerEnd={on ? "url(#awfR)" : "url(#awfG0)"} />
-        <text x={cx + 6} y={TOP + NH + 16} fontSize="10" fontWeight="700" fill={col}>Reject</text>
+        <text x={nRight + 8} y={nmid(i) - 5} fontSize="10" fontWeight="700" fill={col}>Reject</text>
       </g>
     );
   };
@@ -211,12 +216,12 @@ function WorkflowGraph({ form }) {
             ))}
           </defs>
 
-          {/* main flow connectors */}
+          {/* main flow connectors (vertical) */}
           {FLOW_STEPS.slice(0, -1).map((_, i) => {
             const passed = activeIdx >= 0 && i < activeIdx;
             const col = passed ? GREEN : GREY;
             return (
-              <line key={`c${i}`} x1={sx(i) + NW} y1={topMid} x2={sx(i + 1)} y2={topMid}
+              <line key={`c${i}`} x1={ncx} y1={ny(i) + NH} x2={ncx} y2={ny(i + 1)}
                 stroke={col} strokeWidth={2}
                 markerEnd={passed ? "url(#awfArrGreen)" : "url(#awfArr)"} />
             );
@@ -235,23 +240,22 @@ function WorkflowGraph({ form }) {
 
           {isRejected && (
             <>
-              {/* Rejected → Returned to Vendor */}
-              <line x1={rjX} y1={laneMid} x2={rvX + rvW} y2={laneMid}
-                stroke={RED} strokeWidth={2} markerEnd="url(#awfR)" />
+              {/* Rejected → Returned to Vendor (up the reject lane) */}
+              <path d={`M ${rjX + 30} ${rjY} V ${retY + NH}`} fill="none" stroke={RED}
+                strokeWidth={2} markerEnd="url(#awfR)" />
               {/* Returned to Vendor node */}
-              <rect x={rvX} y={rvY} width={rvW} height={laneH} rx={10}
+              <rect x={rjX} y={retY} width={rjW} height={NH} rx={10}
                 fill="#fdecea" stroke={RED} strokeWidth={2} />
-              <text x={rvCX} y={rvY + laneH / 2} textAnchor="middle" dominantBaseline="middle"
+              <text x={rjCX} y={retY + NH / 2} textAnchor="middle" dominantBaseline="middle"
                 fontSize="11" fontWeight="700" fill={RED}>
-                <tspan x={rvCX} dy="-0.15em">Returned to Vendor</tspan>
-                <tspan x={rvCX} dy="1.2em" fontWeight="500">Resubmit required</tspan>
+                <tspan x={rjCX} dy="-0.15em">Returned to Vendor</tspan>
+                <tspan x={rjCX} dy="1.2em" fontWeight="500">Resubmit required</tspan>
               </text>
-              {/* Returned to Vendor → loop back up to Ready for Approval */}
-              <path d={`M ${rvCX} ${rvY} V ${TOP + NH}`} fill="none" stroke={RED}
+              {/* Returned to Vendor → loop back to Ready for Approval */}
+              <line x1={rjX} y1={nmid(1)} x2={nRight} y2={nmid(1)} stroke={RED}
                 strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#awfR)" />
-              <text x={rvCX + 6} y={(rvY + TOP + NH) / 2} fontSize="10" fontWeight="700" fill={RED}>
-                Resubmit
-              </text>
+              <text x={(rjX + nRight) / 2} y={nmid(1) - 6} textAnchor="middle"
+                fontSize="10" fontWeight="700" fill={RED}>Resubmit</text>
             </>
           )}
 
@@ -872,6 +876,15 @@ export default function ApprovalPanel({ activity, form, editable, divisions, onC
             Graph
           </button>
         </div>
+        <button
+          type="button"
+          className="pmis-awf-refresh"
+          title="Refresh workflow"
+          disabled={busy}
+          onClick={() => { if (typeof onTransition === "function") onTransition(); }}
+        >
+          ↻ Refresh
+        </button>
         <span className="pmis-awf-panel__state">
           State: <b>{APPROVAL_STATE_LABELS[state] || state}</b>
         </span>

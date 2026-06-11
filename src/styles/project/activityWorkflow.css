@@ -849,8 +849,9 @@
 .pmis-awf-graph__svg {
   display: block;
   width: 100%;
-  min-width: 760px;
+  max-width: 440px;
   height: auto;
+  margin: 0 auto;
   font-family: inherit;
 }
 .pmis-awf-graph__legend {
@@ -874,3 +875,18 @@
 .pmis-awf-graph__sw--active { border-color: #d32f2f; background: #fff; }
 .pmis-awf-graph__sw--todo { border-color: #cdd7e6; background: #f7f9fc; }
 .pmis-awf-graph__sw--reject { border-color: #d32f2f; border-style: dashed; background: #fdecea; }
+
+/* ─── Refresh button (workflow panel header) ─── */
+.pmis-awf-refresh {
+  border: 1px solid #d7e3f4;
+  background: #f3f7fd;
+  color: #0b3c88;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pmis-awf-refresh:hover:not(:disabled) { background: #e4eefb; border-color: #c4d3e8; }
+.pmis-awf-refresh:disabled { opacity: 0.55; cursor: not-allowed; }
