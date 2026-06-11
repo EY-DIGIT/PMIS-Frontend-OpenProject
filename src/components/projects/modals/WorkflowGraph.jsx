@@ -80,6 +80,23 @@ export default function WorkflowGraph({ form, divisions }) {
   const rejIdx = ownerStageReject ? 4 : 2;
   const activeIdx = FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
+  /* How far the workflow has been approved/passed — those stages stay GREEN
+     even after a later rejection (where activeIdx is -1). */
+  const ownerApproved =
+    String((form && form.ownerApproval && form.ownerApproval.status) || "").toLowerCase() ===
+    "approved";
+  const submitted = state !== "idle" || divApprovals.length > 0;
+  const doneIdx =
+    state === "completed"
+      ? 5
+      : ownerApproved
+        ? 4
+        : allDivisionsApproved || state === "division_approved" || state === "pending_owner"
+          ? 3
+          : submitted
+            ? 1
+            : 0;
+
   /* Where a rejection routes to: the owner can send it back to the vendor
      (full restart) or to specific Concerned Divisions for re-examination;
      a division rejection goes back to the vendor to resubmit. */
@@ -110,9 +127,8 @@ export default function WorkflowGraph({ form, divisions }) {
 
   const isCompleted = state === "completed";
   const kindOf = (i) => {
-    if (isCompleted) return "done";
-    if (i === activeIdx) return "active";
-    if (activeIdx >= 0 && i < activeIdx) return "done";
+    if (i <= doneIdx) return "done"; // approved/passed → green (stays green after a later reject)
+    if (!isRejected && i === activeIdx) return "active";
     return "todo";
   };
 
@@ -159,7 +175,7 @@ export default function WorkflowGraph({ form, divisions }) {
             ))
           )}
         </text>
-        {i === activeIdx && !isCompleted && (
+        {kindOf(i) === "active" && (
           <circle cx={x + NW - 3} cy={y + 3} r={6} fill={RED} stroke="#fff" strokeWidth={2} />
         )}
       </g>
@@ -206,8 +222,8 @@ export default function WorkflowGraph({ form, divisions }) {
           {/* main flow connectors (vertical) + the action that drives each
              transition, labelled beside the arrow. */}
           {FLOW_STEPS.slice(0, -1).map((_, i) => {
-            const passed = activeIdx >= 0 && i < activeIdx;
-            const isNext = i === activeIdx; // the action the user does next
+            const passed = i < doneIdx; // both ends approved/passed → green
+            const isNext = !isRejected && i === activeIdx; // the action the user does next
             // Rows 2 (Concerned Division) and 4 (Owner Review) exit on the
             // APPROVE outcome — draw the forward arrow green and labelled
             // "✓ Approve".
