@@ -566,10 +566,12 @@ export default function MilestoneConfigPage({ mode }) {
     if (nodeUid) params.set("nodeUid", nodeUid);
     navigate(`${configBase}/node?${params.toString()}`);
   }
-  /* Close the form — return to the milestone list. */
+  /* Close the form — go one step back to whichever page opened it (the
+     milestone list, or e.g. an Approval Inbox if the user came from there)
+     rather than always landing on the config list. */
   function closeNodeModal() {
     setModalCtx(null);
-    if (isNodeRoute) navigate(configBase);
+    if (isNodeRoute) navigate(-1);
   }
 
   function saveNodeFromModal(formData, ctxArg) {
