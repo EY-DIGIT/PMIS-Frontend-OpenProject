@@ -148,6 +148,11 @@ export default function MilestoneConfigPage({ mode }) {
   });
 
   const project = isOnboarding ? draft : (apiProjectLocal || realProject);
+  // loadMilestonesFromApi() needs the project object to already exist (it
+  // bails otherwise). When arriving directly via URL (e.g. from the
+  // Approval Inbox) the store is empty on mount, so the tree must be
+  // (re)loaded once the project finishes loading.
+  const projectLoaded = !!project;
 
   const totalMilestones = project ? safeArray(project.milestones).length : 0;
   const effectivePageSize = pageSize > 0 ? pageSize : Math.max(totalMilestones, 1);
@@ -380,9 +385,9 @@ export default function MilestoneConfigPage({ mode }) {
   }
 
   useEffect(() => {
-    if (pid) loadMilestonesFromApi();
+    if (pid && projectLoaded) loadMilestonesFromApi();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pid]);
+  }, [pid, projectLoaded]);
 
   if (!project) {
     if (restoring || projectLoading) {
