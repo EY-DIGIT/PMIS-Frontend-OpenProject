@@ -5,7 +5,6 @@
    action (no toolbar / stepper). Driven purely by fetched workflow data.
    ══════════════════════════════════════════════════════════════════ */
 import React, { useEffect, useState } from "react";
-import ActivityAuditTrail from "./modals/ActivityAuditTrail";
 import WorkflowGraph from "./modals/WorkflowGraph";
 import {
   getProcessInstances,
@@ -72,9 +71,81 @@ function deriveLastRejection(events) {
   return { byKind, byName, reason, revertTo, revertDivisions };
 }
 
+function cap(s) {
+  const x = String(s || "");
+  return x ? x[0].toUpperCase() + x.slice(1) : x;
+}
+
+/* Read-only vertical stepper of the approval stages, derived from the
+   workflow state. Shown in place of the audit trail in the review pages. */
+const STEPPER_STAGES = [
+  { key: "ready", label: "Ready for Approval", states: ["ready_for_approval"] },
+  { key: "division", label: "Concerned Division Review", states: ["pending_division"] },
+  { key: "owner", label: "Activity Owner Review", states: ["pending_owner", "division_approved"] },
+  { key: "completed", label: "Activity Completed", states: ["completed"] },
+];
+
+function WorkflowStepper({ form }) {
+  const state = String((form && form.approvalState) || "idle");
+  const divs = safeArray(form && form.divisionApprovals);
+  const owner = form && form.ownerApproval;
+  const divisionRejected = divs.some((d) => String(d.status || "").toLowerCase() === "rejected");
+  const ownerRejected = String((owner && owner.status) || "").toLowerCase() === "rejected";
+  const isCompleted = state === "completed";
+  const activeIdx = STEPPER_STAGES.findIndex((s) => s.states.includes(state));
+
+  const stageClass = (i, stage) => {
+    const rejected =
+      (stage.key === "division" && divisionRejected) ||
+      (stage.key === "owner" && ownerRejected);
+    if (rejected) return "pmis-awf-step--rejected";
+    if (isCompleted) return "pmis-awf-step--done";
+    if (i === activeIdx) return "pmis-awf-step--active";
+    if (activeIdx >= 0 && i < activeIdx) return "pmis-awf-step--done";
+    return "";
+  };
+
+  return (
+    <div className="pmis-awf-stepper">
+      {STEPPER_STAGES.map((stage, i) => {
+        const cls = stageClass(i, stage);
+        const done = cls.includes("done");
+        const rejected = cls.includes("rejected");
+        const active = cls.includes("active");
+        const marker = rejected ? "✕" : done ? "✓" : i + 1;
+        return (
+          <div key={stage.key} className={`pmis-awf-step ${cls}`}>
+            <span className="pmis-awf-step__marker">{marker}</span>
+            <div className="pmis-awf-step__body">
+              <div className="pmis-awf-step__title">{stage.label}</div>
+              {stage.key === "division" && divs.length > 0 ? (
+                <div className="pmis-awf-targets">
+                  {divs.map((d, j) => (
+                    <div key={`${d.division}-${j}`} className="pmis-awf-target">
+                      <span>{d.division}</span>
+                      <span className={`pmis-awf-status-pill pmis-awf-status-pill--${String(d.status || "pending").toLowerCase()}`}>
+                        {cap(d.status || "pending")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : stage.key === "owner" && owner && owner.status ? (
+                <div className="pmis-awf-step__sub">Owner decision: {cap(owner.status)}</div>
+              ) : (
+                <div className="pmis-awf-step__sub">
+                  {rejected ? "Rejected" : done ? "Done" : active ? "In progress" : "Pending"}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ActivityWorkflowViewer({ activityId, concernedDivisions = [] }) {
-  const [view, setView] = useState("timeline");
-  const [processInstances, setProcessInstances] = useState([]);
+  const [view, setView] = useState("stepper");
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -95,10 +166,6 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
         const auditLogs = auditRes.status === "fulfilled" && Array.isArray(auditRes.value) ? auditRes.value : [];
         const gate = gateRes.status === "fulfilled" && gateRes.value && typeof gateRes.value === "object" ? gateRes.value : null;
         const tl = tlRes.status === "fulfilled" && Array.isArray(tlRes.value) ? tlRes.value : [];
-
-        // Timeline list source: prefer the purpose-built timeline feed,
-        // then audit logs, then legacy process instances.
-        setProcessInstances(tl.length ? tl : auditLogs.length ? auditLogs : instances);
 
         const cd = concernedDivisions || [];
         let st = null, divs = [], owner = null;
@@ -138,10 +205,10 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
         <div className="pmis-awf-viewtoggle">
           <button
             type="button"
-            className={`pmis-awf-viewtoggle__btn${view === "timeline" ? " is-active" : ""}`}
-            onClick={() => setView("timeline")}
+            className={`pmis-awf-viewtoggle__btn${view === "stepper" ? " is-active" : ""}`}
+            onClick={() => setView("stepper")}
           >
-            Timeline
+            Stepper
           </button>
           <button
             type="button"
@@ -164,8 +231,10 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
 
       {view === "graph" ? (
         <WorkflowGraph form={form} />
+      ) : loading ? (
+        <div className="pmis-awf-audit__empty">Loading workflow…</div>
       ) : (
-        <ActivityAuditTrail form={form} processInstances={processInstances} loading={loading} error="" />
+        <WorkflowStepper form={form} />
       )}
     </div>
   );
