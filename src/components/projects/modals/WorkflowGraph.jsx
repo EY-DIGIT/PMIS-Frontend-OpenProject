@@ -85,7 +85,9 @@ export default function WorkflowGraph({ form, divisions }) {
   // the "Concerned Division" stage; the main flow shifts right to make room.
   const DIVB_W = 132, DIVB_H = 32, DIVB_GAP = 8;
   const hasDivs = divApprovals.length > 0;
-  const divLaneW = hasDivs ? DIVB_W + 52 : 0;
+  // The left lane holds the concerned-division boxes AND the owner box, so
+  // it's always reserved.
+  const divLaneW = DIVB_W + 52;
   const nx = PADX + divLaneW, ncx = nx + NW / 2, nRight = nx + NW;
   const ny = (i) => PADY + i * (NH + VGAP);
   const nmid = (i) => ny(i) + NH / 2;
@@ -110,6 +112,14 @@ export default function WorkflowGraph({ form, divisions }) {
       : st === "rejected"
         ? { stroke: "#d32f2f", fill: "#fdecea", text: "#b3261e" }
         : { stroke: "#e0a93b", fill: "#fff7e8", text: "#8a5a00" };
+
+  // owner box (left lane, aligned with Owner Review stage / row 4)
+  const ownerStatus = String(
+    (form && form.ownerApproval && form.ownerApproval.status) || "pending"
+  ).toLowerCase();
+  const ownerDivLabel =
+    form && form.ownerDivision ? divisionName(form.ownerDivision) : "Activity Owner";
+  const ownerBoxY = nmid(4) - DIVB_H / 2;
 
   const rjW = 140, rjX = nRight + 78, rjCX = rjX + rjW / 2;
   const rjY = ny(3), rjH = NH;
@@ -262,8 +272,45 @@ export default function WorkflowGraph({ form, divisions }) {
                   </g>
                 );
               })}
+              {/* routing hint for the divisions */}
+              <text x={divbX} y={divStartY + divTotalH + 13} fontSize="8.5" fill="#1b6a3a" fontWeight="700">
+                ✓ approve → forward
+              </text>
+              <text x={divbX} y={divStartY + divTotalH + 25} fontSize="8.5" fill="#b3261e" fontWeight="700">
+                ✕ reject → back to vendor
+              </text>
             </>
           )}
+
+          {/* Owner box (left lane, at the Owner Review stage) */}
+          {(() => {
+            const c = divBoxColor(ownerStatus);
+            const my = ownerBoxY + DIVB_H / 2;
+            const busX = nx - 26;
+            const glyph = ownerStatus === "approved" ? "✓" : ownerStatus === "rejected" ? "✕" : "⏳";
+            return (
+              <>
+                <text x={divbX} y={ownerBoxY - 8} fontSize="9.5" fontWeight="800"
+                  fill="#66788f" letterSpacing="0.4">OWNER</text>
+                <path d={`M ${divbX + DIVB_W} ${my} H ${busX} V ${nmid(4)} H ${nx}`}
+                  fill="none" stroke={c.stroke} strokeWidth={1.5}
+                  markerEnd={ownerStatus === "approved" ? "url(#awfArrGreen)" : ownerStatus === "rejected" ? "url(#awfR)" : "url(#awfAmber)"}
+                  opacity="0.85" />
+                <rect x={divbX} y={ownerBoxY} width={DIVB_W} height={DIVB_H} rx={7}
+                  fill={c.fill} stroke={c.stroke} strokeWidth={1.5} />
+                <text x={divbX + 9} y={my} dominantBaseline="middle" fontSize="10.5"
+                  fontWeight="700" fill={c.text}>
+                  {glyph} {String(ownerDivLabel).slice(0, 14)}
+                </text>
+                <text x={divbX} y={ownerBoxY + DIVB_H + 12} fontSize="8.5" fill="#1b6a3a" fontWeight="700">
+                  ✓ approve → completed
+                </text>
+                <text x={divbX} y={ownerBoxY + DIVB_H + 24} fontSize="8.5" fill="#b3261e" fontWeight="700">
+                  ✕ reject → back to vendor
+                </text>
+              </>
+            );
+          })()}
 
           {FLOW_STEPS.map((s, i) => <Node key={s.key} i={i} />)}
         </svg>
