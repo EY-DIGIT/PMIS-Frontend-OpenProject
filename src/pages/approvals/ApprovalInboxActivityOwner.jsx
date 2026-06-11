@@ -17,6 +17,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDateTime } from "../../utils/project/helpers";
 import { tokenStore } from "../../api/client";
+import ActivityWorkflowViewer from "../../components/projects/ActivityWorkflowViewer";
 import {
   getActivityWorkflowInbox,
   getActivityWorkflowInboxDetail,
@@ -639,6 +640,12 @@ function DetailView({
         </div>{/* left column */}
 
         <div className="pmis-apinbox-col">
+      <div className="pmis-apinbox-section">
+        <div className="pmis-apinbox-section-head">
+          <h3>Activity Workflow</h3>
+        </div>
+        <ActivityWorkflowViewer activityId={item.activityId} />
+      </div>
       {item.submissions.length > 0 ? (
         <div className="pmis-apinbox-section">
           <div className="pmis-apinbox-section-head">
