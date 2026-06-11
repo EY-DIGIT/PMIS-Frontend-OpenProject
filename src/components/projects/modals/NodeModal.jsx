@@ -332,7 +332,13 @@ export default function NodeModal({
       setFullscreen(false);
       setSaveError("");
     }
-  }, [open, kind, node, mode, parentNode]);
+    /* Key on the node's STABLE id (not the object reference): a background
+       tree reload (loadMilestonesFromApi → commitUpdate) hands us a new
+       node object with the same id, and re-initialising here would wipe the
+       approval state the workflow fetch derived. Re-init only when a
+       genuinely different node/parent opens. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, kind, node && (node.apiId || node.uid), mode, parentNode && (parentNode.apiId || parentNode.uid)]);
 
   useEffect(() => {
     if (!open || kind === "milestone" || !getToken()) return;
