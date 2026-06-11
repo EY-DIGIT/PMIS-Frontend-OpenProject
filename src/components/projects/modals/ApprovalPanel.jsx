@@ -95,45 +95,58 @@ function TargetRow({ icon = "🏛️", name, status, decidedAt, reason, actions 
    done (green), later ones pending (grey). Shown in place of the stepper
    when the user toggles to the Graph view. */
 const FLOW_STEPS = [
-  { key: "start", label: "Start", states: ["idle"] },
-  { key: "ready", label: "Ready for Approval", states: ["ready_for_approval"] },
-  { key: "division", label: "Concerned Division Review", states: ["pending_division"] },
-  { key: "divApproved", label: "Divisions Approved", states: ["division_approved"] },
-  { key: "owner", label: "Owner Review", states: ["pending_owner"] },
-  { key: "completed", label: "Completed", states: ["completed"] },
+  { key: "start", label: "Start", sub: "Activity started", states: ["idle"] },
+  { key: "ready", label: "Ready for Approval", sub: "Submitted", states: ["ready_for_approval"] },
+  { key: "division", label: "Concerned Division", sub: "Division review", states: ["pending_division"], reject: "division" },
+  { key: "divApproved", label: "Divisions Approved", sub: "All divisions approved", states: ["division_approved"] },
+  { key: "owner", label: "Owner Review", sub: "Activity owner decides", states: ["pending_owner"], reject: "owner" },
+  { key: "completed", label: "Completed", sub: "Activity completed", states: ["completed"] },
 ];
 
 function WorkflowGraph({ form }) {
   const state = String((form && form.approvalState) || "idle");
   const isRejected = state === "rejected_to_vendor";
+  const rejection = (form && form.lastRejection) || {};
+  const rejectedFrom = String(rejection.byKind || "").toLowerCase(); // division | owner | vendor
   const activeIdx = isRejected
-    ? 0
+    ? -1
     : FLOW_STEPS.findIndex((s) => s.states.includes(state));
 
   return (
     <div className="pmis-awf-graph">
-      {isRejected && (
-        <div className="pmis-awf-graph__banner">
-          ✕ Rejected — returned to vendor for resubmission
-        </div>
-      )}
-      <div className="pmis-awf-graph__row">
+      <div className="pmis-awf-graph__flow">
         {FLOW_STEPS.map((s, i) => {
-          const done = activeIdx >= 0 && i < activeIdx && !isRejected;
+          const done = activeIdx >= 0 && i < activeIdx;
           const active = i === activeIdx;
-          const variant = active
-            ? "pmis-awf-graph__node--active"
-            : done
-            ? "pmis-awf-graph__node--done"
-            : "pmis-awf-graph__node--todo";
+          const cls = active ? "active" : done ? "done" : "todo";
+          /* A reject branch lights up red if the activity was rejected at
+             this stage. When byKind isn't recorded, assume the division
+             stage (the most common rejection source). */
+          const rejHere =
+            isRejected &&
+            ((s.reject === "division" && (rejectedFrom === "division" || !rejectedFrom)) ||
+              (s.reject === "owner" && rejectedFrom === "owner"));
           return (
             <React.Fragment key={s.key}>
-              <div className={`pmis-awf-graph__node ${variant}`}>
-                {active && <span className="pmis-awf-graph__dot" aria-hidden="true" />}
-                <span className="pmis-awf-graph__icon" aria-hidden="true">
-                  {done ? "✓" : active ? "●" : "○"}
-                </span>
-                <span className="pmis-awf-graph__label">{s.label}</span>
+              <div className="pmis-awf-graph__col">
+                <div className={`pmis-awf-graph__node pmis-awf-graph__node--${cls}`}>
+                  {active && <span className="pmis-awf-graph__dot" aria-hidden="true" />}
+                  <span className="pmis-awf-graph__icon" aria-hidden="true">
+                    {done ? "✓" : active ? "●" : "○"}
+                  </span>
+                  <span className="pmis-awf-graph__text">
+                    <span className="pmis-awf-graph__label">{s.label}</span>
+                    {s.sub && <span className="pmis-awf-graph__sub">{s.sub}</span>}
+                  </span>
+                </div>
+                {s.reject && (
+                  <div className={`pmis-awf-graph__branch${rejHere ? " is-on" : ""}`}>
+                    <span className="pmis-awf-graph__down" aria-hidden="true">▼</span>
+                    <div className={`pmis-awf-graph__reject${rejHere ? " is-on" : ""}`}>
+                      ✕ Reject
+                    </div>
+                  </div>
+                )}
               </div>
               {i < FLOW_STEPS.length - 1 && (
                 <span className="pmis-awf-graph__arrow" aria-hidden="true">→</span>
@@ -142,10 +155,22 @@ function WorkflowGraph({ form }) {
           );
         })}
       </div>
+
+      {isRejected && (
+        <div className="pmis-awf-graph__return">
+          <span className="pmis-awf-graph__return-arrow" aria-hidden="true">↩</span>
+          <div className="pmis-awf-graph__return-node">
+            <b>Returned to Vendor</b>
+            <span>Resubmit required{rejection.reason ? ` — ${rejection.reason}` : ""}</span>
+          </div>
+        </div>
+      )}
+
       <div className="pmis-awf-graph__legend">
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--done" /> Completed</span>
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--active" /> Current</span>
         <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--todo" /> Pending</span>
+        <span><i className="pmis-awf-graph__sw pmis-awf-graph__sw--reject" /> Rejection</span>
       </div>
     </div>
   );
