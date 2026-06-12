@@ -9,6 +9,17 @@ function today() {
     return new Date().toISOString().slice(0, 10);
 }
 
+// Last day of the one-quarter window starting at `iso` (start + 3 months − 1 day).
+// Used to cap the reporting-period end date.
+function quarterEndISO(iso) {
+    if (!iso) return undefined;
+    const d = new Date(`${iso}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return undefined;
+    d.setMonth(d.getMonth() + 3);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+}
+
 // Pull the collection array regardless of which envelope shape the API uses.
 function extractElements(payload) {
     const el =
@@ -981,8 +992,8 @@ export default function ActivitySlasPage() {
                 ...s,
                 schema,
                 loadingSchema: false,
-                period_start: schema?.start_default || s.period_start,
-                period_end: schema?.end_default || s.period_end,
+                period_start: schema?.period?.start_default || schema?.start_default || s.period_start,
+                period_end: "", // user picks the end within one quarter of the start
                 values: {},
             } : s));
         } catch (err) {
@@ -1025,6 +1036,11 @@ export default function ActivitySlasPage() {
             if (missing.length) {
                 setSingleEvalError(`Please enter: ${missing.join(", ")}.`);
                 return; // `finally` resets the loading flag
+            }
+            const maxEnd = quarterEndISO(singleEval.period_start);
+            if (singleEval.period_end < singleEval.period_start || (maxEnd && singleEval.period_end > maxEnd)) {
+                setSingleEvalError(`Period End must be between ${singleEval.period_start} and ${maxEnd} (one quarter).`);
+                return;
             }
             const url = schema.submit?.url
                 ? `${baseUrl}${schema.submit.url}`
@@ -1079,8 +1095,10 @@ export default function ActivitySlasPage() {
             const groups = refs.map((ref, i) => {
                 const sc = schemas[i];
                 const m = byRef.get(ref);
-                if (sc?.start_default) ps = sc.start_default;
-                if (sc?.end_default) pe = sc.end_default;
+                const scStart = sc?.period?.start_default || sc?.start_default;
+                const scEnd = sc?.period?.end_default || sc?.end_default;
+                if (scStart) ps = scStart;
+                if (scEnd) pe = scEnd;
                 return {
                     sla_ref: ref,
                     sla_title: m?.sla_title || sc?.sla_title || ref,
@@ -1475,12 +1493,12 @@ export default function ActivitySlasPage() {
                             <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>SLAs attached to this activity — view the image, edit dates, or evaluate severity.</div>
                         </div>
                         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                            {/* <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                            <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
                                 <input type="checkbox" style={{ width: "auto" }} checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active only
                             </label>
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadMappings} disabled={mappingsLoading}>
                                 {mappingsLoading ? "Loading…" : "↻ Reload"}
-                            </button> */}
+                            </button>
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>
                                 + Map SLA
                             </button>
@@ -1599,12 +1617,20 @@ export default function ActivitySlasPage() {
                                             </div>
                                             <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
                                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                                    <label>{singleEval.schema.label_start || "Period Start"}</label>
-                                                    <input type="date" value={singleEval.period_start} onChange={(e) => setSingleEval((s) => ({ ...s, period_start: e.target.value }))} />
+                                                    <label>{singleEval.schema.period?.label_start || singleEval.schema.label_start || "Period Start"}</label>
+                                                    <input type="date" value={singleEval.period_start} readOnly style={{ background: "#f1f6fd" }} />
+                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Fixed start of the reporting period.</div>
                                                 </div>
                                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                                    <label>{singleEval.schema.label_end || "Period End"}</label>
-                                                    <input type="date" value={singleEval.period_end} onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))} />
+                                                    <label>{singleEval.schema.period?.label_end || singleEval.schema.label_end || "Period End"}</label>
+                                                    <input
+                                                        type="date"
+                                                        value={singleEval.period_end}
+                                                        min={singleEval.period_start || undefined}
+                                                        max={quarterEndISO(singleEval.period_start)}
+                                                        onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))}
+                                                    />
+                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Pick an end date within one quarter of the start.</div>
                                                 </div>
                                             </div>
                                         </div>
