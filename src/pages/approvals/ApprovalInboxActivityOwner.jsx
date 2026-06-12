@@ -303,11 +303,20 @@ export default function ApprovalInboxActivityOwner() {
     setRejection((s) => ({ ...s, reason: text }));
   }
 
+  /* Concerned divisions the owner can route a re-examination to (every
+     breakdown row that isn't the owner's own). When the payload carries
+     none, reverting to "Concerned Divisions" sends it back to all of them,
+     so no explicit pick is required. */
+  const ownerConsentDivisions = (activeDetail?.statusBreakdown || [])
+    .filter((b) => !b.isYou)
+    .map((b) => b.divisionName || b.divisionCode);
+
   const canConfirmReject = (() => {
     const reasonOk = rejection.reason.trim().length >= 1;
     let targetOk = false;
     if (rejection.revertKind === "vendor") targetOk = true;
-    else if (rejection.revertKind === "divisions") targetOk = rejection.revertDivisions.length > 0;
+    else if (rejection.revertKind === "divisions")
+      targetOk = ownerConsentDivisions.length === 0 || rejection.revertDivisions.length > 0;
     return reasonOk && targetOk;
   })();
 
@@ -765,15 +774,15 @@ function DetailView({
                 </div>
               )}
               {rejection.revertKind === "divisions" && (
-                <>
+                consentDivisions.length === 0 ? (
                   <div className="pmis-apinbox-panel-hint">
-                    Select one or more divisions for re-examination.
+                    The workflow will revert to the concerned divisions for re-examination.
                   </div>
-                  {consentDivisions.length === 0 ? (
+                ) : (
+                  <>
                     <div className="pmis-apinbox-panel-hint">
-                      No consent divisions are configured for this activity.
+                      Select one or more divisions for re-examination.
                     </div>
-                  ) : (
                     <div className="pmis-apinbox-checklist">
                       {consentDivisions.map((d) => {
                         const checked = rejection.revertDivisions.includes(d);
@@ -789,8 +798,8 @@ function DetailView({
                         );
                       })}
                     </div>
-                  )}
-                </>
+                  </>
+                )
               )}
               {!rejection.revertKind && (
                 <div className="pmis-apinbox-panel-hint">
