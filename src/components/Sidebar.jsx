@@ -397,7 +397,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           onClick={() => navigate("/assistant")}
         >
           <FiMessageSquare size={ICON_SIZE} />
-          <span className="pmis-text">Assistant</span>
+          <span className="pmis-text">Aadhar Genius</span>
         </a>
       </div>
     </div>
