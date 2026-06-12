@@ -672,8 +672,8 @@ export default function ActivitySlasPage() {
 
     // ---- Two-view flow: the mapping screen (default) and the SLA picker. ----
     const [view, setView] = useState("mapping"); // "mapping" | "picker"
-    // Whether the mapping (effective dates) editor is expanded in the SLA
-    // Details panel.
+    // Whether the "Map SLA to Activity" form (effective window + overrides) is
+    // expanded in the details panel.
     const [showMappingEdit, setShowMappingEdit] = useState(false);
     // Width (px) of the SLA details side-panel — user-resizable via the drag handle.
     const [panelWidth, setPanelWidth] = useState(460);
@@ -704,9 +704,14 @@ export default function ActivitySlasPage() {
     // ---- Step 3: create mapping ----
     const [activityIdInput, setActivityIdInput] = useState(() => searchParams.get("activityId") || "");
     const [effFrom, setEffFrom] = useState(today());
-    const [effUntil, setEffUntil] = useState(today());
+    const [effUntil, setEffUntil] = useState("");
     const [createLoading, setCreateLoading] = useState(false);
     const [createMessage, setCreateMessage] = useState("");
+    // Schema-driven mapping form (GET …/mapping-form-schema): question,
+    // explanation, effective_from default, dynamic override inputs, submit.
+    const [mapSchema, setMapSchema] = useState(null);
+    const [mapSchemaLoading, setMapSchemaLoading] = useState(false);
+    const [mapValues, setMapValues] = useState({}); // override input values
 
     // ---- Step 4: activity mappings + edit ----
     const [mappings, setMappings] = useState([]);
@@ -789,6 +794,8 @@ export default function ActivitySlasPage() {
         setSlaDetail(null);
         setDetailError("");
         setDetailLoading(true);
+        setCreateMessage("");
+        loadMapSchema(slaId); // fetch the mapping form for this SLA + activity
         try {
             const res = await authorizedFetch(
                 `${baseUrl}/api/v3/sla-masters/${encodeURIComponent(slaId)}`,
@@ -803,24 +810,74 @@ export default function ActivitySlasPage() {
         }
     }
 
+    // GET /sla-masters/{sla_id}/mapping-form-schema?activity_id=… — drives the
+    // "Map SLA to Activity" form (effective_from default + any override inputs).
+    async function loadMapSchema(slaId) {
+        setMapSchema(null);
+        setMapValues({});
+        const activityId = activityIdInput.trim();
+        if (!activityId) return;
+        setMapSchemaLoading(true);
+        try {
+            const res = await authorizedFetch(
+                `${baseUrl}/api/v3/sla-masters/${encodeURIComponent(slaId)}/mapping-form-schema?activity_id=${encodeURIComponent(activityId)}`,
+                { method: "GET", headers: { Accept: "application/json" } }
+            );
+            const payload = await readJson(res);
+            const schema = payload?.data || payload;
+            setMapSchema(schema);
+            if (schema?.effective_from_default) setEffFrom(schema.effective_from_default);
+        } catch {
+            setMapSchema(null); // fall back to the plain effective-dates form
+        } finally {
+            setMapSchemaLoading(false);
+        }
+    }
+
     // ---------------------------------------------------------------------------
-    // Step 3 — POST /api/v3/sla-activity-mappings
+    // Step 3 — POST /api/v3/sla-activity-mappings (schema-driven)
     // ---------------------------------------------------------------------------
     async function createMapping() {
-        if (!selectedSlaId) { setCreateMessage("Select an SLA first (Step 1)."); return; }
+        if (!selectedSlaId) { setCreateMessage("Select an SLA first."); return; }
         if (!activityIdInput.trim()) { setCreateMessage("Enter an Activity ID."); return; }
         setCreateLoading(true);
         setCreateMessage("");
         try {
+            // Collect any override inputs the mapping schema asked for.
+            const overrides = {};
+            const missing = [];
+            (Array.isArray(mapSchema?.inputs) ? mapSchema.inputs : []).forEach((inp) => {
+                const key = inp.name || inp.key;
+                let v = mapValues[key];
+                const t = String(inp.type || "").toLowerCase();
+                const isNum = (t === "number" || t === "money" || t === "integer");
+                if (v === "" || v === undefined || v === null) {
+                    if (inp.required) missing.push(inp.label || key);
+                    return; // omit empty (never send null)
+                }
+                if (isNum) {
+                    const n = Number(v);
+                    if (Number.isNaN(n)) { missing.push(`${inp.label || key} (must be a number)`); return; }
+                    v = n;
+                }
+                overrides[key] = v;
+            });
+            if (missing.length) { setCreateMessage(`Please enter: ${missing.join(", ")}.`); return; }
+
+            // Build the body from the schema's template when present.
+            const tmpl = mapSchema?.submit?.body_template || {};
             const body = {
-                activity_id: activityIdInput.trim(),
+                ...tmpl,
                 sla_id: selectedSlaId,
+                activity_id: activityIdInput.trim(),
                 effective_from: effFrom,
-                effective_until: effUntil,
-                overrides: {},
+                overrides: { ...(tmpl.overrides || {}), ...overrides },
             };
-            const res = await authorizedFetch(`${baseUrl}/api/v3/sla-activity-mappings`, {
-                method: "POST",
+            if (effUntil) body.effective_until = effUntil;
+
+            const url = mapSchema?.submit?.url ? `${baseUrl}${mapSchema.submit.url}` : `${baseUrl}/api/v3/sla-activity-mappings`;
+            const res = await authorizedFetch(url, {
+                method: mapSchema?.submit?.method || "POST",
                 headers: { "Content-Type": "application/json", Accept: "application/json" },
                 body: JSON.stringify(body),
             });
@@ -1150,6 +1207,8 @@ export default function ActivitySlasPage() {
         setSelectedSlaId("");
         setSlaDetail(null);
         setShowMappingEdit(false);
+        setMapSchema(null);
+        setMapValues({});
     }
     // Drag the splitter to resize the details panel (wider / narrower), tab-style.
     function startResize(e) {
@@ -1306,34 +1365,50 @@ export default function ActivitySlasPage() {
                         </div>
                     </div>
 
-                    {/* Map SLA to Activity — the activity mapping (activity + effective window)
-                    that gets POSTed. "Edit mapping" reveals the editable fields; the rest
-                    of the SLA fields would go under overrides (not built yet). */}
+                    {/* Map SLA to Activity — schema-driven form (GET …/mapping-form-schema).
+                        Collapsed shows a summary; "Edit mapping" reveals the effective
+                        window + any override inputs the SLA asks for. */}
                     <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#173e77", marginBottom: showMappingEdit ? 12 : 0 }}>
-                            Map SLA to Activity
-                            <span style={{ ...muted, fontWeight: 400, marginLeft: 8 }}>
-                                activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>
-                                {!showMappingEdit && ` · ${effFrom} → ${effUntil}`}
-                            </span>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: "#173e77" }}>
+                            {mapSchema?.question || "Map SLA to Activity"}
                         </div>
+                        <div style={{ fontSize: 12, ...muted, marginTop: 4 }}>
+                            Activity <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>
+                            {mapSchema?.applied_on_label ? <> · Applied on: <b style={{ color: "#173e77", fontWeight: 700 }}>{mapSchema.applied_on_label}</b></> : null}
+                            {!showMappingEdit && <> · {effFrom || "—"} → {effUntil || "—"}</>}
+                        </div>
+
                         {showMappingEdit && (
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Activity ID</label>
-                                    <input type="text" value={activityLabel} readOnly style={{ background: "#f1f6fd" }}
-                                    // onChange={(e) => setActivityIdInput(e.target.value)} 
-                                    />
+                            <>
+                                {mapSchema?.explanation && (
+                                    <div style={{ fontSize: 12, ...muted, marginTop: 8, lineHeight: 1.5 }}>{mapSchema.explanation}</div>
+                                )}
+                                {mapSchemaLoading && <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>Loading mapping form…</div>}
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14, marginTop: 12 }}>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Effective From</label>
+                                        <input type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
+                                    </div>
+                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                        <label>Effective Until <span style={{ ...muted, fontWeight: 400 }}>(optional)</span></label>
+                                        <input type="date" value={effUntil} onChange={(e) => setEffUntil(e.target.value)} />
+                                    </div>
+                                    {(Array.isArray(mapSchema?.inputs) ? mapSchema.inputs : []).map((inp) => {
+                                        const key = inp.name || inp.key;
+                                        return (
+                                            <div key={key} className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                                <label>
+                                                    {inp.label || key}
+                                                    {inp.required && <span style={{ color: "var(--uidai-pmis-red, #d32f2f)" }}> *</span>}
+                                                    {inp.unit ? <span style={{ ...muted, fontWeight: 400 }}> ({inp.unit})</span> : null}
+                                                </label>
+                                                <SchemaInput input={inp} value={mapValues[key]} onChange={(v) => setMapValues((mv) => ({ ...mv, [key]: v }))} />
+                                                {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Effective From</label>
-                                    <input type="date" value={effFrom} onChange={(e) => setEffFrom(e.target.value)} />
-                                </div>
-                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                    <label>Effective Until</label>
-                                    <input type="date" value={effUntil} onChange={(e) => setEffUntil(e.target.value)} />
-                                </div>
-                            </div>
+                            </>
                         )}
                     </div>
                     {createMessage && <Banner text={createMessage} />}
