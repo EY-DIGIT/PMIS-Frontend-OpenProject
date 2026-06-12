@@ -1392,14 +1392,20 @@ export default function ActivitySlasPage() {
             {view === "mapping" && (
                 <div className="uidai-pmis-card">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
-                        <div style={{ ...sectionHead, marginBottom: 0 }}>Activity SLA Mappings</div>
+                        <div>
+                            <div style={{ ...sectionHead, marginBottom: 0 }}>
+                                Activity SLA Mappings
+                                {mappings.length > 0 && <span style={{ marginLeft: 8, background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 9px", fontSize: 12, fontWeight: 800 }}>{mappings.length}</span>}
+                            </div>
+                            <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>SLAs attached to this activity — view the image, edit dates, or evaluate severity.</div>
+                        </div>
                         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                            <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+                            {/* <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
                                 <input type="checkbox" style={{ width: "auto" }} checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} /> Active only
                             </label>
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadMappings} disabled={mappingsLoading}>
                                 {mappingsLoading ? "Loading…" : "↻ Reload"}
-                            </button>
+                            </button> */}
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>
                                 + Map SLA
                             </button>
@@ -1418,15 +1424,16 @@ export default function ActivitySlasPage() {
                                 {mappingsLoading ? (
                                     <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
                                 ) : mappings.length === 0 ? (
-                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>
-                                        <div style={{ marginBottom: 10 }}>No mapped SLA — please map SLA.</div>
+                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 34, ...muted }}>
+                                        <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">📋</div>
+                                        <div style={{ marginBottom: 12, fontSize: 13 }}>No SLAs mapped to this activity yet.</div>
                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>+ Map SLA</button>
                                     </td></tr>
                                 ) : mappings.map((m) => {
                                     const isEditing = editingId === m.id;
                                     return (
                                         <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
-                                            <td style={{ fontFamily: "monospace", fontSize: 11, ...muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</td>
+                                            <td><span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</span></td>
                                             <td>{m.sla_title || "—"}</td>
                                             <td>{m.contract_type ? humanize(m.contract_type) : "—"}</td>
                                             <td>
@@ -1471,11 +1478,17 @@ export default function ActivitySlasPage() {
                     {/* Single-mapping evaluate */}
                     <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                            <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
+                            <div>
+                                <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
+                                <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>Score one SLA for a reporting period.</div>
+                            </div>
                             {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
                         </div>
                         {!singleEval ? (
-                            <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 12 }}>Click “Evaluate” on a mapping above to evaluate a single SLA.</div>
+                            <div style={{ padding: 26, textAlign: "center", ...muted, fontSize: 13 }}>
+                                <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⚡</div>
+                                Pick a mapping above and click <b style={{ color: "#173e77" }}>Evaluate</b> to score a single SLA.
+                            </div>
                         ) : (
                             <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
                                 <div style={{ flex: singleEvalResult !== null ? "1 1 380px" : "1 1 100%", minWidth: 0 }}>

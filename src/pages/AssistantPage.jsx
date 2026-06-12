@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiSend, FiX, FiUser } from "react-icons/fi";
 import Aadhaar from "../assets/Aadhaar.png";
+import { getToken } from "../api/auth";
 
 const WEBHOOK_URL =
   "http://10.1.151.228:5678/webhook/595b77a5-75ed-4793-88db-0c2a10e04c4f/chat";
@@ -22,12 +23,6 @@ const WEBHOOK_URL =
 // n8n instance id sent with each chat request (matches the working curl).
 const N8N_INSTANCE_ID =
   "fccf52d42441dd9f26257393c3e31924e0849f14611c04622f87dac4d51ca27a";
-
-// Auth token from the n8n session (the curl carried it as the `n8n-auth`
-// cookie). Browsers won't let a cross-origin fetch set the Cookie header,
-// so we forward it as a Bearer token instead.
-const N8N_AUTH_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImYxMTg3MTBiLTBjYmYtNDBlYy1iM2M1LWJiN2E0YTk4N2I4YyIsImhhc2giOiJRZXAwVGMrTmIzIiwiYnJvd3NlcklkIjoiYW5INkdzNGdGaFNZZWdWUHBFYmNoRUN4NVQrS2ZiRTQyYm1KQlh4RkZpND0iLCJ1c2VkTWZhIjpmYWxzZSwiaWF0IjoxNzgwODk4ODIzLCJleHAiOjE3ODE1MDM2MjN9.0RHYv2Vpl4-oEK9zZtUBPzpPxxut9Ur-vCL499o-XcI";
 
 const BRAND_GRADIENT = "linear-gradient(135deg, #173e77 0%, #1a8f99 100%)";
 
@@ -82,20 +77,24 @@ export default function AssistantPage() {
     setSending(true);
 
     try {
+      // Use the app's current session token (same one every other
+      // authorized request carries) so the webhook authenticates as the
+      // logged-in user instead of a stale hardcoded token.
+      const token = getToken();
       const res = await fetch(WEBHOOK_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "*/*",
           "X-Instance-Id": N8N_INSTANCE_ID,
-          Authorization: `Bearer ${N8N_AUTH_TOKEN}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           action: "sendMessage",
-          // Send the n8n auth token as the sessionId so the workflow can
-          // read it from the request body (the browser can't forward it as
-          // the n8n-auth cookie cross-origin).
-          sessionId: N8N_AUTH_TOKEN,
+          // Forward the session token in the body too so the workflow can
+          // read it there (the browser can't forward it as a cookie
+          // cross-origin).
+          sessionId: token,
           chatInput: text,
         }),
       });
