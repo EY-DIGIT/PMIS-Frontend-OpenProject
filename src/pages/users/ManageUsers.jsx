@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   getTeamPage,
   updateTeamPage,
-  listUsersByProjectOrg,
+  listAuthzUsersByRole,
   listUsersByDivision,
   listProjectOwnerCandidates,
   listProjectOwnerApproverCandidates,
@@ -270,9 +270,11 @@ export default function ManageTeam() {
 
   /* ─── Data + UI state ─── */
   const [userDirectory, setUserDirectory] = useState([]);
-  /* Users matched against the project's organization — drive the
-     Organization User section dropdowns. */
-  const [orgUsers, setOrgUsers] = useState([]);
+  /* Organization User dropdown sources, keyed by role label
+     (project_admin / project_member). Each role's list comes from the
+     authz service so the Project Admin and Project User dropdowns show
+     only the users actually holding that role on the project. */
+  const [orgUsersByRole, setOrgUsersByRole] = useState({});
   /* Users belonging to each division id we've fetched. Indexed by the
      numeric division id from the team-page response. */
   const [divisionUsersById, setDivisionUsersById] = useState({});
@@ -417,17 +419,23 @@ export default function ManageTeam() {
         if (!cancelled) setLoading(false);
 
         /* Background fetch — org users for the Organization User
-           section. Doesn't block render; dropdown shows whatever's
-           there until this resolves. */
-        listUsersByProjectOrg(projectId)
-          .then(normalizeUsersList)
-          .then((users) => {
-            if (!cancelled) setOrgUsers(users);
-          })
-          .catch((e) => {
-            // eslint-disable-next-line no-console
-            console.warn('[ManageTeam] org-user fetch failed:', e);
-          });
+           section, one call per role (Project Admin / Project User) so
+           each dropdown is scoped to users holding that role on the
+           project. Doesn't block render; dropdowns light up as their
+           role's list resolves. */
+        ORG_USER_ROLES.forEach(({ roleLabel }) => {
+          listAuthzUsersByRole(projectId, roleLabel)
+            .then(normalizeUsersList)
+            .then((users) => {
+              if (!cancelled) {
+                setOrgUsersByRole((prev) => ({ ...prev, [roleLabel]: users }));
+              }
+            })
+            .catch((e) => {
+              // eslint-disable-next-line no-console
+              console.warn(`[ManageTeam] org-user (${roleLabel}) fetch failed:`, e);
+            });
+        });
 
         /* Background fetch — owner division + every Concerned Division
            seen anywhere on the page. Each call resolves independently
@@ -1048,7 +1056,7 @@ export default function ManageTeam() {
                     <td data-label={row.single ? 'User' : 'Users'}>
                       <MultiSelect
                         path={path}
-                        users={orgUsers}
+                        users={orgUsersByRole[row.roleLabel] || []}
                         selectedIds={row.users}
                         single={!!row.single}
                         isOpen={openMsPath === path}

@@ -68,6 +68,16 @@ export function listUsersByProjectOrg(projectId) {
   return listAssociatedUsers({ projectId, orgDetails: true });
 }
 
+/* Org-user role dropdowns (Project Admin / Project User) on Manage Team
+   are sourced from the authz service, which returns the users holding a
+   given role on the project. `role` is the canonical key project_admin or
+   project_member. Reuses getCandidates (defined below) so the response is
+   normalized to a plain array regardless of envelope shape. */
+export function listAuthzUsersByRole(projectId, role) {
+  if (!projectId || !role) return Promise.resolve([]);
+  return getCandidates(ENDPOINTS.users.authzUsers, { project_id: projectId, role });
+}
+
 /* Convenience: users belonging to a specific division id. */
 export function listUsersByDivision(divisionId) {
   if (divisionId === null || divisionId === undefined) {
