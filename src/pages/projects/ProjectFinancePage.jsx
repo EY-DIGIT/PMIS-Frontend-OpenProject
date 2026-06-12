@@ -1294,6 +1294,30 @@ export default function ProjectFinancePage() {
 
   return (
     <div className="uidai-pmis-content">
+      {/* Top action bar — Back returns to wherever the user came from;
+          Save and Next advances to the project detail page. */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        gap: 10, marginBottom: 12,
+      }}>
+        <button
+          type="button"
+          className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+          style={{ marginTop: 0 }}
+          onClick={() => navigate(-1)}
+        >
+          ← Back
+        </button>
+        <button
+          type="button"
+          className="uidai-pmis-btn uidai-pmis-btn-small"
+          style={{ marginTop: 0 }}
+          onClick={() => navigate(`/projects/${encodeURIComponent(projectId)}`)}
+        >
+          Save and Next →
+        </button>
+      </div>
+
       {/* Slim header — just the project name on the right (and the
           LOCKED chip if applicable). The long descriptive subtitle
           was dropped at the user's request. */}
