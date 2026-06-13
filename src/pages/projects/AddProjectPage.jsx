@@ -16,6 +16,23 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { API_BASE, authorizedFetch } from "../../api/client";
 import { useCan } from "../../auth/permissions";
 
+/* Pull the human-readable message out of the backend's error envelope so
+   the user sees "A project named X already exists…" instead of the raw
+   JSON. Shape: { error: { message }, message, detail, status }. Falls back
+   to the raw body, then a generic line. */
+function extractApiError(body, status) {
+  if (!body) return `Request failed (${status})`;
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { return body; }
+  const nested =
+    parsed && parsed.error && typeof parsed.error === "object"
+      ? parsed.error.message
+      : null;
+  const flat = typeof parsed?.message === "string" ? parsed.message : null;
+  const detail = typeof parsed?.detail === "string" ? parsed.detail : null;
+  return nested || flat || detail || `Request failed (${status})`;
+}
+
 function makeEmpty() {
   return {
     projectName: "",
@@ -196,7 +213,7 @@ export default function AddProjectPage() {
 
         if (!res.ok) {
           const errBody = await res.text().catch(() => "");
-          throw new Error(errBody || `Failed to load vendors (${res.status})`);
+          throw new Error(extractApiError(errBody, res.status));
         }
 
         const raw = await res.json().catch(() => ({}));
@@ -249,7 +266,7 @@ export default function AddProjectPage() {
 
         if (!res.ok) {
           const errBody = await res.text().catch(() => "");
-          throw new Error(errBody || `Failed to load divisions (${res.status})`);
+          throw new Error(extractApiError(errBody, res.status));
         }
 
         const raw = await res.json().catch(() => ({}));
@@ -427,7 +444,7 @@ export default function AddProjectPage() {
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => "");
-        throw new Error(errBody || `Request failed (${res.status})`);
+        throw new Error(extractApiError(errBody, res.status));
       }
 
       const raw = await res.json().catch(() => ({}));
