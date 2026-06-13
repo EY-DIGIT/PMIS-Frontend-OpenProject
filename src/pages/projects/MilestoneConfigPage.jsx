@@ -562,12 +562,20 @@ export default function MilestoneConfigPage({ mode }) {
   function toggleEdit() {
     // Per-node saves (via the form) fire their own PATCH/POST; this button
     // flips the page-level edit flag so the row buttons appear/disappear.
-    // Clicking "Save" (i.e. while editing) exits edit mode and routes to
-    // Manage Team so the user can assign owners / members.
+    // Clicking "Save" (i.e. while editing) exits edit mode and routes the
+    // user onward by publish status: a PUBLISHED project goes to Manage
+    // Team (assign owners / members); a not-yet-published one goes to
+    // Finance to capture cost / payment details first.
     if (editingConfig) {
       setEditingConfig(false);
       if (!isOnboarding && projectId) {
-        navigate(`/manage-users/${encodeURIComponent(projectId)}`);
+        const isPublished =
+          String(project?.status || "").toUpperCase() === "PUBLISHED";
+        navigate(
+          isPublished
+            ? `/manage-users/${encodeURIComponent(projectId)}`
+            : `/projects/${encodeURIComponent(projectId)}/finance`
+        );
       }
       return;
     }
@@ -1238,8 +1246,10 @@ export default function MilestoneConfigPage({ mode }) {
       clearPersistedOnboardingDraft();
       uiStore.hideLoader();
       const label = p.projectCode || p.projectId;
+      /* A freshly-onboarded project is always a DRAFT — route straight to
+         Finance so the user captures cost / payment details next. */
       uiStore.showMessage(`Project ${label} added successfully!`, () =>
-        navigate(`/manage-users/${encodeURIComponent(p.projectId)}`)
+        navigate(`/projects/${encodeURIComponent(p.projectId)}/finance`)
       );
     };
 

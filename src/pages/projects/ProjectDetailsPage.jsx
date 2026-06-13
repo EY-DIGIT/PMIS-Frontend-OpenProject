@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { projectsStore, useProject } from "../../store/project/projectsStore";
 import { uiStore } from "../../store/project/uiStore";
 import {
@@ -165,6 +165,7 @@ function mergeIntoStore(mapped) {
 export default function ProjectDetailsPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const realProject = useProject(projectId);
 
   const [editing, setEditing] = useState(false);
@@ -231,6 +232,24 @@ export default function ProjectDetailsPage() {
   const [divisionsError, setDivisionsError] = useState("");
 
   const project = realProject || apiProject;
+
+  /* Auto-publish hand-off from Finance "Save and Next": when we land here
+     with the autoPublish flag set and the project still isn't PUBLISHED,
+     pop the Publish modal so the user can finish the flow. Fires once
+     (ref-guarded), then strips the flag from history so a refresh / back-
+     nav doesn't re-open it. */
+  const autoPublishHandledRef = useRef(false);
+  useEffect(() => {
+    if (autoPublishHandledRef.current) return;
+    if (!location.state?.autoPublish) return;
+    if (!project) return;
+    autoPublishHandledRef.current = true;
+    navigate(location.pathname, { replace: true, state: {} });
+    const isPublished = String(project.status || "").toUpperCase() === "PUBLISHED";
+    if (canPublishProject && !isPublished) {
+      setPublishOpen(true);
+    }
+  }, [location, project, canPublishProject, navigate]);
 
   const projectVendorIndex = useMemo(() => {
     const map = {};

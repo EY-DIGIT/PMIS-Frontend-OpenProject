@@ -1312,7 +1312,13 @@ export default function ProjectFinancePage() {
           type="button"
           className="uidai-pmis-btn uidai-pmis-btn-small"
           style={{ marginTop: 0 }}
-          onClick={() => navigate(`/projects/${encodeURIComponent(projectId)}`)}
+          onClick={() =>
+            navigate(`/projects/${encodeURIComponent(projectId)}`, {
+              // Signal the detail page to auto-open the Publish modal when
+              // the project isn't published yet (final step of the flow).
+              state: { autoPublish: true },
+            })
+          }
         >
           Save and Next →
         </button>
