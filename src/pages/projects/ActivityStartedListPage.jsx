@@ -74,6 +74,22 @@ export default function ActivityStartedListPage() {
     else navigate(`/projects/${encodeURIComponent(projectId || "")}`);
   };
 
+  /* Open the SAME full-page activity editor that Milestone Configuration
+     uses — the config page loads the whole project tree, locates the
+     activity by uid (uid === apiId for saved nodes), and renders NodeModal
+     in edit mode with every action (workflow, start, comments, etc.).
+     Cancelling / saving there navigates back here. */
+  const editActivity = (a) => {
+    const apiId = a.apiId || a.id;
+    if (!apiId) return;
+    const params = new URLSearchParams({
+      kind: "activity",
+      mode: "edit",
+      nodeUid: apiId,
+    });
+    navigate(`/projects/${encodeURIComponent(projectId)}/config/node?${params.toString()}`);
+  };
+
   return (
     <div className="uidai-card-project">
       <div
@@ -114,6 +130,7 @@ export default function ActivityStartedListPage() {
                 <th>Milestone</th>
                 <th>Actual Start Date</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -124,6 +141,16 @@ export default function ActivityStartedListPage() {
                   <td>{a.milestoneName || "—"}</td>
                   <td>{a.actualStartDate ? formatDateDisplay(a.actualStartDate) : "—"}</td>
                   <td>{a.status || "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="pmis-sal-edit-btn"
+                      onClick={() => editActivity(a)}
+                      disabled={!(a.apiId || a.id)}
+                    >
+                      ✎ Edit
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -99,6 +99,27 @@
 .pmis-sal-table tbody tr:hover td {
   background: #f8fbff;
 }
+.pmis-sal-edit-btn {
+  border: 1px solid #c7d6ea;
+  background: #eef3fb;
+  color: #173e77;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.pmis-sal-edit-btn:hover:not(:disabled) {
+  background: #dde8f8;
+  border-color: #9fbce0;
+}
+.pmis-sal-edit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 .uidai-phrase-box {
   margin: 12px 0 14px;
