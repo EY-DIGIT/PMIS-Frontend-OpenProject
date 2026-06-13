@@ -14,7 +14,7 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { formatDateTime } from "../../utils/project/helpers";
 import { tokenStore } from "../../api/client";
 import ActivityWorkflowViewer from "../../components/projects/ActivityWorkflowViewer";
@@ -156,6 +156,14 @@ function mapDetail(raw, currentUserUuid) {
 
 export default function ApprovalInboxActivityOwner() {
   const navigate = useNavigate();
+  const location = useLocation();
+  /* The breadcrumb's "Approval Inbox" crumb navigates here with
+     state.inboxList — close any open review so the user lands back on the
+     list (the review is in-page state on the same url). */
+  useEffect(() => {
+    if (location.state?.inboxList) closeReview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
   const storedUser = tokenStore.getUser() || {};
   const CURRENT_USER = useMemo(
     () => ({

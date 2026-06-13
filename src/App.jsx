@@ -393,6 +393,38 @@ function Breadcrumbs() {
         );
     }
 
+    /* /approvals/* — the Approval Inbox (Concerned Division / Activity
+       Owner). The review screen is in-page state on the SAME url, so the
+       single "Approval Inbox" crumb is rendered as a link that both
+       returns to the list route and signals the page to close any open
+       review (via location state — see the inbox pages' effect). */
+    if (segments[0] === "approvals") {
+        const inboxPath = "/" + segments.slice(0, 2).join("/");
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Home
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <Link
+                    to={inboxPath}
+                    state={{ inboxList: true }}
+                    style={{ color: "#333", textDecoration: "none", fontWeight: 600 }}
+                >
+                    Approval Inbox
+                </Link>
+            </nav>
+        );
+    }
+
     /* The track-progress route ends with a raw node UID (m-..., a-..., t-...,
        s-...) which is meaningless to users. Strip that trailing segment so
        the breadcrumb stops at "Track Progress". */
