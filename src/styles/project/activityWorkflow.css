@@ -520,6 +520,43 @@
   color: #c0392b !important;
 }
 
+/* Summary pills double as filter toggles. Reset the native <button> look
+   so they keep the pill styling, then add hover / active affordances. */
+.pmis-awf-audit__summary button.pmis-awf-audit__pill {
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: box-shadow 0.12s ease, transform 0.12s ease, filter 0.12s ease;
+}
+.pmis-awf-audit__summary button.pmis-awf-audit__pill:not(:disabled):hover {
+  filter: brightness(0.97);
+}
+.pmis-awf-audit__summary button.pmis-awf-audit__pill:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+/* Active filter — a ring in the pill's own accent colour. */
+.pmis-awf-audit__pill--req.is-active {
+  box-shadow: 0 0 0 2px #0b3c88 inset;
+}
+.pmis-awf-audit__pill--ok.is-active {
+  box-shadow: 0 0 0 2px #1b7a42 inset;
+}
+.pmis-awf-audit__pill--bad.is-active {
+  box-shadow: 0 0 0 2px #c0392b inset;
+}
+/* Inline "clear filter" link in the filtered-empty state. */
+.pmis-awf-audit__clear {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-left: 2px;
+  font: inherit;
+  color: #0b57d0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .pmis-awf-audit__list {
   list-style: none;
   margin: 0;

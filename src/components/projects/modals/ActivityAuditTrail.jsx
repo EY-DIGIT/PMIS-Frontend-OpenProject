@@ -14,8 +14,16 @@
    the unique `pmis-awf-` prefix.
    ══════════════════════════════════════════════════════════════════ */
 
-import React from "react";
+import React, { useState } from "react";
 import { safeArray, formatDateTime } from "../../../utils/project/helpers";
+
+/* Which entry `type`s each summary pill represents. The requests pill
+   covers both plain requests and updates (mirrors the count logic below). */
+const FILTER_TYPES = {
+  requests: ["request", "update"],
+  approvals: ["approval"],
+  rejections: ["rejection"],
+};
 
 /* ─── Glyph + variant per event type ─── */
 const SYSTEM_GLYPH = {
@@ -207,20 +215,50 @@ export default function ActivityAuditTrail({ form, processInstances, loading, er
     { approvals: 0, rejections: 0, requests: 0 }
   );
 
+  /* Clicking a summary pill filters the trail to that category; clicking
+     the active pill again clears the filter. `filter` is one of the
+     FILTER_TYPES keys, or null for "show all". */
+  const [filter, setFilter] = useState(null);
+  const toggleFilter = (key) => setFilter((prev) => (prev === key ? null : key));
+  const visibleEntries = filter
+    ? entries.filter((e) => FILTER_TYPES[filter].includes(e.type))
+    : entries;
+
   return (
     <div className="pmis-awf-audit pmis-awf-scope">
       <div className="pmis-awf-audit__head">
         <h4>📜 Activity Audit Trail</h4>
         <div className="pmis-awf-audit__summary">
-          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--req">
+          <button
+            type="button"
+            className={`pmis-awf-audit__pill pmis-awf-audit__pill--req${filter === "requests" ? " is-active" : ""}`}
+            onClick={() => toggleFilter("requests")}
+            disabled={counts.requests === 0}
+            aria-pressed={filter === "requests"}
+            title={filter === "requests" ? "Show all events" : "Show only requests"}
+          >
             <b>{counts.requests}</b> request{counts.requests === 1 ? "" : "s"}
-          </span>
-          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--ok">
+          </button>
+          <button
+            type="button"
+            className={`pmis-awf-audit__pill pmis-awf-audit__pill--ok${filter === "approvals" ? " is-active" : ""}`}
+            onClick={() => toggleFilter("approvals")}
+            disabled={counts.approvals === 0}
+            aria-pressed={filter === "approvals"}
+            title={filter === "approvals" ? "Show all events" : "Show only approvals"}
+          >
             <b>{counts.approvals}</b> approval{counts.approvals === 1 ? "" : "s"}
-          </span>
-          <span className="pmis-awf-audit__pill pmis-awf-audit__pill--bad">
+          </button>
+          <button
+            type="button"
+            className={`pmis-awf-audit__pill pmis-awf-audit__pill--bad${filter === "rejections" ? " is-active" : ""}`}
+            onClick={() => toggleFilter("rejections")}
+            disabled={counts.rejections === 0}
+            aria-pressed={filter === "rejections"}
+            title={filter === "rejections" ? "Show all events" : "Show only rejections"}
+          >
             <b>{counts.rejections}</b> rejection{counts.rejections === 1 ? "" : "s"}
-          </span>
+          </button>
         </div>
       </div>
 
@@ -238,9 +276,20 @@ export default function ActivityAuditTrail({ form, processInstances, loading, er
           No workflow events yet — actions taken on the panel above will appear
           here.
         </div>
+      ) : !loading && entries.length > 0 && visibleEntries.length === 0 ? (
+        <div className="pmis-awf-audit__empty">
+          No {filter} to show.{" "}
+          <button
+            type="button"
+            className="pmis-awf-audit__clear"
+            onClick={() => setFilter(null)}
+          >
+            Clear filter
+          </button>
+        </div>
       ) : !loading && entries.length > 0 ? (
         <ol className="pmis-awf-audit__list">
-          {entries.map((e, idx) => (
+          {visibleEntries.map((e, idx) => (
             <li
               key={e.id || idx}
               className={`pmis-awf-audit__item pmis-awf-audit__item--${e.type}`}
