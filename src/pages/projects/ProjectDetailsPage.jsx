@@ -17,6 +17,7 @@ import {
 import ChipControl from "../../components/projects/ChipControl";
 import PublishModal from "../../components/projects/modals/PublishModal";
 import DeleteProjectModal from "../../components/projects/modals/DeleteProjectModal";
+import ActivityStartedListModal from "../../components/projects/modals/ActivityStartedListModal";
 import { tokenStore, API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
@@ -183,6 +184,7 @@ export default function ProjectDetailsPage() {
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [startedListOpen, setStartedListOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   /* Overflow ("More ▾") menu for the page-header actions. Anything that
      isn't a primary action (Edit/Save, Back) collapses in here so the
@@ -1010,6 +1012,14 @@ export default function ProjectDetailsPage() {
       visible: canPublishProject && project.status === "PUBLISHED"
     },
     {
+      key: "activity-started-list",
+      label: "Activity Started List",
+      onClick: () => setStartedListOpen(true),
+      /* Activities can only be started once the project is PUBLISHED, so
+         the list is meaningless on drafts — hide it there. */
+      visible: isPubBase
+    },
+    {
       key: "publish",
       label: "Publish",
       onClick: () => setPublishOpen(true),
@@ -1372,6 +1382,12 @@ export default function ProjectDetailsPage() {
         project={project}
         onCancel={() => setDeleteOpen(false)}
         onConfirm={confirmDelete}
+      />
+      <ActivityStartedListModal
+        open={startedListOpen}
+        projectId={project.projectId}
+        projectName={project.projectName}
+        onClose={() => setStartedListOpen(false)}
       />
 
       {documentsOpen && (

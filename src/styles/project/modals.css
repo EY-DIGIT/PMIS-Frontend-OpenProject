@@ -53,6 +53,53 @@
   color: #173e77;
 }
 
+/* Activity Started List modal — read-only table of started activities. */
+.pmis-sal-empty {
+  margin-top: 16px;
+  padding: 18px;
+  text-align: center;
+  color: #6b7280;
+  background: #f6f8fc;
+  border: 1px dashed #d6e0ee;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pmis-sal-table-wrap {
+  margin-top: 14px;
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+}
+.pmis-sal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pmis-sal-table thead th {
+  position: sticky;
+  top: 0;
+  background: #eef3fb;
+  color: #173e77;
+  text-align: left;
+  font-weight: 700;
+  padding: 9px 12px;
+  border-bottom: 1px solid #d6e0ee;
+  white-space: nowrap;
+}
+.pmis-sal-table tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #eef2f7;
+  color: #2c3a4f;
+  vertical-align: top;
+}
+.pmis-sal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.pmis-sal-table tbody tr:hover td {
+  background: #f8fbff;
+}
+
 .uidai-phrase-box {
   margin: 12px 0 14px;
   padding: 12px 14px;

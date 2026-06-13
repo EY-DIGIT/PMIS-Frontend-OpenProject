@@ -241,6 +241,10 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
     endDate: toDateInputValue(a.endDate),
     actualStartDate: toDateInputValue(a.actualStartDate),
     actualEndDate: toDateInputValue(a.actualEndDate),
+    /* Explicit backend flag — an activity is "started" once work has begun.
+       Preserved so consumers (e.g. the Activity Started list) can trust it
+       directly rather than inferring solely from actualStartDate. */
+    activityStarted: !!a.activityStarted,
     status: mapStatusFromApi(a.status),
     type: uiType,
     resourceEntryType,
