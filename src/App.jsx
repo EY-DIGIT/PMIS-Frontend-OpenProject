@@ -60,6 +60,7 @@ import SeverityPage from "./pages/severity/severity";
 import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
 import SlaMastersPage from "./pages/sla/SlaMastersPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
+import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
 import * as vendorsApi from './api/vendors';
@@ -108,6 +109,7 @@ function Breadcrumbs() {
         track: "Track Progress",
         "audit-logs": "Audit Logs",
         finance: "Finance",
+        "activities-started": "Activity Started List",
         vendors: "Organizations",
         users: "Users",
         divisions: "Divisions",
@@ -606,6 +608,7 @@ export default function MainApp() {
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequirePermission action="viewProjects"><ProjectFinancePage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
 
 
