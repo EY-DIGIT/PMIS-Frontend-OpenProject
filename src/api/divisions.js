@@ -37,9 +37,10 @@ export async function list() {
 }
 
 export async function create({ label, code, requiresOther = false, email = '', phone_number = '' }) {
-  const res = await api.post(ENDPOINTS.master.divisions.create, {
-    label, code, requiresOther, email, phone_number,
-  });
+  // Code is server-generated — only forward it if a caller explicitly passes one.
+  const body = { label, requiresOther, email, phone_number };
+  if (code !== undefined && code !== null && code !== '') body.code = code;
+  const res = await api.post(ENDPOINTS.master.divisions.create, body);
   return fromApi(unwrapOne(res));
 }
 

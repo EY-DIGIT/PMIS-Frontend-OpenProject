@@ -60,23 +60,9 @@ export default function MasterDivisionForm() {
     return () => { cancelled = true; };
   }, [isEdit, codeParam]);
 
-  /* Derive the division code from the label — the Add form no longer
-     collects a code, but the backend still keys divisions by it. Lower-
-     cases and collapses anything outside [a-z0-9] into single underscores
-     (e.g. "Tech Division" → "tech_division"). */
-  function codeFromLabel(value) {
-    return String(value || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-  }
-
   function validate() {
     const errs = {};
     if (!label.trim()) errs.label = 'Label is required';
-    else if (!isEdit && !codeFromLabel(label))
-      errs.label = 'Label must contain at least one letter or number';
     if (!email.trim()) errs.email = 'Email is required';
     else if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email.trim()))
       errs.email = 'Enter a valid email (e.g. name@example.com)';
@@ -109,7 +95,6 @@ export default function MasterDivisionForm() {
         await divisionsApi.update(code, body);
       } else {
         await divisionsApi.create({
-          code: codeFromLabel(label),
           label: label.trim(),
           email: email.trim(),
           phone_number: phone.trim(),
