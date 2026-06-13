@@ -1,5 +1,5 @@
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DependencyPicker from "../DependencyPicker";
 import ChipControl from "../ChipControl";
@@ -768,6 +768,29 @@ export default function NodeModal({
      approval workflow + audit trail on the right. The extra width keeps
      both columns readable without forcing the user into fullscreen. */
   const isActivityEdit = kind === "activity" && !isAdd && !!node;
+
+  /* Page-mode only: match the right column (Approval Panel + Audit Trail)
+     to the LEFT column's natural content height, so the audit box ends
+     level with the left side and scrolls internally when its events exceed
+     that height — instead of growing the page. In modal mode the box is
+     already locked to 92vh and both columns scroll independently, so we
+     leave that untouched. */
+  const leftColRef = useRef(null);
+  const [rightColHeight, setRightColHeight] = useState(null);
+  useLayoutEffect(() => {
+    if (!(asPage && isActivityEdit)) {
+      setRightColHeight(null);
+      return;
+    }
+    const el = leftColRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setRightColHeight(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [asPage, isActivityEdit]);
+
   const boxStyle = fullscreen
     ? {
         position: "relative",
@@ -810,7 +833,10 @@ export default function NodeModal({
     ? {
         display: "flex",
         gap: 16,
-        alignItems: "stretch",
+        /* Page mode: let the left column take its natural height (we then
+           pin the right column to match via rightColHeight). Modal mode
+           keeps stretch so both columns fill the fixed-height body. */
+        alignItems: asPage ? "flex-start" : "stretch",
         flex: "1 1 auto",
         minHeight: 0
       }
@@ -905,7 +931,7 @@ export default function NodeModal({
         </div>
 
         <div style={splitWrapperStyle}>
-        <div style={isActivityEdit ? leftColStyle : undefined}>
+        <div ref={leftColRef} style={isActivityEdit ? leftColStyle : undefined}>
         {isActivityEdit && (
           <div style={{ minWidth: 0 }}>
             <StartActivityBanner
@@ -1336,7 +1362,7 @@ export default function NodeModal({
         </div>
 
         {isActivityEdit && (
-          <div style={rightColStyle}>
+          <div style={rightColHeight ? { ...rightColStyle, height: rightColHeight } : rightColStyle}>
             <ApprovalPanel
               activity={node}
               form={form}
