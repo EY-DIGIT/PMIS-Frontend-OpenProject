@@ -400,6 +400,12 @@ function Breadcrumbs() {
        review (via location state — see the inbox pages' effect). */
     if (segments[0] === "approvals") {
         const inboxPath = "/" + segments.slice(0, 2).join("/");
+        /* The review screen is in-page state on the same url; the inbox
+           page publishes pageCtx.approvalReview while it's open so we can
+           append a "Review" crumb. When in review, "Approval Inbox" links
+           back to the list (and closes the review via location state);
+           otherwise it's the bold current page. */
+        const inReview = !!(pageCtx && pageCtx.approvalReview);
         return (
             <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
                 paddingBottom: "10px",
@@ -414,13 +420,21 @@ function Breadcrumbs() {
                     Home
                 </Link>
                 <span style={{ color: "#999" }}>›</span>
-                <Link
-                    to={inboxPath}
-                    state={{ inboxList: true }}
-                    style={{ color: "#333", textDecoration: "none", fontWeight: 600 }}
-                >
-                    Approval Inbox
-                </Link>
+                {inReview ? (
+                    <>
+                        <Link
+                            to={inboxPath}
+                            state={{ inboxList: true }}
+                            style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}
+                        >
+                            Approval Inbox
+                        </Link>
+                        <span style={{ color: "#999" }}>›</span>
+                        <span style={{ color: "#333", fontWeight: 600 }}>Review</span>
+                    </>
+                ) : (
+                    <span style={{ color: "#333", fontWeight: 600 }}>Approval Inbox</span>
+                )}
             </nav>
         );
     }

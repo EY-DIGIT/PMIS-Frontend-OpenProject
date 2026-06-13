@@ -25,6 +25,7 @@ import {
   PARALLEL_VOTE,
   WORKFLOW_STATES
 } from "../../api/activityWorkflow";
+import { setPageContext } from "../../utils/pageContext";
 import "../../styles/project/approvalInbox.css";
 
 function cap(s) {
@@ -166,6 +167,13 @@ export default function ApprovalInboxConcernedDivision() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [activeKey, setActiveKey] = useState(null); // selected row.activityId
   const [activeDetail, setActiveDetail] = useState(null);
+  /* Publish whether a review is open so the global breadcrumb can append
+     the "Review" crumb (Home › Approval Inbox › Review). Cleared on close
+     and unmount. */
+  useEffect(() => {
+    setPageContext({ approvalReview: !!activeKey });
+    return () => setPageContext({ approvalReview: false });
+  }, [activeKey]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [rejection, setRejection] = useState({ open: false, reason: "" });
