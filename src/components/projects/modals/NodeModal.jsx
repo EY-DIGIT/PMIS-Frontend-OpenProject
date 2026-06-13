@@ -307,7 +307,6 @@ export default function NodeModal({
   const [divisionsLoading, setDivisionsLoading] = useState(false);
   const [priorities, setPriorities] = useState([]);
   const [prioritiesLoading, setPrioritiesLoading] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
   const [saveError, setSaveError] = useState("");
   /* Workflow audit trail + timeline data, fetched from the activity-
      workflow service for activity edit mode. `refreshKey` triggers a
@@ -330,7 +329,6 @@ export default function NodeModal({
       setPostError("");
       setPosting(false);
       setFileInputKey((k) => k + 1);
-      setFullscreen(false);
       setSaveError("");
     }
     /* Key on the node's STABLE id (not the object reference): a background
@@ -791,18 +789,7 @@ export default function NodeModal({
     return () => ro.disconnect();
   }, [asPage, isActivityEdit]);
 
-  const boxStyle = fullscreen
-    ? {
-        position: "relative",
-        width: "100vw",
-        maxWidth: "100vw",
-        height: "100vh",
-        maxHeight: "100vh",
-        margin: 0,
-        borderRadius: 0,
-        overflowY: "auto"
-      }
-    : isActivityEdit
+  const boxStyle = isActivityEdit
     ? {
         position: "relative",
         width: "min(1400px, 100%)",
@@ -908,15 +895,6 @@ export default function NodeModal({
             SLA Mapping
           </button>
         )}
-        <button
-          type="button"
-          aria-label={fullscreen ? "Exit full screen" : "Full screen"}
-          title={fullscreen ? "Exit full screen" : "Full screen"}
-          onClick={() => setFullscreen((v) => !v)}
-          style={{ ...iconBtnStyle, top: 8, right: 44, fontSize: 16, lineHeight: 1 ,marginTop:4}}
-        >
-          {fullscreen ? "🗗" : "⛶"}
-        </button>
         <button
           type="button"
           aria-label="Close"
