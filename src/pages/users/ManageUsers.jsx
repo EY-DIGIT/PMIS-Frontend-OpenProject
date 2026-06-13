@@ -4,12 +4,14 @@ import {
   getTeamPage,
   updateTeamPage,
   listAuthzUsersByRole,
+  listAuthzUsersByVendorRole,
   listUsersByDivision,
   listProjectOwnerCandidates,
   listProjectOwnerApproverCandidates,
   listActivityMemberCandidates,
   listActivityApproverCandidates
 } from '../../api/teamPage';
+import { loadProjectById } from '../../api/milestoneConfigApi';
 import { setPageContext, clearPageContext } from '../../utils/pageContext';
 import './ManageTeam.css';
 
@@ -418,24 +420,56 @@ export default function ManageTeam() {
            page from rendering. */
         if (!cancelled) setLoading(false);
 
-        /* Background fetch — org users for the Organization User
-           section, one call per role (Project Admin / Project User) so
-           each dropdown is scoped to users holding that role on the
-           project. Doesn't block render; dropdowns light up as their
-           role's list resolves. */
-        ORG_USER_ROLES.forEach(({ roleLabel }) => {
-          listAuthzUsersByRole(projectId, roleLabel)
-            .then(normalizeUsersList)
-            .then((users) => {
-              if (!cancelled) {
-                setOrgUsersByRole((prev) => ({ ...prev, [roleLabel]: users }));
-              }
-            })
-            .catch((e) => {
-              // eslint-disable-next-line no-console
-              console.warn(`[ManageTeam] org-user (${roleLabel}) fetch failed:`, e);
-            });
-        });
+        /* Background fetch — org users for the Organization User section.
+           Doesn't block render; dropdowns light up as their lists resolve.
+
+           Project User  → project_member users on the project.
+           Project Admin → project_admin users on the project, CONCATENATED
+             with the org_admin users of the project's vendor (organization);
+             org admins administer the whole org and so qualify as project
+             admins too. The vendor id comes from the team-page payload when
+             present, else from a project-detail GET fallback. */
+        listAuthzUsersByRole(projectId, 'project_member')
+          .then(normalizeUsersList)
+          .then((users) => {
+            if (!cancelled) setOrgUsersByRole((prev) => ({ ...prev, project_member: users }));
+          })
+          .catch((e) => {
+            // eslint-disable-next-line no-console
+            console.warn('[ManageTeam] org-user (project_member) fetch failed:', e);
+          });
+
+        (async () => {
+          // Prefer a vendor id the team-page already carries; otherwise
+          // fall back to the project detail so the org_admin concat still
+          // works regardless of the team-page response shape.
+          const pickVendorId = (d) =>
+            d?.vendorId ||
+            d?.vendor_id ||
+            d?.organizationId ||
+            d?.orgId ||
+            d?.vendors?.[0]?.id ||
+            d?.organization?.id ||
+            '';
+          let vendorId = pickVendorId(data);
+          if (!vendorId) {
+            try {
+              const proj = await loadProjectById(projectId);
+              vendorId = proj?.vendors?.[0]?.id || proj?.vendors?.[0]?.vendorId || '';
+            } catch (e) { /* swallow — falls back to project_admin only */ }
+          }
+          const [admins, orgAdmins] = await Promise.all([
+            listAuthzUsersByRole(projectId, 'project_admin').catch(() => []),
+            vendorId
+              ? listAuthzUsersByVendorRole(vendorId, 'org_admin').catch(() => [])
+              : Promise.resolve([]),
+          ]);
+          if (cancelled) return;
+          // normalizeUsersList dedups by id, so a user who is both a project
+          // admin and an org admin shows up once.
+          const merged = normalizeUsersList([...(admins || []), ...(orgAdmins || [])]);
+          setOrgUsersByRole((prev) => ({ ...prev, project_admin: merged }));
+        })();
 
         /* Background fetch — owner division + every Concerned Division
            seen anywhere on the page. Each call resolves independently

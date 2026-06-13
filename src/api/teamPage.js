@@ -78,6 +78,15 @@ export function listAuthzUsersByRole(projectId, role) {
   return getCandidates(ENDPOINTS.users.authzUsers, { project_id: projectId, role });
 }
 
+/* Same authz directory, but scoped to a vendor (organization) instead of a
+   project. Used to fold org_admin users into the Project Admin dropdown on
+   Manage Team — those users administer the org and so count as project
+   admins too. `role` is typically org_admin. */
+export function listAuthzUsersByVendorRole(vendorId, role) {
+  if (!vendorId || !role) return Promise.resolve([]);
+  return getCandidates(ENDPOINTS.users.authzUsers, { vendor_id: vendorId, role });
+}
+
 /* Convenience: users belonging to a specific division id. */
 export function listUsersByDivision(divisionId) {
   if (divisionId === null || divisionId === undefined) {
