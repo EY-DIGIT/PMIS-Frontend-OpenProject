@@ -827,8 +827,15 @@ export default function NodeModal({
   const rightColStyle = {
     flex: "1 1 0",
     minWidth: 0,
+    minHeight: 0,
     overflowY: "auto",
-    paddingRight: 6
+    paddingRight: 6,
+    /* Column is a flex stack so the Audit Trail can grow to fill whatever
+       vertical space is left below the Approval Panel (the two columns are
+       stretched to equal height, so the right side otherwise leaves a large
+       empty gap under the trail). */
+    display: "flex",
+    flexDirection: "column"
   };
 
   const iconBtnStyle = {

@@ -469,6 +469,12 @@
   border: 1px solid #c8d6ee;
   border-radius: 10px;
   background: #fff;
+  /* Fill the remaining height of the (flex) right column so the trail
+     uses the space below it instead of sitting in a short fixed box. */
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .pmis-awf-audit__head {
   display: flex;
@@ -564,7 +570,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 380px;
+  /* Grow to fill the audit panel; scroll internally only when the events
+     exceed the available height (no more short 380px box). */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 .pmis-awf-audit__item {
