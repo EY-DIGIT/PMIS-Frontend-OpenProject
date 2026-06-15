@@ -84,6 +84,8 @@ export default function SlaMastersPage() {
 
     const [search, setSearch] = useState("");
     const [filters, setFilters] = useState({ contract_type: "", category: "", status: "" });
+    const [page, setPage] = useState(1);
+    const PAGE_SIZE = 10;
 
     const [toast, setToast] = useState(null); // { title, msg, kind }
 
@@ -152,6 +154,16 @@ export default function SlaMastersPage() {
     }, [slas, search, filters]);
 
     const filtersActive = !!(filters.contract_type || filters.category || filters.status || search);
+
+    // Pagination — 10 rows per page over the filtered set.
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    const safePage = Math.min(page, pageCount);
+    const paged = useMemo(
+        () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+        [filtered, safePage]
+    );
+    // Snap back to page 1 whenever the filtered set changes (search/filter edits).
+    useEffect(() => { setPage(1); }, [search, filters]);
 
     /* ─── Detail (in-page section) ─── */
     async function openDetail(id) {
@@ -287,7 +299,7 @@ export default function SlaMastersPage() {
                                         <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted, fontStyle: "italic" }}>
                                             {slas.length === 0 ? "No SLAs loaded. Check the API base, then Refresh." : "No matching SLAs."}
                                         </td></tr>
-                                    ) : filtered.map((s) => (
+                                    ) : paged.map((s) => (
                                         <tr key={s.id}>
                                             <td><button type="button" className="uidai-pmis-link" style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#173e77", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }} onClick={() => openDetail(s.id)}>{s.sla_ref || "—"}</button></td>
                                             <td>{s.title || s.name || "—"}</td>
@@ -307,6 +319,22 @@ export default function SlaMastersPage() {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Pagination */}
+                        {!loading && filtered.length > 0 && (
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+                                <div style={{ fontSize: 12.5, ...muted }}>
+                                    Showing <strong style={{ color: "#173e77" }}>{(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}</strong> of <strong style={{ color: "#173e77" }}>{filtered.length}</strong>
+                                </div>
+                                <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage <= 1} onClick={() => setPage(1)}>« First</button>
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Prev</button>
+                                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#173e77", padding: "0 8px" }}>Page {safePage} / {pageCount}</span>
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Next ›</button>
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage >= pageCount} onClick={() => setPage(pageCount)}>Last »</button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </>
             )}
@@ -424,7 +452,62 @@ function MeasurementCard({ title, m }) {
     );
 }
 
+// Find the first image reference in a detail object, across the common
+// shapes (attachments/images/files arrays, or a *_url field).
+function extractImageRef(d) {
+    if (!d) return null;
+    const direct = d.image_url || d.imageUrl || d.rfp_image_url || d.rfp_image || d.image;
+    if (typeof direct === "string" && direct.trim()) return direct;
+    const arrays = [d.attachments, d.images, d.files, d?._embedded?.attachments, d?._embedded?.images, d?._embedded?.files];
+    for (const arr of arrays) {
+        if (!Array.isArray(arr)) continue;
+        for (const it of arr) {
+            if (!it) continue;
+            if (typeof it === "string" && it.trim()) return it;
+            const u = it.url || it.href || it.file_url || it.fileUrl || it.download_url || it.downloadUrl
+                || it.path || it.src || it?._links?.download?.href || it?._links?.self?.href;
+            if (typeof u === "string" && u.trim()) return u;
+        }
+    }
+    return null;
+}
+function resolveImageUrl(u) {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u) || u.startsWith("data:") || u.startsWith("blob:")) return u;
+    return DEFAULT_BASE.replace(/\/$/, "") + (u.startsWith("/") ? u : "/" + u);
+}
+
 function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) {
+    // RFP image — fetched as an authorized blob (token-protected), with a
+    // direct-src fallback for public URLs. Hooks run before any early return.
+    const [imgSrc, setImgSrc] = useState(null);
+    const [imgState, setImgState] = useState("none"); // none | loading | ok | error
+    useEffect(() => {
+        let cancelled = false;
+        let objectUrl = null;
+        const ref = extractImageRef(d);
+        if (!ref) { setImgState("none"); setImgSrc(null); return undefined; }
+        const url = resolveImageUrl(ref);
+        setImgState("loading"); setImgSrc(null);
+        (async () => {
+            try {
+                const res = await authorizedFetch(url, { method: "GET" });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                if (cancelled) return;
+                objectUrl = URL.createObjectURL(blob);
+                setImgSrc(objectUrl);
+                setImgState("ok");
+            } catch {
+                if (cancelled) return;
+                // Fall back to a direct <img src> (works for public URLs).
+                setImgSrc(url);
+                setImgState("ok");
+            }
+        })();
+        return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    }, [d]);
+
     const backBtn = (
         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={onBack}>← Back to SLA Masters</button>
     );
@@ -454,7 +537,7 @@ function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) 
                 {backBtn}
                 <div style={{ display: "flex", gap: 8 }}>
                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => onEdit(id)}>✎ Edit</button>
-                    <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" style={{ padding: "8px 14px", borderRadius: 6 }} onClick={() => onDelete(d)}>🗑 Delete</button>
+                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-outline-red uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => onDelete(d)}>🗑 Delete</button>
                 </div>
             </div>
 
@@ -562,6 +645,24 @@ function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) 
                         { label: "Created", value: (d.created_at || "").slice(0, 19).replace("T", " ") || null },
                         { label: "Updated", value: (d.updated_at || "").slice(0, 19).replace("T", " ") || null },
                     ]} />
+                </DetailCard>
+            )}
+
+            {/* RFP image (below the details) */}
+            {imgState !== "none" && (
+                <DetailCard title="RFP Image">
+                    {imgState === "loading" && <div style={{ fontSize: 12.5, ...muted }}>Loading image…</div>}
+                    {imgState === "error" && <div style={{ fontSize: 12.5, ...muted, fontStyle: "italic" }}>Couldn’t load the image.</div>}
+                    {imgState === "ok" && imgSrc && (
+                        <a href={imgSrc} target="_blank" rel="noreferrer" title="Open full size">
+                            <img
+                                src={imgSrc}
+                                alt={`RFP source for ${d.sla_ref || "SLA"}`}
+                                onError={() => setImgState("error")}
+                                style={{ display: "block", maxWidth: "100%", maxHeight: 520, borderRadius: 8, border: "1px solid var(--uidai-pmis-border)" }}
+                            />
+                        </a>
+                    )}
                 </DetailCard>
             )}
         </div>

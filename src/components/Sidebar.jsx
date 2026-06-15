@@ -15,7 +15,8 @@ import {
   FiCalendar,
   FiChevronRight,
   FiChevronDown,
-  FiMessageSquare
+  FiMessageSquare,
+  FiFileText
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
 import { userHasRole } from "../auth/roleNormalize";
@@ -83,6 +84,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const masterActive = isUnder("/master");
   const vendorDataActive = isUnder("/master/vendors");
   const userDataActive = isUnder("/master/users");
+  const slaDataActive = isUnder("/sla-masters");
   const divisionDataActive = isUnder("/master/divisions");
 
   const addVendorActive = isUnder("/vendors/new");
@@ -112,12 +114,12 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   useEffect(() => {
     if (dashActive) setDashOpen(true);
     if (pmActive) setPmOpen(true);
-    if (masterActive) setMdOpen(true);
+    if (masterActive || slaDataActive) setMdOpen(true);
     if (vmActive) setVmOpen(true);
     if (umActive) setUmOpen(true);
     if (mmActive) setMmOpen(true);
     if (inboxActive) setInboxOpen(true);
-  }, [dashActive, pmActive, masterActive, vmActive, umActive, mmActive, inboxActive]);
+  }, [dashActive, pmActive, masterActive, slaDataActive, vmActive, umActive, mmActive, inboxActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -278,6 +280,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                   <span className="pmis-text">Divisions</span>
                 </div>
               )}
+              <div
+                className={slaDataActive ? "active" : ""}
+                onClick={() => navigate("/sla-masters")}
+              >
+                <FiFileText size={ICON_SIZE} />
+                <span className="pmis-text">SLA Masters</span>
+              </div>
             </div>
           </>
         )}
