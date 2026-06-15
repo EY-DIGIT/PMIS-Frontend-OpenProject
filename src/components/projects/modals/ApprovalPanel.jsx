@@ -34,6 +34,7 @@ import {
   WORKFLOW_STATES
 } from "../../../api/activityWorkflow";
 import { useCan } from "../../../auth/permissions";
+import { uiStore } from "../../../store/project/uiStore";
 import ApprovalRequestModal from "./ApprovalRequestModal";
 import WorkflowGraph from "./WorkflowGraph";
 
@@ -146,6 +147,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       return false;
     }
     setBusy(true);
+    uiStore.showLoader("Submitting…");
     setError("");
     try {
       await transitionActivity({
@@ -164,6 +166,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       setError(err && err.message ? err.message : `Workflow ${action} failed.`);
       return false;
     } finally {
+      uiStore.hideLoader();
       setBusy(false);
     }
   }
@@ -239,6 +242,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         return null;
       })();
       setBusy(true);
+      uiStore.showLoader("Requesting division approval…");
       setError("");
       try {
         await requestDivisionApprovalParallel({
@@ -254,6 +258,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       } catch (err) {
         setError(err && err.message ? err.message : "Failed to dispatch division approval request.");
       } finally {
+        uiStore.hideLoader();
         setBusy(false);
       }
     } else if (requestPopup.kind === "owner") {
@@ -279,6 +284,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         return null;
       })();
       setBusy(true);
+      uiStore.showLoader("Requesting owner approval…");
       setError("");
       try {
         await requestOwnerApprovalParallel({
@@ -294,6 +300,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       } catch (err) {
         setError(err && err.message ? err.message : "Failed to dispatch owner approval request.");
       } finally {
+        uiStore.hideLoader();
         setBusy(false);
       }
     } else if (requestPopup.kind === "resubmit") {

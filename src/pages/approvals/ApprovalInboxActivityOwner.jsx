@@ -27,6 +27,7 @@ import {
 } from "../../api/activityWorkflow";
 import { syncApprovalInbox } from "../../api/approvalInbox";
 import { setPageContext } from "../../utils/pageContext";
+import { uiStore } from "../../store/project/uiStore";
 import "../../styles/project/approvalInbox.css";
 
 function cap(s) {
@@ -295,51 +296,26 @@ export default function ApprovalInboxActivityOwner() {
   }
 
   function beginRejection() {
-    setRejection({ open: true, reason: "", revertKind: "", revertDivisions: [] });
+    // Reject always reverts the workflow to the organization — no per-
+    // division option, so default the revert kind to "vendor".
+    setRejection({ open: true, reason: "", revertKind: "vendor", revertDivisions: [] });
   }
   function cancelRejection() {
     setRejection({ open: false, reason: "", revertKind: "", revertDivisions: [] });
-  }
-  function setRevertKind(kind) {
-    setRejection((s) => ({
-      ...s,
-      revertKind: kind,
-      revertDivisions: kind === "divisions" ? s.revertDivisions : []
-    }));
-  }
-  function toggleRevertDivision(d, checked) {
-    setRejection((s) => {
-      const set = new Set(s.revertDivisions);
-      if (checked) set.add(d);
-      else set.delete(d);
-      return { ...s, revertDivisions: Array.from(set) };
-    });
   }
   function setReason(text) {
     setRejection((s) => ({ ...s, reason: text }));
   }
 
-  /* Concerned divisions the owner can route a re-examination to (every
-     breakdown row that isn't the owner's own). When the payload carries
-     none, reverting to "Concerned Divisions" sends it back to all of them,
-     so no explicit pick is required. */
-  const ownerConsentDivisions = (activeDetail?.statusBreakdown || [])
-    .filter((b) => !b.isYou)
-    .map((b) => b.divisionName || b.divisionCode);
-
-  const canConfirmReject = (() => {
-    const reasonOk = rejection.reason.trim().length >= 1;
-    let targetOk = false;
-    if (rejection.revertKind === "vendor") targetOk = true;
-    else if (rejection.revertKind === "divisions")
-      targetOk = ownerConsentDivisions.length === 0 || rejection.revertDivisions.length > 0;
-    return reasonOk && targetOk;
-  })();
+  /* Reject always reverts to the organization (vendor), so the only
+     requirement is a non-empty reason. */
+  const canConfirmReject = rejection.reason.trim().length >= 1;
 
   async function approve() {
     if (!activeDetail) return;
     if (!window.confirm(`Approve "${activeDetail.activityName}" and mark the activity Completed?`)) return;
     setBusy(true);
+    uiStore.showLoader("Approving…");
     setDetailError("");
     try {
       await transitionActivity({
@@ -368,6 +344,7 @@ export default function ApprovalInboxActivityOwner() {
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to approve.");
     } finally {
+      uiStore.hideLoader();
       setBusy(false);
     }
   }
@@ -386,6 +363,7 @@ export default function ApprovalInboxActivityOwner() {
     const comment = `${targetLine} — ${reason}`;
     if (!window.confirm(`Reject "${activeDetail.activityName}"?`)) return;
     setBusy(true);
+    uiStore.showLoader("Rejecting…");
     setDetailError("");
     try {
       await transitionActivity({
@@ -411,6 +389,7 @@ export default function ApprovalInboxActivityOwner() {
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to reject.");
     } finally {
+      uiStore.hideLoader();
       setBusy(false);
     }
   }
@@ -540,8 +519,6 @@ export default function ApprovalInboxActivityOwner() {
             busy={busy}
             canConfirmReject={canConfirmReject}
             onSetReason={setReason}
-            onSetRevertKind={setRevertKind}
-            onToggleRevertDivision={toggleRevertDivision}
             onBeginReject={beginRejection}
             onCancelReject={cancelRejection}
             onApprove={approve}
@@ -563,8 +540,6 @@ function DetailView({
   busy,
   canConfirmReject,
   onSetReason,
-  onSetRevertKind,
-  onToggleRevertDivision,
   onBeginReject,
   onCancelReject,
   onApprove,
@@ -585,9 +560,6 @@ function DetailView({
 
   const status = item.status || "pending";
   const isDecided = status === "approved" || status === "rejected";
-  const consentDivisions = (item.statusBreakdown || [])
-    .filter((b) => !b.isYou)
-    .map((b) => b.divisionName || b.divisionCode);
 
   return (
     <div className="pmis-apinbox-detail">
@@ -752,76 +724,10 @@ function DetailView({
             />
           </div>
           <div>
-            <label>Revert workflow to</label>
-            <div className="pmis-apinbox-revert-kind">
-              <label className={`pmis-apinbox-opt${rejection.revertKind === "vendor" ? " is-selected" : ""}`}>
-                <input
-                  type="radio" name="revertKind" value="vendor"
-                  checked={rejection.revertKind === "vendor"}
-                  onChange={() => onSetRevertKind("vendor")}
-                  disabled={busy}
-                />
-                <span className="pmis-apinbox-opt-body">
-                  <span className="pmis-apinbox-opt-title">Organization</span>
-                  <span className="pmis-apinbox-opt-sub">
-                    Full restart — all consent divisions will re-review after the organization resubmits.
-                  </span>
-                </span>
-              </label>
-              <label className={`pmis-apinbox-opt${rejection.revertKind === "divisions" ? " is-selected" : ""}`}>
-                <input
-                  type="radio" name="revertKind" value="divisions"
-                  checked={rejection.revertKind === "divisions"}
-                  onChange={() => onSetRevertKind("divisions")}
-                  disabled={busy}
-                />
-                <span className="pmis-apinbox-opt-body">
-                  <span className="pmis-apinbox-opt-title">Concerned Divisions</span>
-                  <span className="pmis-apinbox-opt-sub">
-                    Re-examination only — pick one or more divisions to review again.
-                  </span>
-                </span>
-              </label>
-            </div>
             <div className="pmis-apinbox-revert-panel">
-              {rejection.revertKind === "vendor" && (
-                <div className="pmis-apinbox-panel-hint">
-                  The workflow will revert to the organization for resubmission.
-                </div>
-              )}
-              {rejection.revertKind === "divisions" && (
-                consentDivisions.length === 0 ? (
-                  <div className="pmis-apinbox-panel-hint">
-                    The workflow will revert to the concerned divisions for re-examination.
-                  </div>
-                ) : (
-                  <>
-                    <div className="pmis-apinbox-panel-hint">
-                      Select one or more divisions for re-examination.
-                    </div>
-                    <div className="pmis-apinbox-checklist">
-                      {consentDivisions.map((d) => {
-                        const checked = rejection.revertDivisions.includes(d);
-                        return (
-                          <label key={d} className={checked ? "is-checked" : ""}>
-                            <input
-                              type="checkbox" checked={checked}
-                              onChange={(e) => onToggleRevertDivision(d, e.target.checked)}
-                              disabled={busy}
-                            />
-                            <span>{d}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </>
-                )
-              )}
-              {!rejection.revertKind && (
-                <div className="pmis-apinbox-panel-hint">
-                  Choose Organization or Concerned Divisions above to continue.
-                </div>
-              )}
+              <div className="pmis-apinbox-panel-hint">
+                The workflow will revert to the organization for resubmission.
+              </div>
             </div>
           </div>
           <div className="pmis-apinbox-reject-actions">

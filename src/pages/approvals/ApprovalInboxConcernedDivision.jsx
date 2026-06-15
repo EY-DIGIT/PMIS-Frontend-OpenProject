@@ -26,6 +26,7 @@ import {
   WORKFLOW_STATES
 } from "../../api/activityWorkflow";
 import { setPageContext } from "../../utils/pageContext";
+import { uiStore } from "../../store/project/uiStore";
 import "../../styles/project/approvalInbox.css";
 
 function cap(s) {
@@ -283,6 +284,7 @@ export default function ApprovalInboxConcernedDivision() {
     if (!activeDetail) return;
     if (!window.confirm(`Approve "${activeDetail.activityName}"?`)) return;
     setBusy(true);
+    uiStore.showLoader("Approving…");
     setDetailError("");
     try {
       await voteOnActivityParallel({
@@ -306,6 +308,7 @@ export default function ApprovalInboxConcernedDivision() {
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to approve.");
     } finally {
+      uiStore.hideLoader();
       setBusy(false);
     }
   }
@@ -319,6 +322,7 @@ export default function ApprovalInboxConcernedDivision() {
     }
     if (!window.confirm(`Reject "${activeDetail.activityName}"?`)) return;
     setBusy(true);
+    uiStore.showLoader("Rejecting…");
     setDetailError("");
     try {
       await voteOnActivityParallel({
@@ -341,6 +345,7 @@ export default function ApprovalInboxConcernedDivision() {
     } catch (err) {
       setDetailError(err && err.message ? err.message : "Failed to reject.");
     } finally {
+      uiStore.hideLoader();
       setBusy(false);
     }
   }
