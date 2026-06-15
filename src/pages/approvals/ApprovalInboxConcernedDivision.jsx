@@ -596,14 +596,16 @@ function DetailView({
               </span>
             </div>
           ) : (
-            item.statusBreakdown.map((b, i) => (
+            // Show only the reviewer's OWN concerned division — other
+            // divisions' rows are intentionally hidden here.
+            item.statusBreakdown.filter((b) => b.isYou).map((b, i) => (
               <div
                 key={`${b.divisionCode}-${i}`}
-                className={`pmis-apinbox-ds${b.isYou ? " pmis-apinbox-ds--me" : ""}`}
+                className="pmis-apinbox-ds pmis-apinbox-ds--me"
               >
                 <span className="pmis-apinbox-nm">
                   {b.divisionName || b.divisionCode}{" "}
-                  {b.isYou && <span className="pmis-apinbox-you">YOU</span>}
+                  <span className="pmis-apinbox-you">YOU</span>
                 </span>
                 <span className={`pmis-apinbox-pill pmis-apinbox-pill--${b.status}`}>
                   {cap(b.status)}
