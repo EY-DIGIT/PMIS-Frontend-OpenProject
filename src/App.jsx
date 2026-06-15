@@ -59,6 +59,7 @@ import AuditLogsPage from "./pages/projects/AuditLogsPage";
 import SeverityPage from "./pages/severity/severity";
 import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
 import SlaMastersPage from "./pages/sla/SlaMastersPage";
+import SlaOnboardingPage from "./pages/sla/SlaOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
@@ -688,6 +689,7 @@ export default function MainApp() {
 
                                                 {/*SLA Masters*/}
                                                 <Route path="sla-masters" element={<SlaMastersPage />} />
+                                                <Route path="sla-masters/onboard" element={<SlaOnboardingPage />} />
                                                 <Route path="meetings/:id" element={<MeetingDetailPage />} />
                                             </Routes>
                                         </Layout>

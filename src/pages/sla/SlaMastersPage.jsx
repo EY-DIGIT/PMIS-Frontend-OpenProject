@@ -1,37 +1,27 @@
 /* ══════════════════════════════════════════════════════════════════
    SlaMastersPage.jsx — SLA Masters library (route /sla-masters).
 
-   Mirrors the standalone "SLA Master.html" reference in the project's
-   uidai-pmis design system. Backed by the contracts API:
+   Lists onboarded SLAs. Clicking one opens a full-width DETAIL SECTION
+   (in-page, not a modal) showing every field of the new SLA shape.
+   Onboarding / editing live on /sla-masters/onboard.
+
+   Backed by the contracts API:
      GET    /api/v3/sla-masters?offset=1&pageSize=200   list
      GET    /api/v3/sla-masters/{id}                    detail
-     POST   /api/v3/sla-masters/from-rfp                create (multipart: payload + mandatory image)
-     PATCH  /api/v3/sla-masters/{id}                    update (subset)
      DELETE /api/v3/sla-masters/{id}                    delete
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
-import { listAll as listAllProjects } from "../../api/projects";
 import "../../styles/global.css";
 
 const DEFAULT_BASE = "http://10.1.131.199/contracts";
 
 const CONTRACT_TYPES = ["BSP", "MSAP", "MSIP", "PMU"];
 const STATUS_OPTIONS = ["ACTIVE", "DRAFT", "RETIRED"];
-const FORMULA_TYPES = ["band_accumulation", "point_accumulation", "fixed_escalation", "wac"];
-const MEAS_INTERVALS = ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ONE_TIME"];
-const REP_INTERVALS = ["WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"];
-const BASELINE_TYPES = ["STATIC", "ROLLING"];
-const COMPOUND_RULES = ["INDEPENDENT", "COMBINED"];
-const LD_AGG_METHODS = ["SUM", "MAX", "AVG"];
-const LD_BASES = ["QUARTERLY_PAYMENT", "ANNUAL_PAYMENT", "FIXED_AMOUNT"];
-const DIRECTIONS = ["LOWER_BETTER", "HIGHER_BETTER"];
-const GUARD_OPS = ["GT", "GTE", "LT", "LTE", "EQ", "NEQ"];
 
-function today() {
-    return new Date().toISOString().slice(0, 10);
-}
+const NAVY = "#173e77";
 
 // Pull the collection array regardless of which envelope shape the API uses.
 function extractElements(payload) {
@@ -53,11 +43,6 @@ function humanize(value) {
     return String(value).replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const inputStyle = {
-    width: "100%", padding: "9px 10px", borderRadius: 6, border: "1px solid var(--uidai-pmis-border)",
-    background: "#fff", color: "var(--uidai-pmis-text)", font: "inherit", fontSize: 13, boxSizing: "border-box",
-};
-const smallInput = { ...inputStyle, padding: "6px 8px", fontSize: 12 };
 const muted = { color: "var(--uidai-pmis-muted)" };
 
 function StatusBadge({ status }) {
@@ -66,8 +51,8 @@ function StatusBadge({ status }) {
     return <span className={`uidai-pmis-badge ${cls}`}>{s}</span>;
 }
 
-/* ─── Modal shell (project-themed, no global modal class) ─── */
-function Modal({ open, onClose, title, subtitle, width = 900, children, footer }) {
+/* ─── Modal shell — used only for the delete confirm ─── */
+function Modal({ open, onClose, title, width = 520, children, footer }) {
     if (!open) return null;
     return (
         <div
@@ -78,10 +63,7 @@ function Modal({ open, onClose, title, subtitle, width = 900, children, footer }
                 <div style={{ height: 4, background: "linear-gradient(90deg,#0b3c88,#19b6c9)", borderRadius: "12px 12px 0 0" }} />
                 <div style={{ padding: 24 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 12 }}>
-                        <div>
-                            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--uidai-pmis-navy)" }}>{title}</div>
-                            {subtitle && <div style={{ fontSize: 12, ...muted, marginTop: 3 }}>{subtitle}</div>}
-                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--uidai-pmis-navy)" }}>{title}</div>
                         <button type="button" onClick={onClose} title="Close"
                             style={{ width: 30, height: 30, borderRadius: "50%", background: "#fdecec", border: "none", color: "#b42318", cursor: "pointer", fontSize: 15, fontWeight: 700 }}>✕</button>
                     </div>
@@ -93,158 +75,28 @@ function Modal({ open, onClose, title, subtitle, width = 900, children, footer }
     );
 }
 
-/* ─── A labelled field ─── */
-function Field({ label, required, children, full, hint }) {
-    return (
-        <div style={full ? { gridColumn: "1 / -1" } : undefined}>
-            <label style={{ fontWeight: 600, display: "block", marginBottom: 5, fontSize: 13, color: "var(--uidai-pmis-text)" }}>
-                {label} {required && <span style={{ color: "var(--uidai-pmis-red, #d32f2f)" }}>*</span>}
-            </label>
-            {children}
-            {hint && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{hint}</div>}
-        </div>
-    );
-}
-
-/* ─── A collapsible sub-section in the onboard form ─── */
-function SubSection({ title, action, children }) {
-    return (
-        <div style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, padding: 14, marginTop: 12, background: "#fafcff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontWeight: 800, color: "var(--uidai-pmis-navy)", fontSize: 13.5 }}>{title}</div>
-                {action}
-            </div>
-            {children}
-        </div>
-    );
-}
-
-/* ─── Generic add/remove row editor for the array sub-tables ─── */
-function ArrayEditor({ columns, rows, onChange, addLabel = "+ Add row" }) {
-    const blank = () => Object.fromEntries(columns.map((c) => [c.key, c.default ?? ""]));
-    const update = (i, key, val) => onChange(rows.map((r, idx) => (idx === i ? { ...r, [key]: val } : r)));
-    const add = () => onChange([...rows, blank()]);
-    const remove = (i) => onChange(rows.filter((_, idx) => idx !== i));
-    const gridCols = columns.map((c) => c.width || "1fr").join(" ") + " auto";
-    return (
-        <div>
-            {rows.length === 0 && (
-                <div style={{ fontSize: 12, ...muted, fontStyle: "italic", marginBottom: 8 }}>None added.</div>
-            )}
-            {rows.length > 0 && (
-                <div style={{ overflowX: "auto" }}>
-                    <div style={{ minWidth: columns.length * 120 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 8, marginBottom: 6, fontSize: 10.5, fontWeight: 700, ...muted, textTransform: "uppercase", letterSpacing: ".3px" }}>
-                            {columns.map((c) => <div key={c.key}>{c.label}</div>)}
-                            <div />
-                        </div>
-                        {rows.map((r, i) => (
-                            <div key={i} style={{ display: "grid", gridTemplateColumns: gridCols, gap: 8, marginBottom: 8, alignItems: "center" }}>
-                                {columns.map((c) => (
-                                    c.options ? (
-                                        <select key={c.key} style={smallInput} value={r[c.key]} onChange={(e) => update(i, c.key, e.target.value)}>
-                                            {c.options.map((o) => <option key={String(o.value ?? o)} value={o.value ?? o}>{o.label ?? humanize(o)}</option>)}
-                                        </select>
-                                    ) : (
-                                        <input key={c.key} style={smallInput} type={c.type || "text"} placeholder={c.label} value={r[c.key]} onChange={(e) => update(i, c.key, e.target.value)} />
-                                    )
-                                ))}
-                                <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Remove" onClick={() => remove(i)}>✕</button>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 4 }} onClick={add}>{addLabel}</button>
-        </div>
-    );
-}
-
-/* ─── Column specs for each array sub-table ─── */
-const METRIC_COLS = [
-    { key: "metric_key", label: "Internal key" },
-    { key: "display_name", label: "Display name" },
-    { key: "unit", label: "Unit" },
-    { key: "target_numeric", label: "Target", type: "number" },
-    { key: "direction", label: "Direction", options: DIRECTIONS, default: "LOWER_BETTER" },
-    { key: "is_primary", label: "Primary?", options: [{ value: "false", label: "No" }, { value: "true", label: "Yes" }], default: "false" },
-];
-const PARAM_COLS = [
-    { key: "param_key", label: "Key" },
-    { key: "param_value", label: "Value" },
-];
-const BAND_COLS = [
-    { key: "sort_order", label: "Order", type: "number", width: "70px" },
-    { key: "band_label", label: "Label" },
-    { key: "metric_key", label: "Metric key" },
-    { key: "range_min", label: "From", type: "number", width: "90px" },
-    { key: "range_max", label: "To", type: "number", width: "90px" },
-    { key: "range_unit", label: "Unit", width: "80px" },
-    { key: "severity_level", label: "Severity", type: "number", width: "90px" },
-    { key: "rate_percent", label: "Rate %", type: "number", width: "90px" },
-    { key: "points_contribution", label: "Points", type: "number", width: "80px" },
-];
-const LOOKUP_COLS = [
-    { key: "sort_order", label: "Order", type: "number", width: "70px" },
-    { key: "lookup_key", label: "Tier label" },
-    { key: "lookup_value", label: "LD %", type: "number" },
-];
-const GUARD_COLS = [
-    { key: "metric_key", label: "Metric key" },
-    { key: "operator", label: "Op", options: GUARD_OPS, default: "GT", width: "90px" },
-    { key: "threshold_value", label: "Threshold", type: "number", width: "100px" },
-    { key: "threshold_unit", label: "Unit", width: "80px" },
-    { key: "action", label: "Action" },
-    { key: "action_description", label: "Description" },
-];
-
-const EMPTY_FORM = {
-    sla_ref: "", title: "", contract_type: "PMU", project_id: "", category_code: "", category: "", formula_type: "point_accumulation",
-    description: "", scope_text: "", data_source: "", calculation_method: "", reports_submitted_to: "",
-    measurement_interval: "MONTHLY", reporting_interval: "QUARTERLY", baseline_type: "STATIC",
-    compound_metric_rule: "INDEPENDENT", ld_aggregation_method: "SUM", ld_computation_base: "QUARTERLY_PAYMENT",
-    effective_from: today(), effective_until: "", status: "ACTIVE",
-};
-
 export default function SlaMastersPage() {
-    const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE);
-    const [health, setHealth] = useState("unknown"); // unknown | ok | err
+    const navigate = useNavigate();
+    const [baseUrl] = useState(DEFAULT_BASE);
 
     const [slas, setSlas] = useState([]);
     const [loading, setLoading] = useState(false);
-
-    // Dropdown sources for the onboard form's required from-rfp fields.
-    const [projects, setProjects] = useState([]);       // project_id options
-    const [slaCategories, setSlaCategories] = useState([]); // category_code options
 
     const [search, setSearch] = useState("");
     const [filters, setFilters] = useState({ contract_type: "", category: "", status: "" });
 
     const [toast, setToast] = useState(null); // { title, msg, kind }
 
-    // Onboard / edit modal
-    const [formOpen, setFormOpen] = useState(false);
-    const [editingId, setEditingId] = useState(null);
-    const [form, setForm] = useState(EMPTY_FORM);
-    const [metrics, setMetrics] = useState([]);
-    const [parameters, setParameters] = useState([]);
-    const [bands, setBands] = useState([]);
-    const [lookup, setLookup] = useState([]);
-    const [guards, setGuards] = useState([]);
-    const [rfpFile, setRfpFile] = useState(null); // mandatory image for POST /from-rfp
-    const [saving, setSaving] = useState(false);
-
-    // View modal
-    const [viewOpen, setViewOpen] = useState(false);
-    const [viewData, setViewData] = useState(null);
-    const [viewLoading, setViewLoading] = useState(false);
+    // In-page detail section
+    const [detailId, setDetailId] = useState(null);
+    const [detail, setDetail] = useState(null);
+    const [detailLoading, setDetailLoading] = useState(false);
 
     // Delete confirm
     const [pendingDelete, setPendingDelete] = useState(null); // { id, ref }
     const [deleting, setDeleting] = useState(false);
 
     const api = (path) => `${baseUrl.replace(/\/$/, "")}${path}`;
-    const setF = (patch) => setForm((f) => ({ ...f, ...patch }));
 
     function showToast(title, msg, kind = "success") {
         setToast({ title, msg, kind });
@@ -256,17 +108,6 @@ export default function SlaMastersPage() {
         const payload = await res.json().catch(() => null);
         if (!res.ok) throw new Error(payload?.error?.message || payload?.message || `Request failed (${res.status})`);
         return payload;
-    }
-
-    /* ─── Health ─── */
-    async function checkHealth() {
-        try {
-            const res = await authorizedFetch(api("/health"), { method: "GET", headers: { Accept: "application/json" } });
-            setHealth(res.ok ? "ok" : "err");
-            if (res.ok) loadSlas();
-        } catch {
-            setHealth("err");
-        }
     }
 
     /* ─── List ─── */
@@ -283,33 +124,8 @@ export default function SlaMastersPage() {
         }
     }
 
-    /* ─── Dropdown sources for the onboard form ─── */
-    // Projects live on a different gateway (API_BASE :8000), so go through the
-    // projects API helper rather than the contracts `api()` base.
-    async function loadProjects() {
-        try {
-            const rows = await listAllProjects();
-            setProjects((Array.isArray(rows) ? rows : []).filter((p) => p?.projectId));
-        } catch {
-            /* non-fatal — onboard just won't have project options */
-        }
-    }
-    // SLA categories live on the contracts base alongside the masters.
-    async function loadCategories() {
-        try {
-            const res = await authorizedFetch(api("/api/v3/sla-categories"), { method: "GET", headers: { Accept: "application/json" } });
-            const payload = await readJson(res);
-            setSlaCategories(extractElements(payload).map(unwrap).filter((c) => c?.code));
-        } catch {
-            /* non-fatal */
-        }
-    }
-
     useEffect(() => {
         loadSlas();
-        checkHealth();
-        loadProjects();
-        loadCategories();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -337,173 +153,25 @@ export default function SlaMastersPage() {
 
     const filtersActive = !!(filters.contract_type || filters.category || filters.status || search);
 
-    /* ─── Onboard / Edit ─── */
-    function openOnboard() {
-        setEditingId(null);
-        setForm({ ...EMPTY_FORM });
-        setMetrics([]); setParameters([]); setBands([]); setLookup([]); setGuards([]);
-        setRfpFile(null);
-        setFormOpen(true);
-    }
-
-    async function openEdit(id) {
+    /* ─── Detail (in-page section) ─── */
+    async function openDetail(id) {
+        setDetailId(id);
+        setDetail(null);
+        setDetailLoading(true);
         try {
             const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(id)}`), { method: "GET", headers: { Accept: "application/json" } });
             const payload = await readJson(res);
-            const d = payload?.data || payload;
-            setEditingId(id);
-            setForm({
-                sla_ref: d.sla_ref || "", title: d.title || d.name || "", contract_type: d.contract_type || "PMU",
-                project_id: d.project_id || "", category_code: d.category_code || "",
-                category: d.category || "", formula_type: d.formula_type || "point_accumulation",
-                description: d.description || "", scope_text: d.scope_text || "", data_source: d.data_source || "",
-                calculation_method: d.calculation_method || "", reports_submitted_to: d.reports_submitted_to || "",
-                measurement_interval: d.measurement_interval || "MONTHLY", reporting_interval: d.reporting_interval || "QUARTERLY",
-                baseline_type: d.baseline_type || "STATIC", compound_metric_rule: d.compound_metric_rule || "INDEPENDENT",
-                ld_aggregation_method: d.ld_aggregation_method || "SUM", ld_computation_base: d.ld_computation_base || "QUARTERLY_PAYMENT",
-                effective_from: (d.effective_from || today()).slice(0, 10), effective_until: (d.effective_until || "").slice(0, 10),
-                status: d.status || "ACTIVE",
-            });
-            const toStr = (rows, cols) => (Array.isArray(rows) ? rows : []).map((r) =>
-                Object.fromEntries(cols.map((c) => [c.key, r[c.key] === undefined || r[c.key] === null ? (c.default ?? "") : (typeof r[c.key] === "boolean" ? String(r[c.key]) : r[c.key])])));
-            setMetrics(toStr(d.metrics, METRIC_COLS));
-            setParameters(toStr(d.parameters, PARAM_COLS));
-            setBands(toStr(d.condition_bands || d.bands, BAND_COLS));
-            setLookup(toStr(d.lookup_table || d.lookup_rows, LOOKUP_COLS));
-            setGuards(toStr(d.guard_conditions || d.guards, GUARD_COLS));
-            setRfpFile(null); // not used on edit (PATCH stays JSON)
-            setFormOpen(true);
+            setDetail(payload?.data || payload);
         } catch (e) {
             showToast("Load failed", e.message, "error");
-        }
-    }
-
-    // Coerce numeric-looking string fields to numbers; drop empty rows.
-    function cleanRows(rows, cols) {
-        return rows
-            .filter((r) => cols.some((c) => String(r[c.key] ?? "").trim() !== ""))
-            .map((r) => {
-                const out = {};
-                cols.forEach((c) => {
-                    let v = r[c.key];
-                    if (v === "" || v === undefined) return;
-                    if (c.type === "number") v = Number(v);
-                    else if (v === "true") v = true;
-                    else if (v === "false") v = false;
-                    out[c.key] = v;
-                });
-                return out;
-            });
-    }
-
-    async function submitForm() {
-        if (!form.sla_ref.trim() || !form.title.trim()) {
-            showToast("Missing fields", "SLA Ref and Title are required.", "error");
-            return;
-        }
-        if (!editingId) {
-            if (!form.project_id) {
-                showToast("Missing project", "Select the project this SLA belongs to.", "error");
-                return;
-            }
-            if (!form.category_code) {
-                showToast("Missing category", "Select an SLA category.", "error");
-                return;
-            }
-            if (!rfpFile) {
-                showToast("Missing file", "An RFP image is required to onboard an SLA.", "error");
-                return;
-            }
-            // Each formula scores off a specific sub-table, and the backend
-            // rejects the payload when that table is empty. Catch it up front.
-            if (form.formula_type === "fixed_escalation" && cleanRows(lookup, LOOKUP_COLS).length === 0) {
-                showToast("Lookup required", "Fixed-escalation formula needs at least one Lookup Table row.", "error");
-                return;
-            }
-            if (
-                (form.formula_type === "point_accumulation" || form.formula_type === "band_accumulation") &&
-                cleanRows(bands, BAND_COLS).length === 0
-            ) {
-                showToast("Condition band required", "This formula needs at least one Condition Band row.", "error");
-                return;
-            }
-        }
-        setSaving(true);
-        try {
-            if (editingId) {
-                // PATCH — subset the API accepts on update.
-                const body = {
-                    title: form.title.trim(), description: form.description.trim() || null,
-                    measurement_interval: form.measurement_interval, reporting_interval: form.reporting_interval,
-                    baseline_type: form.baseline_type, compound_metric_rule: form.compound_metric_rule,
-                    ld_aggregation_method: form.ld_aggregation_method, ld_computation_base: form.ld_computation_base,
-                    effective_until: form.effective_until || null, status: form.status, metadata: {},
-                    category: form.category || null, scope_text: form.scope_text.trim() || null,
-                    data_source: form.data_source.trim() || null, calculation_method: form.calculation_method.trim() || null,
-                    reports_submitted_to: form.reports_submitted_to.trim() || null,
-                };
-                const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(editingId)}`), {
-                    method: "PATCH", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body),
-                });
-                await readJson(res);
-                showToast("Saved", "SLA updated.");
-            } else {
-                // POST — full schema. The /from-rfp endpoint additionally requires
-                // project_id, category_code and measurement.
-                const body = {
-                    project_id: form.project_id, contract_type: form.contract_type, formula_type: form.formula_type,
-                    sla_ref: form.sla_ref.trim(), title: form.title.trim(), description: form.description.trim() || null,
-                    // `measurement` is a SlaSimpleMeasurement object, not a bare string.
-                    measurement: { measurement_interval: form.measurement_interval, display_name: form.measurement_interval },
-                    measurement_interval: form.measurement_interval, reporting_interval: form.reporting_interval,
-                    baseline_type: form.baseline_type, compound_metric_rule: form.compound_metric_rule,
-                    ld_aggregation_method: form.ld_aggregation_method, ld_computation_base: form.ld_computation_base,
-                    effective_from: form.effective_from, effective_until: form.effective_until || null, metadata: {},
-                    category_code: form.category_code, category: form.category || null, scope_text: form.scope_text.trim() || null,
-                    data_source: form.data_source.trim() || null, calculation_method: form.calculation_method.trim() || null,
-                    reports_submitted_to: form.reports_submitted_to.trim() || null,
-                    metrics: cleanRows(metrics, METRIC_COLS),
-                    parameters: cleanRows(parameters, PARAM_COLS),
-                    condition_bands: cleanRows(bands, BAND_COLS),
-                    lookup_table: cleanRows(lookup, LOOKUP_COLS),
-                    guard_conditions: cleanRows(guards, GUARD_COLS),
-                };
-                // multipart/form-data: same JSON payload as before, now alongside a
-                // mandatory image. Don't set Content-Type — the browser adds the
-                // multipart boundary automatically.
-                const fd = new FormData();
-                fd.append("payload", JSON.stringify(body));
-                fd.append("files", rfpFile, rfpFile.name);
-                const res = await authorizedFetch(api("/api/v3/sla-masters/from-rfp"), {
-                    method: "POST", headers: { Accept: "application/json" }, body: fd,
-                });
-                await readJson(res);
-                showToast("Saved", "SLA onboarded.");
-            }
-            setFormOpen(false);
-            loadSlas();
-        } catch (e) {
-            showToast("Save failed", e.message, "error");
+            setDetailId(null);
         } finally {
-            setSaving(false);
+            setDetailLoading(false);
         }
     }
-
-    /* ─── View ─── */
-    async function openView(id) {
-        setViewOpen(true);
-        setViewData(null);
-        setViewLoading(true);
-        try {
-            const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(id)}`), { method: "GET", headers: { Accept: "application/json" } });
-            const payload = await readJson(res);
-            setViewData(payload?.data || payload);
-        } catch (e) {
-            showToast("Load failed", e.message, "error");
-            setViewOpen(false);
-        } finally {
-            setViewLoading(false);
-        }
+    function closeDetail() {
+        setDetailId(null);
+        setDetail(null);
     }
 
     /* ─── Delete ─── */
@@ -514,7 +182,9 @@ export default function SlaMastersPage() {
             const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(pendingDelete.id)}`), { method: "DELETE", headers: { Accept: "application/json" } });
             if (!res.ok) throw new Error(`Request failed (${res.status})`);
             showToast("Deleted", "SLA removed.");
+            const removedId = pendingDelete.id;
             setPendingDelete(null);
+            if (detailId === removedId) closeDetail();
             loadSlas();
         } catch (e) {
             showToast("Delete failed", e.message, "error");
@@ -524,240 +194,122 @@ export default function SlaMastersPage() {
     }
 
     const filterLabel = { fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)", marginBottom: 6 };
+    const showingDetail = !!detailId;
 
     return (
         <div className="uidai-pmis-content">
-            {/* Header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-                <div>
-                    <div className="uidai-pmis-title" style={{ marginBottom: 2 }}>SLA Masters</div>
-                    <div className="uidai-pmis-subtitle" style={{ marginTop: 0 }}>
-                        Define once, map everywhere — onboard contract SLAs as reusable templates.
-                    </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadSlas} disabled={loading}>
-                        {loading ? "Loading…" : "↻ Refresh"}
-                    </button>
-                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openOnboard}>+ Onboard New SLA</button>
-                </div>
-            </div>
-
-
-            {/* KPIs */}
-            <div className="uidai-pmis-kpi-row">
-                <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Total SLAs</div><div className="uidai-pmis-kpi-value">{kpis.total}</div></div>
-                <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Active</div><div className="uidai-pmis-kpi-value">{kpis.active}</div></div>
-                <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Contract Types</div><div className="uidai-pmis-kpi-value">{kpis.contracts}</div></div>
-                <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Categories</div><div className="uidai-pmis-kpi-value">{kpis.categories}</div></div>
-            </div>
-
-            {/* List card */}
-            <div className="uidai-pmis-card">
-                <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginBottom: 12 }}>SLA Definitions</div>
-
-                <div className="uidai-pmis-filter-shell">
-                    <div className="uidai-pmis-filter-head">
-                        <div className="uidai-pmis-filter-title">Filters</div>
-                        {filtersActive && (
-                            <button type="button" className="uidai-pmis-filter-toggle" onClick={() => { setFilters({ contract_type: "", category: "", status: "" }); setSearch(""); }}>✕ Clear</button>
-                        )}
-                    </div>
-                    <div className="uidai-pmis-filter-body" style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
-                        <div style={{ flex: "2 1 240px", minWidth: 200 }}>
-                            <div style={filterLabel}>Search</div>
-                            <input className="uidai-pmis-filter-input" type="text" placeholder="Search by SLA ref or title…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            {showingDetail ? (
+                <SlaDetailSection
+                    d={detail}
+                    loading={detailLoading}
+                    onBack={closeDetail}
+                    onEdit={(id) => navigate(`/sla-masters/onboard?id=${encodeURIComponent(id)}`)}
+                    onDelete={(d) => setPendingDelete({ id: d.id || detailId, ref: d.sla_ref })}
+                    fallbackId={detailId}
+                />
+            ) : (
+                <>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+                        <div>
+                            <div className="uidai-pmis-title" style={{ marginBottom: 2 }}>SLA Masters</div>
+                            <div className="uidai-pmis-subtitle" style={{ marginTop: 0 }}>
+                                Define once, map everywhere — onboard contract SLAs as reusable templates.
+                            </div>
                         </div>
-                        <div style={{ flex: "1 1 150px", minWidth: 140 }}>
-                            <div style={filterLabel}>Contract Type</div>
-                            <select className="uidai-pmis-filter-select" value={filters.contract_type} onChange={(e) => setFilters((f) => ({ ...f, contract_type: e.target.value }))}>
-                                <option value="">All</option>
-                                {CONTRACT_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div>
-                        <div style={{ flex: "1 1 160px", minWidth: 140 }}>
-                            <div style={filterLabel}>Category</div>
-                            <select className="uidai-pmis-filter-select" value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}>
-                                <option value="">All</option>
-                                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </div>
-                        <div style={{ flex: "1 1 140px", minWidth: 130 }}>
-                            <div style={filterLabel}>Status</div>
-                            <select className="uidai-pmis-filter-select" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
-                                <option value="">All</option>
-                                {STATUS_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadSlas} disabled={loading}>
+                                {loading ? "Loading…" : "↻ Refresh"}
+                            </button>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => navigate("/sla-masters/onboard")}>+ Onboard New SLA</button>
                         </div>
                     </div>
-                </div>
 
-                <div className="uidai-pmis-table-wrap" style={{ marginTop: 14 }}>
-                    <table className="uidai-pmis-table">
-                        <thead>
-                            <tr>
-                                <th>SLA Number</th><th>Title</th><th>Contract</th><th>Category</th><th>Status</th><th>Updated</th><th style={{ textAlign: "center" }}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {loading ? (
-                                <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading…</td></tr>
-                            ) : filtered.length === 0 ? (
-                                <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted, fontStyle: "italic" }}>
-                                    {slas.length === 0 ? "No SLAs loaded. Check the API base, then Refresh." : "No matching SLAs."}
-                                </td></tr>
-                            ) : filtered.map((s) => (
-                                <tr key={s.id}>
-                                    <td><button type="button" className="uidai-pmis-link" style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#173e77", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }} onClick={() => openView(s.id)}>{s.sla_ref || "—"}</button></td>
-                                    <td>{s.title || s.name || "—"}</td>
-                                    <td><span className="uidai-pmis-badge">{s.contract_type || "—"}</span></td>
-                                    <td>{s.category || humanize(s.formula_type)}</td>
-                                    <td><StatusBadge status={s.status} /></td>
-                                    <td style={{ ...muted, fontSize: 12 }}>{(s.updated_at || s.created_at || "").slice(0, 10) || "—"}</td>
-                                    <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                                        <span style={{ display: "inline-flex", gap: 6 }}>
-                                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => openView(s.id)}>View</button>
-                                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => openEdit(s.id)}>Edit</button>
-                                            <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Delete" onClick={() => setPendingDelete({ id: s.id, ref: s.sla_ref })}>🗑</button>
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* ─── Onboard / Edit modal ─── */}
-            <Modal
-                open={formOpen}
-                onClose={() => setFormOpen(false)}
-                width={980}
-                title={editingId ? `Edit SLA — ${form.sla_ref}` : "Onboard New SLA"}
-                subtitle="Reusable SLA template — identification, definition, cadence, scoring bands and guards."
-                footer={
-                    <>
-                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setFormOpen(false)} disabled={saving}>Cancel</button>
-                        <button type="button" className="uidai-pmis-btn" onClick={submitForm} disabled={saving}>{saving ? "Saving…" : (editingId ? "Save Changes" : "Onboard SLA")}</button>
-                    </>
-                }
-            >
-                {!editingId && (
-                    <SubSection title="RFP Document">
-                        <Field label="RFP Image" required full hint="Upload the source RFP image (PNG/JPG). Required to onboard.">
-                            <input
-                                style={inputStyle}
-                                type="file"
-                                accept="image/*"
-                                onChange={(e) => setRfpFile(e.target.files?.[0] || null)}
-                            />
-                            {rfpFile && <div style={{ fontSize: 11.5, ...muted, marginTop: 4 }}>Selected: {rfpFile.name}</div>}
-                        </Field>
-                    </SubSection>
-                )}
-
-                <SubSection title="SLA Identification">
-                    <div className="uidai-pmis-grid-4" style={{ gap: 14 }}>
-                        {!editingId && (
-                            <Field label="Project" required hint="The project this SLA is onboarded under">
-                                <select style={inputStyle} value={form.project_id} onChange={(e) => setF({ project_id: e.target.value })}>
-                                    <option value="">Select project…</option>
-                                    {projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName || p.projectId}</option>)}
-                                </select>
-                            </Field>
-                        )}
-                        <Field label="SLA Number" required><input style={inputStyle} value={form.sla_ref} disabled={!!editingId} onChange={(e) => setF({ sla_ref: e.target.value })} placeholder="PMU-SLA001" /></Field>
-                        <Field label="Title" required><input style={inputStyle} value={form.title} onChange={(e) => setF({ title: e.target.value })} placeholder="Non-submission of deliverable" /></Field>
-                        <Field label="Contract Type" required>
-                            <select style={inputStyle} value={form.contract_type} disabled={!!editingId} onChange={(e) => setF({ contract_type: e.target.value })}>
-                                {CONTRACT_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </Field>
-                        <Field label="Formula Type" required hint="Calculation engine">
-                            <select style={inputStyle} value={form.formula_type} disabled={!!editingId} onChange={(e) => setF({ formula_type: e.target.value })}>
-                                {FORMULA_TYPES.map((c) => <option key={c} value={c}>{humanize(c)}</option>)}
-                            </select>
-                        </Field>
-                        <Field label="Category" required>
-                            <select
-                                style={inputStyle}
-                                value={form.category_code}
-                                onChange={(e) => {
-                                    const code = e.target.value;
-                                    const cat = slaCategories.find((c) => c.code === code);
-                                    // A category carries its canonical formula_type — sync it
-                                    // (still editable below) and keep the display name for `category`.
-                                    setF({
-                                        category_code: code,
-                                        category: cat?.display_name || "",
-                                        ...(cat?.formula_type ? { formula_type: cat.formula_type } : {}),
-                                    });
-                                }}
-                            >
-                                <option value="">Select category…</option>
-                                {slaCategories.map((c) => <option key={c.code} value={c.code}>{c.display_name || c.code}</option>)}
-                            </select>
-                        </Field>
-                        <Field label="Status">
-                            <select style={inputStyle} value={form.status} onChange={(e) => setF({ status: e.target.value })}>
-                                {STATUS_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                        </Field>
+                    {/* KPIs */}
+                    <div className="uidai-pmis-kpi-row">
+                        <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Total SLAs</div><div className="uidai-pmis-kpi-value">{kpis.total}</div></div>
+                        <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Active</div><div className="uidai-pmis-kpi-value">{kpis.active}</div></div>
+                        <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Contract Types</div><div className="uidai-pmis-kpi-value">{kpis.contracts}</div></div>
+                        <div className="uidai-pmis-kpi"><div className="uidai-pmis-kpi-label">Categories</div><div className="uidai-pmis-kpi-value">{kpis.categories}</div></div>
                     </div>
-                </SubSection>
 
-                <SubSection title="Definition & Scope">
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-                        <Field label="Definition of SLA"><textarea style={{ ...inputStyle, height: 70, resize: "vertical" }} value={form.description} onChange={(e) => setF({ description: e.target.value })} placeholder="One-sentence summary of what this SLA covers." /></Field>
-                        <Field label="Scope of SLA"><textarea style={{ ...inputStyle, height: 70, resize: "vertical" }} value={form.scope_text} onChange={(e) => setF({ scope_text: e.target.value })} placeholder="Who or what this SLA applies to." /></Field>
+                    {/* List card */}
+                    <div className="uidai-pmis-card">
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginBottom: 12 }}>SLA Definitions</div>
+
+                        <div className="uidai-pmis-filter-shell">
+                            <div className="uidai-pmis-filter-head">
+                                <div className="uidai-pmis-filter-title">Filters</div>
+                                {filtersActive && (
+                                    <button type="button" className="uidai-pmis-filter-toggle" onClick={() => { setFilters({ contract_type: "", category: "", status: "" }); setSearch(""); }}>✕ Clear</button>
+                                )}
+                            </div>
+                            <div className="uidai-pmis-filter-body" style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+                                <div style={{ flex: "2 1 240px", minWidth: 200 }}>
+                                    <div style={filterLabel}>Search</div>
+                                    <input className="uidai-pmis-filter-input" type="text" placeholder="Search by SLA ref or title…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                                </div>
+                                <div style={{ flex: "1 1 150px", minWidth: 140 }}>
+                                    <div style={filterLabel}>Contract Type</div>
+                                    <select className="uidai-pmis-filter-select" value={filters.contract_type} onChange={(e) => setFilters((f) => ({ ...f, contract_type: e.target.value }))}>
+                                        <option value="">All</option>
+                                        {CONTRACT_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div style={{ flex: "1 1 160px", minWidth: 140 }}>
+                                    <div style={filterLabel}>Category</div>
+                                    <select className="uidai-pmis-filter-select" value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}>
+                                        <option value="">All</option>
+                                        {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                <div style={{ flex: "1 1 140px", minWidth: 130 }}>
+                                    <div style={filterLabel}>Status</div>
+                                    <select className="uidai-pmis-filter-select" value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
+                                        <option value="">All</option>
+                                        {STATUS_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="uidai-pmis-table-wrap" style={{ marginTop: 14 }}>
+                            <table className="uidai-pmis-table">
+                                <thead>
+                                    <tr>
+                                        <th>SLA Number</th><th>Title</th><th>Contract</th><th>Category</th><th>Status</th><th>Updated</th><th style={{ textAlign: "center" }}>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {loading ? (
+                                        <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading…</td></tr>
+                                    ) : filtered.length === 0 ? (
+                                        <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted, fontStyle: "italic" }}>
+                                            {slas.length === 0 ? "No SLAs loaded. Check the API base, then Refresh." : "No matching SLAs."}
+                                        </td></tr>
+                                    ) : filtered.map((s) => (
+                                        <tr key={s.id}>
+                                            <td><button type="button" className="uidai-pmis-link" style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#173e77", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }} onClick={() => openDetail(s.id)}>{s.sla_ref || "—"}</button></td>
+                                            <td>{s.title || s.name || "—"}</td>
+                                            <td><span className="uidai-pmis-badge">{s.contract_type || "—"}</span></td>
+                                            <td>{s.category || humanize(s.formula_type)}</td>
+                                            <td><StatusBadge status={s.status} /></td>
+                                            <td style={{ ...muted, fontSize: 12 }}>{(s.updated_at || s.created_at || "").slice(0, 10) || "—"}</td>
+                                            <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                                                <span style={{ display: "inline-flex", gap: 6 }}>
+                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => openDetail(s.id)}>View</button>
+                                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => navigate(`/sla-masters/onboard?id=${encodeURIComponent(s.id)}`)}>Edit</button>
+                                                    <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Delete" onClick={() => setPendingDelete({ id: s.id, ref: s.sla_ref })}>🗑</button>
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </SubSection>
-
-                <SubSection title="Source & Calculation">
-                    <div className="uidai-pmis-grid-4" style={{ gap: 14 }}>
-                        <Field label="Source of Data"><input style={inputStyle} value={form.data_source} onChange={(e) => setF({ data_source: e.target.value })} placeholder="Manual / system name" /></Field>
-                        <Field label="Reports submitted to"><input style={inputStyle} value={form.reports_submitted_to} onChange={(e) => setF({ reports_submitted_to: e.target.value })} placeholder="TMD, UIDAI HO" /></Field>
-                        <Field label="SLA Calculation" full><textarea style={{ ...inputStyle, height: 60, resize: "vertical" }} value={form.calculation_method} onChange={(e) => setF({ calculation_method: e.target.value })} placeholder="Plain-English description of how this SLA is computed." /></Field>
-                    </div>
-                </SubSection>
-
-                <SubSection title="Cadence & Baseline">
-                    <div className="uidai-pmis-grid-4" style={{ gap: 14 }}>
-                        <Field label="Measurement Interval"><select style={inputStyle} value={form.measurement_interval} onChange={(e) => setF({ measurement_interval: e.target.value })}>{MEAS_INTERVALS.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                        <Field label="Reporting Interval"><select style={inputStyle} value={form.reporting_interval} onChange={(e) => setF({ reporting_interval: e.target.value })}>{REP_INTERVALS.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                        <Field label="Baseline Type"><select style={inputStyle} value={form.baseline_type} onChange={(e) => setF({ baseline_type: e.target.value })}>{BASELINE_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                        <Field label="Compound Metric Rule"><select style={inputStyle} value={form.compound_metric_rule} onChange={(e) => setF({ compound_metric_rule: e.target.value })}>{COMPOUND_RULES.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                        <Field label="LD Aggregation"><select style={inputStyle} value={form.ld_aggregation_method} onChange={(e) => setF({ ld_aggregation_method: e.target.value })}>{LD_AGG_METHODS.map((c) => <option key={c} value={c}>{c}</option>)}</select></Field>
-                        <Field label="Applied On (LD base)"><select style={inputStyle} value={form.ld_computation_base} onChange={(e) => setF({ ld_computation_base: e.target.value })}>{LD_BASES.map((c) => <option key={c} value={c}>{humanize(c)}</option>)}</select></Field>
-                        <Field label="Active From" required><input style={inputStyle} type="date" value={form.effective_from} onChange={(e) => setF({ effective_from: e.target.value })} /></Field>
-                        <Field label="Active Until"><input style={inputStyle} type="date" value={form.effective_until} onChange={(e) => setF({ effective_until: e.target.value })} /></Field>
-                    </div>
-                </SubSection>
-
-                <SubSection title="Metrics"><ArrayEditor columns={METRIC_COLS} rows={metrics} onChange={setMetrics} addLabel="+ Add metric" /></SubSection>
-                <SubSection title="Condition Bands (severity thresholds)"><ArrayEditor columns={BAND_COLS} rows={bands} onChange={setBands} addLabel="+ Add band" /></SubSection>
-                <SubSection title="Lookup Table (linear escalation tiers)"><ArrayEditor columns={LOOKUP_COLS} rows={lookup} onChange={setLookup} addLabel="+ Add tier" /></SubSection>
-                <SubSection title="Parameters"><ArrayEditor columns={PARAM_COLS} rows={parameters} onChange={setParameters} addLabel="+ Add parameter" /></SubSection>
-                <SubSection title="Guard Conditions"><ArrayEditor columns={GUARD_COLS} rows={guards} onChange={setGuards} addLabel="+ Add guard" /></SubSection>
-
-                {editingId && <div style={{ fontSize: 11.5, ...muted, marginTop: 12 }}>Note: edits PATCH the core fields. Metrics / bands / lookup / guards are shown for reference; the API updates them via the dedicated endpoints.</div>}
-            </Modal>
-
-            {/* ─── View modal ─── */}
-            <Modal
-                open={viewOpen}
-                onClose={() => setViewOpen(false)}
-                width={1000}
-                title={viewData ? (viewData.title || viewData.name || viewData.sla_ref || "SLA") : "SLA Details"}
-                subtitle={viewData ? `${viewData.sla_ref || ""}  ·  ${viewData.contract_type || ""}  ·  ${viewData.category || humanize(viewData.formula_type)}` : ""}
-                footer={<button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setViewOpen(false)}>Close</button>}
-            >
-                {viewLoading ? (
-                    <div style={{ padding: 22, textAlign: "center", ...muted, fontSize: 13 }}>Loading SLA details…</div>
-                ) : viewData ? (
-                    <ViewBody d={viewData} />
-                ) : null}
-            </Modal>
+                </>
+            )}
 
             {/* ─── Delete confirm ─── */}
             <Modal
@@ -788,72 +340,230 @@ export default function SlaMastersPage() {
     );
 }
 
-/* ─── View modal body — RFP-style 2-column table + sub-tables ─── */
-function ViewRow({ label, value, mono }) {
-    const empty = value === null || value === undefined || value === "";
-    return (
-        <tr>
-            <th style={{ width: 210, background: "#f1f6fd", padding: "10px 12px", textAlign: "left", verticalAlign: "top", color: "#173e77", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: ".3px" }}>{label}</th>
-            <td style={{ padding: "10px 12px", verticalAlign: "top", lineHeight: 1.5, fontFamily: mono ? "monospace" : "inherit", fontSize: 13 }}>
-                {empty ? <span style={{ ...muted, fontStyle: "italic" }}>—</span> : value}
-            </td>
-        </tr>
-    );
-}
+/* ════════════════════ Detail section (in-page) ════════════════════ */
 
-function ViewSubTable({ title, columns, rows }) {
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+const labelStyle = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".4px", color: "var(--uidai-pmis-muted)", marginBottom: 5 };
+
+function InfoGrid({ items, min = 220 }) {
+    const visible = items.filter((it) => it && it.value !== undefined);
     return (
-        <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 700, color: "#173e77", fontSize: 12.5, marginBottom: 6 }}>{title} <span style={{ ...muted, fontWeight: 400 }}>({rows.length})</span></div>
-            <div className="uidai-pmis-table-wrap">
-                <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0, minWidth: 0 }}>
-                    <thead><tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
-                    <tbody>
-                        {rows.map((r, i) => (
-                            <tr key={i}>{columns.map((c) => <td key={c.key}>{r[c.key] === null || r[c.key] === undefined || r[c.key] === "" ? "—" : (typeof r[c.key] === "boolean" ? (r[c.key] ? "✓" : "") : String(r[c.key]))}</td>)}</tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))`, gap: "18px 26px" }}>
+            {visible.map((it, i) => (
+                <div key={i} style={it.full ? { gridColumn: "1 / -1" } : undefined}>
+                    <div style={labelStyle}>{it.label}</div>
+                    <div style={{ fontSize: 13.5, color: "var(--uidai-pmis-text)", lineHeight: 1.55, wordBreak: "break-word", fontFamily: it.mono ? "ui-monospace, SFMono-Regular, Menlo, monospace" : "inherit" }}>
+                        {it.value === null || it.value === "" || it.value === undefined ? <span style={{ color: "#9aa7ba", fontStyle: "italic" }}>—</span> : it.value}
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }
 
-function ViewBody({ d }) {
-    const category = d.category || humanize(d.formula_type);
+function Chip({ children, tone = "navy" }) {
+    const tones = {
+        navy: { bg: "#eef4fc", fg: "#173e77" },
+        cyan: { bg: "#e6f6fa", fg: "#0b6a7e" },
+        slate: { bg: "#eef1f6", fg: "#41506a" },
+    };
+    const t = tones[tone] || tones.navy;
+    return <span style={{ display: "inline-block", background: t.bg, color: t.fg, fontWeight: 700, fontSize: 11.5, padding: "3px 10px", borderRadius: 99 }}>{children}</span>;
+}
+
+function DetailCard({ title, right, children, style }) {
+    return (
+        <div className="uidai-pmis-card" style={{ marginBottom: 18, ...style }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: NAVY }}>{title}</div>
+                {right}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function SubTable({ columns, rows }) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+        return <div style={{ fontSize: 12.5, ...muted, fontStyle: "italic" }}>None.</div>;
+    }
+    return (
+        <div className="uidai-pmis-table-wrap">
+            <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0, minWidth: 0 }}>
+                <thead><tr>{columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr></thead>
+                <tbody>
+                    {rows.map((r, i) => (
+                        <tr key={i}>{columns.map((c) => {
+                            const v = r[c.key];
+                            const display = v === null || v === undefined || v === "" ? "—" : (typeof v === "boolean" ? (v ? "✓" : "—") : String(v));
+                            return <td key={c.key}>{display}</td>;
+                        })}</tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function MeasurementCard({ title, m }) {
+    const empty = !m || !m.display_name;
+    return (
+        <div style={{ flex: "1 1 240px", minWidth: 220, border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, padding: 14, background: "#fbfdff" }}>
+            <div style={labelStyle}>{title}</div>
+            {empty ? (
+                <div style={{ color: "#9aa7ba", fontStyle: "italic", fontSize: 13 }}>Not set</div>
+            ) : (
+                <>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 6 }}>{m.display_name}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {m.unit ? <Chip tone="slate">unit: {m.unit}</Chip> : null}
+                        {m.target_value !== undefined && m.target_value !== null && m.target_value !== "" ? <Chip tone="cyan">target: {m.target_value}</Chip> : null}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
+function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) {
+    const backBtn = (
+        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={onBack}>← Back to SLA Masters</button>
+    );
+
+    if (loading || !d) {
+        return (
+            <>
+                <div style={{ marginBottom: 16 }}>{backBtn}</div>
+                <div className="uidai-pmis-card" style={{ textAlign: "center", padding: 40, ...muted }}>Loading SLA details…</div>
+            </>
+        );
+    }
+
+    const definition = d.definition || d.description;
+    const scope = d.scope || d.scope_text;
+    const calculation = d.calculation || d.calculation_method;
+    const appliedOn = d.applied_on || d.ld_computation_base;
+    const category = d.category || d.category_code;
+    const lin = d.linear_escalation;
+    const targetRows = d.target_rows || d.bands || d.condition_bands;
+    const id = d.id || fallbackId;
+
     return (
         <div>
-            <div className="uidai-pmis-table-wrap">
-                <table className="uidai-pmis-table" style={{ minWidth: 0 }}>
-                    <tbody>
-                        <ViewRow label="SLA Number" value={d.sla_ref} mono />
-                        <ViewRow label="Title" value={d.title || d.name} />
-                        <ViewRow label="Category" value={category} />
-                        <ViewRow label="Contract Type" value={d.contract_type} />
-                        <ViewRow label="Formula Type" value={humanize(d.formula_type)} />
-                        <ViewRow label="Definition" value={d.description} />
-                        <ViewRow label="Scope" value={d.scope_text} />
-                        <ViewRow label="Source of Data" value={d.data_source} />
-                        <ViewRow label="SLA Calculation" value={d.calculation_method} />
-                        <ViewRow label="Measurement Interval" value={d.measurement_interval} />
-                        <ViewRow label="Reporting Interval" value={d.reporting_interval} />
-                        <ViewRow label="Baseline Type" value={humanize(d.baseline_type)} />
-                        <ViewRow label="LD Aggregation" value={d.ld_aggregation_method} />
-                        <ViewRow label="Applied On" value={humanize(d.ld_computation_base)} />
-                        <ViewRow label="Reports submitted to" value={d.reports_submitted_to} />
-                        <ViewRow label="Active From" value={(d.effective_from || "").slice(0, 10)} />
-                        <ViewRow label="Active Until" value={d.effective_until ? d.effective_until.slice(0, 10) : null} />
-                        <ViewRow label="Status" value={<StatusBadge status={d.status} />} />
-                    </tbody>
-                </table>
+            {/* Action row */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+                {backBtn}
+                <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => onEdit(id)}>✎ Edit</button>
+                    <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" style={{ padding: "8px 14px", borderRadius: 6 }} onClick={() => onDelete(d)}>🗑 Delete</button>
+                </div>
             </div>
 
-            <ViewSubTable title="Metrics" columns={[{ key: "metric_key", label: "Key" }, { key: "display_name", label: "Display name" }, { key: "unit", label: "Unit" }, { key: "direction", label: "Direction" }, { key: "is_primary", label: "Primary" }]} rows={d.metrics} />
-            <ViewSubTable title="Condition Bands" columns={[{ key: "sort_order", label: "Order" }, { key: "band_label", label: "Label" }, { key: "metric_key", label: "Metric" }, { key: "range_min", label: "From" }, { key: "range_max", label: "To" }, { key: "severity_level", label: "Severity" }, { key: "rate_percent", label: "Rate %" }, { key: "points_contribution", label: "Points" }]} rows={d.condition_bands || d.bands} />
-            <ViewSubTable title="Lookup Table" columns={[{ key: "sort_order", label: "Order" }, { key: "lookup_key", label: "Tier" }, { key: "lookup_value", label: "LD %" }]} rows={d.lookup_table || d.lookup_rows} />
-            <ViewSubTable title="Parameters" columns={[{ key: "param_key", label: "Key" }, { key: "param_value", label: "Value" }]} rows={d.parameters} />
-            <ViewSubTable title="Guard Conditions" columns={[{ key: "metric_key", label: "Metric" }, { key: "operator", label: "Op" }, { key: "threshold_value", label: "Threshold" }, { key: "action", label: "Action" }, { key: "action_description", label: "Description" }]} rows={d.guard_conditions || d.guards} />
+            {/* Hero */}
+            <div className="uidai-pmis-card" style={{ marginBottom: 18 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14 }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--uidai-pmis-muted)", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", marginBottom: 6 }}>{d.sla_ref || "—"}</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: NAVY, lineHeight: 1.25 }}>{d.title || d.name || "Untitled SLA"}</div>
+                    </div>
+                    <StatusBadge status={d.status} />
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                    {d.contract_type ? <Chip>{d.contract_type}</Chip> : null}
+                    {category ? <Chip tone="cyan">{category}</Chip> : null}
+                    {d.formula_type ? <Chip tone="slate">{humanize(d.formula_type)}</Chip> : null}
+                </div>
+            </div>
+
+            {/* Definition & Scope */}
+            <DetailCard title="Definition & Scope">
+                <InfoGrid min={300} items={[
+                    { label: "Definition of SLA", value: definition, full: true },
+                    { label: "Scope of SLA", value: scope, full: true },
+                ]} />
+            </DetailCard>
+
+            {/* Source & Calculation */}
+            <DetailCard title="Source & Calculation">
+                <InfoGrid items={[
+                    { label: "Source of Data", value: d.data_source },
+                    { label: "Reports submitted to", value: d.reports_submitted_to },
+                    { label: "SLA Calculation", value: calculation, full: true },
+                ]} />
+            </DetailCard>
+
+            {/* Cadence & Application */}
+            <DetailCard title="Cadence & Application">
+                <InfoGrid items={[
+                    { label: "Measurement Interval", value: d.measurement_interval ? humanize(d.measurement_interval) : null },
+                    { label: "Reporting Interval", value: d.reporting_interval ? humanize(d.reporting_interval) : null },
+                    { label: "Applied On", value: appliedOn ? humanize(appliedOn) : null },
+                    { label: "Active From", value: (d.effective_from || "").slice(0, 10) || null },
+                    { label: "Active Until", value: d.effective_until ? d.effective_until.slice(0, 10) : null },
+                ]} />
+            </DetailCard>
+
+            {/* Measurement */}
+            <DetailCard title="Measurement">
+                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    <MeasurementCard title="Primary measurement" m={d.measurement} />
+                    {d.secondary_measurement ? <MeasurementCard title="Secondary measurement" m={d.secondary_measurement} /> : null}
+                </div>
+            </DetailCard>
+
+            {/* Target */}
+            <DetailCard title={lin ? "Target — Linear LD escalation" : "Target — Severity bands"}>
+                {lin ? (
+                    <div>
+                        <div style={{ padding: "12px 14px", borderRadius: 8, border: "1px dashed #0aa1c0", background: "#eef7fb", fontSize: 14, color: NAVY }}>
+                            If delayed by <strong>N</strong> {lin.unit || "unit"}{(lin.unit || "unit").endsWith("s") ? "" : "s"} → <strong style={{ color: "#b91c1c" }}>LD = N × {lin.rate_per_unit_percent}% × base</strong>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+                            <Chip tone="slate">rate: {lin.rate_per_unit_percent}%</Chip>
+                            <Chip tone="slate">unit: {lin.unit}</Chip>
+                            <Chip tone="slate">grace: {lin.grace_units ?? 0}</Chip>
+                            {lin.max_units != null ? <Chip tone="slate">max: {lin.max_units}</Chip> : null}
+                        </div>
+                    </div>
+                ) : (
+                    <SubTable
+                        columns={[
+                            { key: "severity", label: "Severity" },
+                            { key: "threshold_label", label: "Threshold" },
+                            { key: "from_value", label: "From (excl.)" },
+                            { key: "to_value", label: "To (incl.)" },
+                            { key: "input_variable", label: "Input variable" },
+                        ]}
+                        rows={targetRows}
+                    />
+                )}
+            </DetailCard>
+
+            {/* Placeholders */}
+            {Array.isArray(d.placeholders) && d.placeholders.length > 0 && (
+                <DetailCard title="Mapping inputs (placeholders)">
+                    <SubTable
+                        columns={[
+                            { key: "key", label: "Key" },
+                            { key: "label", label: "Label" },
+                            { key: "type", label: "Type" },
+                            { key: "required", label: "Required" },
+                            { key: "help", label: "Help" },
+                        ]}
+                        rows={d.placeholders}
+                    />
+                </DetailCard>
+            )}
+
+            {/* Meta */}
+            {(d.created_at || d.updated_at || d.project_id) && (
+                <DetailCard title="Record">
+                    <InfoGrid items={[
+                        { label: "Project ID", value: d.project_id, mono: true },
+                        { label: "Created", value: (d.created_at || "").slice(0, 19).replace("T", " ") || null },
+                        { label: "Updated", value: (d.updated_at || "").slice(0, 19).replace("T", " ") || null },
+                    ]} />
+                </DetailCard>
+            )}
         </div>
     );
 }
