@@ -275,8 +275,6 @@ export default function SlaOnboardingPage() {
         const prevPadBottom = scroller ? scroller.style.paddingBottom : "";
         if (scroller) scroller.style.paddingBottom = "0";
 
-        const goBack = () => navigate("/sla-masters");
-
         /* ════════ ported builder logic (scoped to this effect) ════════ */
         const _BOOT_FAILS = new Set();
 
@@ -285,6 +283,10 @@ export default function SlaOnboardingPage() {
         let PROJECTS = [];
         let INPUT_VARIABLES = [];
         let editingId = null;
+
+        // After editing, return to that SLA's detail page (so changes are
+        // visible and Back goes to the list); after creating, go to the list.
+        const goBack = () => navigate(editingId ? `/sla-masters/view/${encodeURIComponent(editingId)}` : "/sla-masters");
 
         function _sevColour(sev) {
             const palette = { 0: "#16a34a", 1: "#f59e0b", 2: "#f97316", 3: "#ef4444", 4: "#991b1b" };

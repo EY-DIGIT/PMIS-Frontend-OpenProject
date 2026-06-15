@@ -690,6 +690,7 @@ export default function MainApp() {
                                                 {/*SLA Masters*/}
                                                 <Route path="sla-masters" element={<SlaMastersPage />} />
                                                 <Route path="sla-masters/onboard" element={<SlaOnboardingPage />} />
+                                                <Route path="sla-masters/view/:slaId" element={<SlaMastersPage />} />
                                                 <Route path="meetings/:id" element={<MeetingDetailPage />} />
                                             </Routes>
                                         </Layout>

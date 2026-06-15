@@ -12,7 +12,7 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import "../../styles/global.css";
 
@@ -77,6 +77,7 @@ function Modal({ open, onClose, title, width = 520, children, footer }) {
 
 export default function SlaMastersPage() {
     const navigate = useNavigate();
+    const { slaId } = useParams(); // present on /sla-masters/view/:slaId → detail mode
     const [baseUrl] = useState(DEFAULT_BASE);
 
     const [slas, setSlas] = useState([]);
@@ -89,8 +90,7 @@ export default function SlaMastersPage() {
 
     const [toast, setToast] = useState(null); // { title, msg, kind }
 
-    // In-page detail section
-    const [detailId, setDetailId] = useState(null);
+    // Detail section (driven by the :slaId route param)
     const [detail, setDetail] = useState(null);
     const [detailLoading, setDetailLoading] = useState(false);
 
@@ -165,26 +165,32 @@ export default function SlaMastersPage() {
     // Snap back to page 1 whenever the filtered set changes (search/filter edits).
     useEffect(() => { setPage(1); }, [search, filters]);
 
-    /* ─── Detail (in-page section) ─── */
-    async function openDetail(id) {
-        setDetailId(id);
+    /* ─── Detail (route /sla-masters/view/:slaId) ─── */
+    const openDetail = (id) => navigate(`/sla-masters/view/${encodeURIComponent(id)}`);
+    function closeDetail() {
+        loadSlas();               // refresh the list so any edit/delete reflects
+        navigate("/sla-masters");
+    }
+    // Fetch the SLA whenever the :slaId route param is present.
+    useEffect(() => {
+        if (!slaId) { setDetail(null); return undefined; }
+        let cancelled = false;
         setDetail(null);
         setDetailLoading(true);
-        try {
-            const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(id)}`), { method: "GET", headers: { Accept: "application/json" } });
-            const payload = await readJson(res);
-            setDetail(payload?.data || payload);
-        } catch (e) {
-            showToast("Load failed", e.message, "error");
-            setDetailId(null);
-        } finally {
-            setDetailLoading(false);
-        }
-    }
-    function closeDetail() {
-        setDetailId(null);
-        setDetail(null);
-    }
+        (async () => {
+            try {
+                const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(slaId)}`), { method: "GET", headers: { Accept: "application/json" } });
+                const payload = await readJson(res);
+                if (!cancelled) setDetail(payload?.data || payload);
+            } catch (e) {
+                if (!cancelled) { showToast("Load failed", e.message, "error"); navigate("/sla-masters"); }
+            } finally {
+                if (!cancelled) setDetailLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [slaId]);
 
     /* ─── Delete ─── */
     async function confirmDelete() {
@@ -196,7 +202,9 @@ export default function SlaMastersPage() {
             showToast("Deleted", "SLA removed.");
             const removedId = pendingDelete.id;
             setPendingDelete(null);
-            if (detailId === removedId) closeDetail();
+            // If we deleted the SLA we're viewing, return to the list; otherwise
+            // just refresh the table in place.
+            if (slaId === removedId) navigate("/sla-masters");
             loadSlas();
         } catch (e) {
             showToast("Delete failed", e.message, "error");
@@ -206,7 +214,7 @@ export default function SlaMastersPage() {
     }
 
     const filterLabel = { fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)", marginBottom: 6 };
-    const showingDetail = !!detailId;
+    const showingDetail = !!slaId;
 
     return (
         <div className="uidai-pmis-content">
@@ -216,8 +224,8 @@ export default function SlaMastersPage() {
                     loading={detailLoading}
                     onBack={closeDetail}
                     onEdit={(id) => navigate(`/sla-masters/onboard?id=${encodeURIComponent(id)}`)}
-                    onDelete={(d) => setPendingDelete({ id: d.id || detailId, ref: d.sla_ref })}
-                    fallbackId={detailId}
+                    onDelete={(d) => setPendingDelete({ id: d.id || slaId, ref: d.sla_ref })}
+                    fallbackId={slaId}
                 />
             ) : (
                 <>
@@ -301,7 +309,7 @@ export default function SlaMastersPage() {
                                         </td></tr>
                                     ) : paged.map((s) => (
                                         <tr key={s.id}>
-                                            <td><button type="button" className="uidai-pmis-link" style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#173e77", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }} onClick={() => openDetail(s.id)}>{s.sla_ref || "—"}</button></td>
+                                            <td><button type="button" className="uidai-pmis-link" style={{ background: "none", border: "none", padding: 0, font: "inherit", color: "#2a6fb0", fontWeight: 600, cursor: "pointer", textDecoration: "none" }} onClick={() => openDetail(s.id)}>{s.sla_ref || "—"}</button></td>
                                             <td>{s.title || s.name || "—"}</td>
                                             <td><span className="uidai-pmis-badge">{s.contract_type || "—"}</span></td>
                                             <td>{s.category || humanize(s.formula_type)}</td>
@@ -327,11 +335,9 @@ export default function SlaMastersPage() {
                                     Showing <strong style={{ color: "#173e77" }}>{(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}</strong> of <strong style={{ color: "#173e77" }}>{filtered.length}</strong>
                                 </div>
                                 <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage <= 1} onClick={() => setPage(1)}>« First</button>
                                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Prev</button>
                                     <span style={{ fontSize: 12.5, fontWeight: 700, color: "#173e77", padding: "0 8px" }}>Page {safePage} / {pageCount}</span>
                                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>Next ›</button>
-                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" disabled={safePage >= pageCount} onClick={() => setPage(pageCount)}>Last »</button>
                                 </div>
                             </div>
                         )}
@@ -532,13 +538,14 @@ function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) 
 
     return (
         <div>
-            {/* Action row */}
+            {/* Action row — Edit/Delete on the left, Back on the right (project
+                convention puts Back on the right, away from the destructive action). */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
-                {backBtn}
                 <div style={{ display: "flex", gap: 8 }}>
                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => onEdit(id)}>✎ Edit</button>
                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-outline-red uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => onDelete(d)}>🗑 Delete</button>
                 </div>
+                {backBtn}
             </div>
 
             {/* Hero */}
