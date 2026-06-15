@@ -634,7 +634,10 @@ function DetailView({
         <div className="pmis-apinbox-section-head">
           <h3>Activity Workflow</h3>
         </div>
-        <ActivityWorkflowViewer activityId={item.activityId} />
+        <ActivityWorkflowViewer
+          activityId={item.activityId}
+          onlyDivisions={[item.yourDivisionCode, item.yourDivisionName, currentUser.division]}
+        />
       </div>
       {item.submissions.length > 0 ? (
         <div className="pmis-apinbox-section">

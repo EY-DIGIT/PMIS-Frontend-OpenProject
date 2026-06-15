@@ -144,7 +144,7 @@ function WorkflowStepper({ form }) {
   );
 }
 
-export default function ActivityWorkflowViewer({ activityId, concernedDivisions = [] }) {
+export default function ActivityWorkflowViewer({ activityId, concernedDivisions = [], onlyDivisions = [] }) {
   const [view, setView] = useState("stepper");
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
@@ -199,6 +199,22 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activityId, reloadKey]);
 
+  /* When `onlyDivisions` is supplied (Concerned Division review), restrict
+     the division breakdown shown in BOTH the stepper and the graph to just
+     the reviewer's own division — matched case-insensitively against the
+     division's name or code. Other divisions are hidden. */
+  const onlyKeys = safeArray(onlyDivisions)
+    .map((k) => String(k || "").trim().toLowerCase())
+    .filter(Boolean);
+  const displayForm = onlyKeys.length
+    ? {
+        ...form,
+        divisionApprovals: safeArray(form.divisionApprovals).filter((d) =>
+          onlyKeys.includes(String(d.division || "").trim().toLowerCase())
+        ),
+      }
+    : form;
+
   return (
     <div className="pmis-awf-scope">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
@@ -230,11 +246,11 @@ export default function ActivityWorkflowViewer({ activityId, concernedDivisions 
       </div>
 
       {view === "graph" ? (
-        <WorkflowGraph form={form} />
+        <WorkflowGraph form={displayForm} />
       ) : loading ? (
         <div className="pmis-awf-audit__empty">Loading workflow…</div>
       ) : (
-        <WorkflowStepper form={form} />
+        <WorkflowStepper form={displayForm} />
       )}
     </div>
   );
