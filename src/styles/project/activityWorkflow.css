@@ -86,6 +86,77 @@
   cursor: not-allowed;
 }
 
+/* ─── Start Activity confirm popup ──────────────────────────────── */
+.pmis-awf-startpop__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.pmis-awf-startpop {
+  background: #fff;
+  width: min(340px, 100%);
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+}
+.pmis-awf-startpop__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0b3c88;
+  margin-bottom: 12px;
+}
+.pmis-awf-startpop__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #42526e;
+  margin-bottom: 5px;
+}
+.pmis-awf-startpop__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #c7d6ea;
+  border-radius: 6px;
+  font: inherit;
+  color: #2c3a4f;
+}
+.pmis-awf-startpop__input:focus {
+  outline: none;
+  border-color: #129ab8;
+  box-shadow: 0 0 0 2px rgba(18, 154, 184, 0.18);
+}
+.pmis-awf-startpop__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.pmis-awf-startpop__btn {
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pmis-awf-startpop__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.pmis-awf-startpop__btn--ok {
+  background: linear-gradient(90deg, #0b3c88, #129ab8);
+  color: #fff;
+}
+.pmis-awf-startpop__btn--cancel {
+  background: #eef2f7;
+  color: #42526e;
+}
+
 /* ─── 2. Approval panel + toolbar ───────────────────────────────── */
 .pmis-awf-panel {
   margin-top: 0;

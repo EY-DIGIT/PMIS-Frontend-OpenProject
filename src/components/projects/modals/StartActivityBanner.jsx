@@ -3,10 +3,11 @@
    activity edit modal.
 
    Two states (mirroring the HTML reference's `.activity-start-banner`):
-     • Not started — amber banner with a "▶ Start Activity" button.
-       Click PATCHes /api/v3/activities/{id} with
-       { activityStarted: true, actualStartDate: <now ISO> } and then
-       stamps actualStartDate on the local form. Errors surface inline.
+     • Not started — amber banner with a "▶ Start Activity" button. Click
+       opens a small confirm popup with the Actual Start Date pre-filled to
+       today; on OK it PATCHes /api/v3/activities/{id} with
+       { activityStarted: true, actualStartDate: <chosen date ISO> } and
+       stamps that date on the local form. Errors surface inline.
      • Started — green banner showing the actual start date.
    ══════════════════════════════════════════════════════════════════ */
 
@@ -25,6 +26,11 @@ export default function StartActivityBanner({ activity, form, editable, projectP
   const canSubmit = useCan('submitActivityForApproval');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /* Clicking "Start Activity" opens a small confirm popup with the Actual
+     Start Date pre-filled to today; the user can adjust it, then OK. */
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [startDate, setStartDate] = useState(todayStr);
 
   /* Backend ships an explicit `activityStarted` boolean — trust it
      first so a refresh of an already-started activity lands on the
@@ -40,24 +46,37 @@ export default function StartActivityBanner({ activity, form, editable, projectP
     "";
   const businessId = activity.apiId || "";
 
+  function openConfirm() {
+    setStartDate(todayStr);
+    setError("");
+    setConfirmOpen(true);
+  }
+
   async function handleStart() {
     if (!businessId) {
       setError("Save the activity first, then start it.");
       return;
     }
+    if (!startDate) {
+      setError("Pick an Actual Start Date.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const nowIso = new Date().toISOString();
+      // Send the chosen date at local midnight as an ISO timestamp.
+      const iso = new Date(`${startDate}T00:00:00`).toISOString();
       await api.patch(ENDPOINTS.activities.update(businessId), {
         activityStarted: true,
-        actualStartDate: nowIso
+        actualStartDate: iso
       });
-      /* Apply the local start-activity transition AND flip the
-         activityStarted flag so the banner immediately mirrors the
-         backend state without waiting for a re-fetch. */
-      const next = startActivity(form);
-      onChange({ ...next, activityStarted: true });
+      /* Apply the local start-activity transition (adds the system comment)
+         AND flip the activityStarted flag so the banner immediately mirrors
+         the backend state without waiting for a re-fetch. Override the
+         stamped date with the one the user picked. */
+      const next = startActivity({ ...form, actualStartDate: "" });
+      onChange({ ...next, activityStarted: true, actualStartDate: startDate });
+      setConfirmOpen(false);
     } catch (err) {
       setError(err && err.message ? err.message : "Failed to start activity.");
     } finally {
@@ -93,18 +112,67 @@ export default function StartActivityBanner({ activity, form, editable, projectP
               <button
                 type="button"
                 className="pmis-awf-start-banner__btn"
-                onClick={handleStart}
+                onClick={openConfirm}
                 disabled={busy}
               >
-                {busy ? "Starting…" : "▶ Start Activity"}
+                ▶ Start Activity
               </button>
             )}
           </>
         )}
       </div>
-      {error && (
+      {error && !confirmOpen && (
         <div className="pmis-awf-error" style={{ marginTop: 8 }}>
           {error}
+        </div>
+      )}
+
+      {confirmOpen && (
+        <div
+          className="pmis-awf-startpop__overlay"
+          onClick={() => { if (!busy) setConfirmOpen(false); }}
+        >
+          <div
+            className="pmis-awf-startpop"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Start Activity"
+          >
+            <div className="pmis-awf-startpop__title">Start Activity</div>
+            <label className="pmis-awf-startpop__label" htmlFor="pmis-awf-start-date">
+              Actual Start Date
+            </label>
+            <input
+              id="pmis-awf-start-date"
+              type="date"
+              className="pmis-awf-startpop__input"
+              value={startDate}
+              max={todayStr}
+              onChange={(e) => setStartDate(e.target.value)}
+              autoFocus
+            />
+            {error && (
+              <div className="pmis-awf-error" style={{ marginTop: 8 }}>{error}</div>
+            )}
+            <div className="pmis-awf-startpop__actions">
+              <button
+                type="button"
+                className="pmis-awf-startpop__btn pmis-awf-startpop__btn--cancel"
+                onClick={() => setConfirmOpen(false)}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="pmis-awf-startpop__btn pmis-awf-startpop__btn--ok"
+                onClick={handleStart}
+                disabled={busy || !startDate}
+              >
+                {busy ? "Starting…" : "OK"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
