@@ -48,13 +48,22 @@ function deriveLastRejection(events) {
   const last = rejs.reduce((a, b) => (ts(b) >= ts(a) ? b : a));
   const action = String((last.actionName || last.action) || "").toUpperCase();
   const comment = String(last.comment || last.detail || "");
+  const prevState = String((last.previousState || last.previousStatus) || "").toUpperCase();
   const byName =
     last.performedByUsername || last.actorUsername || last.performedByUuid || "";
-  const byKind = action.includes("VOTE")
-    ? "division"
-    : action === "RETURN_TO_VENDOR" || /vendor/i.test(comment)
-      ? "owner"
-      : "owner";
+  /* Attribute the rejection to the stage it actually came from. A Concerned
+     Division vote (VOTE_REJECTED) — and the gate's ANY_REJECTED roll-up of
+     it — is a DIVISION rejection, NOT the owner's. Only an owner action
+     (RETURN_TO_VENDOR / RETURN_TO_DIVISION, or a reject recorded while the
+     activity was pending at the owner) is attributed to the owner.
+     Previously ANY_REJECTED fell through to "owner", which made the graph
+     light up the Owner stage as rejected on a concerned-division reject. */
+  const byKind =
+    action.includes("VOTE") || action === "ANY_REJECTED" || prevState.includes("CONCERNED")
+      ? "division"
+      : action === "RETURN_TO_VENDOR" || action === "RETURN_TO_DIVISION" || prevState.includes("OWNER")
+        ? "owner"
+        : "owner";
 
   let revertTo = "vendor";
   let revertDivisions = [];
