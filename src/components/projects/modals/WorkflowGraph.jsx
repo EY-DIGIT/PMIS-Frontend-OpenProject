@@ -188,9 +188,11 @@ export default function WorkflowGraph({ form, divisions }) {
     );
   };
 
-  const branchOn = (i) =>
-    (i === 2 && (divisionRejected || (stateRejected && rejIdx === 2))) ||
-    (i === 4 && (ownerRejected || (stateRejected && rejIdx === 4)));
+  /* Light the side reject-branch arrow red ONLY for the stage that actually
+     rejected (rejIdx), and only when the workflow is in a rejected state —
+     so it stays in sync with the red "✕ Rejected" / "Returned to Vendor"
+     boxes. Otherwise it stays the default dashed gray. */
+  const branchOn = (i) => isRejected && i === rejIdx;
 
   const RejectBranch = ({ i }) => {
     const on = branchOn(i);
