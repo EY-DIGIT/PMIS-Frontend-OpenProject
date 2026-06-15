@@ -168,10 +168,11 @@ export const ENDPOINTS = {
     updatePassword: (id) => `/users/api/v3/users/${enc(id)}/password`,
     remove: (id) => `/users/api/v3/users/${enc(id)}`,
     associated: '/projects/api/v3/associated-users',
-    /* Authz directory — users holding a given role on a project. Drives
-       the Organization User dropdowns on Manage Team (Project Admin /
-       Project User). Pass ?project_id=<uuid>&role=<project_admin|project_member>. */
-    authzUsers: '/users/api/v3/authz/users',
+    /* Authz assignable-users — the candidates that CAN be assigned a given
+       role on a project. Backs the Manage Team Organization User dropdowns
+       (role = project_admin | project_member). */
+    authzAssignableUsers: (projectId, role) =>
+      `/users/api/v3/authz/projects/${enc(projectId)}/assignable-users/${enc(role)}`,
   },
 
   vendors: {

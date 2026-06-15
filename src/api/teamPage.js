@@ -69,22 +69,14 @@ export function listUsersByProjectOrg(projectId) {
 }
 
 /* Org-user role dropdowns (Project Admin / Project User) on Manage Team
-   are sourced from the authz service, which returns the users holding a
-   given role on the project. `role` is the canonical key project_admin or
-   project_member. Reuses getCandidates (defined below) so the response is
-   normalized to a plain array regardless of envelope shape. */
-export function listAuthzUsersByRole(projectId, role) {
+   are sourced from the authz "assignable-users" endpoint, which returns the
+   users that can be assigned a given role on the project. `role` is the
+   canonical key project_admin or project_member. Reuses getCandidates
+   (defined below) so the response is normalized to a plain array regardless
+   of envelope shape. */
+export function listAssignableUsers(projectId, role) {
   if (!projectId || !role) return Promise.resolve([]);
-  return getCandidates(ENDPOINTS.users.authzUsers, { project_id: projectId, role });
-}
-
-/* Same authz directory, but scoped to a vendor (organization) instead of a
-   project. Used to fold org_admin users into the Project Admin dropdown on
-   Manage Team — those users administer the org and so count as project
-   admins too. `role` is typically org_admin. */
-export function listAuthzUsersByVendorRole(vendorId, role) {
-  if (!vendorId || !role) return Promise.resolve([]);
-  return getCandidates(ENDPOINTS.users.authzUsers, { vendor_id: vendorId, role });
+  return getCandidates(ENDPOINTS.users.authzAssignableUsers(projectId, role));
 }
 
 /* Convenience: users belonging to a specific division id. */
