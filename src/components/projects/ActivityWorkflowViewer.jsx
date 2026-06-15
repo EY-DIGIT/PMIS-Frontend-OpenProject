@@ -46,6 +46,20 @@ function deriveLastRejection(events) {
   if (!rejs.length) return null;
   const ts = (e) => Number((e && (e.createdTime || e.timestamp)) || 0);
   const last = rejs.reduce((a, b) => (ts(b) >= ts(a) ? b : a));
+  /* If the activity was re-submitted / re-requested AFTER this rejection,
+     the rejection is stale — the workflow has moved on. Drop it so the graph
+     renders the reject path as the default dashed gray (matching the
+     activity-edit graph, which clears lastRejection on resubmit) instead of
+     a lingering red. */
+  const lastTs = ts(last);
+  const advancedAfter = safeArray(events).some((e) => {
+    const a = String((e && (e.actionName || e.action)) || "").toUpperCase();
+    const advancing =
+      a === "SUBMIT" || a === "RESUBMIT" || a.includes("REQUEST") ||
+      a === "APPROVE" || a === "ALL_APPROVED" || a === "COMPLETE";
+    return advancing && ts(e) > lastTs;
+  });
+  if (advancedAfter) return null;
   const action = String((last.actionName || last.action) || "").toUpperCase();
   const comment = String(last.comment || last.detail || "");
   const prevState = String((last.previousState || last.previousStatus) || "").toUpperCase();
