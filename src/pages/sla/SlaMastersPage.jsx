@@ -181,7 +181,9 @@ export default function SlaMastersPage() {
             try {
                 const res = await authorizedFetch(api(`/api/v3/sla-masters/${encodeURIComponent(slaId)}`), { method: "GET", headers: { Accept: "application/json" } });
                 const payload = await readJson(res);
-                if (!cancelled) setDetail(payload?.data || payload);
+                // The detail envelope may be double-wrapped ({data:{_type, data:{…}}})
+                // like the list rows — unwrap so the real SLA fields surface.
+                if (!cancelled) setDetail(unwrap(payload?.data ?? payload));
             } catch (e) {
                 if (!cancelled) { showToast("Load failed", e.message, "error"); navigate("/sla-masters"); }
             } finally {

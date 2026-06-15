@@ -217,6 +217,28 @@ function Breadcrumbs() {
 
     if (segments.length === 0) return null; // hide on Dashboard
 
+    /* SLA Masters — clean trail:
+         /sla-masters              → Home › SLA Masters
+         /sla-masters/onboard      → Home › SLA Masters › Onboard New SLA (or Edit SLA when ?id=)
+         /sla-masters/view/:slaId  → Home › SLA Masters › Details */
+    if (segments[0] === "sla-masters") {
+        const sep = <span style={{ color: "#999" }}>›</span>;
+        const linkStyle = { color: "#173e77", textDecoration: "none", fontWeight: 500 };
+        let leaf = "";
+        if (segments[1] === "onboard") leaf = new URLSearchParams(search).get("id") ? "Edit SLA" : "Onboard New SLA";
+        else if (segments[1] === "view") leaf = "Details";
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{ paddingBottom: "10px", background: "#f5f7fa", fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <Link to="/" style={linkStyle}>Home</Link>
+                {sep}
+                {leaf
+                    ? <Link to="/sla-masters" style={linkStyle}>SLA Masters</Link>
+                    : <span style={{ color: "#333", fontWeight: 600 }}>SLA Masters</span>}
+                {leaf && (<>{sep}<span style={{ color: "#333", fontWeight: 600 }}>{leaf}</span></>)}
+            </nav>
+        );
+    }
+
     // Project Details (/projects/:projectId) has no sub-pages reachable
     // from the breadcrumb yet — the heading already lives in the navbar,
     // so the lone "Projects › <code>" trail is noise. Hide it for now.
