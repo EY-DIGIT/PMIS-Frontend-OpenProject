@@ -813,98 +813,7 @@ function EditTermModal({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────
-   RFP_TABS — the three procurement models this page supports. Each tab
-   renders its own finance UI; "UIDAI PMU" is the original design below,
-   the other two are added inline (see Rfp2Finance / Rfp3Finance). To add
-   or rename a model, edit this single array.
-   ────────────────────────────────────────────────────────────────── */
-const RFP_TABS = [
-  { key: "pmu", label: "UIDAI PMU" },
-  { key: "rfp2", label: "RFP 2" },
-  { key: "rfp3", label: "RFP 3" },
-];
-
-/* Default export is now a thin shell: a tab bar that switches between the
-   three RFP finance designs. The original UIDAI PMU implementation lives
-   unchanged in UidaiPmuFinance below. */
 export default function ProjectFinancePage() {
-  const [activeRfp, setActiveRfp] = useState("pmu");
-  return (
-    <div className="uidai-pmis-content" style={{ paddingBottom: 0 }}>
-      <div
-        role="tablist"
-        aria-label="RFP finance model"
-        style={{
-          display: "flex", gap: 6, flexWrap: "wrap",
-          borderBottom: "1px solid var(--uidai-pmis-border)",
-          marginBottom: 14,
-        }}
-      >
-        {RFP_TABS.map((t) => {
-          const active = activeRfp === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setActiveRfp(t.key)}
-              style={{
-                appearance: "none",
-                border: "none",
-                borderBottom: active ? "3px solid var(--uidai-pmis-cyan)" : "3px solid transparent",
-                background: "transparent",
-                padding: "10px 16px",
-                font: "inherit",
-                fontSize: 14,
-                fontWeight: active ? 800 : 600,
-                color: active ? "#173e77" : "var(--uidai-pmis-muted)",
-                cursor: "pointer",
-                marginBottom: -1,
-              }}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {activeRfp === "pmu" && <UidaiPmuFinance />}
-      {activeRfp === "rfp2" && <Rfp2Finance />}
-      {activeRfp === "rfp3" && <Rfp3Finance />}
-    </div>
-  );
-}
-
-/* Placeholder for the second RFP finance design — to be implemented from
-   the pasted spec. */
-function Rfp2Finance() {
-  return <RfpComingSoon label="RFP 2" />;
-}
-
-/* Placeholder for the third RFP finance design — to be implemented from
-   the pasted spec. */
-function Rfp3Finance() {
-  return <RfpComingSoon label="RFP 3" />;
-}
-
-function RfpComingSoon({ label }) {
-  return (
-    <div className="uidai-pmis-card">
-      <div style={{ padding: 28, textAlign: "center", ...muted }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#173e77", marginBottom: 6 }}>
-          {label} finance design
-        </div>
-        <div style={{ fontSize: 13 }}>
-          This finance model hasn’t been designed yet. Share the spec and it’ll be built into this tab.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function UidaiPmuFinance() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const project = useProject(projectId);
@@ -1361,7 +1270,7 @@ function UidaiPmuFinance() {
   if (!projectId) return null;
   if (pageLoading && !page) {
     return (
-      <div>
+      <div className="uidai-pmis-content">
         <div className="uidai-pmis-card">
           <div style={{ padding: 22, textAlign: "center", ...muted }}>Loading project finance…</div>
         </div>
@@ -1370,7 +1279,7 @@ function UidaiPmuFinance() {
   }
   if (pageError && !page) {
     return (
-      <div>
+      <div className="uidai-pmis-content">
         <div className="uidai-pmis-card">
           <div style={{ color: "var(--uidai-pmis-red)", padding: 14, fontWeight: 600 }}>
             {pageError}
@@ -1384,10 +1293,7 @@ function UidaiPmuFinance() {
   }
 
   return (
-    /* No uidai-pmis-content wrapper here — the ProjectFinancePage shell
-       already provides it (around the RFP tab bar), so nesting a second
-       one would double the responsive padding. */
-    <div>
+    <div className="uidai-pmis-content">
       {/* Top action bar — Back returns to wherever the user came from;
           Save and Next advances to the project detail page. */}
       <div style={{
