@@ -137,14 +137,12 @@ export default function SeverityPage() {
         const payload = text ? JSON.parse(text) : null;
         const items = normalizeLdBands(payload?.data ?? payload ?? {});
         setLdRows(items.length ? items : []);
-        setLdSnapshot(new Map(items.filter((it) => it.id != null).map((it) => [it.id, it])));
         setLdServerPresent(!!items.length);
         setLdEditMode(false);
         return;
       }
       if (res.status === 404) {
         setLdRows([]);
-        setLdSnapshot(new Map());
         setLdServerPresent(false);
         setLdEditMode(false);
         return;
@@ -310,69 +308,73 @@ export default function SeverityPage() {
       const validationError = validateLdRows();
       if (validationError) return uiStore.showError(validationError);
 
-      // Diff the current rows against the server snapshot so we only hit the API
-      // for what actually changed.
-      const isChanged = (row, snap) =>
-        Number(row.points_threshold) !== Number(snap.points_threshold) ||
-        Number(row.ld_percent) !== Number(snap.ld_percent) ||
-        String(row.label) !== String(snap.label);
-
-      const toCreate = [];          // new rows (no server id) → POST
-      const toPatch = [];           // existing rows that changed → PATCH
-      for (const r of ldRows) {
-        if (r.id == null) { toCreate.push(r); continue; }
-        const snap = ldSnapshot.get(r.id);
-        if (!snap || isChanged(r, snap)) toPatch.push(r);  // unchanged rows are skipped
-      }
-
-      // Rows that were in the snapshot but no longer present in the UI → DELETE
-      const presentIds = new Set(ldRows.map((r) => r.id).filter((id) => id != null));
-      const toDelete = [...ldSnapshot.keys()].filter((id) => !presentIds.has(id));
-
-      if (!toCreate.length && !toPatch.length && !toDelete.length) {
-        setLdEditMode(false);
-        uiStore.showMessage('No changes to save');
-        return;
-      }
+      const normalized = ldRows.map((r) => ({
+        id: r.id ?? null,
+        points_threshold: Number(r.points_threshold),
+        ld_percent: Number(r.ld_percent),
+        label: String(r.label),
+      }));
 
       uiStore.showLoader('Saving LD bands');
+
       try {
-        // PATCH each changed band individually.
-        const patchResults = await Promise.all(toPatch.map(async (item) => {
-          const res = await authorizedFetch(`${baseLdPath()}/${item.id}`, {
-            method: 'PATCH',
+        if (!ldServerPresent) {
+          // No existing config → POST the full list
+          const res = await authorizedFetch(baseLdPath(), {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ points_threshold: Number(item.points_threshold), ld_percent: Number(item.ld_percent), label: item.label }),
+            body: JSON.stringify({ bands: normalized.map(({ id, ...b }) => b) }),
           });
-          const text = await res.text().catch(() => '');
-          return { ok: res.ok, status: res.status, text, label: item.label };
-        }));
+          const text = await captureResponse(res);
 
-        // DELETE each removed band.
-        const deleteResults = await Promise.all(toDelete.map(async (id) => {
-          const res = await authorizedFetch(`${baseLdPath()}/${id}`, { method: 'DELETE', headers: { Accept: 'application/json' } });
-          const text = await res.text().catch(() => '');
-          const snap = ldSnapshot.get(id);
-          return { ok: res.ok, status: res.status, text, label: snap?.label ?? `Band ${id}` };
-        }));
+          if (res.ok) {
+            setLdServerPresent(true);
+            setLdEditMode(false);
+            uiStore.hideLoader();
+            uiStore.showMessage('LD bands saved successfully');
+            await loadLdBands();
+            return;
+          }
 
-        // POST only the new bands.
+          uiStore.hideLoader();
+          uiStore.showError(extractErrorMessage(text, res.status));
+          return;
+        }
+
+        // Existing config → PATCH each existing band individually, POST new ones
+        // PATCH /api/v3/projects/{project_id}/ld-bands/{id}
+        const toPatch = normalized.filter((r) => r.id != null);
+        const toCreate = normalized.filter((r) => r.id == null);
+
+        const patchResults = await Promise.all(
+          toPatch.map(async (item) => {
+            const res = await authorizedFetch(`${baseLdPath()}/${item.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ points_threshold: item.points_threshold, ld_percent: item.ld_percent, label: item.label }),
+            });
+            const text = await res.text().catch(() => '');
+            return { ok: res.ok, status: res.status, text, label: item.label };
+          })
+        );
+
         let createResult = null;
         if (toCreate.length) {
-          const res = await authorizedFetch(baseLdPath(), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ bands: toCreate.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: r.label })) }) });
+          const res = await authorizedFetch(baseLdPath(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ bands: toCreate.map(({ id, ...b }) => b) }),
+          });
           const text = await res.text().catch(() => '');
           createResult = { ok: res.ok, status: res.status, text };
         }
 
         uiStore.hideLoader();
 
-        // Surface any failed PATCH/DELETE/POST (e.g. duplicate points_threshold)
-        // rather than reporting success unconditionally.
+        // Surface any failed PATCH/POST (e.g. duplicate points_threshold) instead
+        // of claiming success.
         const messages = [];
         patchResults.filter((r) => !r.ok).forEach((f) => {
-          messages.push(`${f.label}: ${extractErrorMessage(f.text, f.status)}`);
-        });
-        deleteResults.filter((r) => !r.ok).forEach((f) => {
           messages.push(`${f.label}: ${extractErrorMessage(f.text, f.status)}`);
         });
         if (createResult && !createResult.ok) {
