@@ -50,6 +50,35 @@ export default function SeverityPage() {
   const basePath = () => `/contracts/api/v3/projects/${encodeURIComponent(projectId)}/severity-master`;
   const baseLdPath = () => `/contracts/api/v3/projects/${encodeURIComponent(projectId)}/ld-bands`;
 
+  // Pull a human-readable error message out of a (possibly JSON) response body.
+  // Handles plain strings, { message }, { error: { message } }, and arrays of
+  // validation errors (e.g. duplicate severity level / ld level / points_threshold).
+  function extractErrorMessage(text, status) {
+    let parsed = text;
+    try { parsed = JSON.parse(text); } catch { /* not JSON, keep raw text */ }
+
+    if (parsed && typeof parsed === 'object') {
+      const fromArray = (arr) => arr
+        .map((e) => (typeof e === 'string' ? e : e?.message || e?.detail || e?.error))
+        .filter(Boolean)
+        .join('; ');
+
+      const candidate =
+        parsed.message ||
+        parsed.error?.message ||
+        parsed.error ||
+        parsed.detail ||
+        (Array.isArray(parsed.errors) && fromArray(parsed.errors)) ||
+        (Array.isArray(parsed._embedded?.errors) && fromArray(parsed._embedded.errors)) ||
+        parsed._embedded?.details?.[0]?.message;
+
+      if (candidate) return typeof candidate === 'string' ? candidate : JSON.stringify(candidate);
+    }
+
+    if (typeof parsed === 'string' && parsed.trim()) return parsed.trim();
+    return `Request failed (${status})`;
+  }
+
   async function captureResponse(res) {
     const text = await res.text().catch(() => "");
     setLastResponseText(text || "");
@@ -85,10 +114,8 @@ export default function SeverityPage() {
       }
 
       // Any other error
-      const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
-      const msg = parsedErr?.message || parsedErr?.error?.message || `Request failed (${res.status})`;
       setEditMode(false);
-      uiStore.showError(msg);
+      uiStore.showError(extractErrorMessage(text, res.status));
     } catch (err) {
       setEditMode(false);
       uiStore.showError(err?.message || String(err));
@@ -117,9 +144,7 @@ export default function SeverityPage() {
         setLdEditMode(false);
         return;
       }
-      const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
-      const msg = parsedErr?.message || parsedErr?.error?.message || `Request failed (${res.status})`;
-      uiStore.showError(msg);
+      uiStore.showError(extractErrorMessage(text, res.status));
     } catch (err) {
       uiStore.showError(err?.message || String(err));
     } finally {
@@ -154,6 +179,7 @@ export default function SeverityPage() {
   }
 
   function validateRows() {
+    const seenLevels = new Set();
     for (const item of rows) {
       if (Number.isNaN(item.level) || item.level < 0 || item.level > 4)
         return 'Severity level must be an integer between 0 and 4.';
@@ -161,6 +187,11 @@ export default function SeverityPage() {
         return 'Points must be an integer between -100 and 100.';
       if (!item.label?.trim())
         return 'Each severity level requires a label.';
+      // Severity rows are keyed by level on the server, so a duplicate level
+      // would overwrite the existing row instead of being saved separately.
+      if (seenLevels.has(item.level))
+        return `Severity level ${item.level} is already used. Each row must have a unique severity level.`;
+      seenLevels.add(item.level);
     }
     return null;
   }
@@ -197,10 +228,8 @@ export default function SeverityPage() {
           return;
         }
 
-        const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
-        const msg = parsedErr?.message || parsedErr?.error?.message || `Save failed (${res.status})`;
         uiStore.hideLoader();
-        uiStore.showError(msg);
+        uiStore.showError(extractErrorMessage(text, res.status));
 
       } else {
         // Existing config → PATCH each level individually
@@ -217,9 +246,19 @@ export default function SeverityPage() {
           })
         );
 
-        // Update debug panel with last result
-
         uiStore.hideLoader();
+
+        // Surface any failed PATCH (e.g. duplicate severity level) instead of
+        // claiming success — without this every save reported "saved successfully".
+        const failures = results.filter((r) => !r.ok);
+        if (failures.length) {
+          const msg = failures
+            .map((f) => `Level ${f.level}: ${extractErrorMessage(f.text, f.status)}`)
+            .join('\n');
+          uiStore.showError(msg);
+          return;
+        }
+
         setEditMode(false);
         uiStore.showMessage('Severity settings saved successfully');
       }
@@ -247,10 +286,16 @@ export default function SeverityPage() {
     }
 
     function validateLdRows() {
+      const seenThresholds = new Set();
       for (const item of ldRows) {
         if (Number.isNaN(item.points_threshold)) return 'Points threshold must be a number.';
         if (Number.isNaN(item.ld_percent) || item.ld_percent < 0 || item.ld_percent > 100) return 'LD percent must be 0–100.';
         if (!item.label?.trim()) return 'Each LD band requires a label.';
+        // LD bands are identified by their points threshold, so a duplicate
+        // threshold would overwrite the existing band instead of adding a new one.
+        if (seenThresholds.has(item.points_threshold))
+          return `Points threshold ${item.points_threshold} is already used. Each LD band must have a unique points threshold.`;
+        seenThresholds.add(item.points_threshold);
       }
       return null;
     }
@@ -278,10 +323,8 @@ export default function SeverityPage() {
             await loadLdBands();
             return;
           }
-          const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
-          const msg = parsedErr?.message || parsedErr?.error?.message || `Save failed (${res.status})`;
           uiStore.hideLoader();
-          uiStore.showError(msg);
+          uiStore.showError(extractErrorMessage(text, res.status));
           return;
         }
 
@@ -292,20 +335,40 @@ export default function SeverityPage() {
           else toCreate.push(r);
         }
 
-        await Promise.all(toPatch.map(async (item) => {
+        const patchResults = await Promise.all(toPatch.map(async (item) => {
           const res = await authorizedFetch(`${baseLdPath()}/${item.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify({ points_threshold: Number(item.points_threshold), ld_percent: Number(item.ld_percent), label: item.label }),
           });
-          await res.text().catch(() => '');
+          const text = await res.text().catch(() => '');
+          return { ok: res.ok, status: res.status, text, label: item.label };
         }));
 
+        let createResult = null;
         if (toCreate.length) {
-          await authorizedFetch(baseLdPath(), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ bands: toCreate.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: r.label })) }) });
+          const res = await authorizedFetch(baseLdPath(), { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ bands: toCreate.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: r.label })) }) });
+          const text = await res.text().catch(() => '');
+          createResult = { ok: res.ok, status: res.status, text };
         }
 
         uiStore.hideLoader();
+
+        // Surface any failed PATCH/POST (e.g. duplicate points_threshold) rather
+        // than reporting success unconditionally.
+        const messages = [];
+        patchResults.filter((r) => !r.ok).forEach((f) => {
+          messages.push(`${f.label}: ${extractErrorMessage(f.text, f.status)}`);
+        });
+        if (createResult && !createResult.ok) {
+          messages.push(extractErrorMessage(createResult.text, createResult.status));
+        }
+        if (messages.length) {
+          uiStore.showError(messages.join('\n'));
+          await loadLdBands();
+          return;
+        }
+
         setLdEditMode(false);
         uiStore.showMessage('LD bands saved successfully');
         await loadLdBands();
@@ -333,9 +396,7 @@ export default function SeverityPage() {
           await loadLdBands();
           return;
         }
-        const parsedErr = (() => { try { return JSON.parse(text); } catch { return text; } })();
-        const msg = parsedErr?.message || parsedErr?.error?.message || `Seed failed (${res.status})`;
-        uiStore.showError(msg);
+        uiStore.showError(extractErrorMessage(text, res.status));
       } catch (err) {
         uiStore.showError(err?.message || 'Failed to seed master defaults');
       } finally {

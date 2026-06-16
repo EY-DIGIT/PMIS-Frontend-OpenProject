@@ -176,7 +176,7 @@ const BODY_HTML = `
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">Project (PMC contract) <span class="required">*</span></div>
-        <div class="field-help">The PMC contract this SLA belongs to.</div>
+        <div class="field-help">The contract this SLA belongs to.</div>
       </div>
       <div class="dyn-cell-value"><select id="s_project_id"><option value="">— Select a project —</option></select></div>
       <div class="dyn-cell-delete"></div>
@@ -184,7 +184,7 @@ const BODY_HTML = `
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">SLA Category <span class="required">*</span></div>
-        <div class="field-help">Picks the calculation engine (point_accumulation / fixed_escalation). Also chooses whether Target below is a severity table or a linear LD form.</div>
+        <div class="field-help">Picks the calculation engine. Also chooses whether Target below is a severity table or a linear LD form</div>
       </div>
       <div class="dyn-cell-value">
         <select id="s_category_code" onchange="window.__slaOnb._onStaticCategoryChange()"><option value="">— Select —</option></select>
@@ -306,7 +306,7 @@ export default function SlaOnboardingPage() {
         const _FALLBACK_RFP_FIELDS = [
             { key: "sla_ref", label: "SLA Number", section: "Identification", input_type: "text", required: true, placeholder: "PMU-SLA001" },
             { key: "title", label: "Title", section: "Identification", input_type: "text", required: true },
-            { key: "project_id", label: "Project (PMC contract)", section: "Identification", input_type: "project_picker", required: true },
+            { key: "project_id", label: "Project", section: "Identification", input_type: "project_picker", required: true },
             { key: "category_code", label: "SLA Category", section: "Identification", input_type: "category_picker", required: true },
             { key: "description", label: "Definition of SLA", section: "Definition", input_type: "textarea" },
             { key: "scope_text", label: "Scope of SLA", section: "Definition", input_type: "textarea" },

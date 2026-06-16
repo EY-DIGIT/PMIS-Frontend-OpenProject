@@ -38,18 +38,35 @@ const MEETING_WEBHOOK_URL = "http://10.1.151.228:5678/webhook/meeting";
 function momFormFromResponse(data) {
   const root = Array.isArray(data) ? data[0] : data?.data ?? data;
   if (!root || typeof root !== "object") return null;
-  const descs = (arr) =>
-    (Array.isArray(arr) ? arr : [])
-      .map((x) => (typeof x === "string" ? x : x?.description || ""))
+  /* Prefix each line with a bullet so the textareas read as a list.
+     parseLines strips these back off before saving. */
+  const bulletize = (text) =>
+    String(text || "")
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[-*•]\s*/, "").trim())
       .filter(Boolean)
+      .map((l) => `• ${l}`)
       .join("\n");
+  const descs = (arr) =>
+    bulletize(
+      (Array.isArray(arr) ? arr : [])
+        .map((x) => (typeof x === "string" ? x : x?.description || ""))
+        .filter(Boolean)
+        .join("\n")
+    );
   const decisions = descs(root.decisions);
   const actions = descs(root.actionItems ?? root.actions);
   const risks = descs(root.risks);
   if (decisions || actions || risks) return { decisions, actions, risks };
   /* No structured arrays — fall back to the plain-text content block. */
-  if (typeof root.content === "string" && root.content.trim())
-    return parseMoM(root.content);
+  if (typeof root.content === "string" && root.content.trim()) {
+    const fb = parseMoM(root.content);
+    return {
+      decisions: bulletize(fb.decisions),
+      actions: bulletize(fb.actions),
+      risks: bulletize(fb.risks),
+    };
+  }
   return null;
 }
 
