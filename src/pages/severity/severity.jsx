@@ -319,7 +319,7 @@ export default function SeverityPage() {
 
       try {
         if (!ldServerPresent) {
-          // No existing config → POST the full list
+          // No existing config (LD is empty) → POST the full list to create it.
           const res = await authorizedFetch(baseLdPath(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -341,45 +341,28 @@ export default function SeverityPage() {
           return;
         }
 
-        // Existing config → PATCH each existing band individually, POST new ones
-        // PATCH /api/v3/projects/{project_id}/ld-bands/{id}
-        const toPatch = normalized.filter((r) => r.id != null);
-        const toCreate = normalized.filter((r) => r.id == null);
-
+        // Existing config → PATCH each band individually by band_id (like severity).
+        // PATCH /api/v3/projects/{project_id}/ld-bands/{band_id}, body { label, ld_percent, points_threshold }
         const patchResults = await Promise.all(
-          toPatch.map(async (item) => {
+          normalized.map(async (item) => {
             const res = await authorizedFetch(`${baseLdPath()}/${item.id}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({ points_threshold: item.points_threshold, ld_percent: item.ld_percent, label: item.label }),
+              body: JSON.stringify({ label: item.label, ld_percent: item.ld_percent, points_threshold: item.points_threshold }),
             });
             const text = await res.text().catch(() => '');
             return { ok: res.ok, status: res.status, text, label: item.label };
           })
         );
 
-        let createResult = null;
-        if (toCreate.length) {
-          const res = await authorizedFetch(baseLdPath(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ bands: toCreate.map(({ id, ...b }) => b) }),
-          });
-          const text = await res.text().catch(() => '');
-          createResult = { ok: res.ok, status: res.status, text };
-        }
-
         uiStore.hideLoader();
 
-        // Surface any failed PATCH/POST (e.g. duplicate points_threshold) instead
+        // Surface any failed PATCH (e.g. duplicate points_threshold) instead
         // of claiming success.
         const messages = [];
         patchResults.filter((r) => !r.ok).forEach((f) => {
           messages.push(`${f.label}: ${extractErrorMessage(f.text, f.status)}`);
         });
-        if (createResult && !createResult.ok) {
-          messages.push(extractErrorMessage(createResult.text, createResult.status));
-        }
         if (messages.length) {
           uiStore.showError(messages.join('\n'));
           await loadLdBands();
