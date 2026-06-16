@@ -49,13 +49,36 @@ export default function ApprovalRequestModal({
     /* Keep the raw File handle alongside the display name + size so the
        parent can forward it to multipart endpoints. The display shape
        (`{ name, size }`) is what the audit-trail comment serializer
-       reads — leave it intact and add `raw` for the upload path. */
-    const files = Array.from(fileList || []).map((f) => ({
+       reads — leave it intact and add `raw` for the upload path.
+
+       A native <input type="file"> only ever holds its LATEST pick, so
+       choosing files in a second browse would otherwise drop the first
+       batch. Merge each new selection onto what's already there and
+       dedupe by name+byte-size so re-picking the same file is a no-op. */
+    const picked = Array.from(fileList || []).map((f) => ({
       name: f.name,
       size: formatBytes(f.size),
+      bytes: f.size,
       raw: f
     }));
-    setState((s) => ({ ...s, [id]: { ...(s[id] || { text: "" }), files } }));
+    if (picked.length === 0) return;
+    setState((s) => {
+      const prev = (s[id] && s[id].files) || [];
+      const seen = new Set(prev.map((f) => `${f.name}::${f.bytes ?? ""}`));
+      const merged = prev.slice();
+      picked.forEach((f) => {
+        const key = `${f.name}::${f.bytes ?? ""}`;
+        if (!seen.has(key)) { seen.add(key); merged.push(f); }
+      });
+      return { ...s, [id]: { ...(s[id] || { text: "" }), files: merged } };
+    });
+  }
+  function removeFile(id, index) {
+    setState((s) => {
+      const prev = (s[id] && s[id].files) || [];
+      const files = prev.filter((_, i) => i !== index);
+      return { ...s, [id]: { ...(s[id] || { text: "" }), files } };
+    });
   }
 
   function submit() {
@@ -129,7 +152,12 @@ export default function ApprovalRequestModal({
                     <input
                       type="file"
                       multiple
-                      onChange={(e) => setFiles(row.id, e.target.files)}
+                      onChange={(e) => {
+                        setFiles(row.id, e.target.files);
+                        /* Reset so the next browse fires onChange even if
+                           the same file is picked, and merge keeps the rest. */
+                        e.target.value = "";
+                      }}
                       disabled={submitting}
                     />
                     {entry.files.length > 0 && (
@@ -138,6 +166,21 @@ export default function ApprovalRequestModal({
                           <span key={i} className="pmis-awf-reqmodal__file-chip">
                             📎 {f.name}{" "}
                             <span className="pmis-awf-reqmodal__file-size">{f.size}</span>
+                            <button
+                              type="button"
+                              className="pmis-awf-reqmodal__file-remove"
+                              aria-label={`Remove ${f.name}`}
+                              title="Remove"
+                              onClick={() => removeFile(row.id, i)}
+                              disabled={submitting}
+                              style={{
+                                marginLeft: 6, border: "none", background: "transparent",
+                                cursor: "pointer", color: "#9b1c1c", fontWeight: 700,
+                                fontSize: 13, lineHeight: 1, padding: 0,
+                              }}
+                            >
+                              ✕
+                            </button>
                           </span>
                         ))}
                       </div>
