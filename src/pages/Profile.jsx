@@ -91,6 +91,10 @@ export default function Profile() {
     return m ? m.label : (user?.division || "—");
   }, [user]);
   const status = user?.status === "active" ? "Active" : user?.status || "—";
+  // Last login timestamp — the backend sends snake_case `last_login_at`;
+  // tolerate a camelCase shape too in case /me normalises it.
+  const lastLoginAt =
+    user?.last_login_at || user?.lastLoginAt || user?.previous_login_at || null;
 
   const divisionRequiresOther = (form.division || "").toLowerCase() === "others";
 
@@ -210,7 +214,7 @@ export default function Profile() {
             <div className="uidai-prof-summary-item">
               <span className="uidai-prof-lbl">Last Login</span>
               <span className="uidai-prof-val">
-                {user?.updatedAt ? formatDateTime(user.updatedAt) : "—"}
+                {formatDateTime(lastLoginAt)}
               </span>
             </div>
             <div className="uidai-prof-summary-item">
