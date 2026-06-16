@@ -198,18 +198,32 @@ export const PARALLEL_VOTE = {
   REJECTED: "REJECTED"
 };
 
+/* Normalise the attachment input into a flat list of raw File objects.
+   Callers may pass `files` (array of File) and/or a single `file`; both
+   are merged so the multipart body carries every attachment the user
+   picked across all rows. */
+function collectUploadFiles(files, file) {
+  const out = [];
+  if (Array.isArray(files)) {
+    files.forEach((f) => { if (f) out.push(f); });
+  }
+  if (file) out.push(file);
+  return out;
+}
+
 /* ─────────────────────────────────────────────────────────────────
    Step 2 — POST /activities/parallel/request-division-approval
    Multipart upload that seeds per-division approver rows after the
-   SUBMIT transition. `file` is optional (the backend accepts the
-   form without it); the popup may collect one per row but the
-   endpoint takes a single attachment for the whole dispatch.
+   SUBMIT transition. Attachments are optional (the backend accepts the
+   form without any); every file the user picked across the popup rows
+   is appended under the repeated `file` field.
    ───────────────────────────────────────────────────────────────── */
 export async function requestDivisionApprovalParallel({
   activityId,
   projectId,
   stateName,
   comment,
+  files,
   file
 } = {}) {
   if (!activityId) throw new ApiError("Missing activity id for division approval request.");
@@ -231,7 +245,7 @@ export async function requestDivisionApprovalParallel({
   fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION);
   fd.append("comment", comment || "");
   fd.append("requestInfo", JSON.stringify(requestInfo));
-  if (file) fd.append("file", file);
+  collectUploadFiles(files, file).forEach((f) => fd.append("file", f));
 
   /* Multipart — DO NOT set Content-Type; the browser sets the
      boundary header automatically. */
@@ -255,6 +269,7 @@ export async function requestOwnerApprovalParallel({
   projectId,
   stateName,
   comment,
+  files,
   file
 } = {}) {
   if (!activityId) throw new ApiError("Missing activity id for owner approval request.");
@@ -276,7 +291,7 @@ export async function requestOwnerApprovalParallel({
   fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION);
   fd.append("comment", comment || "");
   fd.append("requestInfo", JSON.stringify(requestInfo));
-  if (file) fd.append("file", file);
+  collectUploadFiles(files, file).forEach((f) => fd.append("file", f));
 
   const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestOwnerApproval}`, {
     method: "POST",

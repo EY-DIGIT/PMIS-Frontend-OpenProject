@@ -215,9 +215,8 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
     if (requestPopup.kind === "division") {
       /* Fire the parallel request-division-approval multipart call so
          the backend seeds an approver row for each Concerned Division.
-         The endpoint accepts a single attachment + a single comment;
-         we concatenate per-row notes and forward the first raw File
-         the user attached on any row. */
+         We concatenate per-row notes into a single comment and forward
+         every raw File the user attached across all rows. */
       if (!businessId) {
         setError(
           "Activity has no server id yet — save the activity first, then trigger the workflow."
@@ -232,15 +231,9 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         .map((p) => (p && p.text && p.text.trim() ? p.text.trim() : ""))
         .filter(Boolean)
         .join(" | ");
-      const firstFile = (() => {
-        for (const p of payloads) {
-          const files = (p && p.files) || [];
-          for (const f of files) {
-            if (f && f.raw) return f.raw;
-          }
-        }
-        return null;
-      })();
+      const allFiles = payloads.flatMap((p) =>
+        ((p && p.files) || []).map((f) => f && f.raw).filter(Boolean)
+      );
       setBusy(true);
       uiStore.showLoader("Requesting division approval…");
       setError("");
@@ -250,7 +243,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
           projectId,
           stateName: WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION,
           comment: combined || "Please review the activity submission.",
-          file: firstFile
+          files: allFiles
         });
         apply(requestDivisionApproval(form, consentDivisions, payloads));
         if (typeof onTransition === "function") onTransition();
@@ -276,13 +269,9 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       }
       const p = payloads[0] || {};
       const note = (p && p.text && p.text.trim()) || "";
-      const firstFile = (() => {
-        const files = (p && p.files) || [];
-        for (const f of files) {
-          if (f && f.raw) return f.raw;
-        }
-        return null;
-      })();
+      const allFiles = ((p && p.files) || [])
+        .map((f) => f && f.raw)
+        .filter(Boolean);
       setBusy(true);
       uiStore.showLoader("Requesting owner approval…");
       setError("");
@@ -292,7 +281,7 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
           projectId,
           stateName: WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION,
           comment: note || "All divisions approved. Forwarding for owner review.",
-          file: firstFile
+          files: allFiles
         });
         apply(requestOwnerApproval(form, ownerName, p));
         if (typeof onTransition === "function") onTransition();
