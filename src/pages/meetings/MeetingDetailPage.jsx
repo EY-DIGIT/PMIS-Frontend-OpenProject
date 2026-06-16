@@ -21,6 +21,38 @@ import "../../styles/meetings.css";
 
 const STATUS_OPTIONS = ["DRAFT", "IN_REVIEW", "FINALIZED"];
 
+/* n8n webhook that turns a meeting transcript into a structured MoM.
+   Two input shapes (per the backend team's working request):
+     - PDF upload  : multipart/form-data, key `file`
+     - Transcript  : JSON body { "transcript": "<text>" }
+   It responds with JSON shaped like the saveMoM payload:
+     { title, templateId, content, decisions[], actionItems[], risks[] }
+   where each entry carries a `description` (owners come back as speaker
+   labels like "Speaker 1", not real user ids). */
+const MEETING_WEBHOOK_URL = "http://10.1.151.228:5678/webhook/meeting";
+
+/* Map the webhook's structured JSON response into the three editable
+   textareas — descriptions only, since owners are speaker labels rather
+   than real user ids. Falls back to parsing the plain-text `content`
+   block if the structured arrays are absent. */
+function momFormFromResponse(data) {
+  const root = Array.isArray(data) ? data[0] : data?.data ?? data;
+  if (!root || typeof root !== "object") return null;
+  const descs = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .map((x) => (typeof x === "string" ? x : x?.description || ""))
+      .filter(Boolean)
+      .join("\n");
+  const decisions = descs(root.decisions);
+  const actions = descs(root.actionItems ?? root.actions);
+  const risks = descs(root.risks);
+  if (decisions || actions || risks) return { decisions, actions, risks };
+  /* No structured arrays — fall back to the plain-text content block. */
+  if (typeof root.content === "string" && root.content.trim())
+    return parseMoM(root.content);
+  return null;
+}
+
 /* ─── Small helpers (date / time / strings) ─── */
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -167,6 +199,12 @@ export default function MeetingDetailPage() {
   });
   const [momRemote, setMomRemote] = useState(null);
   const [savingMom, setSavingMom] = useState(false);
+
+  /* Auto-MoM generator (n8n webhook). User uploads a PDF transcript or
+     pastes the transcript text; the response fills the MoM textareas. */
+  const [transcript, setTranscript] = useState("");
+  const [uploadFile, setUploadFile] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
   /* A MoM has a SINGLE status — edited once for the whole record, not
      per action item. These drive that one inline editor. */
@@ -339,6 +377,50 @@ export default function MeetingDetailPage() {
     if (!meeting) return;
     setMomForm(parseMoM(sampleMoM(meeting)));
     show("Sample MoM loaded.", "ok");
+  };
+
+  /* Send the PDF / pasted transcript to the n8n webhook and parse the
+     structured MoM it returns into the three editable fields. An uploaded
+     PDF wins over pasted text. Does NOT save — the user reviews, then
+     clicks Save MoM. */
+  const generateFromTranscript = async () => {
+    if (generating) return;
+    const text = transcript.trim();
+    if (!uploadFile && !text) {
+      show("Upload a PDF or paste the transcript first.", "warn");
+      return;
+    }
+    setGenerating(true);
+    try {
+      let res;
+      if (uploadFile) {
+        const fd = new FormData();
+        fd.append("file", uploadFile);
+        /* No Content-Type header — the browser sets the multipart
+           boundary itself. */
+        res = await fetch(MEETING_WEBHOOK_URL, { method: "POST", body: fd });
+      } else {
+        /* The workflow expects the transcript wrapped as JSON, not a raw
+           text/plain body (matches the backend team's working request). */
+        res = await fetch(MEETING_WEBHOOK_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript: text }),
+        });
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const parsed = momFormFromResponse(await res.json().catch(() => null));
+      if (!parsed || (!parsed.decisions && !parsed.actions && !parsed.risks)) {
+        show("Couldn't read a MoM from the response.", "warn");
+        return;
+      }
+      setMomForm(parsed);
+      show("Auto MoM generated — review and edit before saving.", "ok");
+    } catch (e) {
+      show(e.message || "Failed to generate MoM.", "warn");
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const toggleSelection = (key) => {
@@ -669,6 +751,58 @@ export default function MeetingDetailPage() {
               Load sample
             </button>
           </div>
+          {/* ── Auto-MoM generator: upload a PDF or paste the transcript,
+                 then "Generate Auto MoM" fills the three fields below. ── */}
+          <div
+            className="field full"
+            style={{
+              marginBottom: 14,
+              padding: 14,
+              border: "1px solid #e6ebf2",
+              borderRadius: 10,
+              background: "#fafbfd",
+            }}
+          >
+            <label style={{ fontWeight: 600 }}>Generate Auto MoM</label>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+                alignItems: "center",
+                marginTop: 6,
+              }}
+            >
+              <input
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                disabled={generating || savingMom}
+              />
+              <button
+                type="button"
+                className="btn ghost small-btn"
+                onClick={generateFromTranscript}
+                disabled={generating || savingMom}
+              >
+                {generating ? "Generating…" : "Generate Auto MoM"}
+              </button>
+            </div>
+            <textarea
+              className="mom-textarea"
+              style={{ height: 110, marginTop: 8 }}
+              placeholder="…or paste the meeting transcript here"
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              disabled={generating || savingMom}
+            />
+            <span className="muted" style={{ fontSize: 12 }}>
+              Upload a PDF transcript or paste the transcript text, then
+              Generate Auto MoM to fill Decisions, Action Items and Risks
+              below. An uploaded PDF takes priority over pasted text.
+            </span>
+          </div>
+
           <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
             <div className="field full">
               <label htmlFor="momDecisions">Decisions</label>
