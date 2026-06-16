@@ -754,53 +754,179 @@ export default function MeetingDetailPage() {
           {/* ── Auto-MoM generator: upload a PDF or paste the transcript,
                  then "Generate Auto MoM" fills the three fields below. ── */}
           <div
-            className="field full"
             style={{
-              marginBottom: 14,
-              padding: 14,
-              border: "1px solid #e6ebf2",
-              borderRadius: 10,
-              background: "#fafbfd",
+              marginBottom: 16,
+              borderRadius: 12,
+              border: "1px solid #dfe7f1",
+              background: "linear-gradient(180deg,#f6faff 0%,#fbfdff 100%)",
+              overflow: "hidden",
             }}
           >
-            <label style={{ fontWeight: 600 }}>Generate Auto MoM</label>
+            {/* header */}
             <div
               style={{
                 display: "flex",
-                flexWrap: "wrap",
-                gap: 10,
                 alignItems: "center",
-                marginTop: 6,
+                gap: 10,
+                padding: "12px 16px",
+                borderBottom: "1px solid #e6ecf5",
               }}
             >
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                disabled={generating || savingMom}
-              />
-              <button
-                type="button"
-                className="btn ghost small-btn"
-                onClick={generateFromTranscript}
-                disabled={generating || savingMom}
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "#eaf1fb",
+                  fontSize: 16,
+                }}
               >
-                {generating ? "Generating…" : "Generate Auto MoM"}
-              </button>
+                ✨
+              </span>
+              <div style={{ lineHeight: 1.3 }}>
+                <div style={{ fontWeight: 700, color: "#173e77" }}>
+                  Generate Auto MoM
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  Upload a PDF transcript or paste the text — it fills
+                  Decisions, Action Items &amp; Risks below for you to review.
+                </div>
+              </div>
             </div>
-            <textarea
-              className="mom-textarea"
-              style={{ height: 110, marginTop: 8 }}
-              placeholder="…or paste the meeting transcript here"
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              disabled={generating || savingMom}
-            />
-            <span className="muted" style={{ fontSize: 12 }}>
-              Upload a PDF transcript or paste the transcript text, then
-              Generate Auto MoM to fill Decisions, Action Items and Risks
-              below. An uploaded PDF takes priority over pasted text.
-            </span>
+
+            {/* body */}
+            <div
+              style={{
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+              }}
+            >
+              {/* upload row */}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <label
+                  className="btn ghost small-btn"
+                  style={{
+                    margin: 0,
+                    cursor: generating || savingMom ? "not-allowed" : "pointer",
+                  }}
+                >
+                  📄 Choose PDF
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                    disabled={generating || savingMom}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                {uploadFile ? (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: "#173e77" }}>
+                      {uploadFile.name}
+                    </span>
+                    <button
+                      type="button"
+                      className="mt-copy-btn"
+                      title="Remove file"
+                      aria-label="Remove file"
+                      onClick={() => setUploadFile(null)}
+                      disabled={generating || savingMom}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ) : (
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    No file selected
+                  </span>
+                )}
+              </div>
+
+              {/* divider */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  color: "#9aa7bd",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                <span style={{ flex: 1, height: 1, background: "#e6ecf5" }} />
+                OR
+                <span style={{ flex: 1, height: 1, background: "#e6ecf5" }} />
+              </div>
+
+              {/* paste transcript */}
+              <div className="field full" style={{ margin: 0 }}>
+                <label htmlFor="momTranscript">Paste transcript</label>
+                <textarea
+                  id="momTranscript"
+                  className="mom-textarea"
+                  style={{ height: 130 }}
+                  placeholder="Paste the meeting transcript here…"
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  disabled={generating || savingMom}
+                />
+              </div>
+
+              {/* action */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={generateFromTranscript}
+                  disabled={
+                    generating ||
+                    savingMom ||
+                    (!uploadFile && !transcript.trim())
+                  }
+                >
+                  {generating ? "Generating…" : "✨ Generate Auto MoM"}
+                </button>
+                {generating ? (
+                  <span className="muted" style={{ fontSize: 12.5 }}>
+                    Reading the transcript and extracting the MoM…
+                  </span>
+                ) : (
+                  <span
+                    className="muted"
+                    style={{ fontSize: 12, marginLeft: "auto" }}
+                  >
+                    A selected PDF takes priority over pasted text.
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
