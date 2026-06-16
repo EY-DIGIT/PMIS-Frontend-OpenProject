@@ -34,6 +34,8 @@ export default function SeverityPage() {
   const [rows, setRows] = useState([{ level: 0, points: 0, label: 'Level 0' }]);
   const [loading, setLoading] = useState(false);
   const [serverPresent, setServerPresent] = useState(false);
+  // Levels that already exist on the server — used to decide POST (new row) vs PATCH (edit).
+  const [serverLevels, setServerLevels] = useState(() => new Set());
   const [debugOpen, setDebugOpen] = useState(true);
   const [lastResponseText, setLastResponseText] = useState("");
   const [lastStatus, setLastStatus] = useState(null);
@@ -101,6 +103,7 @@ export default function SeverityPage() {
         const items = normalizeServerItems(payload?.data ?? payload ?? {});
         setRows(items.length ? items : [{ level: 0, points: 0, label: 'Level 0' }]);
         setServerPresent(!!items.length);
+        setServerLevels(new Set(items.map((it) => Number(it.level))));
         setEditMode(false);
         return;
       }
@@ -109,6 +112,7 @@ export default function SeverityPage() {
       if (res.status === 404) {
         setRows([{ level: 0, points: 0, label: 'Level 0' }]);
         setServerPresent(false);
+        setServerLevels(new Set());
         setEditMode(false);
         return;
       }
@@ -208,60 +212,59 @@ export default function SeverityPage() {
       label: String(r.label || `Level ${r.level}`)
     }));
 
+    // New rows (levels not yet on the server) → POST; existing levels → PATCH.
+    const toCreate = normalized.filter((item) => !serverLevels.has(item.level));
+    const toPatch = normalized.filter((item) => serverLevels.has(item.level));
+
     uiStore.showLoader('Saving severity settings');
 
     try {
-      if (!serverPresent) {
-        // No existing config → POST the full list
+      // PATCH each edited level individually.
+      // PATCH /api/v3/projects/{project_id}/severity-master/{level}
+      const patchResults = await Promise.all(
+        toPatch.map(async (item) => {
+          const res = await authorizedFetch(`${basePath()}/${item.level}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ points: item.points, label: item.label })
+          });
+          const text = await res.text().catch(() => "");
+          return { ok: res.ok, status: res.status, text, level: item.level };
+        })
+      );
+
+      // POST only the new levels.
+      let createResult = null;
+      if (toCreate.length) {
         const res = await authorizedFetch(basePath(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ levels: normalized })
+          body: JSON.stringify({ levels: toCreate })
         });
-        const text = await captureResponse(res);
-
-        if (res.ok) {
-          setServerPresent(true);
-          setEditMode(false);
-          uiStore.hideLoader();
-          uiStore.showMessage('Severity settings saved successfully');
-          return;
-        }
-
-        uiStore.hideLoader();
-        uiStore.showError(extractErrorMessage(text, res.status));
-
-      } else {
-        // Existing config → PATCH each level individually
-        // PATCH /api/v3/projects/{project_id}/severity-master/{level}
-        const results = await Promise.all(
-          normalized.map(async (item) => {
-            const res = await authorizedFetch(`${basePath()}/${item.level}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-              body: JSON.stringify({ points: item.points, label: item.label })
-            });
-            const text = await res.text().catch(() => "");
-            return { ok: res.ok, status: res.status, text, level: item.level };
-          })
-        );
-
-        uiStore.hideLoader();
-
-        // Surface any failed PATCH (e.g. duplicate severity level) instead of
-        // claiming success — without this every save reported "saved successfully".
-        const failures = results.filter((r) => !r.ok);
-        if (failures.length) {
-          const msg = failures
-            .map((f) => `Level ${f.level}: ${extractErrorMessage(f.text, f.status)}`)
-            .join('\n');
-          uiStore.showError(msg);
-          return;
-        }
-
-        setEditMode(false);
-        uiStore.showMessage('Severity settings saved successfully');
+        const text = await res.text().catch(() => "");
+        createResult = { ok: res.ok, status: res.status, text };
       }
+
+      uiStore.hideLoader();
+
+      // Surface any failed POST/PATCH (e.g. duplicate severity level) instead of
+      // claiming success — without this every save reported "saved successfully".
+      const messages = [];
+      patchResults.filter((r) => !r.ok).forEach((f) => {
+        messages.push(`Level ${f.level}: ${extractErrorMessage(f.text, f.status)}`);
+      });
+      if (createResult && !createResult.ok) {
+        messages.push(extractErrorMessage(createResult.text, createResult.status));
+      }
+      if (messages.length) {
+        uiStore.showError(messages.join('\n'));
+        await loadSeverity();
+        return;
+      }
+
+      setEditMode(false);
+      uiStore.showMessage('Severity settings saved successfully');
+      await loadSeverity();
     } catch (err) {
       uiStore.hideLoader();
       uiStore.showError(err?.message || 'Failed to save severity settings');
@@ -307,27 +310,7 @@ export default function SeverityPage() {
 
       uiStore.showLoader('Saving LD bands');
       try {
-        const normalized = ldRows.map((r) => ({ points_threshold: Number(r.points_threshold), ld_percent: Number(r.ld_percent), label: String(r.label) }));
-        if (!ldServerPresent) {
-          const res = await authorizedFetch(baseLdPath(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ bands: normalized }),
-          });
-          const text = await captureResponse(res);
-          if (res.ok) {
-            setLdServerPresent(true);
-            setLdEditMode(false);
-            uiStore.hideLoader();
-            uiStore.showMessage('LD bands saved successfully');
-            await loadLdBands();
-            return;
-          }
-          uiStore.hideLoader();
-          uiStore.showError(extractErrorMessage(text, res.status));
-          return;
-        }
-
+        // Existing bands (have an id) → PATCH; new bands (no id) → POST.
         const toPatch = [];
         const toCreate = [];
         for (const r of ldRows) {
