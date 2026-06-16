@@ -21,6 +21,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 
 import { useSessionManager } from "./api/sessionManager";
 import { useCan, useCurrentRole } from "./auth/permissions";
+import { userHasRole } from "./auth/roleNormalize";
 
 import VendorList from './pages/vendors/VendorList';
 import VendorForm from './pages/vendors/VendorForm';
@@ -595,6 +596,24 @@ function RequirePermission({ action, children }) {
     );
 }
 
+/* Gate a route by a workflow role read straight off the user object
+   (these live outside roles.json — e.g. division_approver for the
+   Approval Inbox). Subscribing to useCurrentRole() keeps the guard
+   re-evaluating on login / logout / role refresh. Mirrors the
+   sidebar's Approval Inbox visibility so project_admin, project_member
+   and org_admin can't reach these pages by direct URL. */
+function RequireWorkflowRole({ role, children }) {
+    useCurrentRole();
+    if (userHasRole(tokenStore.getUser(), role)) return children;
+    return (
+        <div style={{ padding: 32, textAlign: 'center', color: '#5a6680' }}>
+            <h2 style={{ marginBottom: 8, color: '#173e77' }}>Access denied</h2>
+            <p>Your role does not have permission to view this page.</p>
+            <Link to="/" style={{ color: '#173e77' }}>Go to Home</Link>
+        </div>
+    );
+}
+
 export default function MainApp() {
     return (
 
@@ -699,21 +718,23 @@ export default function MainApp() {
                                                 <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
                                                 <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
-                                                {/* Approval Inbox — gated by role at the data level for now; both sidebar links
-                                                    are visible because the role gating isn't wired up yet. */}
-                                                <Route path="approvals/concerned-division" element={<ApprovalInboxConcernedDivision />} />
-                                                <Route path="approvals/activity-owner" element={<ApprovalInboxActivityOwner />} />
+                                                {/* Approval Inbox — visible only to the division_approver
+                                                    workflow role, matching the sidebar. project_admin,
+                                                    project_member and org_admin are blocked here too. */}
+                                                <Route path="approvals/concerned-division" element={<RequireWorkflowRole role="division_approver"><ApprovalInboxConcernedDivision /></RequireWorkflowRole>} />
+                                                <Route path="approvals/activity-owner" element={<RequireWorkflowRole role="division_approver"><ApprovalInboxActivityOwner /></RequireWorkflowRole>} />
 
                                                 {/* Meeting Management — ported from Meeting_Management.html.
-                                                    No role gating yet; everyone with auth can access. */}
-                                                <Route path="meetings" element={<MeetingsListPage />} />
-                                                <Route path="meetings/new" element={<CreateMeetingPage />} />
+                                                    Gated by viewMeetings so project_admin, project_member
+                                                    and org_admin can't reach it by direct URL either. */}
+                                                <Route path="meetings" element={<RequirePermission action="viewMeetings"><MeetingsListPage /></RequirePermission>} />
+                                                <Route path="meetings/new" element={<RequirePermission action="viewMeetings"><CreateMeetingPage /></RequirePermission>} />
 
                                                 {/*SLA Masters*/}
                                                 <Route path="sla-masters" element={<SlaMastersPage />} />
                                                 <Route path="sla-masters/onboard" element={<SlaOnboardingPage />} />
                                                 <Route path="sla-masters/view/:slaId" element={<SlaMastersPage />} />
-                                                <Route path="meetings/:id" element={<MeetingDetailPage />} />
+                                                <Route path="meetings/:id" element={<RequirePermission action="viewMeetings"><MeetingDetailPage /></RequirePermission>} />
                                             </Routes>
                                         </Layout>
                                     </RequireAuth>

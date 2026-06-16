@@ -43,7 +43,8 @@
         "viewDivisions": true,
         "createDivision": true,
         "editDivision": true,
-        "deleteDivision": true
+        "deleteDivision": true,
+        "viewMeetings": true
       }
     },
     "admin": {
@@ -89,7 +90,8 @@
         "viewDivisions": true,
         "createDivision": false,
         "editDivision": false,
-        "deleteDivision": false
+        "deleteDivision": false,
+        "viewMeetings": true
       }
     },
     "org_admin": {
@@ -135,7 +137,8 @@
         "viewDivisions": false,
         "createDivision": false,
         "editDivision": false,
-        "deleteDivision": false
+        "deleteDivision": false,
+        "viewMeetings": false
       }
     },
     "project_admin": {
@@ -181,7 +184,8 @@
         "viewDivisions": false,
         "createDivision": false,
         "editDivision": false,
-        "deleteDivision": false
+        "deleteDivision": false,
+        "viewMeetings": false
       }
     },
     "director_admin": {
@@ -227,7 +231,8 @@
         "viewDivisions": false,
         "createDivision": false,
         "editDivision": false,
-        "deleteDivision": false
+        "deleteDivision": false,
+        "viewMeetings": false
       }
     },
     "project_member": {
@@ -273,7 +278,8 @@
         "viewDivisions": false,
         "createDivision": false,
         "editDivision": false,
-        "deleteDivision": false
+        "deleteDivision": false,
+        "viewMeetings": false
       }
     }
   },

@@ -38,6 +38,10 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canCreateVendor = useCan("createVendor");
   const canViewUsers = useCan("viewUsers");
   const canCreateUser = useCan("createUser");
+  // Meeting Management is hidden from project_admin, project_member and
+  // org_admin (viewMeetings:false in roles.json); only the elevated
+  // admin roles keep it.
+  const canViewMeetings = useCan("viewMeetings");
 
   // Approval Inbox visibility. The whole Approval Inbox section is shown
   // ONLY to the division_approver workflow role — nobody else sees it.
@@ -209,35 +213,39 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         )}
 
         {/* Meeting Management — ported from the Meeting_Management.html
-            reference. Sub-items: Create Meeting / All Meetings. Routes
-            (/meetings/new, /meetings) will need pages wired up in App.jsx;
-            until then the links resolve cleanly but render empty. */}
-        <a
-          className={mmActive ? "active" : ""}
-          onClick={() => setMmOpen(!mmOpen)}
-        >
-          <FiCalendar size={ICON_SIZE} />
-          <span className="pmis-text">Meeting Management</span>
-          <span className="pmis-submenu-arrow">
-            <Chevron open={mmOpen} />
-          </span>
-        </a>
-        <div className={`pmis-submenu${mmOpen ? " open" : ""}`}>
-          <div
-            className={createMeetingActive ? "active" : ""}
-            onClick={() => navigate("/meetings/new")}
-          >
-            <FiPlus size={ICON_SIZE} />
-            <span className="pmis-text">Create Meeting</span>
-          </div>
-          <div
-            className={allMeetingsActive ? "active" : ""}
-            onClick={() => navigate("/meetings")}
-          >
-            <FiSearch size={ICON_SIZE} />
-            <span className="pmis-text">All Meetings</span>
-          </div>
-        </div>
+            reference. Sub-items: Create Meeting / All Meetings. Hidden
+            from project_admin, project_member and org_admin via the
+            viewMeetings permission. */}
+        {canViewMeetings && (
+          <>
+            <a
+              className={mmActive ? "active" : ""}
+              onClick={() => setMmOpen(!mmOpen)}
+            >
+              <FiCalendar size={ICON_SIZE} />
+              <span className="pmis-text">Meeting Management</span>
+              <span className="pmis-submenu-arrow">
+                <Chevron open={mmOpen} />
+              </span>
+            </a>
+            <div className={`pmis-submenu${mmOpen ? " open" : ""}`}>
+              <div
+                className={createMeetingActive ? "active" : ""}
+                onClick={() => navigate("/meetings/new")}
+              >
+                <FiPlus size={ICON_SIZE} />
+                <span className="pmis-text">Create Meeting</span>
+              </div>
+              <div
+                className={allMeetingsActive ? "active" : ""}
+                onClick={() => navigate("/meetings")}
+              >
+                <FiSearch size={ICON_SIZE} />
+                <span className="pmis-text">All Meetings</span>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Master Data */}
         {canViewMasterData && (
