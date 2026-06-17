@@ -175,7 +175,7 @@ const BODY_HTML = `
     </div>
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
-        <div style="font-weight:600;color:var(--navy);font-size:13px;">Project (PMC contract) <span class="required">*</span></div>
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Project <span class="required">*</span></div>
         <div class="field-help">The contract this SLA belongs to.</div>
       </div>
       <div class="dyn-cell-value"><select id="s_project_id"><option value="">— Select a project —</option></select></div>

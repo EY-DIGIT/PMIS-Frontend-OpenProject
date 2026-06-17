@@ -301,6 +301,7 @@ export default function SeverityPage() {
         if (Number.isNaN(item.points_threshold)) return 'Points threshold must be a number.';
         if (Number.isNaN(item.ld_percent) || item.ld_percent < 0 || item.ld_percent > 100) return 'LD percent must be 0–100.';
         if (!item.label?.trim()) return 'Each LD band requires a label.';
+        if (item.label.trim().length > 100) return 'Label must be 100 characters or fewer.';
         // Bands must be ordered low → high: both the points threshold and the LD
         // percent have to strictly increase as you go down the list. This also
         // guarantees uniqueness, so a separate duplicate check isn't needed.
@@ -521,7 +522,7 @@ export default function SeverityPage() {
                     <>
                       <td><input style={ctrl} type="number" value={b.points_threshold} onChange={(e) => updateLdRow(i, 'points_threshold', e.target.value)} /></td>
                       <td><input style={ctrl} type="number" min={0} max={100} value={b.ld_percent} onChange={(e) => updateLdRow(i, 'ld_percent', e.target.value)} /></td>
-                      <td><input style={ctrl} type="text" value={b.label || ''} onChange={(e) => updateLdRow(i, 'label', e.target.value)} /></td>
+                      <td><input style={ctrl} type="text" maxLength="100" value={b.label || ''} onChange={(e) => updateLdRow(i, 'label', e.target.value)} /></td>
                       <td style={{ textAlign: "center" }}>
                         <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" title="Remove" onClick={() => removeLdRow(i)}>✕</button>
                       </td>
