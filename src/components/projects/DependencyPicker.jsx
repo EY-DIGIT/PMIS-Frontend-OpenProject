@@ -70,6 +70,13 @@ export default function DependencyPicker({
   const [actUid, setActUid] = useState("");
   const [tskUid, setTskUid] = useState("");
 
+  /* Snapshot of the dependencies already saved on the node when the picker
+     first opened. Switching projects reverts to this baseline so picks added
+     in this session under a different project (e.g. after a failed save) are
+     dropped from the payload instead of accumulating — while genuinely saved
+     dependencies are preserved. */
+  const [baseline] = useState(() => (Array.isArray(value) ? value.slice() : []));
+
   /* Project picker — defaults to the current project so existing behaviour
      is unchanged until the user explicitly switches projects. */
   const ownProjectId = currentProjectId || project?.projectId || "";
@@ -284,6 +291,15 @@ export default function DependencyPicker({
   }
 
   function onProjectChange(nextId) {
+    if (nextId !== selProjectId) {
+      // Drop picks added this session before moving to another project,
+      // keeping only the dependencies already saved on the node. Prevents a
+      // failed save under one project from leaving stale picks in the payload
+      // when the user retries under a different project.
+      const baseSet = new Set(baseline);
+      const reverted = value.filter((v) => baseSet.has(v));
+      if (reverted.length !== value.length) onChange(reverted);
+    }
     setSelProjectId(nextId);
     setMsUid("");
     setActUid("");
