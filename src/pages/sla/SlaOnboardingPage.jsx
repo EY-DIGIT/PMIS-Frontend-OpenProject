@@ -122,20 +122,30 @@ const STYLE = `
   background:#fff;color:var(--navy-deep);border-radius:6px;cursor:pointer;font-weight:600;transition:background .15s;}
 .sla-onb-root .sub-form .small-btn:hover{background:#f1f6fd;}
 
-.sla-onb-root .toast{position:fixed;top:20px;right:20px;background:#fff;border-left:4px solid var(--cyan);
-  padding:12px 16px;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);
-  z-index:2000;min-width:280px;max-width:420px;display:none;}
-.sla-onb-root .toast.open{display:block;}
+/* Toast stack — each message is its own card, stacked top-right. */
+.sla-onb-root .toast-stack{position:fixed;top:20px;right:20px;z-index:2000;display:flex;flex-direction:column;gap:10px;
+  width:340px;max-width:90vw;max-height:calc(100vh - 40px);overflow-y:auto;}
+.sla-onb-root .toast{position:relative;background:#fff;border-left:4px solid var(--cyan);
+  padding:12px 30px 12px 14px;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.15);}
 .sla-onb-root .toast.success{border-left-color:var(--green);}
 .sla-onb-root .toast.error{border-left-color:var(--red);}
 .sla-onb-root .toast-title{font-weight:800;font-size:13px;margin-bottom:3px;color:var(--navy-deep);}
-.sla-onb-root .toast-msg{font-size:12px;color:var(--text-soft);}
+.sla-onb-root .toast-msg{font-size:12px;color:var(--text-soft);line-height:1.45;}
+.sla-onb-root .toast-close{position:absolute;top:7px;right:9px;border:none;background:none;cursor:pointer;
+  color:#9aa7ba;font-weight:700;font-size:14px;line-height:1;padding:2px;}
+.sla-onb-root .toast-close:hover{color:var(--red);}
 
 .sla-onb-root .required{color:var(--red);}
 .sla-onb-root .hint{font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.4;}
 
 .sla-onb-root .lin-preview{margin-top:10px;padding:10px 12px;border-radius:8px;
   border:1px dashed var(--cyan);background:#eef7fb;font-size:13px;color:var(--navy-deep);}
+
+/* Validation highlights */
+.sla-onb-root .field-error,
+.sla-onb-root .field-error:focus{border:1px solid var(--red) !important;box-shadow:0 0 0 3px rgba(211,47,47,.14) !important;}
+.sla-onb-root #s_target_container.field-error{border-radius:8px;padding:6px;}
+.sla-onb-root .table-error{outline:2px solid var(--red);outline-offset:2px;}
 `;
 
 /* ─── Page markup (ported; inline handlers call window.__slaOnb.*) ─── */
@@ -249,10 +259,7 @@ const BODY_HTML = `
   <button class="btn primary" id="submitBtn" onclick="window.__slaOnb.submitSla()">Onboard SLA</button>
 </div>
 
-<div class="toast" id="toast">
-  <div class="toast-title" id="toastTitle"></div>
-  <div class="toast-msg" id="toastMsg"></div>
-</div>
+<div class="toast-stack" id="toastStack"></div>
 `;
 
 export default function SlaOnboardingPage() {
@@ -886,9 +893,39 @@ export default function SlaOnboardingPage() {
 
         /* ── submit ── */
         async function submitSla() {
+            _clearErrorState();
             const payload = _collectPayload();
-            const validation = _validate(payload);
-            if (validation) { toast("Missing required fields", validation, "error"); return; }
+
+            // ── Client-side validation → one toast per error, plus inline marks ──
+            const errors = [];          // { label, message }
+            const markIds = [];         // static field ids to outline red
+            let tableErr = false;       // red-border the whole RFP table
+            const presentKeys = new Set(
+                Array.from(host.querySelectorAll("#dynBody .dyn-row")).map((r) => r.dataset.fieldKey).filter(Boolean)
+            );
+            RFP_FIELDS.filter((f) => f.required).forEach((f) => {
+                const v = payload[f.key];
+                const missing = v == null || v === "" || (Array.isArray(v) && v.length === 0);
+                if (!missing) return;
+                const staticId = STATIC_FIELD_IDS[f.key];
+                if (staticId) { errors.push({ label: f.label, message: "This field is required." }); markIds.push(staticId); }
+                else { errors.push({ label: f.label, message: presentKeys.has(f.key) ? "Fill in this required RFP row." : "Add this RFP row and fill it in." }); tableErr = true; }
+            });
+            if (!payload.target_rows && !payload.linear_escalation) {
+                errors.push({ label: "Target / Applied Severity level", message: "Add a severity table or linear LD escalation." });
+                markIds.push("s_target_container");
+            }
+            if (!editingId) {
+                const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
+                if (!stashed || !stashed.length) { errors.push({ label: "Image attachment", message: "Upload an RFP image (add the 'Image attachments' row)." }); tableErr = true; }
+            }
+            if (errors.length) {
+                markIds.forEach(_markField);
+                if (tableErr) _flagTable();
+                errors.forEach((e) => toast(e.label, e.message, "error"));
+                return;
+            }
+
             const url = editingId
                 ? CONTRACTS_BASE + "/api/v3/sla-masters/" + editingId
                 : CONTRACTS_BASE + "/api/v3/sla-masters/from-rfp";
@@ -911,7 +948,13 @@ export default function SlaOnboardingPage() {
                 }
                 if (!resp.ok) {
                     const t = await resp.text();
-                    toast("Save failed", "HTTP " + resp.status + " " + t.slice(0, 200), "error");
+                    // Each server validation error becomes its own toast, with the
+                    // matching field outlined (or the RFP table flagged) where known.
+                    const serverErrors = _parseServerErrors(t, resp.status);
+                    let flagTbl = false;
+                    serverErrors.forEach((e) => { if (e.fieldId) _markField(e.fieldId); else if (e.table) flagTbl = true; });
+                    if (flagTbl) _flagTable();
+                    serverErrors.forEach((e) => toast(e.label, e.message, "error"));
                     return;
                 }
                 toast("Saved", editingId ? "SLA updated." : "SLA onboarded.", "success");
@@ -1033,27 +1076,6 @@ export default function SlaOnboardingPage() {
             }
             return undefined;
         }
-        function _validate(payload) {
-            const required = RFP_FIELDS.filter((f) => f.required).map((f) => f.key);
-            const missing = [];
-            for (const k of required) {
-                const v = payload[k];
-                if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) missing.push(_labelOf(k));
-            }
-            if (!payload.target_rows && !payload.linear_escalation) {
-                missing.push("Target / Applied Severity level (or Linear LD escalation)");
-            }
-            // The RFP image is mandatory when onboarding a new SLA.
-            if (!editingId) {
-                const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
-                if (!stashed || !stashed.length) missing.push("Image attachment (required)");
-            }
-            return missing.length ? missing.join(", ") : null;
-        }
-        function _labelOf(key) {
-            const f = RFP_FIELDS.find((ff) => ff.key === key);
-            return f ? f.label : key;
-        }
 
         /* ── edit-mode hydration ── */
         async function loadSlaForEdit(id) {
@@ -1171,13 +1193,91 @@ export default function SlaOnboardingPage() {
                 .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
         }
+        // Each call adds a separate card to the top-right stack (errors stay
+        // longer and carry a data-err flag so a re-submit can clear stale ones).
         function toast(title, msg, kind) {
-            const el = host.querySelector("#toast");
-            if (!el) return;
-            el.className = "toast open " + (kind || "");
-            host.querySelector("#toastTitle").textContent = title;
-            host.querySelector("#toastMsg").textContent = msg || "";
-            window.setTimeout(() => { el.className = "toast"; }, 4500);
+            const stack = host.querySelector("#toastStack");
+            if (!stack) return;
+            const el = document.createElement("div");
+            el.className = "toast " + (kind || "");
+            if (kind === "error") el.setAttribute("data-err", "1");
+            el.innerHTML =
+                `<button type="button" class="toast-close" onclick="this.parentElement.remove()">✕</button>` +
+                `<div class="toast-title">${esc(title)}</div>` +
+                (msg ? `<div class="toast-msg">${esc(msg)}</div>` : "");
+            stack.appendChild(el);
+            window.setTimeout(() => { el.remove(); }, kind === "error" ? 9000 : 3800);
+        }
+        // Clear inline validation marks + any lingering error toasts before re-validating.
+        function _clearErrorState() {
+            host.querySelectorAll(".field-error").forEach((el) => el.classList.remove("field-error"));
+            const tbl = host.querySelector("#dynTable");
+            if (tbl) tbl.classList.remove("table-error");
+            host.querySelectorAll("#toastStack [data-err]").forEach((el) => el.remove());
+        }
+        function _markField(id) {
+            if (!id) return;
+            const el = host.querySelector("#" + id);
+            if (el) el.classList.add("field-error");
+        }
+        function _flagTable() {
+            const tbl = host.querySelector("#dynTable");
+            if (tbl) tbl.classList.add("table-error");
+        }
+        function _prettyKey(k) {
+            return String(k).replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        }
+        // Map a payload/loc key → the static field element id to mark red.
+        const STATIC_FIELD_IDS = {
+            sla_ref: "s_sla_ref", title: "s_title", project_id: "s_project_id",
+            category_code: "s_category_code", description: "s_description",
+            calculation_method: "s_calculation_method",
+            target_rows: "s_target_container", linear_escalation: "s_target_container",
+            condition_bands: "s_target_container", lookup_table: "s_target_container",
+        };
+        // Turn a server error body into a list of {label, message, fieldId?, table?}.
+        function _parseServerErrors(text, status) {
+            let data = null;
+            try { data = JSON.parse(text); } catch { /* not JSON */ }
+            const out = [];
+            const pushLoc = (loc, msg) => {
+                const key = String(loc).split(".").pop();
+                const fieldId = STATIC_FIELD_IDS[key];
+                const label = (RFP_FIELDS.find((f) => f.key === key) || {}).label || _prettyKey(loc || "Error");
+                out.push({ label, message: msg, fieldId, table: !fieldId });
+            };
+            // FastAPI-style arrays (detail[] or error._embedded.details.errors[]).
+            const arr = (Array.isArray(data?.detail) && data.detail) ||
+                (Array.isArray(data?.error?._embedded?.details?.errors) && data.error._embedded.details.errors) || null;
+            if (arr) {
+                arr.forEach((it) => {
+                    const loc = Array.isArray(it.loc) ? it.loc.filter((p) => p !== "body").join(".") : (it.loc || "");
+                    pushLoc(loc, it.msg || "Invalid value");
+                });
+            }
+            // error.message may embed a pydantic repr list, or be a single message.
+            const msg = data?.error?.message || data?.message;
+            if (!out.length && typeof msg === "string") {
+                const re = /'loc':\s*\(([^)]*)\)\s*,\s*'msg':\s*'([^']*)'/g;
+                let m; let any = false;
+                while ((m = re.exec(msg)) !== null) {
+                    any = true;
+                    const loc = m[1].replace(/['"\s]/g, "").split(",").filter(Boolean).filter((p) => p !== "body").join(".");
+                    pushLoc(loc, m[2]);
+                }
+                if (!any) {
+                    const low = msg.toLowerCase();
+                    const targetish = /condition_band|lookup|target|severity|escalation/.test(low);
+                    out.push({
+                        label: data?.error?.errorIdentifier ? _prettyKey(data.error.errorIdentifier) : "Server error",
+                        message: msg,
+                        fieldId: targetish ? "s_target_container" : null,
+                        table: false,
+                    });
+                }
+            }
+            if (!out.length) out.push({ label: "Save failed", message: (typeof text === "string" && text.slice(0, 300)) || `HTTP ${status}` });
+            return out;
         }
 
         /* ── expose handler-referenced functions for the inline DOM events ── */

@@ -29,7 +29,7 @@ const STATUS_OPTIONS = ["DRAFT", "IN_REVIEW", "FINALIZED"];
      { title, templateId, content, decisions[], actionItems[], risks[] }
    where each entry carries a `description` (owners come back as speaker
    labels like "Speaker 1", not real user ids). */
-const MEETING_WEBHOOK_URL = "http://10.1.151.228:5678/webhook/meeting";
+const MEETING_WEBHOOK_URL = "http://10.1.131.199:5678/webhook/meeting";
 
 /* Map the webhook's structured JSON response into the three editable
    textareas — descriptions only, since owners are speaker labels rather
