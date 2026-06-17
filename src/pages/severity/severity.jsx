@@ -281,7 +281,14 @@ export default function SeverityPage() {
     }
 
     function addLdRow() {
-      setLdRows((prev) => [...prev, { id: null, points_threshold: 0, ld_percent: 10, label: `Band ${prev.length + 1}` }]);
+      setLdRows((prev) => {
+        const last = prev[prev.length - 1];
+        // Seed the new band just above the previous one so it stays in the
+        // required increasing order (the user can still adjust it).
+        const nextThreshold = last ? Number(last.points_threshold) + 2 : 0;
+        const nextPercent = last ? Math.min(100, Number(last.ld_percent) + 1) : 0;
+        return [...prev, { id: null, points_threshold: nextThreshold, ld_percent: nextPercent, label: `Band ${prev.length + 1}` }];
+      });
     }
 
     function removeLdRow(index) {
@@ -289,16 +296,21 @@ export default function SeverityPage() {
     }
 
     function validateLdRows() {
-      const seenThresholds = new Set();
-      for (const item of ldRows) {
+      for (let i = 0; i < ldRows.length; i++) {
+        const item = ldRows[i];
         if (Number.isNaN(item.points_threshold)) return 'Points threshold must be a number.';
         if (Number.isNaN(item.ld_percent) || item.ld_percent < 0 || item.ld_percent > 100) return 'LD percent must be 0–100.';
         if (!item.label?.trim()) return 'Each LD band requires a label.';
-        // LD bands are identified by their points threshold, so a duplicate
-        // threshold would overwrite the existing band instead of adding a new one.
-        if (seenThresholds.has(item.points_threshold))
-          return `Points threshold ${item.points_threshold} is already used. Each LD band must have a unique points threshold.`;
-        seenThresholds.add(item.points_threshold);
+        // Bands must be ordered low → high: both the points threshold and the LD
+        // percent have to strictly increase as you go down the list. This also
+        // guarantees uniqueness, so a separate duplicate check isn't needed.
+        if (i > 0) {
+          const prev = ldRows[i - 1];
+          if (Number(item.points_threshold) <= Number(prev.points_threshold))
+            return `Points threshold must increase down the list — row ${i + 1} (${item.points_threshold}) must be greater than row ${i} (${prev.points_threshold}).`;
+          if (Number(item.ld_percent) <= Number(prev.ld_percent))
+            return `LD percent must increase down the list — row ${i + 1} (${item.ld_percent}) must be greater than row ${i} (${prev.ld_percent}).`;
+        }
       }
       return null;
     }
@@ -479,7 +491,7 @@ export default function SeverityPage() {
           ) : (
             <>
               <button type="button" className="uidai-pmis-btn" onClick={doSave} disabled={loading}>Save</button>
-              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setEditMode(false)} disabled={loading}>Cancel</button>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => loadSeverity()} disabled={loading}>Cancel</button>
             </>
           )}
         </div>
@@ -493,7 +505,7 @@ export default function SeverityPage() {
             <thead>
               <tr>
                 <th>Points Threshold</th>
-                <th>LD Percent</th>
+                <th>LD Percent (%)</th>
                 <th>Label</th>
                 {ldEditMode && <th style={{ textAlign: "center", width: 70 }}>Action</th>}
               </tr>
@@ -539,7 +551,7 @@ export default function SeverityPage() {
           ) : (
             <>
               <button type="button" className="uidai-pmis-btn" onClick={doSaveLd} disabled={ldLoading}>Save</button>
-              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setLdEditMode(false)} disabled={ldLoading}>Cancel</button>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => loadLdBands()} disabled={ldLoading}>Cancel</button>
             </>
           )}
         </div>
