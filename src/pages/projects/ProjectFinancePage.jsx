@@ -6,6 +6,7 @@ import { uiStore } from "../../store/project/uiStore";
 import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
+import { fromApiNodeStatus } from "../../api/adapters";
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -898,7 +899,11 @@ export default function ProjectFinancePage() {
       const payload = await readJson(res);
       const list = extractElements(payload)
         .filter((m) => m && m.id)
-        .map((m) => ({ id: m.id, name: m.name || m.title || m.id }));
+        .map((m) => ({
+          id: m.id,
+          name: m.name || m.title || m.id,
+          status: fromApiNodeStatus(m.status),
+        }));
       setMilestones(list);
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1260,6 +1265,15 @@ export default function ProjectFinancePage() {
     return milestones.find((m) => m.id === id)?.name || id || "—";
   }
 
+  function milestoneStatus(id) {
+    return milestones.find((m) => m.id === id)?.status || "Not Completed";
+  }
+
+  function generateInvoice(term) {
+    const name = milestoneName(term?.milestoneId);
+    uiStore.showMessage(`Invoice generated for milestone "${name}".`);
+  }
+
   function costTypeLabel(code) {
     return costTypes.find((c) => c.code === code)?.name ||
       (code === "fixed" ? "Fixed" : code === "one_time" ? "One-Time" : code);
@@ -1458,8 +1472,10 @@ export default function ProjectFinancePage() {
                 key={p.phase}
                 phase={p}
                 milestoneName={milestoneName}
+                milestoneStatus={milestoneStatus}
                 frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
+                onGenerateInvoice={generateInvoice}
                 onApplyFrequency={applyPhaseFrequency}
                 isLocked={isLocked}
                 isLastPhase={idx === phases.length - 1}
@@ -1575,7 +1591,8 @@ export default function ProjectFinancePage() {
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, frequencies = [], onEditTerm, onApplyFrequency,
+  phase, milestoneName, milestoneStatus = () => "Not Completed",
+  frequencies = [], onEditTerm, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -1733,7 +1750,7 @@ function PhasePanel({
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
-                  <th style={{ width: 90, textAlign: "center" }}>Action</th>
+                  <th style={{ width: 220, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1783,6 +1800,7 @@ function PhasePanel({
                         </div>
                       </td>
                       <td style={{ textAlign: "center" }}>
+                       <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <button
                           type="button"
                           title="Edit payment term"
@@ -1820,6 +1838,60 @@ function PhasePanel({
                             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                           </svg>
                         </button>
+                        {(() => {
+                          const msComplete = milestoneStatus(t.milestoneId) === "Completed";
+                          const genDisabled = isLocked || !msComplete;
+                          return (
+                            <button
+                              type="button"
+                              title={
+                                msComplete
+                                  ? "Generate invoice for this milestone"
+                                  : "Available only when the milestone status is Completed"
+                              }
+                              aria-label="Generate invoice"
+                              disabled={genDisabled}
+                              onClick={() => onGenerateInvoice(t)}
+                              style={{
+                                height: 32,
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                gap: 6,
+                                padding: "0 10px",
+                                border: "1px solid var(--uidai-pmis-border)",
+                                background: genDisabled ? "#f4f6f9" : "#173e77",
+                                color: genDisabled ? "var(--uidai-pmis-muted)" : "#fff",
+                                borderColor: genDisabled ? "var(--uidai-pmis-border)" : "#173e77",
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                whiteSpace: "nowrap",
+                                cursor: genDisabled ? "not-allowed" : "pointer",
+                                opacity: genDisabled ? 0.7 : 1,
+                                transition: "background .15s, border-color .15s, transform .15s",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (genDisabled) return;
+                                e.currentTarget.style.background = "#0f2f5e";
+                                e.currentTarget.style.transform = "translateY(-1px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                if (genDisabled) return;
+                                e.currentTarget.style.background = "#173e77";
+                                e.currentTarget.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2"
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <path d="M14 2v6h6" />
+                                <path d="M9 13h6M9 17h6" />
+                              </svg>
+                              Generate Invoice
+                            </button>
+                          );
+                        })()}
+                       </div>
                       </td>
                     </tr>
                   );

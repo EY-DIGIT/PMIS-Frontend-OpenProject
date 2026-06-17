@@ -1379,6 +1379,24 @@ export default function NodeModal({
               Save
             </button>
           )}
+          {kind === "milestone" && !isAdd && (
+            <button
+              type="button"
+              className="uidai-btn"
+              onClick={() => {
+                if (!project.projectId) return;
+                navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`);
+              }}
+              disabled={form.status !== "Completed"}
+              title={
+                form.status === "Completed"
+                  ? "Raise an invoice for this milestone"
+                  : "Available only when the milestone status is Completed"
+              }
+            >
+              Raise Invoice
+            </button>
+          )}
           <button type="button" className="uidai-btn uidai-btn--cancel" onClick={onCancel}>
             Close
           </button>
