@@ -203,7 +203,15 @@ export default function CreateMeetingPage() {
   const [extInput, setExtInput] = useState("");
   const [showExt, setShowExt] = useState(false);
   const [files, setFiles] = useState([]); /* raw File objects */
-  const [errors, setErrors] = useState({ date: false, time: false, attendees: false });
+  const [errors, setErrors] = useState({
+    projectId: false,
+    title: false,
+    date: false,
+    start: false,
+    end: false,
+    time: false,
+    attendees: false
+  });
   const [submitting, setSubmitting] = useState(false);
 
   /* Master data fetched from existing APIs. */
@@ -220,7 +228,7 @@ export default function CreateMeetingPage() {
     setLoadingProjects(true);
     setLoadingUsers(true);
     projectsApi
-      .list()
+      .list({ pageSize: 200 })
       .then((rows) => { if (alive) setProjects(rows); })
       .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingProjects(false); });
@@ -286,20 +294,28 @@ export default function CreateMeetingPage() {
 
   const submit = async () => {
     let ok = true;
-    const nextErr = { date: false, time: false, attendees: false };
-    if (!draft.projectId) { show("Select a project.", "warn"); ok = false; }
-    if (!draft.title.trim()) { show("Meeting Title is required.", "warn"); ok = false; }
+    const nextErr = {
+      projectId: false,
+      title: false,
+      date: false,
+      start: false,
+      end: false,
+      time: false,
+      attendees: false
+    };
+    if (!draft.projectId) { nextErr.projectId = true; ok = false; }
+    if (!draft.title.trim()) { nextErr.title = true; ok = false; }
     if (!draft.date) { nextErr.date = true; ok = false; }
-    if (!draft.start || !draft.end) {
-      show("Start and End time are required.", "warn");
-      ok = false;
-    }
+    if (!draft.start) { nextErr.start = true; ok = false; }
+    if (!draft.end) { nextErr.end = true; ok = false; }
     if (!draft.attendees || draft.attendees.length === 0) {
       nextErr.attendees = true;
-      show("Select at least one attendee.", "warn");
       ok = false;
     }
-    if (!validateTimes()) { nextErr.time = true; ok = false; }
+    if (draft.start && draft.end && draft.end <= draft.start) {
+      nextErr.time = true;
+      ok = false;
+    }
     setErrors(nextErr);
     if (!ok) return;
 
@@ -377,7 +393,10 @@ export default function CreateMeetingPage() {
             <select
               id="projSel"
               value={draft.projectId}
-              onChange={(e) => updateDraft({ projectId: e.target.value })}
+              onChange={(e) => {
+                updateDraft({ projectId: e.target.value });
+                setErrors((er) => ({ ...er, projectId: false }));
+              }}
               disabled={loadingProjects}
             >
               <option value="" disabled>
@@ -390,6 +409,9 @@ export default function CreateMeetingPage() {
                 </option>
               ))}
             </select>
+            <div className={`field-err${errors.projectId ? " show" : ""}`}>
+              Please select a project.
+            </div>
           </div>
           <div className="field">
             <label htmlFor="mTitle">
@@ -400,9 +422,15 @@ export default function CreateMeetingPage() {
               type="text"
               maxLength={120}
               value={draft.title}
-              onChange={(e) => updateDraft({ title: e.target.value })}
+              onChange={(e) => {
+                updateDraft({ title: e.target.value });
+                setErrors((er) => ({ ...er, title: false }));
+              }}
               placeholder="e.g. Q2 Governance Committee Review"
             />
+            <div className={`field-err${errors.title ? " show" : ""}`}>
+              Meeting Title is required.
+            </div>
           </div>
         </div>
 
@@ -436,9 +464,12 @@ export default function CreateMeetingPage() {
               value={draft.start}
               onChange={(e) => {
                 updateDraft({ start: e.target.value });
-                setErrors((er) => ({ ...er, time: false }));
+                setErrors((er) => ({ ...er, start: false, time: false }));
               }}
             />
+            <div className={`field-err${errors.start ? " show" : ""}`}>
+              Please select a start time.
+            </div>
           </div>
           <div className="field">
             <label htmlFor="mEnd">
@@ -448,9 +479,15 @@ export default function CreateMeetingPage() {
               id="mEnd"
               type="time"
               value={draft.end}
-              onChange={(e) => updateDraft({ end: e.target.value })}
+              onChange={(e) => {
+                updateDraft({ end: e.target.value });
+                setErrors((er) => ({ ...er, end: false, time: false }));
+              }}
               onBlur={validateTimes}
             />
+            <div className={`field-err${errors.end ? " show" : ""}`}>
+              Please select an end time.
+            </div>
             <div className={`field-err${errors.time ? " show" : ""}`}>
               End time must be after start time.
             </div>
