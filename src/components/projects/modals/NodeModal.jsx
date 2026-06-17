@@ -895,6 +895,43 @@ export default function NodeModal({
             SLA Mapping
           </button>
         )}
+        {kind === "milestone" && !isAdd && (() => {
+          const msComplete = form.status === "Completed";
+          return (
+            <button
+              type="button"
+              aria-label="Raise Invoice"
+              title={
+                msComplete
+                  ? "Raise an invoice for this milestone"
+                  : "Available only when the milestone status is Completed"
+              }
+              disabled={!msComplete}
+              onClick={() => {
+                if (!project.projectId) return;
+                navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`);
+              }}
+              style={{
+                ...iconBtnStyle,
+                top: 8,
+                right: 48,
+                fontSize: 14,
+                lineHeight: 1,
+                width: "auto",
+                padding: "8px 16px",
+                background: msComplete
+                  ? "linear-gradient(90deg, #0b3c88, #129ab8)"
+                  : "#e6e8ec",
+                borderRadius: 4,
+                color: msComplete ? "#ffffff" : "#9aa1ab",
+                cursor: msComplete ? "pointer" : "not-allowed",
+                marginTop: 4,
+              }}
+            >
+              Raise Invoice
+            </button>
+          );
+        })()}
         <button
           type="button"
           aria-label="Close"
@@ -1377,24 +1414,6 @@ export default function NodeModal({
               disabled={disableSave}
             >
               Save
-            </button>
-          )}
-          {kind === "milestone" && !isAdd && (
-            <button
-              type="button"
-              className="uidai-btn"
-              onClick={() => {
-                if (!project.projectId) return;
-                navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`);
-              }}
-              disabled={form.status !== "Completed"}
-              title={
-                form.status === "Completed"
-                  ? "Raise an invoice for this milestone"
-                  : "Available only when the milestone status is Completed"
-              }
-            >
-              Raise Invoice
             </button>
           )}
           <button type="button" className="uidai-btn uidai-btn--cancel" onClick={onCancel}>
