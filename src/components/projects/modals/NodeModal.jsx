@@ -1336,6 +1336,7 @@ export default function NodeModal({
                 value={form.dependsOn}
                 onChange={(next) => updateField({ dependsOn: next })}
                 project={project}
+                currentProjectId={project.projectId}
                 kind={kind}
                 nodeUid={node ? node.uid : ""}
                 parentUid={parentUid || ""}

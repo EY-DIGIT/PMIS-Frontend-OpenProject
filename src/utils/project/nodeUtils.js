@@ -352,7 +352,7 @@ export function listEligibleItemsForDep(project, nodeKind, nodeUid, parentUid, d
   if (depKind === "milestone") {
     safeArray(project.milestones).forEach((m) => {
       if (excluded.has(m.uid)) return;
-      out.push({ uid: m.uid, id: m.id || "", name: m.name || "", msUid: "", actUid: "", tskUid: "" });
+      out.push({ uid: m.uid, apiId: m.apiId || "", id: m.id || "", name: m.name || "", msUid: "", actUid: "", tskUid: "" });
     });
     return out;
   }
@@ -363,6 +363,7 @@ export function listEligibleItemsForDep(project, nodeKind, nodeUid, parentUid, d
         if (excluded.has(a.uid)) return;
         out.push({
           uid: a.uid,
+          apiId: a.apiId || "",
           id: a.id || "",
           name: a.name || "",
           msUid: m.uid,
@@ -381,6 +382,7 @@ export function listEligibleItemsForDep(project, nodeKind, nodeUid, parentUid, d
           if (excluded.has(t.uid)) return;
           out.push({
             uid: t.uid,
+            apiId: t.apiId || "",
             id: t.id || "",
             name: t.name || "",
             msUid: m.uid,
@@ -402,6 +404,7 @@ export function listEligibleItemsForDep(project, nodeKind, nodeUid, parentUid, d
             if (!excluded.has(s.uid)) {
               out.push({
                 uid: s.uid,
+                apiId: s.apiId || "",
                 id: s.id || "",
                 name: s.name || "",
                 msUid: m.uid,

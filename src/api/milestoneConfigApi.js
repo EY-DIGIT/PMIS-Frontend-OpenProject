@@ -137,9 +137,14 @@ function sortByPosition(list) {
 }
 
 /* Resolve form dependsOn (local node UIDs) → display IDs (M1, M2, …) by
-   walking the project tree. Unknown UIDs are dropped. */
+   walking the project tree. Unknown UIDs are dropped.
+
+   Cross-project dependencies are stored in the form as "xproj:<apiId>"
+   tokens (see DependencyPicker). Those carry the target node's globally
+   unique server id (apiId), so they bypass the local tree lookup and are
+   sent to the server verbatim — the backend resolves them across projects. */
 function resolveDepDisplayIds(project, uids) {
-  if (!project || !Array.isArray(uids) || uids.length === 0) return [];
+  if (!Array.isArray(uids) || uids.length === 0) return [];
   const map = {};
   function walk(list) {
     if (!Array.isArray(list)) return;
@@ -151,8 +156,13 @@ function resolveDepDisplayIds(project, uids) {
       if (n.subtasks) walk(n.subtasks);
     }
   }
-  walk(project.milestones);
-  return uids.map((u) => map[u]).filter(Boolean);
+  if (project) walk(project.milestones);
+  return uids
+    .map((u) => {
+      if (typeof u === "string" && u.startsWith("xproj:")) return u.slice("xproj:".length);
+      return map[u];
+    })
+    .filter(Boolean);
 }
 
 /* Common base fields for activity/task create & update. Tasks and
