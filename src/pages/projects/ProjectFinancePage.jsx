@@ -950,7 +950,10 @@ export default function ProjectFinancePage() {
   const totals = page?.totals || {};
   const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
-  const isLocked = !!page?.isLocked;
+  // Finance page is always actionable — the user can edit terms, generate
+  // invoices, add cost rows, etc. at any time regardless of the server's
+  // locked flag.
+  const isLocked = false;
 
   const phaseNumbersFromCosts = useMemo(() => {
     const set = new Set();
