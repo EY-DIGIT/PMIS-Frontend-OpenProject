@@ -896,7 +896,10 @@ export default function NodeModal({
           </button>
         )}
         {kind === "milestone" && !isAdd && (() => {
-          const msComplete = form.status === "Completed";
+          // Gate on the persisted (API) status, not the unsaved form value —
+          // the button only enables once the milestone is actually saved as
+          // Completed on the server.
+          const msComplete = node?.status === "Completed";
           return (
             <button
               type="button"
