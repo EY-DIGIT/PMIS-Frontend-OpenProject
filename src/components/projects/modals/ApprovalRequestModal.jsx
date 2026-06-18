@@ -56,57 +56,66 @@ export default function ApprovalRequestModal({
     const id = row.id;
     /* A native <input type="file"> only holds its LATEST pick, so each
        browse is treated as one upload batch. Dedupe by name+byte-size so
-       re-picking the same file in the SAME row is a no-op. */
+       re-picking the same file in the SAME row is a no-op. Generate the
+       keys up-front so the post-upload patch can map each response
+       attachment back to the exact entry it created (by position). */
+    const prev = (state[id] && state[id].files) || [];
+    const seen = new Set(prev.map((f) => `${f.name}::${f.bytes ?? ""}`));
+    const added = [];
+    Array.from(fileList || []).forEach((f) => {
+      const dedupeKey = `${f.name}::${f.size ?? ""}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      keySeq.current += 1;
+      added.push({ key: `f${keySeq.current}`, file: f });
+    });
+    if (added.length === 0) return;
+
     setState((s) => {
-      const prev = (s[id] && s[id].files) || [];
-      const seen = new Set(prev.map((f) => `${f.name}::${f.bytes ?? ""}`));
-      const merged = prev.slice();
-      Array.from(fileList || []).forEach((f) => {
-        const dedupeKey = `${f.name}::${f.size ?? ""}`;
-        if (seen.has(dedupeKey)) return;
-        seen.add(dedupeKey);
-        keySeq.current += 1;
-        merged.push({
-          key: `f${keySeq.current}`,
-          name: f.name,
-          size: formatBytes(f.size),
-          bytes: f.size,
-          raw: f,
+      const entry = s[id] || { text: "", files: [] };
+      const files = (entry.files || []).slice();
+      added.forEach(({ key, file }) => {
+        files.push({
+          key,
+          name: file.name,
+          size: formatBytes(file.size),
+          bytes: file.size,
+          raw: file,
           documentStoreId: null,
           uploading: true,
           uploadError: ""
         });
       });
-      return { ...s, [id]: { ...(s[id] || { text: "" }), files: merged } };
+      return { ...s, [id]: { ...entry, files } };
     });
 
-    /* Determine which raw files are genuinely new (not duplicates already
-       present) and upload exactly that batch — one call per browse. */
-    const existingKeys = new Set(
-      ((state[id] && state[id].files) || []).map((f) => `${f.name}::${f.bytes ?? ""}`)
-    );
-    const batch = Array.from(fileList || []).filter(
-      (f) => !existingKeys.has(`${f.name}::${f.size ?? ""}`)
-    );
-    if (batch.length === 0) return;
-
-    // Snapshot the keys we just appended for this batch so we can patch them.
-    const targetNames = new Set(batch.map((f) => `${f.name}::${f.size ?? ""}`));
-
     if (typeof onUpload !== "function") return;
+    const addedKeys = new Set(added.map((a) => a.key));
     try {
-      const documentStoreId = await onUpload({
+      const res = await onUpload({
         row,
-        files: batch,
+        files: added.map((a) => a.file),
         comment: (state[id] && state[id].text) || ""
       });
+      const documentStoreId = (res && res.documentStoreId) || null;
+      const attachments = res && Array.isArray(res.attachments) ? res.attachments : [];
       setState((s) => {
         const entry = s[id] || { text: "", files: [] };
-        const files = (entry.files || []).map((f) =>
-          targetNames.has(`${f.name}::${f.bytes ?? ""}`) && f.uploading
-            ? { ...f, uploading: false, documentStoreId: documentStoreId || null }
-            : f
-        );
+        const files = (entry.files || []).map((f) => {
+          const idx = added.findIndex((a) => a.key === f.key);
+          if (idx === -1) return f;
+          /* Prefer the server-assigned name/size from the response. */
+          const att = attachments[idx];
+          return {
+            ...f,
+            uploading: false,
+            documentStoreId,
+            name: (att && (att.fileName || att.name)) || f.name,
+            size:
+              att && att.sizeBytes != null ? formatBytes(att.sizeBytes) : f.size,
+            fileUrl: (att && att.fileUrl) || f.fileUrl || ""
+          };
+        });
         return { ...s, [id]: { ...entry, files } };
       });
     } catch (err) {
@@ -114,7 +123,7 @@ export default function ApprovalRequestModal({
       setState((s) => {
         const entry = s[id] || { text: "", files: [] };
         const files = (entry.files || []).map((f) =>
-          targetNames.has(`${f.name}::${f.bytes ?? ""}`) && f.uploading
+          addedKeys.has(f.key) && f.uploading
             ? { ...f, uploading: false, uploadError: msg }
             : f
         );

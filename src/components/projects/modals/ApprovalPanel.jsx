@@ -232,13 +232,14 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         "Activity has no server id yet — save the activity first, then attach files."
       );
     }
-    const res = await uploadActivityDocuments({
+    /* Return the full response so the modal can show the server-assigned
+       fileName / size from `attachments[]` (not the raw local file). */
+    return uploadActivityDocuments({
       activityId: businessId,
       divisionId: divisionIdForRow(row),
       comment: comment || "",
       files
     });
-    return (res && res.documentStoreId) || null;
   }
 
   async function submitRequestPopup(payloads) {
