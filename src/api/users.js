@@ -112,6 +112,16 @@ export async function get(id) {
   return fromApi(unwrapOne(res));
 }
 
+/* Users assignable to a task / subtask for a given vendor.
+   GET /users/api/v3/vendors/{vendorId}/assignable-users */
+export async function listVendorAssignableUsers(vendorId, { offset = 1, pageSize = 100, status } = {}) {
+  if (!vendorId) return [];
+  const res = await api.get(ENDPOINTS.users.vendorAssignableUsers(vendorId), {
+    query: { offset, pageSize, status },
+  });
+  return unwrap(res).map(fromApi);
+}
+
 export async function create(body) {
   const res = await api.post(ENDPOINTS.users.create, body);
   return fromApi(unwrapOne(res));

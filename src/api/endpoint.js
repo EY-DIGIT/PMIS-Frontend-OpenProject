@@ -173,6 +173,10 @@ export const ENDPOINTS = {
        (role = project_admin | project_member). */
     authzAssignableUsers: (projectId, role) =>
       `/users/api/v3/authz/projects/${enc(projectId)}/assignable-users/${enc(role)}`,
+    /* Users that can be assigned to a task / subtask, scoped to a vendor.
+       Backs the "Assigned To" dropdown in the task / subtask modals. */
+    vendorAssignableUsers: (vendorId) =>
+      `/users/api/v3/vendors/${enc(vendorId)}/assignable-users`,
   },
 
   vendors: {

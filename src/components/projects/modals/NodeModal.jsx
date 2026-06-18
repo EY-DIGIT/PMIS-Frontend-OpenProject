@@ -57,7 +57,7 @@ import {
 } from "../../../api/milestoneConfigApi";
 import { getToken } from "../../../api/auth";
 import { authorizedFetch } from "../../../api/client";
-import { useData } from "../../../data/DataContext";
+import { listVendorAssignableUsers } from "../../../api/users";
 
 const TITLE_MAP = {
   milestone: "Milestone",
@@ -276,16 +276,37 @@ export default function NodeModal({
     return null;
   }, [open, project, kind, mode, nodeUid, parentUid]);
 
-  /* All users belonging to the enclosing activity's vendor — populates
-     the Assigned To dropdown. Falls back to [] when the activity has
-     no vendor or no users match. */
-  const { users } = useData();
-  const assignableUsers = useMemo(() => {
-    if (kind !== "task" && kind !== "subtask") return [];
-    const vendorId = enclosingActivity?.vendorId || "";
-    if (!vendorId) return [];
-    return safeArray(users).filter((u) => u && u.vendorId === vendorId);
-  }, [kind, enclosingActivity, users]);
+  /* Users assignable to this task / subtask — fetched from the vendor's
+     assignable-users endpoint, scoped to the enclosing activity's vendor.
+     GET /users/api/v3/vendors/{vendorId}/assignable-users */
+  const [assignableUsers, setAssignableUsers] = useState([]);
+  const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
+  const assignableVendorId = enclosingActivity?.vendorId || "";
+  useEffect(() => {
+    if (!open || (kind !== "task" && kind !== "subtask")) {
+      setAssignableUsers([]);
+      return;
+    }
+    if (!assignableVendorId || !getToken()) {
+      setAssignableUsers([]);
+      return;
+    }
+    let cancelled = false;
+    setAssignableUsersLoading(true);
+    listVendorAssignableUsers(assignableVendorId)
+      .then((list) => {
+        if (!cancelled) setAssignableUsers(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignableUsers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAssignableUsersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, kind, assignableVendorId]);
 
   const [form, setForm] = useState(() => makeDefaultForm(kind, node, mode, parentNode));
   // Snapshot of the form taken whenever it is (re)initialized from the
@@ -1310,9 +1331,11 @@ export default function NodeModal({
                 className="uidai-select"
                 value={form.assignedTo}
                 onChange={(e) => updateField({ assignedTo: e.target.value })}
-                disabled={dis || !enclosingActivity?.vendorId}
+                disabled={dis || !enclosingActivity?.vendorId || assignableUsersLoading}
               >
-                <option value="">— Unassigned —</option>
+                <option value="">
+                  {assignableUsersLoading ? "Loading users…" : "— Unassigned —"}
+                </option>
                 {assignableUsers.map((u) => (
                   <option key={u.userId} value={u.userId}>
                     {u.fullName || u.email || u.userCode || u.userId}
@@ -1324,9 +1347,9 @@ export default function NodeModal({
                   The parent activity has no vendor assigned yet — pick a vendor on the activity first to enable this list.
                 </div>
               )}
-              {enclosingActivity?.vendorId && assignableUsers.length === 0 && (
+              {enclosingActivity?.vendorId && !assignableUsersLoading && assignableUsers.length === 0 && (
                 <div className="uidai-field__hint" style={{ fontSize: 12, color: "#66788f", marginTop: 4 }}>
-                  No users are mapped to this activity's vendor yet.
+                  No assignable users found for this activity's vendor.
                 </div>
               )}
             </div>
