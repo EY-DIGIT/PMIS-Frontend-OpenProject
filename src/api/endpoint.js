@@ -366,10 +366,10 @@ export const ENDPOINTS = {
     /* Purpose-built timeline feed for an activity — ordered VOTE /
        STATE_TRANSITION events with ready title/detail strings. */
     timeline: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}/timeline`,
-    /* Approval status summary — who requested (and when), plus each
-       concerned division's + the owner's decision, status and timestamp.
-       Drives the date/time labels on the activity workflow graph. */
-    approvalStatus: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}/approval-status`,
+    /* Approval summary — who requested (and when), plus each concerned
+       division's + the owner's decision, status and timestamp. Drives the
+       date/time labels on the activity workflow graph. */
+    approvalStatus: (activityId) => `/activity-workflow/activities/inbox/${enc(activityId)}/approval-summary`,
     auditLogs: (activityId) => `/activity-workflow/activities/audit/ACTIVITY/${enc(activityId)}`,
     /* Parallel gate status — authoritative roll-up of the Concerned
        Division votes. `readyForOwner: true` means every division approved
