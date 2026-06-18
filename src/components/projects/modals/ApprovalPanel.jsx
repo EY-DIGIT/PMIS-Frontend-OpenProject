@@ -212,43 +212,15 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
     setRequestPopup({ open: false, kind: null });
   }
 
-  /* Resolve the divisionId a request-popup row uploads under: a concerned
-     division uses its code (the row id is `div::<code>`); the owner row
-     uploads under the literal "OWNER" bucket. */
-  function divisionIdForRow(row) {
-    if (!row) return "";
-    if (row.kind === "owner") return "OWNER";
-    const id = String(row.id || "");
-    return id.startsWith("div::") ? id.slice("div::".length) : id;
-  }
-
-  /* Per-choose upload — fired by ApprovalRequestModal each time the user
-     picks files. POSTs the batch to /documents/upload and returns the
-     documentStoreId, which the modal stores against those files and hands
-     back on Send Request. */
-  async function uploadRequestFiles({ row, files, comment }) {
-    if (!businessId) {
-      throw new Error(
-        "Activity has no server id yet — save the activity first, then attach files."
-      );
-    }
-    /* Return the full response so the modal can show the server-assigned
-       fileName / size from `attachments[]` (not the raw local file). */
-    return uploadActivityDocuments({
-      activityId: businessId,
-      divisionId: divisionIdForRow(row),
-      comment: comment || "",
-      files
-    });
-  }
-
   async function submitRequestPopup(payloads) {
     if (requestPopup.kind === "division") {
-      /* Attachments were already uploaded on selection (see
-         uploadRequestFiles) — each payload row carries the resulting
-         documentStoreId(s). Here we just POST request-division-approval
-         (JSON) with one entry per division. Divisions sent no attachments
-         still get a row with an empty list. */
+      /* Two-step dispatch per the 2026-06-18 contract:
+           1. For each Concerned Division that has attachments, POST the
+              files to /documents/upload (scoped to that division's code)
+              and capture the returned documentStoreId.
+           2. POST request-division-approval (JSON) with one entry per
+              division referencing its documentStoreId(s). Divisions
+              without attachments still get a row with an empty list. */
       if (!businessId) {
         setError(
           "Activity has no server id yet — save the activity first, then trigger the workflow."
@@ -263,14 +235,27 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       uiStore.showLoader("Requesting division approval…");
       setError("");
       try {
-        const divisionApprovals = payloads
-          .map((p) => {
-            const code = String((p && p.id) || "").startsWith("div::")
-              ? p.id.slice("div::".length)
-              : (p && p.id) || "";
-            return { divisionId: code, documentStoreIds: (p && p.documentStoreIds) || [] };
-          })
-          .filter((d) => d.divisionId);
+        const divisionApprovals = [];
+        for (const p of payloads) {
+          const code = String((p && p.id) || "").startsWith("div::")
+            ? p.id.slice("div::".length)
+            : (p && p.id) || "";
+          if (!code) continue;
+          const rawFiles = ((p && p.files) || [])
+            .map((f) => f && f.raw)
+            .filter(Boolean);
+          let documentStoreIds = [];
+          if (rawFiles.length) {
+            const up = await uploadActivityDocuments({
+              activityId: businessId,
+              divisionId: code,
+              comment: (p && p.text && p.text.trim()) || "",
+              files: rawFiles
+            });
+            if (up && up.documentStoreId) documentStoreIds = [up.documentStoreId];
+          }
+          divisionApprovals.push({ divisionId: code, documentStoreIds });
+        }
         await requestDivisionApprovalParallel({
           activityId: businessId,
           projectId,
@@ -286,9 +271,9 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         setBusy(false);
       }
     } else if (requestPopup.kind === "owner") {
-      /* Attachments were already uploaded on selection (divisionId
-         "OWNER") — the payload carries the documentStoreId(s). Here we
-         just POST request-owner-approval (JSON) referencing them. */
+      /* Two-step dispatch (2026-06-18 contract): upload any attachments
+         under divisionId "OWNER" to capture a documentStoreId, then POST
+         request-owner-approval (JSON) referencing it. */
       if (!businessId) {
         setError(
           "Activity has no server id yet — save the activity first, then trigger the workflow."
@@ -301,11 +286,23 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       }
       const p = payloads[0] || {};
       const note = (p && p.text && p.text.trim()) || "";
-      const documentStoreIds = (p && p.documentStoreIds) || [];
+      const allFiles = ((p && p.files) || [])
+        .map((f) => f && f.raw)
+        .filter(Boolean);
       setBusy(true);
       uiStore.showLoader("Requesting owner approval…");
       setError("");
       try {
+        let documentStoreIds = [];
+        if (allFiles.length) {
+          const up = await uploadActivityDocuments({
+            activityId: businessId,
+            divisionId: "OWNER",
+            comment: note,
+            files: allFiles
+          });
+          if (up && up.documentStoreId) documentStoreIds = [up.documentStoreId];
+        }
         await requestOwnerApprovalParallel({
           activityId: businessId,
           projectId,
@@ -765,7 +762,6 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         submitting={busy}
         error={error}
         onSubmit={submitRequestPopup}
-        onUpload={uploadRequestFiles}
         onClose={closeRequestPopup}
       />
     </div>

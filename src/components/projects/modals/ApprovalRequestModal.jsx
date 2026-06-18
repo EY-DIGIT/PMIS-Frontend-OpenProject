@@ -5,16 +5,14 @@
 
    Renders one row per target (each Concerned Division for a division
    request; the Activity Owner for an owner request). Each row has its
-   own comment textarea and file picker.
+   own comment textarea and file picker. On Send Request, the parent's
+   onSubmit handler receives `payloads = [{ id, kind, label, text,
+   files }]` so it can apply the per-target system comments.
 
-   Per the 2026-06-18 contract, attachments upload IMMEDIATELY on every
-   "Choose File" — each browse fires onUpload(), which POSTs that batch to
-   /activities/documents/upload and returns a documentStoreId. The id is
-   stored on the picked file entries. On Send Request the parent receives
-   `payloads = [{ id, kind, label, text, files, documentStoreIds }]`.
+   Mirrors the HTML reference's `_openApprovalRequestModal` flow.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 function makeInitialState(rows) {
   const out = {};
@@ -32,13 +30,9 @@ export default function ApprovalRequestModal({
   submitting,
   error,
   onSubmit,
-  onUpload,
   onClose
 }) {
   const [state, setState] = useState(() => makeInitialState(rows));
-  /* Monotonic key generator so every picked file entry is uniquely
-     addressable while its async upload is in flight. */
-  const keySeq = useRef(0);
   /* When the consumer reopens the popup with a different set of rows
      (e.g. owner row vs. division rows), refresh local state. */
   useEffect(() => {
@@ -51,123 +45,52 @@ export default function ApprovalRequestModal({
   function setText(id, text) {
     setState((s) => ({ ...s, [id]: { ...(s[id] || { files: [] }), text } }));
   }
+  function setFiles(id, fileList) {
+    /* Keep the raw File handle alongside the display name + size so the
+       parent can forward it to multipart endpoints. The display shape
+       (`{ name, size }`) is what the audit-trail comment serializer
+       reads — leave it intact and add `raw` for the upload path.
 
-  async function handleChoose(row, fileList) {
-    const id = row.id;
-    /* A native <input type="file"> only holds its LATEST pick, so each
-       browse is treated as one upload batch. Dedupe by name+byte-size so
-       re-picking the same file in the SAME row is a no-op. Generate the
-       keys up-front so the post-upload patch can map each response
-       attachment back to the exact entry it created (by position). */
-    const prev = (state[id] && state[id].files) || [];
-    const seen = new Set(prev.map((f) => `${f.name}::${f.bytes ?? ""}`));
-    const added = [];
-    Array.from(fileList || []).forEach((f) => {
-      const dedupeKey = `${f.name}::${f.size ?? ""}`;
-      if (seen.has(dedupeKey)) return;
-      seen.add(dedupeKey);
-      keySeq.current += 1;
-      added.push({ key: `f${keySeq.current}`, file: f });
-    });
-    if (added.length === 0) return;
-
+       A native <input type="file"> only ever holds its LATEST pick, so
+       choosing files in a second browse would otherwise drop the first
+       batch. Merge each new selection onto what's already there and
+       dedupe by name+byte-size so re-picking the same file is a no-op. */
+    const picked = Array.from(fileList || []).map((f) => ({
+      name: f.name,
+      size: formatBytes(f.size),
+      bytes: f.size,
+      raw: f
+    }));
+    if (picked.length === 0) return;
     setState((s) => {
-      const entry = s[id] || { text: "", files: [] };
-      const files = (entry.files || []).slice();
-      added.forEach(({ key, file }) => {
-        files.push({
-          key,
-          name: file.name,
-          size: formatBytes(file.size),
-          bytes: file.size,
-          raw: file,
-          documentStoreId: null,
-          uploading: true,
-          uploadError: ""
-        });
+      const prev = (s[id] && s[id].files) || [];
+      const seen = new Set(prev.map((f) => `${f.name}::${f.bytes ?? ""}`));
+      const merged = prev.slice();
+      picked.forEach((f) => {
+        const key = `${f.name}::${f.bytes ?? ""}`;
+        if (!seen.has(key)) { seen.add(key); merged.push(f); }
       });
-      return { ...s, [id]: { ...entry, files } };
+      return { ...s, [id]: { ...(s[id] || { text: "" }), files: merged } };
     });
-
-    if (typeof onUpload !== "function") return;
-    const addedKeys = new Set(added.map((a) => a.key));
-    try {
-      const res = await onUpload({
-        row,
-        files: added.map((a) => a.file),
-        comment: (state[id] && state[id].text) || ""
-      });
-      const documentStoreId = (res && res.documentStoreId) || null;
-      const attachments = res && Array.isArray(res.attachments) ? res.attachments : [];
-      setState((s) => {
-        const entry = s[id] || { text: "", files: [] };
-        const files = (entry.files || []).map((f) => {
-          const idx = added.findIndex((a) => a.key === f.key);
-          if (idx === -1) return f;
-          /* Prefer the server-assigned name/size from the response. */
-          const att = attachments[idx];
-          return {
-            ...f,
-            uploading: false,
-            documentStoreId,
-            name: (att && (att.fileName || att.name)) || f.name,
-            size:
-              att && att.sizeBytes != null ? formatBytes(att.sizeBytes) : f.size,
-            fileUrl: (att && att.fileUrl) || f.fileUrl || ""
-          };
-        });
-        return { ...s, [id]: { ...entry, files } };
-      });
-    } catch (err) {
-      const msg = (err && err.message) || "Upload failed.";
-      setState((s) => {
-        const entry = s[id] || { text: "", files: [] };
-        const files = (entry.files || []).map((f) =>
-          addedKeys.has(f.key) && f.uploading
-            ? { ...f, uploading: false, uploadError: msg }
-            : f
-        );
-        return { ...s, [id]: { ...entry, files } };
-      });
-    }
   }
-
-  function removeFile(id, key) {
+  function removeFile(id, index) {
     setState((s) => {
-      const entry = s[id] || { text: "", files: [] };
-      const files = (entry.files || []).filter((f) => f.key !== key);
-      return { ...s, [id]: { ...entry, files } };
+      const prev = (s[id] && s[id].files) || [];
+      const files = prev.filter((_, i) => i !== index);
+      return { ...s, [id]: { ...(s[id] || { text: "" }), files } };
     });
   }
-
-  /* Distinct documentStoreIds still attached to (non-removed) files. */
-  function documentStoreIdsFor(entry) {
-    const ids = ((entry && entry.files) || [])
-      .map((f) => f.documentStoreId)
-      .filter(Boolean);
-    return Array.from(new Set(ids));
-  }
-
-  const anyUploading = list.some((r) =>
-    ((state[r.id] && state[r.id].files) || []).some((f) => f.uploading)
-  );
 
   function submit() {
-    const payloads = list.map((r) => {
-      const entry = state[r.id] || { text: "", files: [] };
-      return {
-        id: r.id,
-        kind: r.kind || "division",
-        label: r.label || "",
-        text: entry.text || "",
-        files: entry.files || [],
-        documentStoreIds: documentStoreIdsFor(entry)
-      };
-    });
+    const payloads = list.map((r) => ({
+      id: r.id,
+      kind: r.kind || "division",
+      label: r.label || "",
+      text: (state[r.id] && state[r.id].text) || "",
+      files: (state[r.id] && state[r.id].files) || []
+    }));
     onSubmit(payloads);
   }
-
-  const disableSend = submitting || anyUploading || list.length === 0;
 
   return (
     <div className="pmis-awf-reqmodal pmis-awf-scope" role="dialog" aria-modal="true">
@@ -223,50 +146,32 @@ export default function ApprovalRequestModal({
                     <label>
                       Attachments{" "}
                       <span className="pmis-awf-reqmodal__hint">
-                        (optional, max 25 MB per file — uploaded on selection)
+                        (optional, max 25 MB per file)
                       </span>
                     </label>
                     <input
                       type="file"
                       multiple
                       onChange={(e) => {
-                        handleChoose(row, e.target.files);
+                        setFiles(row.id, e.target.files);
                         /* Reset so the next browse fires onChange even if
-                           the same file is picked again. */
+                           the same file is picked, and merge keeps the rest. */
                         e.target.value = "";
                       }}
                       disabled={submitting}
                     />
                     {entry.files.length > 0 && (
                       <div className="pmis-awf-reqmodal__files">
-                        {entry.files.map((f) => (
-                          <span key={f.key} className="pmis-awf-reqmodal__file-chip">
+                        {entry.files.map((f, i) => (
+                          <span key={i} className="pmis-awf-reqmodal__file-chip">
                             📎 {f.name}{" "}
                             <span className="pmis-awf-reqmodal__file-size">{f.size}</span>
-                            {f.uploading && (
-                              <span style={{ marginLeft: 6, fontSize: 11, color: "#0b3c88" }}>
-                                uploading…
-                              </span>
-                            )}
-                            {!f.uploading && f.documentStoreId && (
-                              <span style={{ marginLeft: 6, fontSize: 11, color: "#1b7a42" }}>
-                                ✓ uploaded
-                              </span>
-                            )}
-                            {!f.uploading && f.uploadError && (
-                              <span
-                                style={{ marginLeft: 6, fontSize: 11, color: "#9b1c1c" }}
-                                title={f.uploadError}
-                              >
-                                ✕ failed
-                              </span>
-                            )}
                             <button
                               type="button"
                               className="pmis-awf-reqmodal__file-remove"
                               aria-label={`Remove ${f.name}`}
                               title="Remove"
-                              onClick={() => removeFile(row.id, f.key)}
+                              onClick={() => removeFile(row.id, i)}
                               disabled={submitting}
                               style={{
                                 marginLeft: 6, border: "none", background: "transparent",
@@ -302,9 +207,9 @@ export default function ApprovalRequestModal({
             type="button"
             className="pmis-awf-btn"
             onClick={submit}
-            disabled={disableSend}
+            disabled={submitting || list.length === 0}
           >
-            {submitting ? "Sending…" : anyUploading ? "Uploading…" : "Send Request"}
+            {submitting ? "Sending…" : "Send Request"}
           </button>
         </div>
       </div>
