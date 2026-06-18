@@ -86,7 +86,7 @@ export default function ProjectsListPage() {
       setError("");
       try {
         const res = await authorizedFetch(
-          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=100`,
+          `${API_BASE}${ENDPOINTS.projects.list}?offset=1&pageSize=200`,
           {
             method: "GET",
             headers: { accept: "application/json" }
