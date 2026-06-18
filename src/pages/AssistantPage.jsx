@@ -18,7 +18,7 @@ import Aadhaar from "../assets/Aadhaar.png";
 import { getToken } from "../api/auth";
 
 const WEBHOOK_URL =
-  "http://10.1.151.228:5678/webhook/aadhar";
+  "http://10.1.151.228:5678/webhook/aadhaar";
 
 // n8n instance id sent with each chat request (matches the working curl).
 const N8N_INSTANCE_ID =
