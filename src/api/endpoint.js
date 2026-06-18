@@ -353,6 +353,11 @@ export const ENDPOINTS = {
      ────────────────────────────────────────────────────────────────── */
   activityWorkflow: {
     transition: '/activity-workflow/activities/process/_transition',
+    /* Multipart upload of approval attachments, scoped to a divisionId
+       (a concerned-division code, or "OWNER" for the owner stage). Returns
+       a documentStoreId that is then referenced in the request-*-approval
+       JSON payloads below. */
+    documentsUpload: '/activity-workflow/activities/documents/upload',
     requestDivisionApproval: '/activity-workflow/activities/parallel/request-division-approval',
     requestOwnerApproval: '/activity-workflow/activities/parallel/request-owner-approval',
     parallelVote: '/activity-workflow/activities/parallel/vote',

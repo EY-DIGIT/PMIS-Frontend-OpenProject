@@ -28,6 +28,7 @@ import {
 } from "../../../utils/project/approvalWorkflow";
 import {
   transitionActivity,
+  uploadActivityDocuments,
   requestDivisionApprovalParallel,
   requestOwnerApprovalParallel,
   WORKFLOW_ACTIONS,
@@ -213,10 +214,13 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
 
   async function submitRequestPopup(payloads) {
     if (requestPopup.kind === "division") {
-      /* Fire the parallel request-division-approval multipart call so
-         the backend seeds an approver row for each Concerned Division.
-         We concatenate per-row notes into a single comment and forward
-         every raw File the user attached across all rows. */
+      /* Two-step dispatch per the 2026-06-18 contract:
+           1. For each Concerned Division that has attachments, POST the
+              files to /documents/upload (scoped to that division's code)
+              and capture the returned documentStoreId.
+           2. POST request-division-approval (JSON) with one entry per
+              division referencing its documentStoreId(s). Divisions
+              without attachments still get a row with an empty list. */
       if (!businessId) {
         setError(
           "Activity has no server id yet — save the activity first, then trigger the workflow."
@@ -227,23 +231,35 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         setError("Missing project id — cannot dispatch division approval request.");
         return;
       }
-      const combined = payloads
-        .map((p) => (p && p.text && p.text.trim() ? p.text.trim() : ""))
-        .filter(Boolean)
-        .join(" | ");
-      const allFiles = payloads.flatMap((p) =>
-        ((p && p.files) || []).map((f) => f && f.raw).filter(Boolean)
-      );
       setBusy(true);
       uiStore.showLoader("Requesting division approval…");
       setError("");
       try {
+        const divisionApprovals = [];
+        for (const p of payloads) {
+          const code = String((p && p.id) || "").startsWith("div::")
+            ? p.id.slice("div::".length)
+            : (p && p.id) || "";
+          if (!code) continue;
+          const rawFiles = ((p && p.files) || [])
+            .map((f) => f && f.raw)
+            .filter(Boolean);
+          let documentStoreIds = [];
+          if (rawFiles.length) {
+            const up = await uploadActivityDocuments({
+              activityId: businessId,
+              divisionId: code,
+              comment: (p && p.text && p.text.trim()) || "",
+              files: rawFiles
+            });
+            if (up && up.documentStoreId) documentStoreIds = [up.documentStoreId];
+          }
+          divisionApprovals.push({ divisionId: code, documentStoreIds });
+        }
         await requestDivisionApprovalParallel({
           activityId: businessId,
           projectId,
-          stateName: WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION,
-          comment: combined || "Please review the activity submission.",
-          files: allFiles
+          divisionApprovals
         });
         apply(requestDivisionApproval(form, consentDivisions, payloads));
         if (typeof onTransition === "function") onTransition();
@@ -255,8 +271,9 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
         setBusy(false);
       }
     } else if (requestPopup.kind === "owner") {
-      /* Fire the parallel request-owner-approval multipart call so the
-         backend hands the activity off to the Activity Owner stage. */
+      /* Two-step dispatch (2026-06-18 contract): upload any attachments
+         under divisionId "OWNER" to capture a documentStoreId, then POST
+         request-owner-approval (JSON) referencing it. */
       if (!businessId) {
         setError(
           "Activity has no server id yet — save the activity first, then trigger the workflow."
@@ -276,12 +293,22 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       uiStore.showLoader("Requesting owner approval…");
       setError("");
       try {
+        let documentStoreIds = [];
+        if (allFiles.length) {
+          const up = await uploadActivityDocuments({
+            activityId: businessId,
+            divisionId: "OWNER",
+            comment: note,
+            files: allFiles
+          });
+          if (up && up.documentStoreId) documentStoreIds = [up.documentStoreId];
+        }
         await requestOwnerApprovalParallel({
           activityId: businessId,
           projectId,
           stateName: WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION,
           comment: note || "All divisions approved. Forwarding for owner review.",
-          files: allFiles
+          documentStoreIds
         });
         apply(requestOwnerApproval(form, ownerName, p));
         if (typeof onTransition === "function") onTransition();

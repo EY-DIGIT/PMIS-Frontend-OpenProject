@@ -200,8 +200,7 @@ export const PARALLEL_VOTE = {
 
 /* Normalise the attachment input into a flat list of raw File objects.
    Callers may pass `files` (array of File) and/or a single `file`; both
-   are merged so the multipart body carries every attachment the user
-   picked across all rows. */
+   are merged so the multipart body carries every attachment. */
 function collectUploadFiles(files, file) {
   const out = [];
   if (Array.isArray(files)) {
@@ -212,91 +211,111 @@ function collectUploadFiles(files, file) {
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   Step 2 — POST /activities/parallel/request-division-approval
-   Multipart upload that seeds per-division approver rows after the
-   SUBMIT transition. Attachments are optional (the backend accepts the
-   form without any); every file the user picked across the popup rows
-   is appended under the repeated `file` field.
+   POST /activities/documents/upload  (multipart)
+   Uploads one or more attachments for a single division (a concerned-
+   division code, or "OWNER" for the owner stage) and returns the
+   created document record — including the `documentStoreId` that the
+   request-*-approval calls below reference. Per the 2026-06-18 contract.
    ───────────────────────────────────────────────────────────────── */
-export async function requestDivisionApprovalParallel({
+export async function uploadActivityDocuments({
   activityId,
-  projectId,
-  stateName,
+  divisionId,
   comment,
   files,
   file
 } = {}) {
-  if (!activityId) throw new ApiError("Missing activity id for division approval request.");
-  if (!projectId) throw new ApiError("Missing project id for division approval request.");
-
-  const user = tokenStore.getUser() || {};
-  const requestInfo = {
-    userInfo: {
-      uuid: pickUserUuid(user),
-      userName: pickUserName(user),
-      roles: deriveRoles(user)
-    }
-  };
+  if (!activityId) throw new ApiError("Missing activity id for document upload.");
+  const all = collectUploadFiles(files, file);
+  if (all.length === 0) throw new ApiError("No files to upload.");
 
   const fd = new FormData();
-  fd.append("businessService", BUSINESS_SERVICE);
+  all.forEach((f) => fd.append("file", f));
   fd.append("activityId", activityId);
-  fd.append("projectId", projectId);
-  fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_CONCERNED_DIVISION);
+  if (divisionId) fd.append("divisionId", divisionId);
   fd.append("comment", comment || "");
-  fd.append("requestInfo", JSON.stringify(requestInfo));
-  collectUploadFiles(files, file).forEach((f) => fd.append("file", f));
 
   /* Multipart — DO NOT set Content-Type; the browser sets the
      boundary header automatically. */
-  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestDivisionApproval}`, {
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.documentsUpload}`, {
     method: "POST",
     headers: authHeaders(),
     body: fd,
+    cache: "no-store"
+  });
+  return parseJsonOrThrow(res, "Document upload");
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   Step 2 — POST /activities/parallel/request-division-approval  (JSON)
+   Seeds per-division approver rows after the SUBMIT transition. Each
+   entry references the documentStoreId(s) returned by a prior
+   uploadActivityDocuments() call for that division (empty when the
+   reviewer was sent no attachments).
+   ───────────────────────────────────────────────────────────────── */
+export async function requestDivisionApprovalParallel({
+  activityId,
+  projectId,
+  divisionApprovals = []
+} = {}) {
+  if (!activityId) throw new ApiError("Missing activity id for division approval request.");
+  if (!projectId) throw new ApiError("Missing project id for division approval request.");
+
+  const body = {
+    RequestInfo: buildRequestInfo(),
+    businessService: BUSINESS_SERVICE,
+    activityId,
+    projectId,
+    divisionApprovals: (Array.isArray(divisionApprovals) ? divisionApprovals : [])
+      .filter((d) => d && d.divisionId)
+      .map((d) => ({
+        divisionId: d.divisionId,
+        documentStoreIds: Array.isArray(d.documentStoreIds)
+          ? d.documentStoreIds.filter(Boolean)
+          : []
+      }))
+  };
+
+  const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestDivisionApproval}`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
     cache: "no-store"
   });
   return parseJsonOrThrow(res, "Request division approval");
 }
 
 /* ─────────────────────────────────────────────────────────────────
-   Step 6 — POST /activities/parallel/request-owner-approval
-   Multipart upload that hands the activity from the Concerned Division
-   stage to the Activity Owner stage. Same payload shape as
-   request-division-approval but with `stateName=PENDINGATOWNERDIVISION`.
+   Step 6 — POST /activities/parallel/request-owner-approval  (JSON)
+   Hands the activity from the Concerned Division stage to the Activity
+   Owner stage. References the documentStoreId(s) from a prior
+   uploadActivityDocuments({ divisionId: "OWNER" }) call.
    ───────────────────────────────────────────────────────────────── */
 export async function requestOwnerApprovalParallel({
   activityId,
   projectId,
   stateName,
   comment,
-  files,
-  file
+  documentStoreIds = []
 } = {}) {
   if (!activityId) throw new ApiError("Missing activity id for owner approval request.");
   if (!projectId) throw new ApiError("Missing project id for owner approval request.");
 
-  const user = tokenStore.getUser() || {};
-  const requestInfo = {
-    userInfo: {
-      uuid: pickUserUuid(user),
-      userName: pickUserName(user),
-      roles: deriveRoles(user)
-    }
+  const body = {
+    RequestInfo: buildRequestInfo(),
+    businessService: BUSINESS_SERVICE,
+    activityId,
+    projectId,
+    stateName: stateName || WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION,
+    comment: comment || "",
+    documentStoreIds: Array.isArray(documentStoreIds)
+      ? documentStoreIds.filter(Boolean)
+      : []
   };
-
-  const fd = new FormData();
-  fd.append("businessService", BUSINESS_SERVICE);
-  fd.append("activityId", activityId);
-  fd.append("projectId", projectId);
-  fd.append("stateName", stateName || WORKFLOW_STATES.PENDING_AT_OWNER_DIVISION);
-  fd.append("comment", comment || "");
-  fd.append("requestInfo", JSON.stringify(requestInfo));
-  collectUploadFiles(files, file).forEach((f) => fd.append("file", f));
 
   const res = await fetch(`${API_BASE}${ENDPOINTS.activityWorkflow.requestOwnerApproval}`, {
     method: "POST",
-    headers: authHeaders(),
-    body: fd,
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
     cache: "no-store"
   });
   return parseJsonOrThrow(res, "Request owner approval");
