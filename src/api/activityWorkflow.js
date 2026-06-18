@@ -363,6 +363,22 @@ export async function getActivityWorkflowInboxDetail(activityId, userUuid, state
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   GET /activities/inbox/{activityId}/approval-status
+   Returns the approval summary: divisionApprovalRequest (who requested +
+   requestedAt), the concernedDivisions[] decisions (status / actionAt /
+   comment) and the ownerDivision decision. Used by the workflow graph to
+   show when approval was requested and when each party acted.
+   ───────────────────────────────────────────────────────────────── */
+export async function getActivityApprovalStatus(activityId) {
+  if (!activityId) throw new ApiError("Missing activity id for approval status.");
+  const res = await fetch(
+    `${API_BASE}${ENDPOINTS.activityWorkflow.approvalStatus(activityId)}`,
+    { method: "GET", headers: authHeaders(), cache: "no-store" }
+  );
+  return parseJsonOrThrow(res, "Approval status fetch");
+}
+
+/* ─────────────────────────────────────────────────────────────────
    Step 5 — POST /activities/parallel/vote
    Approve / reject as a Concerned Division reviewer. `vote` is
    "APPROVED" or "REJECTED" per the backend contract.

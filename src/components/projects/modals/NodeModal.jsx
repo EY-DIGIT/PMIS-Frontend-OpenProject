@@ -10,7 +10,8 @@ import {
   getProcessInstances,
   getActivityWorkflowAuditLogs,
   getActivityWorkflowTimeline,
-  getParallelGateStatus
+  getParallelGateStatus,
+  getActivityApprovalStatus
 } from "../../../api/activityWorkflow";
 import {
   deriveStateFromInstances,
@@ -495,9 +496,10 @@ export default function NodeModal({
       getProcessInstances(businessId),
       getActivityWorkflowAuditLogs(businessId),
       getParallelGateStatus(businessId),
-      getActivityWorkflowTimeline(businessId)
+      getActivityWorkflowTimeline(businessId),
+      getActivityApprovalStatus(businessId)
     ])
-      .then(([piRes, auditRes, gateRes, timelineRes]) => {
+      .then(([piRes, auditRes, gateRes, timelineRes, apprRes]) => {
         if (cancelled) return;
         const instances = piRes.status === "fulfilled" && Array.isArray(piRes.value)
           ? piRes.value : [];
@@ -547,6 +549,46 @@ export default function NodeModal({
         if (gateDivs.length) {
           derivedDivs = gateDivs;
         }
+
+        /* Approval-status summary is the AUTHORITATIVE source for each
+           division's / the owner's decision + timestamp, and the only
+           source for when the approval was requested. Prefer it over the
+           gate / audit inference when present. */
+        const approval =
+          apprRes.status === "fulfilled" && apprRes.value && typeof apprRes.value === "object"
+            ? apprRes.value
+            : null;
+        const msToIso = (ms) => {
+          const n = Number(ms);
+          if (!Number.isFinite(n) || n <= 0) return "";
+          const d = new Date(n);
+          return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+        };
+        let divisionRequestedAt = "";
+        if (approval) {
+          const cds = safeArray(approval.concernedDivisions);
+          if (cds.length) {
+            derivedDivs = cds.map((d) => ({
+              division: d.divisionCode || d.divisionName || "",
+              status: String(d.status || "pending").toLowerCase(),
+              decidedBy: d.approverName || d.approverEmail || "",
+              decidedAt: msToIso(d.actionAt),
+              reason: d.comment || ""
+            }));
+          }
+          if (approval.ownerDivision) {
+            const o = approval.ownerDivision;
+            derivedOwner = {
+              status: String(o.status || "pending").toLowerCase(),
+              decidedBy: o.approverName || o.approverEmail || "",
+              decidedAt: msToIso(o.actionAt),
+              reason: o.comment || ""
+            };
+          }
+          divisionRequestedAt = msToIso(
+            approval.divisionApprovalRequest && approval.divisionApprovalRequest.requestedAt
+          );
+        }
         /* When the gate reports every division approved (readyForOwner)
            surface the "Request Owner Approval" button by bumping
            pending_division → division_approved. Upgrade ONLY — never
@@ -566,22 +608,26 @@ export default function NodeModal({
         ) {
           derivedState = "division_approved";
         }
-        if (!derivedState) return;
+        /* Proceed if we derived a state OR the approval-status summary gave
+           us anything to show (decisions / requested-at). */
+        if (!derivedState && !approval) return;
         setForm((f) => ({
           ...f,
-          approvalState: derivedState,
+          approvalState: derivedState || f.approvalState,
           divisionApprovals:
             derivedDivs.length > 0 ? derivedDivs : safeArray(f.divisionApprovals),
-          ownerApproval: derivedOwner || f.ownerApproval || null
+          ownerApproval: derivedOwner || f.ownerApproval || null,
+          divisionRequestedAt: divisionRequestedAt || f.divisionRequestedAt || ""
         }));
         setBaseline((b) =>
           b
             ? {
                 ...b,
-                approvalState: derivedState,
+                approvalState: derivedState || b.approvalState,
                 divisionApprovals:
                   derivedDivs.length > 0 ? derivedDivs : safeArray(b.divisionApprovals),
-                ownerApproval: derivedOwner || b.ownerApproval || null
+                ownerApproval: derivedOwner || b.ownerApproval || null,
+                divisionRequestedAt: divisionRequestedAt || b.divisionRequestedAt || ""
               }
             : b
         );
