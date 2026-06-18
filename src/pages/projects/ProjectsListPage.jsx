@@ -211,6 +211,37 @@ export default function ProjectsListPage() {
           </div>
         )} */}
 
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            margin: "12px 0 8px",
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#173e77" }}>
+            Projects
+            <span
+              style={{
+                marginLeft: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 24,
+                height: 22,
+                padding: "0 8px",
+                borderRadius: 999,
+                background: "#eaf1fb",
+                color: "#173e77",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              {loading ? "…" : total}
+            </span>
+          </h3>
+        </div>
+
         <div className="uidai-table-wrap">
           <table className="uidai-table">
             <thead>
