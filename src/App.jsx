@@ -39,6 +39,7 @@ import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityO
 import MeetingsListPage from './pages/meetings/MeetingsListPage';
 import CreateMeetingPage from './pages/meetings/CreateMeetingPage';
 import MeetingDetailPage from './pages/meetings/MeetingDetailPage';
+import ProjectMeetingsPage from './pages/meetings/ProjectMeetingsPage';
 import { DataProvider, useData } from './data/DataContext';
 import "./styles/global.css";
 
@@ -697,6 +698,7 @@ export default function MainApp() {
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequirePermission action="viewProjects"><ProjectFinancePage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
 
 

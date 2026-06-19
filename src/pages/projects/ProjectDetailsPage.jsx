@@ -180,6 +180,7 @@ export default function ProjectDetailsPage() {
   const canDeleteProject = useCan('deleteProject');
   const canManageDocuments = useCan('manageProjectDocuments');
   const canViewDocuments = useCan('viewProjectDocuments');
+  const canViewMeetings = useCan('viewMeetings');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1016,6 +1017,12 @@ export default function ProjectDetailsPage() {
       /* Activities can only be started once the project is PUBLISHED, so
          the list is meaningless on drafts — hide it there. */
       visible: isPubBase
+    },
+    {
+      key: "meeting-details",
+      label: "Meeting Details",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/meetings`),
+      visible: canViewMeetings
     },
     {
       key: "publish",
