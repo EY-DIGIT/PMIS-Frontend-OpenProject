@@ -196,11 +196,6 @@ function parseLines(text) {
     .map((l) => l.replace(/^[-*•]\s*/, "").trim())
     .filter(Boolean);
 }
-function splitDraftLines(text) {
-  const raw = String(text || "");
-  if (!raw.trim()) return parseLines(raw);
-  return raw ? raw.split(/\r?\n/).map((l) => l.replace(/^[-*â€¢]\s*/, "")) : [];
-}
 function joinLines(lines) {
   return (lines || []).join("\n");
 }
@@ -213,12 +208,6 @@ function cleanPayload(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([, value]) => value !== "" && value !== null && value !== undefined)
   );
-}
-function datetimeInputValue(value) {
-  return value ? String(value).slice(0, 16) : "";
-}
-function toApiDateTime(value) {
-  return value ? new Date(value).toISOString() : undefined;
 }
 
 export default function MeetingDetailPage() {
@@ -413,32 +402,12 @@ export default function MeetingDetailPage() {
                 id: a?.id ?? "",
                 momId: a?.momId ?? "",
                 taskName: a?.taskName || a?.title || "",
+                description: a?.description || "",
                 assignedToUserId: a?.assignedToUserId || "",
                 startDate: a?.startDate || "",
-                dueDate: a?.dueDate || "",
                 endDate: a?.endDate || a?.dueDate || "",
                 priority: a?.priority || "MEDIUM",
                 status: a?.status || "OPEN",
-                linkedTaskId: a?.linkedTaskId ?? "",
-                linkedMilestoneId: a?.linkedMilestoneId ?? "",
-                linkedTicketId: a?.linkedTicketId || "",
-                linkedActivityId: a?.linkedActivityId || "",
-                commentId: a?.comments?.[0]?.id ?? "",
-                commentParentId: a?.comments?.[0]?.parentId ?? "",
-                commentAuthorUserId: a?.comments?.[0]?.authorUserId || "",
-                commentContent: a?.comments?.[0]?.content || "",
-                commentCreatedAt: datetimeInputValue(a?.comments?.[0]?.createdAt),
-                extensionRequestId: a?.extensionRequests?.[0]?.id ?? "",
-                extensionActionItemId: a?.extensionRequests?.[0]?.actionItemId ?? "",
-                previousDueDate: a?.extensionRequests?.[0]?.previousDueDate || "",
-                requestedDueDate: a?.extensionRequests?.[0]?.requestedDueDate || "",
-                extensionJustification: a?.extensionRequests?.[0]?.justification || "",
-                extensionStatus: a?.extensionRequests?.[0]?.status || "PENDING",
-                requestedByUserId: a?.extensionRequests?.[0]?.requestedByUserId || "",
-                requestedAt: datetimeInputValue(a?.extensionRequests?.[0]?.requestedAt),
-                decidedByUserId: a?.extensionRequests?.[0]?.decidedByUserId || "",
-                decisionComment: a?.extensionRequests?.[0]?.decisionComment || "",
-                decidedAt: datetimeInputValue(a?.extensionRequests?.[0]?.decidedAt),
               })),
               riskDetails: risksList.map((r) => ({
                 id: r?.id ?? "",
@@ -473,37 +442,48 @@ export default function MeetingDetailPage() {
       rows[index] = { ...(rows[index] || {}), [key]: value };
       return { ...f, [section]: rows };
     });
-  const updateMomLine = (field, index, value) =>
-    setMomForm((f) => {
-      const lines = splitDraftLines(f[field]);
-      lines[index] = value;
-      return { ...f, [field]: joinLines(lines) };
-    });
-  const addMomLine = (field, detailField, label, defaults = {}) =>
+
+  /* The MoM is now a single dynamic Tasks table — each row lives in
+     momForm.actionDetails. Task Name / Start Date / Priority have no
+     dedicated API column, so they are folded into the content block on
+     save (see submitMoM). */
+  const emptyTaskRow = () => ({
+    taskName: "",
+    description: "",
+    startDate: "",
+    endDate: "",
+    assignedToUserId: "",
+    priority: "MEDIUM",
+    status: "OPEN",
+  });
+  const addTaskRow = () =>
     setMomForm((f) => ({
       ...f,
-      [field]: joinLines([...splitDraftLines(f[field]), label]),
-      [detailField]: [...(f[detailField] || []), defaults],
+      actionDetails: [...(f.actionDetails || []), emptyTaskRow()],
     }));
-  const removeMomLine = (field, detailField, index) =>
-    setMomForm((f) => {
-      const lines = splitDraftLines(f[field]).filter((_, i) => i !== index);
-      const details = (f[detailField] || []).filter((_, i) => i !== index);
-      return { ...f, [field]: joinLines(lines), [detailField]: details };
-    });
+  const removeTaskRow = (index) =>
+    setMomForm((f) => ({
+      ...f,
+      actionDetails: (f.actionDetails || []).filter((_, i) => i !== index),
+    }));
 
   /* Drop a canned MoM block into the three textareas so the user can
      test the form without typing the whole thing. Mirrors the helper
      from the pre-API HTML reference; doesn't touch the server. */
   const loadSample = () => {
     if (!meeting) return;
+    const sample = parseMoM(sampleMoM(meeting));
+    const rows = parseLines(sample.actions).map((description) => ({
+      ...emptyTaskRow(),
+      description,
+    }));
     setMomForm((f) => ({
       ...f,
-      ...parseMoM(sampleMoM(meeting)),
       title: f.title || meeting.title || "",
       templateId: f.templateId || "1",
+      actionDetails: rows,
     }));
-    show("Sample MoM loaded.", "ok");
+    show("Sample tasks loaded.", "ok");
   };
 
   /* Send the PDF / pasted transcript to the n8n webhook and parse the
@@ -541,11 +521,22 @@ export default function MeetingDetailPage() {
         show("Couldn't read a MoM from the response.", "warn");
         return;
       }
+      /* Every extracted line (decisions / actions / risks) becomes a task
+         row — the user reviews and fills in dates / owner / priority. */
+      const rows = [
+        ...parseLines(parsed.actions),
+        ...parseLines(parsed.decisions),
+        ...parseLines(parsed.risks),
+      ].map((description) => ({ ...emptyTaskRow(), description }));
+      if (!rows.length) {
+        show("Couldn't read any tasks from the response.", "warn");
+        return;
+      }
       setMomForm((f) => ({
         ...f,
-        ...parsed,
         title: f.title || meeting?.title || "",
         templateId: f.templateId || "1",
+        actionDetails: rows,
       }));
       show("Auto MoM generated — review and edit before saving.", "ok");
     } catch (e) {
@@ -563,53 +554,55 @@ export default function MeetingDetailPage() {
 
   const submitMoM = async () => {
     if (!meeting) return;
-    const actionRows = splitDraftLines(momForm.actions)
-      .map((description, index) => ({ description: description.trim(), index }))
-      .filter((row) => {
-        const detail = momForm.actionDetails?.[row.index] || {};
-        return row.description || detail.taskName || detail.assignedToUserId || detail.startDate || detail.endDate || detail.priority;
-      });
-    if (!actionRows.length) {
-      show("Add at least one task row.", "warn");
+    const taskRows = (momForm.actionDetails || []).filter(
+      (d) =>
+        (d.taskName && d.taskName.trim()) ||
+        (d.description && d.description.trim()) ||
+        d.assignedToUserId ||
+        d.startDate ||
+        d.endDate
+    );
+    if (!taskRows.length) {
+      show("Add at least one task.", "warn");
       return;
     }
     const fallbackOwner =
       meeting.attendees?.[0]?.userId || users[0]?.userId || null;
     const due = addDaysISO(meeting.meetingDate, 7);
-    const generatedContent = `Tasks:\n${actionRows.map(({ description, index }) => {
-      const detail = momForm.actionDetails?.[index] || {};
-      return [
-        `- ${detail.taskName || "Untitled task"}`,
-        description ? `Description: ${description}` : "",
-        detail.startDate ? `Start: ${detail.startDate}` : "",
-        detail.endDate || detail.dueDate ? `End: ${detail.endDate || detail.dueDate}` : "",
-        detail.assignedToUserId ? `Assigned: ${labelFor(detail.assignedToUserId)}` : "",
-        detail.priority ? `Priority: ${detail.priority}` : "",
-      ].filter(Boolean).join(" | ");
-    }).join("\n")}`;
+    /* Task Name, Start Date and Priority have no dedicated API column, so
+       they are folded into the human-readable content block here. */
+    const generatedContent = `Tasks:\n${taskRows
+      .map((d) =>
+        [
+          `- ${d.taskName?.trim() || d.description?.trim() || "Untitled task"}`,
+          d.description?.trim() ? `Description: ${d.description.trim()}` : "",
+          d.startDate ? `Start: ${d.startDate}` : "",
+          d.endDate || d.dueDate ? `End: ${d.endDate || d.dueDate}` : "",
+          d.assignedToUserId ? `Assigned: ${labelFor(d.assignedToUserId)}` : "",
+          d.priority ? `Priority: ${d.priority}` : "",
+        ]
+          .filter(Boolean)
+          .join(" | ")
+      )
+      .join("\n")}`;
     const body = {
       title: momForm.title?.trim() || meeting.title || "Meeting",
       templateId: numberOrUndefined(momForm.templateId) ?? 1,
       content: momForm.content?.trim() || generatedContent,
       status: momRemote?.status || "DRAFT",
       decisions: [],
-      actionItems: actionRows.map(({ description, index }) => {
-        const detail = momForm.actionDetails?.[index] || {};
-        return cleanPayload({
-          id: numberOrUndefined(detail.id),
-          momId: numberOrUndefined(detail.momId),
-          description: description || detail.taskName || "Untitled task",
-          assignedToUserId: detail.assignedToUserId || fallbackOwner,
-          dueDate: detail.endDate || detail.dueDate || due,
-          status: detail.status || "OPEN",
-          linkedTaskId: numberOrUndefined(detail.linkedTaskId),
-          linkedMilestoneId: numberOrUndefined(detail.linkedMilestoneId),
-          linkedTicketId: detail.linkedTicketId,
-          linkedActivityId: detail.linkedActivityId,
+      actionItems: taskRows.map((d) =>
+        cleanPayload({
+          id: numberOrUndefined(d.id),
+          momId: numberOrUndefined(d.momId),
+          description: d.description?.trim() || d.taskName?.trim() || "Untitled task",
+          assignedToUserId: d.assignedToUserId || fallbackOwner,
+          dueDate: d.endDate || d.dueDate || due,
+          status: d.status || "OPEN",
           comments: [],
           extensionRequests: [],
-        });
-      }),
+        })
+      ),
       risks: [],
     };
     setSavingMom(true);
@@ -736,12 +729,8 @@ export default function MeetingDetailPage() {
     }
   };
 
-  const decisions = momRemote?.decisions || [];
   const actionItems = momRemote?.actionItems || [];
-  const risks = momRemote?.risks || [];
-  const decisionDrafts = splitDraftLines(momForm.decisions);
-  const actionDrafts = splitDraftLines(momForm.actions);
-  const riskDrafts = splitDraftLines(momForm.risks);
+  const taskRowsDraft = momForm.actionDetails || [];
   const userOptions = users.filter((u) => u.userId);
   const renderUserOptions = (currentValue) => (
     <>
@@ -956,8 +945,8 @@ export default function MeetingDetailPage() {
                   Generate Auto MoM
                 </div>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  Upload a PDF transcript or paste the text — it fills
-                  Decisions, Action Items &amp; Risks below for you to review.
+                  Upload a PDF transcript or paste the text — it fills the
+                  Tasks table below for you to review.
                 </div>
               </div>
             </div>
@@ -1109,160 +1098,77 @@ export default function MeetingDetailPage() {
               </div>
             </div>
             <div className="field full">
-              <label htmlFor="momContent">Content</label>
-              <textarea
-                id="momContent"
-                className="mom-textarea"
-                style={{ height: 110 }}
-                placeholder="Optional MoM summary. If blank, it will be generated from the sections below."
-                value={momForm.content}
-                onChange={(e) => updateMomField("content", e.target.value)}
-              />
-            </div>
-            <div className="field full">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <label>Decisions</label>
+                <label>Tasks</label>
                 <button
                   type="button"
                   className="btn ghost small-btn"
-                  onClick={() => addMomLine("decisions", "decisionDetails", "New decision", {})}
+                  onClick={addTaskRow}
                   disabled={savingMom}
                 >
-                  + Add decision
+                  + Add task
                 </button>
               </div>
-              {decisionDrafts.length > 0 && (
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {decisionDrafts.map((description, index) => {
-                    const detail = momForm.decisionDetails?.[index] || {};
-                    return (
-                      <div
-                        key={`decision-detail-${index}`}
-                        style={{
-                          border: "1px solid #dfe7f1",
-                          borderRadius: 8,
-                          padding: 12,
-                          background: "#fbfdff",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 10,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-                            Decision {index + 1}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn ghost small-btn"
-                            onClick={() => removeMomLine("decisions", "decisionDetails", index)}
-                            disabled={savingMom}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div className="field full" style={{ margin: "0 0 10px" }}>
-                          <label>Description</label>
-                          <textarea
-                            className="mom-textarea"
-                            style={{ height: 80 }}
-                            value={description}
-                            onChange={(e) => updateMomLine("decisions", index, e.target.value)}
-                          />
-                        </div>
-                        <div
-                          className="grid"
-                          style={{ gridTemplateColumns: "minmax(220px, 1fr)", gap: 10 }}
-                        >
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Owner</label>
-                            <select
-                              value={detail.ownerUserId || ""}
+              <div className="table-wrap" style={{ marginTop: 10 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th style={{ minWidth: 160 }}>Task Name</th>
+                      <th style={{ minWidth: 220 }}>Task Description</th>
+                      <th style={{ minWidth: 150 }}>Start Date</th>
+                      <th style={{ minWidth: 150 }}>End Date</th>
+                      <th style={{ minWidth: 180 }}>Assigned To</th>
+                      <th style={{ minWidth: 130 }}>Priority</th>
+                      <th aria-label="Remove" style={{ width: 44 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taskRowsDraft.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 16 }}>
+                          No tasks yet. Click “+ Add task” to create one.
+                        </td>
+                      </tr>
+                    ) : (
+                      taskRowsDraft.map((detail, index) => (
+                        <tr key={`task-row-${index}`}>
+                          <td>
+                            <input
+                              value={detail.taskName || ""}
+                              placeholder="Task name"
                               onChange={(e) =>
-                                updateMomDetail("decisionDetails", index, "ownerUserId", e.target.value)
+                                updateMomDetail("actionDetails", index, "taskName", e.target.value)
                               }
-                            >
-                              {renderUserOptions(detail.ownerUserId)}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="field full">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <label>Action Items</label>
-                <button
-                  type="button"
-                  className="btn ghost small-btn"
-                  onClick={() =>
-                    addMomLine("actions", "actionDetails", "New action item", {
-                      status: "OPEN",
-                    })
-                  }
-                  disabled={savingMom}
-                >
-                  + Add action
-                </button>
-              </div>
-              {actionDrafts.length > 0 && (
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {actionDrafts.map((description, index) => {
-                    const detail = momForm.actionDetails?.[index] || {};
-                    return (
-                      <div
-                        key={`action-detail-${index}`}
-                        style={{
-                          border: "1px solid #dfe7f1",
-                          borderRadius: 8,
-                          padding: 12,
-                          background: "#fbfdff",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 10,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-                            Action {index + 1}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn ghost small-btn"
-                            onClick={() => removeMomLine("actions", "actionDetails", index)}
-                            disabled={savingMom}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div className="field full" style={{ margin: "0 0 10px" }}>
-                          <label>Description</label>
-                          <textarea
-                            className="mom-textarea"
-                            style={{ height: 80 }}
-                            value={description}
-                            onChange={(e) => updateMomLine("actions", index, e.target.value)}
-                          />
-                        </div>
-                        <div
-                          className="grid"
-                          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}
-                        >
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Assigned To</label>
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={detail.description || ""}
+                              placeholder="What needs to be done"
+                              onChange={(e) =>
+                                updateMomDetail("actionDetails", index, "description", e.target.value)
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="date"
+                              value={detail.startDate || ""}
+                              onChange={(e) =>
+                                updateMomDetail("actionDetails", index, "startDate", e.target.value)
+                              }
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="date"
+                              value={detail.endDate || ""}
+                              onChange={(e) =>
+                                updateMomDetail("actionDetails", index, "endDate", e.target.value)
+                              }
+                            />
+                          </td>
+                          <td>
                             <select
                               value={detail.assignedToUserId || ""}
                               onChange={(e) =>
@@ -1271,306 +1177,12 @@ export default function MeetingDetailPage() {
                             >
                               {renderUserOptions(detail.assignedToUserId)}
                             </select>
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Due Date</label>
-                            <input
-                              type="date"
-                              value={detail.dueDate || ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "dueDate", e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Status</label>
+                          </td>
+                          <td>
                             <select
-                              value={detail.status || "OPEN"}
+                              value={detail.priority || "MEDIUM"}
                               onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "status", e.target.value)
-                              }
-                            >
-                              <option value="OPEN">OPEN</option>
-                              <option value="IN_PROGRESS">IN_PROGRESS</option>
-                              <option value="DONE">DONE</option>
-                              <option value="CANCELLED">CANCELLED</option>
-                            </select>
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Linked Task ID</label>
-                            <input
-                              type="number"
-                              value={detail.linkedTaskId ?? ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "linkedTaskId", e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Linked Milestone ID</label>
-                            <input
-                              type="number"
-                              value={detail.linkedMilestoneId ?? ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "linkedMilestoneId", e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Linked Ticket ID</label>
-                            <input
-                              value={detail.linkedTicketId || ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "linkedTicketId", e.target.value)
-                              }
-                            />
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Linked Activity ID</label>
-                            <input
-                              value={detail.linkedActivityId || ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "linkedActivityId", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 12,
-                            paddingTop: 12,
-                            borderTop: "1px solid #e6ecf5",
-                          }}
-                        >
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                            Comment
-                          </div>
-                          <div
-                            className="grid"
-                            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}
-                          >
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Author</label>
-                              <select
-                                value={detail.commentAuthorUserId || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "commentAuthorUserId", e.target.value)
-                                }
-                              >
-                                {renderUserOptions(detail.commentAuthorUserId)}
-                              </select>
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Created At</label>
-                              <input
-                                type="datetime-local"
-                                value={detail.commentCreatedAt || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "commentCreatedAt", e.target.value)
-                                }
-                              />
-                            </div>
-                          </div>
-                          <div className="field full" style={{ margin: "10px 0 0" }}>
-                            <label>Comment Content</label>
-                            <input
-                              value={detail.commentContent || ""}
-                              onChange={(e) =>
-                                updateMomDetail("actionDetails", index, "commentContent", e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            marginTop: 12,
-                            paddingTop: 12,
-                            borderTop: "1px solid #e6ecf5",
-                          }}
-                        >
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                            Extension Request
-                          </div>
-                          <div
-                            className="grid"
-                            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}
-                          >
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Previous Due Date</label>
-                              <input
-                                type="date"
-                                value={detail.previousDueDate || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "previousDueDate", e.target.value)
-                                }
-                              />
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Requested Due Date</label>
-                              <input
-                                type="date"
-                                value={detail.requestedDueDate || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "requestedDueDate", e.target.value)
-                                }
-                              />
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Status</label>
-                              <select
-                                value={detail.extensionStatus || "PENDING"}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "extensionStatus", e.target.value)
-                                }
-                              >
-                                <option value="PENDING">PENDING</option>
-                                <option value="APPROVED">APPROVED</option>
-                                <option value="REJECTED">REJECTED</option>
-                              </select>
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Requested By</label>
-                              <select
-                                value={detail.requestedByUserId || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "requestedByUserId", e.target.value)
-                                }
-                              >
-                                {renderUserOptions(detail.requestedByUserId)}
-                              </select>
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Requested At</label>
-                              <input
-                                type="datetime-local"
-                                value={detail.requestedAt || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "requestedAt", e.target.value)
-                                }
-                              />
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Decided By</label>
-                              <select
-                                value={detail.decidedByUserId || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "decidedByUserId", e.target.value)
-                                }
-                              >
-                                {renderUserOptions(detail.decidedByUserId)}
-                              </select>
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Decided At</label>
-                              <input
-                                type="datetime-local"
-                                value={detail.decidedAt || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "decidedAt", e.target.value)
-                                }
-                              />
-                            </div>
-                          </div>
-                          <div
-                            className="grid"
-                            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginTop: 10 }}
-                          >
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Justification</label>
-                              <input
-                                value={detail.extensionJustification || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "extensionJustification", e.target.value)
-                                }
-                              />
-                            </div>
-                            <div className="field" style={{ margin: 0 }}>
-                              <label>Decision Comment</label>
-                              <input
-                                value={detail.decisionComment || ""}
-                                onChange={(e) =>
-                                  updateMomDetail("actionDetails", index, "decisionComment", e.target.value)
-                                }
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="field full">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <label>Risks</label>
-                <button
-                  type="button"
-                  className="btn ghost small-btn"
-                  onClick={() =>
-                    addMomLine("risks", "riskDetails", "New risk", {
-                      severity: "LOW",
-                    })
-                  }
-                  disabled={savingMom}
-                >
-                  + Add risk
-                </button>
-              </div>
-              {riskDrafts.length > 0 && (
-                <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                  {riskDrafts.map((description, index) => {
-                    const detail = momForm.riskDetails?.[index] || {};
-                    return (
-                      <div
-                        key={`risk-detail-${index}`}
-                        style={{
-                          border: "1px solid #dfe7f1",
-                          borderRadius: 8,
-                          padding: 12,
-                          background: "#fbfdff",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 10,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div className="muted" style={{ fontSize: 12, fontWeight: 700 }}>
-                            Risk {index + 1}
-                          </div>
-                          <button
-                            type="button"
-                            className="btn ghost small-btn"
-                            onClick={() => removeMomLine("risks", "riskDetails", index)}
-                            disabled={savingMom}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div className="field full" style={{ margin: "0 0 10px" }}>
-                          <label>Description</label>
-                          <textarea
-                            className="mom-textarea"
-                            style={{ height: 80 }}
-                            value={description}
-                            onChange={(e) => updateMomLine("risks", index, e.target.value)}
-                          />
-                        </div>
-                        <div
-                          className="grid"
-                          style={{ gridTemplateColumns: "150px minmax(220px, 1fr)", gap: 10 }}
-                        >
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Severity</label>
-                            <select
-                              value={detail.severity || "LOW"}
-                              onChange={(e) =>
-                                updateMomDetail("riskDetails", index, "severity", e.target.value)
+                                updateMomDetail("actionDetails", index, "priority", e.target.value)
                               }
                             >
                               <option value="LOW">LOW</option>
@@ -1578,33 +1190,25 @@ export default function MeetingDetailPage() {
                               <option value="HIGH">HIGH</option>
                               <option value="CRITICAL">CRITICAL</option>
                             </select>
-                          </div>
-                          <div className="field" style={{ margin: 0 }}>
-                            <label>Owner</label>
-                            <select
-                              value={detail.ownerUserId || ""}
-                              onChange={(e) =>
-                                updateMomDetail("riskDetails", index, "ownerUserId", e.target.value)
-                              }
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              type="button"
+                              className="mt-copy-btn"
+                              title="Remove task"
+                              aria-label="Remove task"
+                              onClick={() => removeTaskRow(index)}
+                              disabled={savingMom}
                             >
-                              {renderUserOptions(detail.ownerUserId)}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="field full" style={{ margin: "10px 0 0" }}>
-                          <label>Mitigation</label>
-                          <input
-                            value={detail.mitigation || ""}
-                            onChange={(e) =>
-                              updateMomDetail("riskDetails", index, "mitigation", e.target.value)
-                            }
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
 
@@ -1698,78 +1302,46 @@ export default function MeetingDetailPage() {
                 </div>
               </div>
 
-              {decisions.length > 0 && (
+              {actionItems.length > 0 ? (
                 <div className="card">
-                  <div className="card-title">Decisions</div>
-                  <ul className="mt-list">
-                    {decisions.map((d) => (
-                      <li key={d.id}>
-                        <span>{d.description}</span>
-                        {d.ownerUserId && (
-                          <span className="muted">
-                            {" "}
-                            · {labelFor(d.ownerUserId)}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {actionItems.length > 0 && (
-                <div className="card">
-                  <div className="card-title">Action Items</div>
+                  <div className="card-title">Tasks</div>
                   <div className="table-wrap">
                     <table className="table">
                       <thead>
                         <tr>
-                          <th style={{ minWidth: 240 }}>Description</th>
-                          <th>Owner</th>
-                          <th>Due</th>
-                          {/* <th>Status</th> */}
+                          <th style={{ minWidth: 160 }}>Task Name</th>
+                          <th style={{ minWidth: 240 }}>Task Description</th>
+                          <th>Start Date</th>
+                          <th>End Date</th>
+                          <th>Assigned To</th>
+                          <th>Priority</th>
                         </tr>
                       </thead>
                       <tbody>
                         {actionItems.map((a) => (
                           <tr key={a.id}>
+                            <td>{a.taskName || "—"}</td>
                             <td>{a.description}</td>
-                            <td>{labelFor(a.assignedToUserId)}</td>
+                            <td>{a.startDate ? fmtDate(a.startDate) : "—"}</td>
                             <td>{fmtDate(a.dueDate)}</td>
-                            {/* <td>
-                              <ActionStatusBadge status={a.status} />
-                            </td> */}
+                            <td>{labelFor(a.assignedToUserId)}</td>
+                            <td>{a.priority || "—"}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 </div>
-              )}
-
-              {risks.length > 0 && (
-                <div className="card">
-                  <div className="card-title">Risks</div>
-                  <ul className="mt-list">
-                    {risks.map((r) => (
-                      <li key={r.id}>
-                        <span>{r.description}</span>
-                        {r.severity && (
-                          <span className="muted"> · {r.severity}</span>
-                        )}
-                        {r.mitigation && (
-                          <div className="muted">Mitigation: {r.mitigation}</div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+              ) : (
+                <div className="card no-stripe" style={{ borderStyle: "dashed" }}>
+                  <div className="empty-state">No tasks recorded for this MoM.</div>
                 </div>
               )}
             </>
           ) : (
             <div className="card no-stripe" style={{ borderStyle: "dashed" }}>
               <div className="empty-state">
-                Save the MoM to see decisions, action items and risks here.
+                Save the MoM to see tasks here.
               </div>
             </div>
           )}
