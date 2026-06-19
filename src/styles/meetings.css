@@ -135,6 +135,8 @@
 
 /* Type segment */
 .pmis-mtg .type-seg { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.pmis-mtg .type-seg--3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 760px) { .pmis-mtg .type-seg--3 { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .pmis-mtg .type-seg { grid-template-columns: 1fr; } }
 .pmis-mtg .type-opt { border: 2px solid var(--border); border-radius: 11px; padding: 13px 15px; cursor: pointer; background: #fff; transition: border-color .15s, box-shadow .15s, background .15s; user-select: none; display: flex; align-items: flex-start; gap: 11px; }
 .pmis-mtg .type-opt:hover { border-color: #9fb7df; box-shadow: 0 2px 10px rgba(23,62,119,.07); }

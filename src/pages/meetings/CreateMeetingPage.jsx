@@ -12,7 +12,8 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
 import * as usersApi from "../../api/users";
-import * as vendorsApi from "../../api/vendors";
+// TEMP: vendor-based attendee filter disabled while the vendor API is erroring.
+// import * as vendorsApi from "../../api/vendors";
 import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
 
@@ -367,11 +368,13 @@ export default function CreateMeetingPage() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
-  /* projectId / projectCode → vendor name, built from the vendor master
-     (each vendor lists the projects it owns). Attendees are restricted to
-     the vendor that owns the selected project. */
-  const [vendorByProject, setVendorByProject] = useState({});
-  const [loadingVendors, setLoadingVendors] = useState(false);
+  /* projectId / projectCode → vendor name. TEMPORARILY DISABLED while the
+     vendor API is erroring — attendee filtering is off and we show every
+     user (see `projectUsers` below). Re-enable these two lines, the
+     vendorsApi import, the fetch effect, and the filtered `projectUsers`
+     to restore per-project (vendor) attendee filtering. */
+  // const [vendorByProject, setVendorByProject] = useState({});
+  // const [loadingVendors, setLoadingVendors] = useState(false);
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -390,32 +393,35 @@ export default function CreateMeetingPage() {
       .then((rows) => { if (alive) setUsers(rows); })
       .catch((e) => { if (alive) show(`Couldn't load users: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingUsers(false); });
-    /* Vendor master → which vendor owns which project. This is the source
-       of truth for "show only this project's vendor's attendees". */
-    setLoadingVendors(true);
-    vendorsApi
-      .list()
-      .then((vendors) => {
-        if (!alive) return;
-        const map = {};
-        vendors.forEach((v) => {
-          const name = v.vendorName || "";
-          if (!name) return;
-          (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
-          (v.projects || []).forEach((p) => {
-            const code = p?.projectCode;
-            if (code) map[code] = name;
-          });
-        });
-        setVendorByProject(map);
-      })
-      .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
-      .finally(() => { if (alive) setLoadingVendors(false); });
+    /* Vendor master → which vendor owns which project. TEMPORARILY DISABLED
+       (vendor API erroring). Re-enable to restore the attendee filter. */
+    // setLoadingVendors(true);
+    // vendorsApi
+    //   .list()
+    //   .then((vendors) => {
+    //     if (!alive) return;
+    //     const map = {};
+    //     vendors.forEach((v) => {
+    //       const name = v.vendorName || "";
+    //       if (!name) return;
+    //       (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
+    //       (v.projects || []).forEach((p) => {
+    //         const code = p?.projectCode;
+    //         if (code) map[code] = name;
+    //       });
+    //     });
+    //     setVendorByProject(map);
+    //   })
+    //   .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
+    //   .finally(() => { if (alive) setLoadingVendors(false); });
     return () => { alive = false; };
   }, [show]);
 
-  /* Vendor that owns the currently-selected project (looked up by id, then
-     by code). Empty until a project with a known vendor is chosen. */
+  /* ── Vendor-based attendee filter (TEMPORARILY DISABLED) ─────────────
+     Re-enable this block (plus the import, state and fetch effect above)
+     once the vendor API is fixed, then swap `projectUsers` back to the
+     filtered version.
+
   const selectedVendorName = useMemo(() => {
     if (!draft.projectId) return "";
     const sel = projects.find((p) => p.projectId === draft.projectId);
@@ -426,9 +432,6 @@ export default function CreateMeetingPage() {
     );
   }, [draft.projectId, projects, vendorByProject]);
 
-  /* Users eligible to attend: only those whose vendor matches the project's
-     owning vendor. No project → none. Unknown vendor → none (with a hint),
-     so we never silently show the whole roster. */
   const projectUsers = useMemo(() => {
     if (!draft.projectId || loadingVendors) return [];
     if (!selectedVendorName) return [];
@@ -437,6 +440,11 @@ export default function CreateMeetingPage() {
       (u) => u.vendorName && String(u.vendorName).toLowerCase() === want
     );
   }, [users, draft.projectId, selectedVendorName, loadingVendors]);
+  ──────────────────────────────────────────────────────────────────── */
+
+  /* TEMP: show the full user roster as candidate attendees (no vendor
+     filter) until the vendor API is reliable. */
+  const projectUsers = users;
 
   const attendeeGroups = useMemo(() => {
     const byVendor = {};
@@ -826,28 +834,8 @@ export default function CreateMeetingPage() {
               updateDraft({ attendees: sel });
               setErrors((er) => ({ ...er, attendees: false }));
             }}
-            disabled={!draft.projectId}
-            placeholder={
-              !draft.projectId
-                ? "Select a project first…"
-                : loadingUsers || loadingVendors
-                ? "Loading attendees…"
-                : !selectedVendorName
-                ? "No vendor mapped to this project"
-                : attendeeGroups.length === 0
-                ? `No attendees found for ${selectedVendorName}`
-                : "Select attendees…"
-            }
+            placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
           />
-          <div className="help">
-            {!draft.projectId
-              ? "Pick a project above — attendees are limited to that project's vendor."
-              : loadingVendors
-              ? "Resolving the project's vendor…"
-              : selectedVendorName
-              ? `Showing attendees from vendor: ${selectedVendorName}.`
-              : "Couldn't find a vendor for this project, so no attendees can be listed."}
-          </div>
           <div className={`field-err${errors.attendees ? " show" : ""}`}>
             Select at least one attendee.
           </div>
