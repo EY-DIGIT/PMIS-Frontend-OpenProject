@@ -56,9 +56,11 @@ export default function WorkflowGraph({ form, divisions }) {
     const pad = (n) => String(n).padStart(2, "0");
     return `${pad(dt.getDate())}-${pad(dt.getMonth() + 1)}-${String(dt.getFullYear()).slice(2)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
   };
-  /* When the Concerned Division approval was requested (from the
-     approval-status API) — shown on the "Request Division Approval" arrow. */
+  /* When each approval was requested (from the approval-summary API) —
+     shown on the "Request Division Approval" / "Request Owner Approval"
+     arrows. */
   const requestedWhen = shortWhen(form && form.divisionRequestedAt);
+  const ownerRequestedWhen = shortWhen(form && form.ownerRequestedAt);
   const rejection = (form && form.lastRejection) || {};
   const rejectedFrom = String(rejection.byKind || "").toLowerCase();
   const divisionRejected = safeArray(form && form.divisionApprovals).some(
@@ -253,11 +255,17 @@ export default function WorkflowGraph({ form, divisions }) {
                   fill={passed ? "#1b6a3a" : isNext ? "#0b3c88" : "#8a97ab"}>
                   {label}
                 </text>
-                {/* When the division approval was requested. */}
+                {/* When each approval was requested. */}
                 {i === 1 && requestedWhen && (
                   <text x={ncx + 12} y={midY + 12} dominantBaseline="middle"
                     fontSize="8.5" fontWeight="600" fill="#66788f">
                     🕒 Requested {requestedWhen}
+                  </text>
+                )}
+                {i === 3 && ownerRequestedWhen && (
+                  <text x={ncx + 12} y={midY + 12} dominantBaseline="middle"
+                    fontSize="8.5" fontWeight="600" fill="#66788f">
+                    🕒 Requested {ownerRequestedWhen}
                   </text>
                 )}
               </g>

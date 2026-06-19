@@ -609,17 +609,24 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
       /* Division Approve/Reject is now driven from the Concerned-Division
          reviewer's inbox page — the timeline shows status only. */
       s3Body = (
-        <div className="pmis-awf-targets">
-          {rows.map((r) => (
-            <TargetRow
-              key={r.division}
-              name={divisionName(r.division)}
-              status={r.status}
-              decidedAt={r.decidedAt}
-              reason={r.reason}
-            />
-          ))}
-        </div>
+        <>
+          {form.divisionRequestedAt && (
+            <div className="pmis-awf-step__meta">
+              🕒 Requested: <b>{formatDateTime(form.divisionRequestedAt)}</b>
+            </div>
+          )}
+          <div className="pmis-awf-targets">
+            {rows.map((r) => (
+              <TargetRow
+                key={r.division}
+                name={divisionName(r.division)}
+                status={r.status}
+                decidedAt={r.decidedAt}
+                reason={r.reason}
+              />
+            ))}
+          </div>
+        </>
       );
     } else if (state === "rejected_to_vendor" && form.lastRejection?.byKind === "division") {
       s3Body = (
@@ -667,6 +674,11 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
     s4Body = (
       <>
         Awaiting decision from <b>{ownerLabel}</b>.
+        {form.ownerRequestedAt && (
+          <div className="pmis-awf-step__meta">
+            🕒 Requested: <b>{formatDateTime(form.ownerRequestedAt)}</b>
+          </div>
+        )}
         <div className="pmis-awf-targets">
           <TargetRow
             icon="👤"
@@ -680,6 +692,11 @@ export default function ApprovalPanel({ activity, form, editable, readOnly, divi
   } else if (s4 === "done") {
     s4Body = (
       <>
+        {form.ownerRequestedAt && (
+          <div className="pmis-awf-step__meta">
+            🕒 Requested: <b>{formatDateTime(form.ownerRequestedAt)}</b>
+          </div>
+        )}
         {ownerLabel} approved on{" "}
         <b>{formatDateTime(form.ownerApproval?.decidedAt || "")}</b>.
       </>

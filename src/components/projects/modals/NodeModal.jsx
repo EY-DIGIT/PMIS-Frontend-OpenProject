@@ -565,6 +565,7 @@ export default function NodeModal({
           return Number.isNaN(d.getTime()) ? "" : d.toISOString();
         };
         let divisionRequestedAt = "";
+        let ownerRequestedAt = "";
         if (approval) {
           const cds = safeArray(approval.concernedDivisions);
           if (cds.length) {
@@ -587,6 +588,9 @@ export default function NodeModal({
           }
           divisionRequestedAt = msToIso(
             approval.divisionApprovalRequest && approval.divisionApprovalRequest.requestedAt
+          );
+          ownerRequestedAt = msToIso(
+            approval.ownerApprovalRequest && approval.ownerApprovalRequest.requestedAt
           );
         }
         /* When the gate reports every division approved (readyForOwner)
@@ -617,7 +621,8 @@ export default function NodeModal({
           divisionApprovals:
             derivedDivs.length > 0 ? derivedDivs : safeArray(f.divisionApprovals),
           ownerApproval: derivedOwner || f.ownerApproval || null,
-          divisionRequestedAt: divisionRequestedAt || f.divisionRequestedAt || ""
+          divisionRequestedAt: divisionRequestedAt || f.divisionRequestedAt || "",
+          ownerRequestedAt: ownerRequestedAt || f.ownerRequestedAt || ""
         }));
         setBaseline((b) =>
           b
@@ -627,7 +632,8 @@ export default function NodeModal({
                 divisionApprovals:
                   derivedDivs.length > 0 ? derivedDivs : safeArray(b.divisionApprovals),
                 ownerApproval: derivedOwner || b.ownerApproval || null,
-                divisionRequestedAt: divisionRequestedAt || b.divisionRequestedAt || ""
+                divisionRequestedAt: divisionRequestedAt || b.divisionRequestedAt || "",
+                ownerRequestedAt: ownerRequestedAt || b.ownerRequestedAt || ""
               }
             : b
         );
