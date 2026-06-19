@@ -7,16 +7,17 @@
    body.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
 import * as usersApi from "../../api/users";
+import * as vendorsApi from "../../api/vendors";
 import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
 
 /* Grouped checkbox multi-select used for Attendees. */
-function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }) {
+function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId, disabled }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const all = groups.flatMap((g) => g.items);
@@ -37,31 +38,40 @@ function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }
     onChange(Array.from(set));
   };
 
+  /* Search matches name, type/role (meta) AND the group/vendor name, so
+     typing a role like "admin" or a vendor narrows the list. */
+  const needle = filter.toLowerCase();
   const filtered = groups
-    .map((g) => ({
-      group: g.group,
-      items: g.items.filter(
-        (it) =>
-          !filter ||
-          it.label.toLowerCase().includes(filter.toLowerCase()) ||
-          (it.meta || "").toLowerCase().includes(filter.toLowerCase())
-      )
-    }))
+    .map((g) => {
+      const groupMatches = (g.group || "").toLowerCase().includes(needle);
+      return {
+        group: g.group,
+        items: g.items.filter(
+          (it) =>
+            !needle ||
+            groupMatches ||
+            it.label.toLowerCase().includes(needle) ||
+            (it.meta || "").toLowerCase().includes(needle)
+        )
+      };
+    })
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="multi" id={mountId}>
+    <div className="multi" id={mountId} aria-disabled={disabled}>
       <div
         style={{
           border: "1px solid var(--border)",
           borderRadius: 6,
-          background: "#fff",
+          background: disabled ? "#f3f6fb" : "#fff",
           padding: "6px 8px",
           minHeight: 44,
           display: "flex",
           flexWrap: "wrap",
           gap: 6,
-          alignItems: "center"
+          alignItems: "center",
+          opacity: disabled ? 0.7 : 1,
+          cursor: disabled ? "not-allowed" : "default"
         }}
       >
         {selected.length === 0 ? (
@@ -89,11 +99,12 @@ function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }
           className="btn ghost small-btn"
           style={{ marginLeft: "auto" }}
           onClick={() => setOpen((o) => !o)}
+          disabled={disabled}
         >
           {open ? "Close" : "Browse…"}
         </button>
       </div>
-      {open && (
+      {open && !disabled && (
         <div
           style={{
             border: "1px solid var(--border)",
@@ -107,7 +118,7 @@ function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId }
         >
           <input
             type="text"
-            placeholder="Filter…"
+            placeholder="Search by name or type…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{ marginBottom: 8 }}
@@ -185,6 +196,141 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/* Searchable single-select — used for the Project picker, which can hold
+   hundreds of rows. Same look as a native select, but the dropdown has a
+   type-to-filter box so you don't scroll forever. */
+function SearchableSelect({ id, value, options, onChange, placeholder, disabled, loading }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function onOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? options.filter((o) => o.label.toLowerCase().includes(needle))
+    : options;
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        id={id}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: "100%",
+          padding: 10,
+          borderRadius: 6,
+          border: "1px solid var(--border)",
+          background: disabled ? "#f3f6fb" : "#fff",
+          color: selected ? "var(--text)" : "var(--text-muted)",
+          font: "inherit",
+          textAlign: "left",
+          cursor: disabled ? "not-allowed" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selected ? selected.label : (loading ? "Loading…" : placeholder || "Select…")}
+        </span>
+        <span aria-hidden="true" style={{ color: "var(--text-muted)" }}>▾</span>
+      </button>
+      {open && !disabled && (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            border: "1px solid var(--border)",
+            borderRadius: 6,
+            background: "#fff",
+            boxShadow: "0 6px 20px rgba(11,60,136,.14)",
+            padding: 8,
+            maxHeight: 280,
+            overflow: "auto"
+          }}
+        >
+          <input
+            type="text"
+            autoFocus
+            placeholder="Search…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ marginBottom: 8 }}
+          />
+          {filtered.length === 0 ? (
+            <div className="muted" style={{ padding: 8 }}>No matches.</div>
+          ) : (
+            filtered.map((o) => {
+              const on = o.value === value;
+              return (
+                <div
+                  key={o.value}
+                  role="option"
+                  aria-selected={on}
+                  onClick={() => { onChange(o.value); setOpen(false); setQuery(""); }}
+                  style={{
+                    padding: "8px 8px",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                    fontSize: 13.5,
+                    background: on ? "#eef4ff" : "transparent",
+                    fontWeight: on ? 700 : 500,
+                    color: on ? "var(--navy)" : "var(--text)"
+                  }}
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  {o.label}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Location helpers — the backend stores a single `meetingLink` string, so
+   the three modes below are just UX scaffolding around that one value. */
+const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
+const mapsSearchUrl = (s) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(s || "").trim())}`;
+
+const LOCATION_TYPES = [
+  {
+    key: "online",
+    icon: "🎥",
+    name: "Online Meeting",
+    desc: "Video-call link (Meet, Teams, Zoom)",
+    label: "Meeting link",
+    placeholder: "https://meet.google.com/abc-defg-hij",
+    help: "Paste the full video-call URL — attendees open it with one click.",
+  },
+  {
+    key: "map",
+    icon: "🗺️",
+    name: "Google Maps / Address",
+    desc: "Map link or full address",
+    label: "Maps link or address",
+    placeholder: "Paste a Google Maps link or a full address",
+    help: "Paste a maps.google.com link, or a full address to generate one.",
+  },
+];
+
 export default function CreateMeetingPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
@@ -195,6 +341,7 @@ export default function CreateMeetingPage() {
     date: "",
     start: "",
     end: "",
+    locationType: "online", /* online | map — UI only, value lands in `location` */
     location: "",
     agenda: "",
     attendees: [],
@@ -220,6 +367,12 @@ export default function CreateMeetingPage() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
 
+  /* projectId / projectCode → vendor name, built from the vendor master
+     (each vendor lists the projects it owns). Attendees are restricted to
+     the vendor that owns the selected project. */
+  const [vendorByProject, setVendorByProject] = useState({});
+  const [loadingVendors, setLoadingVendors] = useState(false);
+
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
   /* Initial load: projects + users in parallel. */
@@ -233,16 +386,61 @@ export default function CreateMeetingPage() {
       .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingProjects(false); });
     usersApi
-      .list({ pageSize: 200 })
+      .listAll()
       .then((rows) => { if (alive) setUsers(rows); })
       .catch((e) => { if (alive) show(`Couldn't load users: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingUsers(false); });
+    /* Vendor master → which vendor owns which project. This is the source
+       of truth for "show only this project's vendor's attendees". */
+    setLoadingVendors(true);
+    vendorsApi
+      .list()
+      .then((vendors) => {
+        if (!alive) return;
+        const map = {};
+        vendors.forEach((v) => {
+          const name = v.vendorName || "";
+          if (!name) return;
+          (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
+          (v.projects || []).forEach((p) => {
+            const code = p?.projectCode;
+            if (code) map[code] = name;
+          });
+        });
+        setVendorByProject(map);
+      })
+      .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
+      .finally(() => { if (alive) setLoadingVendors(false); });
     return () => { alive = false; };
   }, [show]);
 
+  /* Vendor that owns the currently-selected project (looked up by id, then
+     by code). Empty until a project with a known vendor is chosen. */
+  const selectedVendorName = useMemo(() => {
+    if (!draft.projectId) return "";
+    const sel = projects.find((p) => p.projectId === draft.projectId);
+    return (
+      vendorByProject[draft.projectId] ||
+      (sel?.projectCode ? vendorByProject[sel.projectCode] : "") ||
+      ""
+    );
+  }, [draft.projectId, projects, vendorByProject]);
+
+  /* Users eligible to attend: only those whose vendor matches the project's
+     owning vendor. No project → none. Unknown vendor → none (with a hint),
+     so we never silently show the whole roster. */
+  const projectUsers = useMemo(() => {
+    if (!draft.projectId || loadingVendors) return [];
+    if (!selectedVendorName) return [];
+    const want = selectedVendorName.toLowerCase();
+    return users.filter(
+      (u) => u.vendorName && String(u.vendorName).toLowerCase() === want
+    );
+  }, [users, draft.projectId, selectedVendorName, loadingVendors]);
+
   const attendeeGroups = useMemo(() => {
     const byVendor = {};
-    users.forEach((u) => {
+    projectUsers.forEach((u) => {
       const group = u.vendorName || u.division || u.orgRole || "Users";
       (byVendor[group] = byVendor[group] || []).push(u);
     });
@@ -254,7 +452,7 @@ export default function CreateMeetingPage() {
         meta: u.orgRole || u.role || ""
       }))
     }));
-  }, [users]);
+  }, [projectUsers]);
 
   const validateTimes = () => {
     const bad = !!(draft.start && draft.end && draft.end <= draft.start);
@@ -390,25 +588,23 @@ export default function CreateMeetingPage() {
             <label htmlFor="projSel">
               Project <span className="required">*</span>
             </label>
-            <select
+            <SearchableSelect
               id="projSel"
               value={draft.projectId}
-              onChange={(e) => {
-                updateDraft({ projectId: e.target.value });
-                setErrors((er) => ({ ...er, projectId: false }));
-              }}
+              loading={loadingProjects}
               disabled={loadingProjects}
-            >
-              <option value="" disabled>
-                {loadingProjects ? "Loading…" : "Select a project…"}
-              </option>
-              {projects.map((p) => (
-                <option key={p.projectId} value={p.projectId}>
-                  {p.projectCode ? `${p.projectCode} — ` : ""}
-                  {p.projectName}
-                </option>
-              ))}
-            </select>
+              placeholder="Select a project…"
+              options={projects.map((p) => ({
+                value: p.projectId,
+                label: `${p.projectCode ? `${p.projectCode} — ` : ""}${p.projectName}`
+              }))}
+              onChange={(val) => {
+                /* Switching project changes the eligible attendee set, so
+                   wipe any previously-picked attendees. */
+                updateDraft({ projectId: val, attendees: [] });
+                setErrors((er) => ({ ...er, projectId: false, attendees: false }));
+              }}
+            />
             <div className={`field-err${errors.projectId ? " show" : ""}`}>
               Please select a project.
             </div>
@@ -498,17 +694,108 @@ export default function CreateMeetingPage() {
         <div className="mt-section-label">Location &amp; Agenda</div>
         <div className="field">
           <label htmlFor="mLoc">Meeting Location / Link</label>
-          <input
-            id="mLoc"
-            type="text"
-            maxLength={300}
-            value={draft.location}
-            onChange={(e) => updateDraft({ location: e.target.value })}
-            placeholder="MS Teams / Google Meet link or physical location"
-          />
-          <div className="help">
-            Paste a video-call link or type a room / venue.
+
+          {/* Mode picker — pick how attendees will join / find the meeting. */}
+          <div
+            className="type-seg"
+            role="radiogroup"
+            aria-label="Meeting location type"
+            style={{ marginBottom: 12 }}
+          >
+            {LOCATION_TYPES.map((t) => {
+              const active = draft.locationType === t.key;
+              /* Switching mode clears the value so an online link never
+                 lingers in the Maps field (and vice-versa). */
+              const pick = () =>
+                updateDraft(
+                  active ? {} : { locationType: t.key, location: "" }
+                );
+              return (
+                <div
+                  key={t.key}
+                  role="radio"
+                  aria-checked={active}
+                  tabIndex={0}
+                  className={`type-opt${active ? " active" : ""}`}
+                  onClick={pick}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      pick();
+                    }
+                  }}
+                >
+                  <span className="type-radio" aria-hidden="true" />
+                  <span className="type-body">
+                    <span className="type-name">
+                      <span aria-hidden="true" style={{ marginRight: 6 }}>{t.icon}</span>
+                      {t.name}
+                    </span>
+                    <span className="type-desc">{t.desc}</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
+
+          {(() => {
+            const cfg =
+              LOCATION_TYPES.find((t) => t.key === draft.locationType) ||
+              LOCATION_TYPES[0];
+            const loc = draft.location.trim();
+            const valueIsUrl = isUrl(loc);
+            /* Soft, non-blocking hint: only the online mode strictly needs a
+               URL — Maps mode happily accepts a plain address too. */
+            const linkModeButNotUrl =
+              loc && draft.locationType === "online" && !valueIsUrl;
+            return (
+              <>
+                <input
+                  id="mLoc"
+                  type="text"
+                  maxLength={300}
+                  value={draft.location}
+                  onChange={(e) => updateDraft({ location: e.target.value })}
+                  placeholder={cfg.placeholder}
+                  aria-label={cfg.label}
+                />
+                <div className="help">{cfg.help}</div>
+
+                {/* Live preview — open/verify the location before saving. */}
+                {loc && (
+                  <div style={{ marginTop: 8 }}>
+                    {draft.locationType === "online" && valueIsUrl && (
+                      <a
+                        className="pill-link"
+                        href={loc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        🎥 Open meeting link ↗
+                      </a>
+                    )}
+                    {draft.locationType === "map" && (
+                      <a
+                        className="pill-link"
+                        href={valueIsUrl ? loc : mapsSearchUrl(loc)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        🗺️ {valueIsUrl ? "Open in Google Maps ↗" : "Search on Google Maps ↗"}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {linkModeButNotUrl && (
+                  <div className="help" style={{ color: "var(--red)" }}>
+                    This doesn't look like a link — start it with https:// or
+                    switch to “Google Maps / Address”.
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
         <div className="field" style={{ marginTop: 14 }}>
           <label htmlFor="mDesc">Agenda</label>
@@ -539,8 +826,28 @@ export default function CreateMeetingPage() {
               updateDraft({ attendees: sel });
               setErrors((er) => ({ ...er, attendees: false }));
             }}
-            placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
+            disabled={!draft.projectId}
+            placeholder={
+              !draft.projectId
+                ? "Select a project first…"
+                : loadingUsers || loadingVendors
+                ? "Loading attendees…"
+                : !selectedVendorName
+                ? "No vendor mapped to this project"
+                : attendeeGroups.length === 0
+                ? `No attendees found for ${selectedVendorName}`
+                : "Select attendees…"
+            }
           />
+          <div className="help">
+            {!draft.projectId
+              ? "Pick a project above — attendees are limited to that project's vendor."
+              : loadingVendors
+              ? "Resolving the project's vendor…"
+              : selectedVendorName
+              ? `Showing attendees from vendor: ${selectedVendorName}.`
+              : "Couldn't find a vendor for this project, so no attendees can be listed."}
+          </div>
           <div className={`field-err${errors.attendees ? " show" : ""}`}>
             Select at least one attendee.
           </div>
