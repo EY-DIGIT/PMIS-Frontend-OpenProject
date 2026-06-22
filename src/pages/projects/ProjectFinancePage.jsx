@@ -8,6 +8,7 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
+import { setPageContext, clearPageContext } from "../../utils/pageContext";
 
 /* ⚠️ TEMP DUMMY — placeholder activities shown in the payment-term table's
    Activity column for partial-payment milestones. Replace with the real
@@ -1000,6 +1001,15 @@ export default function ProjectFinancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Publish the project name so the global navbar's right-side pill shows
+  // it (NavProjectName in Layout) instead of an in-page header. Cleared on
+  // unmount so other routes don't inherit a stale name.
+  const navProjectName = page?.projectName || project?.projectName || "";
+  useEffect(() => {
+    setPageContext({ projectName: navProjectName });
+  }, [navProjectName]);
+  useEffect(() => () => clearPageContext(), []);
+
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
   const phases = page?.phases || [];
@@ -1405,31 +1415,9 @@ export default function ProjectFinancePage() {
         </button>
       </div>
 
-      {/* Slim header — just the project name on the right (and the
-          LOCKED chip if applicable). The long descriptive subtitle
-          was dropped at the user's request. */}
-      <div style={{
-        display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10,
-        marginTop: 0, marginBottom: 12,
-      }}>
-        <span style={{
-          fontSize: 13, fontWeight: 700, color: "#fff",
-          padding: "4px 14px", borderRadius: 999,
-          background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
-          boxShadow: "0 2px 6px rgba(23, 62, 119, 0.18)",
-          letterSpacing: 0.2,
-        }}>
-          {page?.projectName || project?.projectName || ""}
-        </span>
-        {isLocked && (
-          <span style={{
-            padding: "2px 8px", borderRadius: 999,
-            background: "#fff4e0", color: "#a35a00", fontWeight: 700, fontSize: 11,
-          }}>
-            LOCKED
-          </span>
-        )}
-      </div>
+      {/* Project name now lives in the global navbar's right-side pill
+          (NavProjectName in Layout, fed via setPageContext above), so the
+          in-page header pill was removed. */}
 
       {/* Organization tabs — one per organization (vendor) assigned to this
           project. Selecting a tab sets the active organization; the finance
