@@ -892,8 +892,10 @@ export default function ProjectFinancePage() {
   // ── CCN cap edit buffer ──
   const [ccnInput, setCcnInput] = useState("");
   const [ccnSaving, setCcnSaving] = useState(false);
-  // Additional cost type linked to the CCN: ccn | qgr | aqp.
+  // Additional cost type: ccn | qgr | aqp. Drives which input shows below.
   const [additionalCostType, setAdditionalCostType] = useState("ccn");
+  // Value buffer for the QGR / AQP variants (CCN uses ccnInput above).
+  const [additionalValue, setAdditionalValue] = useState("");
 
   // ── QGR mutation guard — blocks concurrent cascades that could
   //    otherwise leave two phases showing Yes at once. ──
@@ -1290,20 +1292,28 @@ export default function ProjectFinancePage() {
   }
 
   async function saveCcnCap() {
-    if (ccnInput === "" || ccnInput === null) {
+    const isCcn = additionalCostType === "ccn";
+    if (isCcn && (ccnInput === "" || ccnInput === null)) {
       uiStore.showError("Enter a CCN Cap %.");
+      return;
+    }
+    if (!isCcn && (additionalValue === "" || additionalValue === null)) {
+      uiStore.showError(`Enter a ${additionalCostType.toUpperCase()} %.`);
       return;
     }
     setCcnSaving(true);
     try {
+      const body = isCcn
+        ? { additionalCostType, ccnCapPercent: Number(ccnInput) }
+        : { additionalCostType, value: Number(additionalValue) };
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.ccnCap(projectId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ccnCapPercent: Number(ccnInput), additionalCostType }),
+        body: JSON.stringify(body),
       });
       const payload = await readJson(res);
       setPage(payload?.data ?? payload);
-      uiStore.showMessage("CCN Cap updated.");
+      uiStore.showMessage(`${additionalCostType.toUpperCase()} updated.`);
     } catch (err) {
       if (handleAuthError(err)) return;
       uiStore.showError(err?.message || "Failed to update CCN Cap");
@@ -1589,45 +1599,77 @@ export default function ProjectFinancePage() {
             ))}
           </div>
 
-          {/* Section 3 — CCN Cap & Value. Calculation hint dropped per
-              request; the Save button now lives at the right end of the
-              same row as the two inputs. */}
+          {/* Section 3 — Additional Cost Type. The dropdown sits at the top;
+              selecting CCN / QGR / AQP reveals that type's input(s) below. */}
           <div className="uidai-pmis-card">
+            {/* Selector ABOVE the section heading. */}
+            <div className="uidai-pmis-field" style={{ marginBottom: 14, maxWidth: 260 }}>
+              <label>Additional Cost Type</label>
+              <select
+                value={additionalCostType}
+                onChange={(e) => setAdditionalCostType(e.target.value)}
+                disabled={isLocked}
+              >
+                <option value="ccn">CCN</option>
+                <option value="qgr">QGR</option>
+                <option value="aqp">AQP</option>
+              </select>
+            </div>
+
             <div style={sectionHead}>
               <span style={stepBadge}>3</span>
-              CCN 
-              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
-                (Change Control Note)
-              </span>
+              {additionalCostType === "ccn" ? (
+                <>
+                  CCN
+                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
+                    (Change Control Note)
+                  </span>
+                </>
+              ) : additionalCostType === "qgr" ? (
+                <>
+                  QGR
+                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
+                    (Quarterly Guaranteed Revenue)
+                  </span>
+                </>
+              ) : (
+                <>AQP</>
+              )}
             </div>
+
             <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
-              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
-                <label>Additional Cost Type</label>
-                <select
-                  value={additionalCostType}
-                  onChange={(e) => setAdditionalCostType(e.target.value)}
-                  disabled={isLocked}
-                >
-                  <option value="ccn">CCN</option>
-                  <option value="qgr">QGR</option>
-                  <option value="aqp">AQP</option>
-                </select>
-              </div>
-              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
-                <label>CCN Cap (%)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={ccnInput}
-                  onChange={(e) => setCcnInput(e.target.value)}
-                  disabled={isLocked}
-                />
-              </div>
-              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
-                <label>CCN Value</label>
-                <input value={inr(ccnValueServer)} disabled />
-              </div>
+              {additionalCostType === "ccn" ? (
+                <>
+                  <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
+                    <label>CCN Cap (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={ccnInput}
+                      onChange={(e) => setCcnInput(e.target.value)}
+                      disabled={isLocked}
+                    />
+                  </div>
+                  <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
+                    <label>CCN Value</label>
+                    <input value={inr(ccnValueServer)} disabled />
+                  </div>
+                </>
+              ) : (
+                <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
+                  <label>{additionalCostType === "qgr" ? "QGR (%)" : "AQP (%)"}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={additionalValue}
+                    onChange={(e) => setAdditionalValue(e.target.value)}
+                    placeholder={additionalCostType === "qgr" ? "Enter QGR %" : "Enter AQP %"}
+                    disabled={isLocked}
+                  />
+                </div>
+              )}
               <button
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-small"
