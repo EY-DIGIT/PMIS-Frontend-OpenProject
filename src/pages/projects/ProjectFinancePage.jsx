@@ -1804,7 +1804,7 @@ function PhasePanel({
                 padding: "2px 7px", borderRadius: 999,
                 background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
               }}>
-                Carry Forward
+                Carry Forward Cost
               </span>
             )}
             {phase.cycleCount != null && (
@@ -1824,9 +1824,9 @@ function PhasePanel({
               style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
             >
               <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
-                Carry Forward
+                Carry Forward Cost
               </span>
-              <div role="group" aria-label={`Apply Carry Forward to Phase ${phase.phase}`}
+              <div role="group" aria-label={`Apply Carry Forward Cost to Phase ${phase.phase}`}
                 style={{
                   display: "inline-flex",
                   border: "1px solid var(--uidai-pmis-border)",
@@ -2348,7 +2348,7 @@ function QgrSummarySection({ phases, totals }) {
                       padding: "1px 6px", borderRadius: 999,
                       background: "#1b7a42", color: "#fff",
                     }}>
-                      Carry Forward
+                      Carry Forward Cost
                     </span>
                   )}
                 </span>
@@ -2359,7 +2359,7 @@ function QgrSummarySection({ phases, totals }) {
                 {stat("Scheduled", `${totalPercent}%`,
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
-                {stat("Carry Forward Hold-back",
+                {stat("Carry Forward Cost Hold-back",
                   yes ? `${qgrPercent}% · ${inr(qgrValue)}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
               </div>
