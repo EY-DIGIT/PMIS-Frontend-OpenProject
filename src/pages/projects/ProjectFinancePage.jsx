@@ -1928,8 +1928,13 @@ function PhasePanel({
                   const remaining = phaseBase - scheduledSoFar;
                   return (
                     <React.Fragment key={t.id}>
-                    <tr>
-                      <td>{milestoneName(t.milestoneId)}</td>
+                    <tr style={expandedTerms.has(t.id) ? { background: "#eef5ff" } : undefined}>
+                      <td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                          <span aria-hidden="true" style={{ fontSize: 13 }}>🏁</span>
+                          <strong style={{ color: "#173e77" }}>{milestoneName(t.milestoneId)}</strong>
+                        </span>
+                      </td>
                       <td>
                         {/* ⚠️ DUMMY — partial-payment milestones calculate
                             activity-wise; the row collapses to reveal each
@@ -2072,23 +2077,71 @@ function PhasePanel({
                       </td>
                     </tr>
                     {/* Activity-wise breakdown for a partial-payment milestone —
-                        the milestone's value/% is split across its activities.
-                        ⚠️ DUMMY split until the backend returns per-activity terms. */}
+                        the milestone's value/% is split across its activities,
+                        each with its own Edit action. ⚠️ DUMMY split until the
+                        backend returns per-activity terms. */}
                     {expandedTerms.has(t.id) && DUMMY_PARTIAL_ACTIVITIES.map((act, ai) => {
                       const n = DUMMY_PARTIAL_ACTIVITIES.length || 1;
                       const aPct = pct / n;
                       const aVal = value / n;
+                      const last = ai === n - 1;
                       return (
-                        <tr key={`${t.id}-act-${ai}`} style={{ background: "#fafcff" }}>
-                          <td></td>
-                          <td style={{ paddingLeft: 16, color: "#0b3c88", fontSize: 12, fontWeight: 600 }}>
-                            ↳ {act} (dummy)
+                        <tr key={`${t.id}-act-${ai}`} style={{ background: "#f6faff" }}>
+                          <td style={{ borderLeft: "3px solid #0aa1c0", borderBottom: last ? undefined : "none" }} />
+                          <td style={{ paddingLeft: 14 }}>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#0aa1c0", display: "inline-block" }} />
+                              <span style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}>{act}</span>
+                              <span style={{ fontSize: 10, color: "var(--uidai-pmis-muted)", fontWeight: 500 }}>(dummy)</span>
+                            </span>
                           </td>
                           <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                           <td><strong style={{ color: "#173e77" }}>{aPct.toFixed(2)} %</strong></td>
                           <td style={{ fontWeight: 700, color: "#173e77" }}>₹ {aVal.toLocaleString("en-IN")}</td>
-                          <td><span style={{ fontSize: 11, color: "#0b3c88" }}>Activity-wise</span></td>
-                          <td></td>
+                          <td>
+                            <span style={{
+                              display: "inline-block", padding: "1px 8px", borderRadius: 999,
+                              background: "#e6f6fa", color: "#067a93", fontSize: 10.5, fontWeight: 700,
+                              border: "1px solid #bfe7ef",
+                            }}>Activity-wise</span>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              type="button"
+                              title={`Edit ${act}`}
+                              aria-label={`Edit ${act}`}
+                              disabled={isLocked}
+                              onClick={() => onEditTerm(t)}
+                              style={{
+                                width: 28, height: 28,
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                border: "1px solid #bfe7ef",
+                                background: "#fff",
+                                color: "#067a93",
+                                borderRadius: 6,
+                                cursor: isLocked ? "not-allowed" : "pointer",
+                                opacity: isLocked ? 0.5 : 1,
+                                padding: 0,
+                                transition: "background .15s, border-color .15s, transform .15s",
+                              }}
+                              onMouseEnter={(e) => {
+                                if (isLocked) return;
+                                e.currentTarget.style.background = "#eaf7fb";
+                                e.currentTarget.style.transform = "translateY(-1px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = "#fff";
+                                e.currentTarget.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="2"
+                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                              </svg>
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
