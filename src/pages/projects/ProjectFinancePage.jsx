@@ -330,13 +330,13 @@ function AddCostItemModal({
   costTypes, milestones, hasOneTime, disabledMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
-        costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
+        costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
       });
     }
   }, [open]);
@@ -374,7 +374,7 @@ function AddCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || 1),
+                  phase: next === "one_time" ? "" : (d.phase || "default"),
                   milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
@@ -392,9 +392,9 @@ function AddCostItemModal({
               <input value="" disabled placeholder="—" />
             ) : (
               <input
-                type="number"
-                min="1"
+                type="text"
                 value={draft.phase}
+                placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
             )}
@@ -472,7 +472,7 @@ function EditCostItemModal({
   costTypes, milestones, row, usedMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: 1, cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
   });
 
   useEffect(() => {
@@ -485,7 +485,7 @@ function EditCostItemModal({
           : "");
     setDraft({
       costTypeCode: row.costTypeCode || "fixed",
-      phase: isOne ? "" : (row.phase ?? 1),
+      phase: isOne ? "" : (row.phase ?? "default"),
       cost: row.cost != null ? String(row.cost) : "",
       taxAmount: taxAmt === "" ? "" : String(taxAmt),
       milestoneIds: Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
@@ -536,7 +536,7 @@ function EditCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || 1),
+                  phase: next === "one_time" ? "" : (d.phase || "default"),
                   milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
@@ -554,9 +554,9 @@ function EditCostItemModal({
               <input value="" disabled placeholder="—" />
             ) : (
               <input
-                type="number"
-                min="1"
+                type="text"
                 value={draft.phase}
+                placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
             )}
@@ -1029,7 +1029,7 @@ export default function ProjectFinancePage() {
       draft.costTypeCode === "fixed"
         ? {
           costTypeCode: "fixed",
-          phase: Number(draft.phase) || 1,
+          phase: draft.phase || "default",
           cost: Number(draft.cost),
           taxAmount: Number(draft.taxAmount),
           milestoneIds: draft.milestoneIds,
@@ -1072,7 +1072,7 @@ export default function ProjectFinancePage() {
       draft.costTypeCode === "fixed"
         ? {
             costTypeCode: "fixed",
-            phase: Number(draft.phase) || 1,
+            phase: draft.phase || "default",
             cost: Number(draft.cost),
             taxAmount: Number(draft.taxAmount),
             milestoneIds: draft.milestoneIds,
