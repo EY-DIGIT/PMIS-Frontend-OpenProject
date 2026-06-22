@@ -1389,7 +1389,7 @@ export default function ProjectFinancePage() {
           Save and Next advances to the project detail page. */}
       <div style={{
         display: "flex", justifyContent: "space-between", alignItems: "center",
-        gap: 10, marginBottom: 12,
+        flexWrap: "wrap", gap: 10, marginBottom: 12,
       }}>
         <button
           type="button"
@@ -1473,13 +1473,8 @@ export default function ProjectFinancePage() {
       {/* Page-wide 2-column grid: every editable section sits on the
           left; the Summary panel sits on the right and sticks while
           the user scrolls through the long left column. */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) 320px",
-        gap: 20,
-        alignItems: "start",
-      }}>
-        <div style={{ minWidth: 0 }}>
+      <div className="uidai-pmis-finance-grid">
+        <div className="uidai-pmis-finance-main">
           {/* Section 1 — Project Cost */}
           <div className="uidai-pmis-card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
@@ -1663,16 +1658,7 @@ export default function ProjectFinancePage() {
             the eye reads them as a single status panel. The card itself
             owns the border + shadow; the inner sections render as bare
             content separated by a hairline divider. */}
-        <div style={{
-          position: "sticky",
-          top: 16,
-          background: "linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%)",
-          border: "1px solid var(--uidai-pmis-border)",
-          borderRadius: 12,
-          boxShadow: "0 4px 12px rgba(20, 50, 110, 0.06)",
-          maxHeight: "calc(100vh - 32px)",
-          overflowY: "auto",
-        }}>
+        <div className="uidai-pmis-finance-summary">
           <SummaryPanel totals={totals} />
           <div style={{
             height: 1,

@@ -676,6 +676,43 @@
   .uidai-pmis-search-input { width: 100%; }
 }
 
+/* ---------- Project Finance page ---------- */
+/* Two-column working area: editable sections on the left, a sticky
+   Summary + QGR panel on the right. Collapses to a single column on
+   narrower viewports so neither column gets crushed. */
+.uidai-pmis-finance-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+}
+.uidai-pmis-finance-main { min-width: 0; }
+.uidai-pmis-finance-summary {
+  position: sticky;
+  top: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%);
+  border: 1px solid var(--uidai-pmis-border);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(20, 50, 110, 0.06);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+@media (max-width: 1100px) {
+  /* Stack the panels; the Summary un-sticks and grows to its content
+     so it reads as a normal block at the bottom of the page. */
+  .uidai-pmis-finance-grid { grid-template-columns: 1fr; gap: 16px; }
+  .uidai-pmis-finance-summary {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+@media (max-width: 992px) {
+  /* Keep the finance tables readable — let them scroll horizontally
+     inside their wrapper instead of squashing the columns. */
+  .uidai-pmis-finance-grid .uidai-pmis-table { min-width: 760px; }
+}
+
 /* =====================================================================
    Role / Permissions assignment — inline card + modal.
    Mirrors the HTML reference (.role-* classes), namespaced to uidai-role-
