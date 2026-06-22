@@ -1602,9 +1602,13 @@ export default function ProjectFinancePage() {
           {/* Section 3 — Additional Cost Type. The dropdown sits at the top;
               selecting CCN / QGR / AQP reveals that type's input(s) below. */}
           <div className="uidai-pmis-card">
-            {/* Selector ABOVE the section heading. */}
+            {/* Step heading carries the "3" badge directly on the
+                Additional Cost Type selector. */}
+            <div style={sectionHead}>
+              <span style={stepBadge}>3</span>
+              Additional Cost Type
+            </div>
             <div className="uidai-pmis-field" style={{ marginBottom: 14, maxWidth: 260 }}>
-              <label>Additional Cost Type</label>
               <select
                 value={additionalCostType}
                 onChange={(e) => setAdditionalCostType(e.target.value)}
@@ -1614,27 +1618,6 @@ export default function ProjectFinancePage() {
                 <option value="qgr">QGR</option>
                 <option value="aqp">AQP</option>
               </select>
-            </div>
-
-            <div style={sectionHead}>
-              <span style={stepBadge}>3</span>
-              {additionalCostType === "ccn" ? (
-                <>
-                  CCN
-                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
-                    (Change Control Note)
-                  </span>
-                </>
-              ) : additionalCostType === "qgr" ? (
-                <>
-                  QGR
-                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
-                    (Quarterly Guaranteed Revenue)
-                  </span>
-                </>
-              ) : (
-                <>AQP</>
-              )}
             </div>
 
             <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
