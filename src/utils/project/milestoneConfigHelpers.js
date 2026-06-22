@@ -174,6 +174,9 @@ export function mapApiMilestoneToNode(m) {
     startDate: toDateInputValue(m.startDate),
     endDate: toDateInputValue(m.endDate),
     status: mapStatusFromApi(m.status),
+    /* Milestone payment release mode (on_completion | partial_activity |
+       resource_based) — prefilled in the edit form. */
+    paymentType: m.paymentType || "",
     vendor: vendors.length ? vendors[0].name || "" : "",
     dependsOn: rawDeps.slice(),
     /* Snapshot of server display IDs (e.g. "M1", "M2"). The loader keeps

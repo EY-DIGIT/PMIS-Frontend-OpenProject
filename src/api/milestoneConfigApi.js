@@ -195,6 +195,9 @@ function buildMilestonePayload(project, formData) {
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
   if (formData.priority !== undefined) body.priority = formData.priority || null;
+  /* Milestone payment release mode: on_completion | partial_activity |
+     resource_based. */
+  if (formData.paymentType) body.paymentType = formData.paymentType;
   return body;
 }
 

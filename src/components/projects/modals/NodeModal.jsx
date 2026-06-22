@@ -161,6 +161,8 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     actualStartDate: n.actualStartDate || "",
     actualEndDate: n.actualEndDate || "",
     status: n.status || "Not Completed",
+    /* Milestone-only: how payment for this milestone is released. */
+    paymentType: kind === "milestone" ? (n.paymentType || "on_completion") : "",
     type: inheritFromParent
       ? parentNode.type
       : n.type || (kind === "milestone" ? "" : "Standard Type"),
@@ -1196,6 +1198,22 @@ export default function NodeModal({
                 )}
               </div>
             </>
+          )}
+
+          {kind === "milestone" && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">Payment Type</label>
+              <select
+                className="uidai-select"
+                value={form.paymentType}
+                onChange={(e) => updateField({ paymentType: e.target.value })}
+                disabled={dis}
+              >
+                <option value="on_completion">On Completion</option>
+                <option value="partial_activity">Partial Payment (based on activity)</option>
+                <option value="resource_based">Resource Based</option>
+              </select>
+            </div>
           )}
 
           {showStatus && (
