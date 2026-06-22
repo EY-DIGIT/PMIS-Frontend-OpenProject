@@ -1804,7 +1804,7 @@ function PhasePanel({
                 padding: "2px 7px", borderRadius: 999,
                 background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
               }}>
-                QGR
+                Carry Forward
               </span>
             )}
             {phase.cycleCount != null && (
@@ -1824,12 +1824,9 @@ function PhasePanel({
               style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
             >
               <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
-                QGR{" "}
-                <span style={{ fontWeight: 600, color: "var(--uidai-pmis-muted)" }}>
-                  (Quarterly Guaranteed Revenue)
-                </span>
+                Carry Forward
               </span>
-              <div role="group" aria-label={`Apply QGR to Phase ${phase.phase}`}
+              <div role="group" aria-label={`Apply Carry Forward to Phase ${phase.phase}`}
                 style={{
                   display: "inline-flex",
                   border: "1px solid var(--uidai-pmis-border)",
@@ -2351,7 +2348,7 @@ function QgrSummarySection({ phases, totals }) {
                       padding: "1px 6px", borderRadius: 999,
                       background: "#1b7a42", color: "#fff",
                     }}>
-                      QGR
+                      Carry Forward
                     </span>
                   )}
                 </span>
@@ -2362,7 +2359,7 @@ function QgrSummarySection({ phases, totals }) {
                 {stat("Scheduled", `${totalPercent}%`,
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
-                {stat("QGR Hold-back",
+                {stat("Carry Forward Hold-back",
                   yes ? `${qgrPercent}% · ${inr(qgrValue)}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
               </div>
