@@ -1741,6 +1741,16 @@ function PhasePanel({
   isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
   const [expanded, setExpanded] = useState(true);
+  /* Which payment-term rows are expanded to reveal their activity-wise
+     breakdown (partial-payment milestones). */
+  const [expandedTerms, setExpandedTerms] = useState(() => new Set());
+  const toggleTermExpand = (id) =>
+    setExpandedTerms((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   /* Apply-Frequency tool: a start/end/frequency window for the phase.
      Values persist between opens so the modal re-opens prefilled. */
   const [showFreqModal, setShowFreqModal] = useState(false);
@@ -1917,19 +1927,28 @@ function PhasePanel({
                     .reduce((s, r) => s + (Number(r.value) || 0), 0);
                   const remaining = phaseBase - scheduledSoFar;
                   return (
-                    <tr key={t.id}>
+                    <React.Fragment key={t.id}>
+                    <tr>
                       <td>{milestoneName(t.milestoneId)}</td>
                       <td>
-                        {/* ⚠️ DUMMY — partial-payment milestones map to an
-                            activity; shown here with placeholder data until
-                            the backend provides the per-term activity. */}
-                        <span style={{
-                          display: "inline-block", padding: "2px 8px", borderRadius: 999,
-                          background: "#eef3fb", color: "#0b3c88", fontSize: 11, fontWeight: 600,
-                          border: "1px solid #cfe0f5",
-                        }}>
-                          {DUMMY_PARTIAL_ACTIVITIES[idx % DUMMY_PARTIAL_ACTIVITIES.length]} (dummy)
-                        </span>
+                        {/* ⚠️ DUMMY — partial-payment milestones calculate
+                            activity-wise; the row collapses to reveal each
+                            activity's split. Placeholder until the backend
+                            returns the per-term activities. */}
+                        <button
+                          type="button"
+                          onClick={() => toggleTermExpand(t.id)}
+                          aria-expanded={expandedTerms.has(t.id)}
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                            border: "1px solid #cfe0f5", background: "#eef3fb",
+                            color: "#0b3c88", fontSize: 11, fontWeight: 700,
+                            borderRadius: 999, padding: "2px 10px", cursor: "pointer",
+                          }}
+                        >
+                          <span style={{ fontSize: 9 }}>{expandedTerms.has(t.id) ? "▾" : "▸"}</span>
+                          Activities ({DUMMY_PARTIAL_ACTIVITIES.length})
+                        </button>
                       </td>
                       <td>
                         {t.cycleCount != null
@@ -2052,6 +2071,28 @@ function PhasePanel({
                        </div>
                       </td>
                     </tr>
+                    {/* Activity-wise breakdown for a partial-payment milestone —
+                        the milestone's value/% is split across its activities.
+                        ⚠️ DUMMY split until the backend returns per-activity terms. */}
+                    {expandedTerms.has(t.id) && DUMMY_PARTIAL_ACTIVITIES.map((act, ai) => {
+                      const n = DUMMY_PARTIAL_ACTIVITIES.length || 1;
+                      const aPct = pct / n;
+                      const aVal = value / n;
+                      return (
+                        <tr key={`${t.id}-act-${ai}`} style={{ background: "#fafcff" }}>
+                          <td></td>
+                          <td style={{ paddingLeft: 16, color: "#0b3c88", fontSize: 12, fontWeight: 600 }}>
+                            ↳ {act} (dummy)
+                          </td>
+                          <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                          <td><strong style={{ color: "#173e77" }}>{aPct.toFixed(2)} %</strong></td>
+                          <td style={{ fontWeight: 700, color: "#173e77" }}>₹ {aVal.toLocaleString("en-IN")}</td>
+                          <td><span style={{ fontSize: 11, color: "#0b3c88" }}>Activity-wise</span></td>
+                          <td></td>
+                        </tr>
+                      );
+                    })}
+                    </React.Fragment>
                   );
                 })}
                 {terms.length > 0 && (
