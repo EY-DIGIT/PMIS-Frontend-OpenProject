@@ -9,6 +9,12 @@ import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
 import { loadProjectTree } from "../../api/milestoneConfigApi";
+
+/* ⚠️ TEMPORARY TEST FLAG — set to false (or delete the block that reads it in
+   loadMilestones) once the backend returns paymentType + activities. When on,
+   every milestone is treated as partial-payment with dummy activities so the
+   Add Cost "Activity" dropdown can be exercised without backend support. */
+const DUMMY_PARTIAL_TEST = true;
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -1040,6 +1046,27 @@ export default function ProjectFinancePage() {
           );
         }
       } catch { /* tree enrichment is best-effort */ }
+
+      /* ⚠️ TEMP DUMMY DATA — see DUMMY_PARTIAL_TEST above. Marks every
+         milestone as partial-payment and seeds dummy activities so the
+         partial → Activity-dropdown flow can be tested without backend
+         support. Remove this block (and the flag) for production. */
+      if (DUMMY_PARTIAL_TEST) {
+        setMilestones((prev) =>
+          prev.map((m) => ({
+            ...m,
+            paymentType: "partial_activity",
+            activities:
+              m.activities && m.activities.length
+                ? m.activities
+                : [
+                    { id: `${m.id}-dummy-a1`, name: "Activity A1 (dummy)" },
+                    { id: `${m.id}-dummy-a2`, name: "Activity A2 (dummy)" },
+                    { id: `${m.id}-dummy-a3`, name: "Activity A3 (dummy)" },
+                  ],
+          }))
+        );
+      }
     } catch (err) {
       if (handleAuthError(err)) return;
       // eslint-disable-next-line no-console
