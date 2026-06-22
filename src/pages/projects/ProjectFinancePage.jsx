@@ -8,6 +8,7 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
+import { loadProjectTree } from "../../api/milestoneConfigApi";
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -348,15 +349,24 @@ function AddCostItemModal({
 }) {
   const [draft, setDraft] = useState({
     costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
+    milestoneActivities: {},
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
         costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
+        milestoneActivities: {},
       });
     }
   }, [open]);
+
+  /* Milestones (among those selected) whose payment type is partial — each
+     needs an Activity picked so the milestone's payment can be computed
+     activity-wise. */
+  const partialMilestones = (milestones || []).filter(
+    (m) => (draft.milestoneIds || []).includes(m.id) && m.paymentType === "partial_activity"
+  );
 
   if (!open) return null;
   const isOneTime = draft.costTypeCode === "one_time";
@@ -444,11 +454,57 @@ function AddCostItemModal({
                 value={draft.milestoneIds}
                 options={milestones}
                 disabledIds={disabledMilestoneIds}
-                onChange={(next) => setDraft((d) => ({ ...d, milestoneIds: next }))}
+                onChange={(next) =>
+                  setDraft((d) => {
+                    // Drop activity selections for any milestone no longer chosen.
+                    const keep = {};
+                    Object.entries(d.milestoneActivities || {}).forEach(([mid, aid]) => {
+                      if (next.includes(mid)) keep[mid] = aid;
+                    });
+                    return { ...d, milestoneIds: next, milestoneActivities: keep };
+                  })
+                }
               />
             )}
           </div>
         </div>
+
+        {/* Activity picker(s) for partial-payment milestones — one per
+            selected milestone whose payment type is partial (activity-based),
+            so the milestone's payment is computed activity-wise. */}
+        {!isOneTime && partialMilestones.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#173e77", marginBottom: 6 }}>
+              Activity (for partial-payment milestones)
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+              {partialMilestones.map((m) => (
+                <div key={m.id} className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                  <label>{m.name}</label>
+                  <select
+                    value={(draft.milestoneActivities && draft.milestoneActivities[m.id]) || ""}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        milestoneActivities: { ...(d.milestoneActivities || {}), [m.id]: e.target.value },
+                      }))
+                    }
+                  >
+                    <option value="">— Select activity —</option>
+                    {(m.activities || []).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  {(m.activities || []).length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", marginTop: 4 }}>
+                      No activities found for this milestone.
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
           <button
@@ -952,8 +1008,38 @@ export default function ProjectFinancePage() {
           id: m.id,
           name: m.name || m.title || m.id,
           status: fromApiNodeStatus(m.status),
+          // Captured from the flat list when present; enriched from the
+          // tree below (which also carries each milestone's activities).
+          paymentType: m.paymentType || "",
+          activities: [],
         }));
       setMilestones(list);
+
+      /* Enrich with paymentType + activities from the project tree so the
+         Add/Edit Cost modals can offer an Activity dropdown for milestones
+         whose payment type is "partial_activity". Best-effort. */
+      try {
+        const tree = await loadProjectTree(projectId);
+        const byId = new Map();
+        (tree?.milestones || []).forEach((mn) => {
+          const key = mn.apiId || mn.id || mn.uid;
+          if (!key) return;
+          byId.set(key, {
+            paymentType: mn.paymentType || "",
+            activities: (mn.activities || [])
+              .map((a) => ({ id: a.apiId || a.id || a.uid, name: a.name || a.id || a.uid }))
+              .filter((a) => a.id),
+          });
+        });
+        if (byId.size) {
+          setMilestones((prev) =>
+            prev.map((m) => {
+              const extra = byId.get(m.id);
+              return extra ? { ...m, paymentType: extra.paymentType || m.paymentType, activities: extra.activities } : m;
+            })
+          );
+        }
+      } catch { /* tree enrichment is best-effort */ }
     } catch (err) {
       if (handleAuthError(err)) return;
       // eslint-disable-next-line no-console
@@ -1052,6 +1138,11 @@ export default function ProjectFinancePage() {
           cost: Number(draft.cost),
           taxAmount: Number(draft.taxAmount),
           milestoneIds: draft.milestoneIds,
+          /* Per partial-payment milestone: which activity the cost maps to,
+             so that milestone is computed activity-wise. */
+          milestoneActivities: Object.entries(draft.milestoneActivities || {})
+            .filter(([, activityId]) => activityId)
+            .map(([milestoneId, activityId]) => ({ milestoneId, activityId })),
         }
         : {
           costTypeCode: "one_time",
@@ -1326,6 +1417,17 @@ export default function ProjectFinancePage() {
   function milestoneName(id) {
     return milestones.find((m) => m.id === id)?.name || id || "—";
   }
+  function activityName(activityId) {
+    if (!activityId) return "";
+    for (const m of milestones) {
+      const a = (m.activities || []).find((x) => x.id === activityId);
+      if (a) return a.name;
+    }
+    return activityId;
+  }
+  function isPartialMilestone(id) {
+    return milestones.find((m) => m.id === id)?.paymentType === "partial_activity";
+  }
 
   function milestoneStatus(id) {
     return milestones.find((m) => m.id === id)?.status || "Not Completed";
@@ -1538,9 +1640,31 @@ export default function ProjectFinancePage() {
                       <tr key={r.id}>
                         <td>{costTypeLabel(r.costTypeCode)}</td>
                         <td >
-                          {isOneTime
-                            ? <span style={disabledCell}></span>
-                            : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
+                          {isOneTime ? (
+                            <span style={disabledCell}></span>
+                          ) : (r.milestoneIds || []).length === 0 ? (
+                            "—"
+                          ) : (() => {
+                            /* Map of milestoneId → activityId for this row's
+                               partial-payment milestones (echoed by the API). */
+                            const actMap = {};
+                            (r.milestoneActivities || []).forEach((x) => {
+                              if (x && x.milestoneId) actMap[x.milestoneId] = x.activityId;
+                            });
+                            return (r.milestoneIds || []).map((mid) => {
+                              const act = actMap[mid];
+                              return (
+                                <div key={mid}>
+                                  {milestoneName(mid)}
+                                  {isPartialMilestone(mid) && (
+                                    <span style={{ color: "#0b3c88", fontSize: 11, fontWeight: 600 }}>
+                                      {" · "}{act ? activityName(act) : "Partial (activity-wise)"}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })()}
                         </td>
                         <td>{inr(r.cost)}</td>
                         <td >
