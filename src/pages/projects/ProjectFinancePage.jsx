@@ -7,6 +7,7 @@ import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
+import { get as getProjectById } from "../../api/projects";
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -819,6 +820,37 @@ export default function ProjectFinancePage() {
   const navigate = useNavigate();
   const project = useProject(projectId);
 
+  /* Organizations (vendors) assigned to this project — drive the tab bar.
+     Prefer the hydrated store project; fall back to a direct fetch when the
+     store isn't populated (e.g. a hard refresh landing on the finance page). */
+  const [fetchedVendors, setFetchedVendors] = useState([]);
+  const orgs = useMemo(() => {
+    const raw =
+      Array.isArray(project?.vendors) && project.vendors.length
+        ? project.vendors
+        : fetchedVendors;
+    const names = (Array.isArray(raw) ? raw : [])
+      .map((v) => (typeof v === "string" ? v : (v && (v.name || v.label || v.id)) || ""))
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }, [project, fetchedVendors]);
+  const [activeOrg, setActiveOrg] = useState(0);
+  useEffect(() => {
+    if (orgs.length > 0 && activeOrg > orgs.length - 1) setActiveOrg(0);
+  }, [orgs.length, activeOrg]);
+  useEffect(() => {
+    if (!projectId) return;
+    if (Array.isArray(project?.vendors) && project.vendors.length) return;
+    let cancelled = false;
+    getProjectById(projectId)
+      .then((p) => {
+        if (!cancelled) setFetchedVendors(Array.isArray(p?.vendors) ? p.vendors : []);
+      })
+      .catch(() => { /* tabs just stay hidden if this fails */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, project]);
+
   // ── Master data ──
   const [costTypes, setCostTypes] = useState([]);
   const [frequencies, setFrequencies] = useState([]);
@@ -1366,6 +1398,57 @@ export default function ProjectFinancePage() {
           </span>
         )}
       </div>
+
+      {/* Organization tabs — one per organization (vendor) assigned to this
+          project. Selecting a tab sets the active organization; the finance
+          sections below render under it. */}
+      {orgs.length > 0 && (
+        <div
+          role="tablist"
+          aria-label="Organizations"
+          style={{
+            display: "flex",
+            gap: 4,
+            flexWrap: "wrap",
+            borderBottom: "2px solid var(--uidai-pmis-border)",
+            marginBottom: 14,
+          }}
+        >
+          {orgs.map((name, i) => {
+            const active = i === activeOrg;
+            return (
+              <button
+                key={`${name}-${i}`}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setActiveOrg(i)}
+                title={name}
+                style={{
+                  border: "1px solid var(--uidai-pmis-border)",
+                  borderBottom: active ? "2px solid #173e77" : "1px solid var(--uidai-pmis-border)",
+                  borderTopLeftRadius: 8,
+                  borderTopRightRadius: 8,
+                  background: active ? "#fff" : "#f1f6fd",
+                  color: active ? "#173e77" : "#5b6b82",
+                  fontWeight: active ? 800 : 600,
+                  fontSize: 13,
+                  padding: "8px 16px",
+                  marginBottom: -2,
+                  cursor: "pointer",
+                  maxWidth: 220,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  transition: "background .15s, color .15s",
+                }}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Page-wide 2-column grid: every editable section sits on the
           left; the Summary panel sits on the right and sticks while
