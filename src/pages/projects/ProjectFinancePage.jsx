@@ -320,6 +320,23 @@ function SummaryPanel({ totals }) {
   );
 }
 
+/* Master cost-type list plus the two product-required extras (Resource
+   Cost, Transaction Cost). Falls back to a lone "Fixed" entry when the
+   master list hasn't loaded. Extras are appended only when the master list
+   doesn't already define that code. */
+function buildCostTypeOptions(costTypes) {
+  const base =
+    Array.isArray(costTypes) && costTypes.length
+      ? costTypes
+      : [{ code: "fixed", name: "Fixed" }];
+  const extras = [
+    { code: "resource", name: "Resource Cost" },
+    { code: "transaction", name: "Transaction Cost" },
+  ];
+  const have = new Set(base.map((c) => String(c.code || "").toLowerCase()));
+  return [...base, ...extras.filter((e) => !have.has(e.code))];
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Add Cost Item modal — replaces the previous inline form. Renders
    into the standard `.uidai-modal` shell so it inherits the project's
@@ -379,9 +396,7 @@ function AddCostItemModal({
                 }));
               }}
             >
-              {costTypes.length === 0 ? (
-                <option value="fixed">Fixed</option>
-              ) : costTypes.map((c) => (
+              {buildCostTypeOptions(costTypes).map((c) => (
                 <option key={c.code} value={c.code}>{c.name}</option>
               ))}
             </select>
@@ -541,9 +556,7 @@ function EditCostItemModal({
                 }));
               }}
             >
-              {costTypes.length === 0 ? (
-                <option value="fixed">Fixed</option>
-              ) : costTypes.map((c) => (
+              {buildCostTypeOptions(costTypes).map((c) => (
                 <option key={c.code} value={c.code}>{c.name}</option>
               ))}
             </select>
