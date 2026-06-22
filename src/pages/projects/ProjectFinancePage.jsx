@@ -8,6 +8,11 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
+
+/* ⚠️ TEMP DUMMY — placeholder activities shown in the payment-term table's
+   Activity column for partial-payment milestones. Replace with the real
+   per-term activity once the backend returns it. */
+const DUMMY_PARTIAL_ACTIVITIES = ["Activity A1", "Activity A2", "Activity A3"];
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -1886,6 +1891,7 @@ function PhasePanel({
               <thead>
                 <tr>
                   <th>Milestone</th>
+                  <th style={{ width: 160 }}>Activity</th>
                   <th style={{ width: 110 }}>Cycle</th>
                   <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
                   <th style={{ width: 170 }}>Value</th>
@@ -1896,7 +1902,7 @@ function PhasePanel({
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={7} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -1913,6 +1919,18 @@ function PhasePanel({
                   return (
                     <tr key={t.id}>
                       <td>{milestoneName(t.milestoneId)}</td>
+                      <td>
+                        {/* ⚠️ DUMMY — partial-payment milestones map to an
+                            activity; shown here with placeholder data until
+                            the backend provides the per-term activity. */}
+                        <span style={{
+                          display: "inline-block", padding: "2px 8px", borderRadius: 999,
+                          background: "#eef3fb", color: "#0b3c88", fontSize: 11, fontWeight: 600,
+                          border: "1px solid #cfe0f5",
+                        }}>
+                          {DUMMY_PARTIAL_ACTIVITIES[idx % DUMMY_PARTIAL_ACTIVITIES.length]} (dummy)
+                        </span>
+                      </td>
                       <td>
                         {t.cycleCount != null
                           ? <span style={{
@@ -2038,7 +2056,7 @@ function PhasePanel({
                 })}
                 {terms.length > 0 && (
                   <tr style={{ background: "#f1f6fd" }}>
-                    <td colSpan={3} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
+                    <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
                     </td>
                     <td style={{ fontWeight: 800, color: "#173e77" }}>
