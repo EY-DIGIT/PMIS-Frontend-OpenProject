@@ -892,6 +892,8 @@ export default function ProjectFinancePage() {
   // ── CCN cap edit buffer ──
   const [ccnInput, setCcnInput] = useState("");
   const [ccnSaving, setCcnSaving] = useState(false);
+  // Additional cost type linked to the CCN: ccn | qgr | aqp.
+  const [additionalCostType, setAdditionalCostType] = useState("ccn");
 
   // ── QGR mutation guard — blocks concurrent cascades that could
   //    otherwise leave two phases showing Yes at once. ──
@@ -971,6 +973,8 @@ export default function ProjectFinancePage() {
       if (!silent || ccnInput === "") {
         const cap = data?.ccn?.capPercent;
         setCcnInput(cap !== null && cap !== undefined ? String(cap) : "");
+        const act = data?.ccn?.additionalCostType;
+        if (act) setAdditionalCostType(String(act).toLowerCase());
       }
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -1295,7 +1299,7 @@ export default function ProjectFinancePage() {
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.ccnCap(projectId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ccnCapPercent: Number(ccnInput) }),
+        body: JSON.stringify({ ccnCapPercent: Number(ccnInput), additionalCostType }),
       });
       const payload = await readJson(res);
       setPage(payload?.data ?? payload);
@@ -1597,6 +1601,18 @@ export default function ProjectFinancePage() {
               </span>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-end" }}>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
+                <label>Additional Cost Type</label>
+                <select
+                  value={additionalCostType}
+                  onChange={(e) => setAdditionalCostType(e.target.value)}
+                  disabled={isLocked}
+                >
+                  <option value="ccn">CCN</option>
+                  <option value="qgr">QGR</option>
+                  <option value="aqp">AQP</option>
+                </select>
+              </div>
               <div className="uidai-pmis-field" style={{ marginBottom: 0, flex: "1 1 220px", minWidth: 200 }}>
                 <label>CCN Cap (%)</label>
                 <input
