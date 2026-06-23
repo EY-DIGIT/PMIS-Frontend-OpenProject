@@ -13,7 +13,7 @@ import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
 import * as usersApi from "../../api/users";
 // TEMP: vendor-based attendee filter disabled while the vendor API is erroring.
-// import * as vendorsApi from "../../api/vendors";
+import * as vendorsApi from "../../api/vendors";
 import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
 
@@ -316,7 +316,7 @@ const LOCATION_TYPES = [
     key: "online",
     icon: "🎥",
     name: "Online Meeting",
-    desc: "Video-call link (Meet, Teams, Zoom)",
+    // desc: "Video-call link (Meet, Teams, Zoom)",
     label: "Meeting link",
     placeholder: "https://meet.google.com/abc-defg-hij",
     help: "Paste the full video-call URL — attendees open it with one click.",
@@ -325,7 +325,7 @@ const LOCATION_TYPES = [
     key: "map",
     icon: "🗺️",
     name: "Google Maps / Address",
-    desc: "Map link or full address",
+    // desc: "Map link or full address",
     label: "Maps link or address",
     placeholder: "Paste a Google Maps link or a full address",
     help: "Paste a maps.google.com link, or a full address to generate one.",
@@ -373,8 +373,8 @@ export default function CreateMeetingPage() {
      user (see `projectUsers` below). Re-enable these two lines, the
      vendorsApi import, the fetch effect, and the filtered `projectUsers`
      to restore per-project (vendor) attendee filtering. */
-  // const [vendorByProject, setVendorByProject] = useState({});
-  // const [loadingVendors, setLoadingVendors] = useState(false);
+  const [vendorByProject, setVendorByProject] = useState({});
+  const [loadingVendors, setLoadingVendors] = useState(false);
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -395,25 +395,25 @@ export default function CreateMeetingPage() {
       .finally(() => { if (alive) setLoadingUsers(false); });
     /* Vendor master → which vendor owns which project. TEMPORARILY DISABLED
        (vendor API erroring). Re-enable to restore the attendee filter. */
-    // setLoadingVendors(true);
-    // vendorsApi
-    //   .list()
-    //   .then((vendors) => {
-    //     if (!alive) return;
-    //     const map = {};
-    //     vendors.forEach((v) => {
-    //       const name = v.vendorName || "";
-    //       if (!name) return;
-    //       (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
-    //       (v.projects || []).forEach((p) => {
-    //         const code = p?.projectCode;
-    //         if (code) map[code] = name;
-    //       });
-    //     });
-    //     setVendorByProject(map);
-    //   })
-    //   .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
-    //   .finally(() => { if (alive) setLoadingVendors(false); });
+    setLoadingVendors(true);
+    vendorsApi
+      .list()
+      .then((vendors) => {
+        if (!alive) return;
+        const map = {};
+        vendors.forEach((v) => {
+          const name = v.vendorName || "";
+          if (!name) return;
+          (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
+          (v.projects || []).forEach((p) => {
+            const code = p?.projectCode;
+            if (code) map[code] = name;
+          });
+        });
+        setVendorByProject(map);
+      })
+      .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
+      .finally(() => { if (alive) setLoadingVendors(false); });
     return () => { alive = false; };
   }, [show]);
 
@@ -421,6 +421,7 @@ export default function CreateMeetingPage() {
      Re-enable this block (plus the import, state and fetch effect above)
      once the vendor API is fixed, then swap `projectUsers` back to the
      filtered version.
+     */
 
   const selectedVendorName = useMemo(() => {
     if (!draft.projectId) return "";
@@ -440,11 +441,11 @@ export default function CreateMeetingPage() {
       (u) => u.vendorName && String(u.vendorName).toLowerCase() === want
     );
   }, [users, draft.projectId, selectedVendorName, loadingVendors]);
-  ──────────────────────────────────────────────────────────────────── */
+  // ──────────────────────────────────────────────────────────────────── 
 
   /* TEMP: show the full user roster as candidate attendees (no vendor
      filter) until the vendor API is reliable. */
-  const projectUsers = users;
+  // const projectUsers = users;
 
   const attendeeGroups = useMemo(() => {
     const byVendor = {};

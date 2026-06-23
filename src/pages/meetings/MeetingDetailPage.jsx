@@ -13,13 +13,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as usersApi from "../../api/users";
-import { getMeeting, getMoM, saveMoM, updateMeeting, momUpdateStatus } from "../../api/meetings";
+import { listUsersByProjectOrg } from "../../api/teamPage";
+import { getMeeting, getMoM, saveMoM, updateMeeting, momUpdateStatus, createActivityTask } from "../../api/meetings";
 import { sampleMoM, parseMoM } from "../../data/meetingsMock";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
 const STATUS_OPTIONS = ["DRAFT", "IN_REVIEW", "FINALIZED"];
+
+/* TEMP (test only): default task assignee when a row has no owner picked and
+   no project-assignable user resolves. This is the org-admin user id — remove
+   once the project-org assignee dropdown is confirmed working end-to-end. */
+const DEFAULT_ASSIGNEE_ID = "71e53819-ee1b-4ddb-aad2-42d010c41632";
 
 /* n8n webhook that turns a meeting transcript into a structured MoM.
    Two input shapes (per the backend team's working request):
@@ -114,6 +120,26 @@ function addDaysISO(iso, n) {
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 }
+
+/* The task-create API wants a full ISO datetime (e.g. 2026-06-22T00:00:00.000Z),
+   but our date inputs hand back a plain "YYYY-MM-DD". Widen the date to a
+   midnight-UTC timestamp; pass anything already containing a time straight
+   through. Returns "" for empty input so callers can fall back. */
+function toIsoDateTime(value) {
+  if (!value) return "";
+  const s = String(value);
+  const d = s.includes("T") ? new Date(s) : new Date(s + "T00:00:00.000Z");
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+/* MoM table priority (LOW/MEDIUM/HIGH/CRITICAL) → task API priority
+   (p1..p4). Per the contract, LOW is the lowest code (p1). */
+const TASK_PRIORITY_MAP = {
+  LOW: "p1",
+  MEDIUM: "p2",
+  HIGH: "p3",
+  CRITICAL: "p4",
+};
 
 /* ─── Status badge — DRAFT / SCHEDULED / COMPLETED / CANCELLED ─── */
 const STATUS_CLASS = {
@@ -218,6 +244,13 @@ export default function MeetingDetailPage() {
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState([]);
+  /* Users that can actually be assigned a task on this meeting's project.
+     A task's assignee MUST have a role on the project (the create API
+     returns 403 otherwise), so the "Assigned To" dropdown is sourced from
+     the linked activity's vendor assignable-users — NOT the global user
+     directory. Resolved via: meeting.activityId → activity.vendorId →
+     listVendorAssignableUsers(vendorId). */
+  const [assignees, setAssignees] = useState([]);
 
   const [momForm, setMomForm] = useState({
     title: "",
@@ -291,14 +324,53 @@ export default function MeetingDetailPage() {
     return () => { alive = false; };
   }, []);
 
+  /* Resolve the task-assignee candidates for this meeting's project. A task
+     assignee MUST belong to a vendor mapped to the project (the create API
+     403s on `same_vendor` otherwise), so we source the dropdown from the
+     project's organization-associated users — NOT the global directory or
+     the activity's vendor. The associated-users endpoint returns
+     { id, login, email, firstName, lastName, ... }; normalize to the
+     { userId, fullName, email } shape the rest of the page uses. */
+  useEffect(() => {
+    let alive = true;
+    const projectId = meeting?.projectId;
+    if (!projectId) {
+      setAssignees([]);
+      return () => { alive = false; };
+    }
+    listUsersByProjectOrg(projectId)
+      .then((rows) => {
+        if (!alive) return;
+        const norm = (Array.isArray(rows) ? rows : [])
+          .map((u) => ({
+            userId: u.id || u.userId || u.uuid || "",
+            fullName:
+              [u.firstName, u.lastName].filter(Boolean).join(" ").trim() ||
+              u.fullName ||
+              u.name ||
+              u.login ||
+              u.email ||
+              "",
+            email: u.email || "",
+          }))
+          .filter((u) => u.userId);
+        setAssignees(norm);
+      })
+      .catch(() => { if (alive) setAssignees([]); });
+    return () => { alive = false; };
+  }, [meeting?.projectId]);
+
   /* Clear the breadcrumb's meeting-name context when leaving the page. */
   useEffect(() => () => clearPageContext(), []);
 
   const userById = useMemo(() => {
     const m = new Map();
+    /* Directory first, then assignees — so an assignee not in the paged
+       directory still resolves to a name. */
     users.forEach((u) => m.set(u.userId, u));
+    assignees.forEach((u) => m.set(u.userId, u));
     return (uid) => m.get(uid) || null;
-  }, [users]);
+  }, [users, assignees]);
 
   const labelFor = (uid) => {
     const u = userById(uid);
@@ -566,8 +638,14 @@ export default function MeetingDetailPage() {
       show("Add at least one task.", "warn");
       return;
     }
+    /* The task-create API rejects assignees without a project role, so the
+       fallback owner must come from the project-assignable list. Prefer an
+       attendee who is also assignable; otherwise the first assignable user. */
+    const assigneeIds = new Set(assignees.map((u) => u.userId));
     const fallbackOwner =
-      meeting.attendees?.[0]?.userId || users[0]?.userId || null;
+      meeting.attendees?.find((a) => assigneeIds.has(a.userId))?.userId ||
+      assignees[0]?.userId ||
+      DEFAULT_ASSIGNEE_ID;
     const due = addDaysISO(meeting.meetingDate, 7);
     /* Task Name, Start Date and Priority have no dedicated API column, so
        they are folded into the human-readable content block here. */
@@ -605,11 +683,57 @@ export default function MeetingDetailPage() {
       ),
       risks: [],
     };
+    /* Tasks gate the MoM: create every task FIRST, and only persist the MoM
+       if they all succeed. If any task call fails, abort and surface the
+       error — the MoM is NOT saved. */
+    const activityId = meeting.activityId;
+    if (!activityId) {
+      show("This meeting has no linked activity — cannot create tasks.", "warn");
+      return;
+    }
     setSavingMom(true);
     try {
+      /* 1. Create one task per table row. Throw on the first failure so the
+            MoM save below never runs. */
+      let created = 0;
+      for (let i = 0; i < taskRows.length; i++) {
+        const d = taskRows[i];
+        const name = d.taskName?.trim() || d.description?.trim() || "Untitled task";
+        const assignedTo = d.assignedToUserId || fallbackOwner;
+        /* No valid project assignee → the create API would 403. Fail now
+           with a clear message instead of firing a doomed request. */
+        if (!assignedTo) {
+          throw new Error(`"${name}" has no assignable user for this project.`);
+        }
+        const startDate = toIsoDateTime(d.startDate) || toIsoDateTime(meeting.meetingDate);
+        const endDate = toIsoDateTime(d.endDate || d.dueDate) || toIsoDateTime(due);
+        const taskBody = cleanPayload({
+          name,
+          description: d.description?.trim() || d.taskName?.trim() || name,
+          startDate,
+          endDate,
+          /* Mirror planned dates — matches the proven-201 request shape. */
+          actualStartDate: startDate,
+          actualEndDate: endDate,
+          status: "open",
+          priority: TASK_PRIORITY_MAP[String(d.priority || "MEDIUM").toUpperCase()] || "p2",
+          position: i,
+          assignedTo,
+          dependsOn: [],
+        });
+        try {
+          await createActivityTask(activityId, taskBody);
+          created += 1;
+        } catch (err) {
+          throw new Error(`Task "${name}" failed: ${err.message || "request error"}`);
+        }
+      }
+
+      /* 2. All tasks created — now persist the MoM. */
       const saved = await saveMoM(meeting.id, body);
       setMomRemote(saved);
-      show("MoM saved.", "ok");
+      show(`${created} task${created === 1 ? "" : "s"} created. MoM saved.`, "ok");
+
       setTimeout(() => {
         taskSectionRef.current?.scrollIntoView?.({
           behavior: "smooth",
@@ -617,7 +741,8 @@ export default function MeetingDetailPage() {
         });
       }, 60);
     } catch (e) {
-      show(e.message || "Failed to save MoM.", "warn");
+      /* A task (or the MoM) failed — show the error and leave the MoM unsaved. */
+      show(e.message || "Failed — MoM not saved.", "warn");
     } finally {
       setSavingMom(false);
     }
@@ -731,6 +856,10 @@ export default function MeetingDetailPage() {
 
   const actionItems = momRemote?.actionItems || [];
   const taskRowsDraft = momForm.actionDetails || [];
+  /* TEMP (test): allow ANY user as a task assignee. The create API really
+     wants a project-mapped user (see `assignees`), but for now we list the
+     full directory so testers can pick e.g. super-admin. Swap back to
+     `assignees` once project-scoped assignment is confirmed. */
   const userOptions = users.filter((u) => u.userId);
   const renderUserOptions = (currentValue) => (
     <>

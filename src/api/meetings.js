@@ -97,3 +97,12 @@ export async function momUpdateStatus(momId, status) {
     null
   );
 }
+
+/* POST /projects/api/v3/activities/{activityId}/tasks/create — create one
+   task under the meeting's linked activity. Called once per MoM task row
+   when the user saves the MoM. Body shape (per the backend curl):
+     { name, description, startDate, endDate, actualStartDate,
+       actualEndDate, status, priority, position, assignedTo, dependsOn[] } */
+export async function createActivityTask(activityId, body) {
+  return api.post(ENDPOINTS.activities.taskCreate(activityId), body);
+}
