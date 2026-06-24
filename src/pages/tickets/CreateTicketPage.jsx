@@ -105,7 +105,7 @@ export default function CreateTicketPage() {
           <h2>Create Ticket</h2>
           <div className="tkt-lede">
             Raise an operational or contractual issue against a project, task or activity.
-            The category and priority drive the SLA timeline, escalation and approval workflow.
+            The category and priority drive the escalation and approval workflow.
           </div>
         </div>
         <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")}>
@@ -115,7 +115,7 @@ export default function CreateTicketPage() {
 
       <div className="tkt-form-card">
         <div className="tkt-form-grid">
-          <div className="full">
+          <div>
             <label className="req">Title</label>
             <input
               className={errors.title ? "err" : ""}

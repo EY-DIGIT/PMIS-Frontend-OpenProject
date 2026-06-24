@@ -117,10 +117,10 @@ export default function TicketManagementPage() {
       {/* Header */}
       <div className="tkt-header">
         <div>
-          <h2>Ticket &amp; SLA Management</h2>
+          <h2>Ticket Management</h2>
           <div className="tkt-lede">
             Raise and track operational and contractual issues against projects, tasks and
-            activities. Categories drive SLA timelines, escalation and approval workflows.
+            activities. Categories drive escalation and approval workflows.
           </div>
         </div>
         <button type="button" className="tkt-btn" onClick={() => navigate("/tickets/new")}>
