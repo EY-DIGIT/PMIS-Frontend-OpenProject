@@ -358,10 +358,10 @@ function AddCostItemModal({
   }, [open]);
 
   if (!open) return null;
-  /* Only "fixed" rows are milestone-backed (phase + milestones). Every
-     other type — one_time, resource_cost, transaction_cost — is a
-     standalone amount row, so those fields are hidden/cleared. */
-  const isFixed = draft.costTypeCode === "fixed";
+  /* Only one_time is a standalone amount row (no phase, no milestones).
+     fixed, resource_cost and transaction_cost all carry phase +
+     milestones, so those fields show for everything except one_time. */
+  const isOneTime = draft.costTypeCode === "one_time";
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -393,8 +393,8 @@ function AddCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "fixed" ? (d.phase || "default") : "",
-                  milestoneIds: next === "fixed" ? d.milestoneIds : [],
+                  phase: next === "one_time" ? "" : (d.phase || "default"),
+                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
             >
@@ -405,15 +405,15 @@ function AddCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Phase</label>
-            {isFixed ? (
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
               <input
                 type="text"
                 value={draft.phase}
                 placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
-            ) : (
-              <input value="" disabled placeholder="—" />
             )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -439,7 +439,7 @@ function AddCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
-            {!isFixed ? (
+            {isOneTime ? (
               <input value="" disabled placeholder="—" />
             ) : (
               <MilestoneMultiSelect
@@ -494,7 +494,7 @@ function EditCostItemModal({
 
   useEffect(() => {
     if (!open || !row) return;
-    const isFixedRow = row.costTypeCode === "fixed";
+    const isOne = row.costTypeCode === "one_time";
     const taxAmt = row.taxAmount != null
       ? row.taxAmount
       : (row.taxPercent != null
@@ -502,10 +502,10 @@ function EditCostItemModal({
           : "");
     setDraft({
       costTypeCode: row.costTypeCode || "fixed",
-      phase: isFixedRow ? (row.phase ?? "default") : "",
+      phase: isOne ? "" : (row.phase ?? "default"),
       cost: row.cost != null ? String(row.cost) : "",
       taxAmount: taxAmt === "" ? "" : String(taxAmt),
-      milestoneIds: isFixedRow && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
+      milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
     });
   }, [open, row]);
 
@@ -521,7 +521,7 @@ function EditCostItemModal({
   }, [usedMilestoneIds, row]);
 
   if (!open || !row) return null;
-  const isFixed = draft.costTypeCode === "fixed";
+  const isOneTime = draft.costTypeCode === "one_time";
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -553,8 +553,8 @@ function EditCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "fixed" ? (d.phase || "default") : "",
-                  milestoneIds: next === "fixed" ? d.milestoneIds : [],
+                  phase: next === "one_time" ? "" : (d.phase || "default"),
+                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
             >
@@ -565,15 +565,15 @@ function EditCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Phase</label>
-            {isFixed ? (
+            {isOneTime ? (
+              <input value="" disabled placeholder="—" />
+            ) : (
               <input
                 type="text"
                 value={draft.phase}
                 placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
-            ) : (
-              <input value="" disabled placeholder="—" />
             )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -599,7 +599,7 @@ function EditCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
-            {!isFixed ? (
+            {isOneTime ? (
               <input value="" disabled placeholder="—" />
             ) : (
               <MilestoneMultiSelect
@@ -1061,21 +1061,21 @@ export default function ProjectFinancePage() {
       return;
     }
     const body =
-      draft.costTypeCode === "fixed"
+      draft.costTypeCode === "one_time"
         ? {
-          costTypeCode: "fixed",
+          /* one_time is the only standalone row — no phase, no milestones. */
+          costTypeCode: "one_time",
+          cost: Number(draft.cost),
+          taxAmount: Number(draft.taxAmount),
+        }
+        : {
+          /* fixed / resource_cost / transaction_cost — all carry phase +
+             milestones; send the actual selected code. */
+          costTypeCode: draft.costTypeCode,
           phase: draft.phase || "default",
           cost: Number(draft.cost),
           taxAmount: Number(draft.taxAmount),
           milestoneIds: draft.milestoneIds,
-        }
-        : {
-          /* one_time / resource_cost / transaction_cost — send the actual
-             selected code, not a hardcoded one_time. These are standalone
-             amount rows (no phase, no milestones). */
-          costTypeCode: draft.costTypeCode,
-          cost: Number(draft.cost),
-          taxAmount: Number(draft.taxAmount),
         };
     setAddingRow(true);
     try {
@@ -1107,20 +1107,21 @@ export default function ProjectFinancePage() {
       return;
     }
     const body =
-      draft.costTypeCode === "fixed"
+      draft.costTypeCode === "one_time"
         ? {
-            costTypeCode: "fixed",
+            /* one_time is the only standalone row — no phase, no milestones. */
+            costTypeCode: "one_time",
+            cost: Number(draft.cost),
+            taxAmount: Number(draft.taxAmount),
+          }
+        : {
+            /* fixed / resource_cost / transaction_cost — all carry phase +
+               milestones; send the actual selected code. */
+            costTypeCode: draft.costTypeCode,
             phase: draft.phase || "default",
             cost: Number(draft.cost),
             taxAmount: Number(draft.taxAmount),
             milestoneIds: draft.milestoneIds,
-          }
-        : {
-            /* one_time / resource_cost / transaction_cost — send the actual
-               selected code, not a hardcoded one_time. */
-            costTypeCode: draft.costTypeCode,
-            cost: Number(draft.cost),
-            taxAmount: Number(draft.taxAmount),
           };
     setSavingCostItem(true);
     try {
@@ -1519,9 +1520,9 @@ export default function ProjectFinancePage() {
                       </td>
                     </tr>
                   ) : costItems.map((r) => {
-                    /* Only fixed rows carry milestones + phase; one_time,
-                       resource_cost and transaction_cost show blank cells. */
-                    const isFixed = r.costTypeCode === "fixed";
+                    /* Only one_time hides milestones + phase; fixed,
+                       resource_cost and transaction_cost all show them. */
+                    const isOneTime = r.costTypeCode === "one_time";
                     /* Prefer the new explicit taxAmount field; fall back
                        to deriving it from taxPercent for rows saved
                        before the contract change. */
@@ -1534,13 +1535,13 @@ export default function ProjectFinancePage() {
                       <tr key={r.id}>
                         <td>{costTypeLabel(r.costTypeCode)}</td>
                         <td >
-                          {!isFixed
+                          {isOneTime
                             ? <span style={disabledCell}></span>
                             : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
                         </td>
                         <td>{inr(r.cost)}</td>
                         <td >
-                          {!isFixed
+                          {isOneTime
                             ? <span style={disabledCell}></span>
                             : (r.phase ?? "—")}
                         </td>
@@ -1847,6 +1848,7 @@ function PhasePanel({
                 >
                   No
                 </button>
+
               </div>
             </div>
           )}
@@ -1858,6 +1860,16 @@ function PhasePanel({
       {expanded && (
         <div style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              placeholder="Enter Carry Forward Percentage"
+              style={{ marginRight: 10, width: 150 }}
+            />
+            <div>
+              Enter your Carry Forward Percentage for this phase. This will be applied to the next phase's payment terms.
+              </div>
             <button
               type="button"
               className="uidai-pmis-btn uidai-pmis-btn-small"
