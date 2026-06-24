@@ -16,7 +16,8 @@ import {
   FiChevronRight,
   FiChevronDown,
   FiMessageSquare,
-  FiFileText
+  FiFileText,
+  FiTag
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
 import { userHasRole } from "../auth/roleNormalize";
@@ -111,6 +112,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const inboxAoActive = isUnder("/approvals/activity-owner");
   const inboxActive = inboxCdActive || inboxAoActive;
 
+  const ticketsActive = isUnder("/tickets");
   const assistantActive = isUnder("/assistant");
 
   // Auto-expand the section that matches the current route so the active
@@ -406,6 +408,16 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </div>
           </>
         )}
+
+        {/* Ticket & SLA Management — single entry (no submenu). The page
+            holds its own Create / filter / bulk-op controls. */}
+        <a
+          className={ticketsActive ? "active" : ""}
+          onClick={() => navigate("/tickets")}
+        >
+          <FiTag size={ICON_SIZE} />
+          <span className="pmis-text">Ticket Management</span>
+        </a>
 
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}

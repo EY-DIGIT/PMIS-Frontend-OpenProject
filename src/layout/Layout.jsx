@@ -28,6 +28,10 @@ const NAV_TITLES = {
   "meetings": {
     label: "Meeting Management",
     tooltip: "Schedule meetings, capture MoMs and convert decisions into tasks."
+  },
+  "tickets": {
+    label: "Ticket & SLA Management",
+    tooltip: "Raise and track project tickets — categories drive SLA timelines, escalation and approval workflows."
   }
 };
 
