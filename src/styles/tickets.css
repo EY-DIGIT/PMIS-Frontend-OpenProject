@@ -211,9 +211,15 @@
 /* ---------- full-page Create Ticket form (route: /tickets/new) ---------- */
 .tkt-form-card {
   background: #fff; border: 1px solid var(--uidai-pmis-border, #dbe5f1);
-  border-radius: 10px; max-width: 880px;
+  border-radius: 10px; width: 100%;
 }
-.tkt-form-card .tkt-form-grid { padding: 20px; }
+/* Full-width form: three fields per row so the wide page isn't left with
+   empty space on the right. The .full items (Title / Description / hint)
+   still span the whole row via grid-column: 1 / -1. */
+.tkt-form-card .tkt-form-grid {
+  padding: 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .tkt-form-foot {
   display: flex; justify-content: flex-end; gap: 10px;
   padding: 14px 20px; border-top: 1px solid var(--uidai-pmis-border, #dbe5f1);
@@ -231,8 +237,12 @@
 @media (max-width: 1100px) {
   .tkt-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+@media (max-width: 1024px) {
+  .tkt-form-card .tkt-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 720px) {
-  .tkt-form-grid { grid-template-columns: 1fr; }
+  .tkt-form-grid,
+  .tkt-form-card .tkt-form-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 560px) {
   .tkt-kpis { grid-template-columns: 1fr; }
