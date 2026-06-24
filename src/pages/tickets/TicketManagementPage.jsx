@@ -22,13 +22,12 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  TICKETS, CATEGORIES, PRIORITIES, STATUSES, SLA_STATES,
+  TICKETS, CATEGORIES, PRIORITIES, STATUSES,
   ASSIGNEES, PROJECTS, LINKABLES,
 } from "../../data/ticketsMock";
 import "../../styles/tickets.css";
 
 const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || code;
-const prioOf = (code) => PRIORITIES.find((p) => p.code === code);
 const statusLabel = (code) => STATUSES.find((s) => s.code === code)?.label || code;
 const assigneeOf = (id) => ASSIGNEES.find((a) => a.id === id);
 const projectName = (id) => PROJECTS.find((p) => p.id === id)?.name || id || "â€”";
@@ -36,51 +35,6 @@ const linkOf = (id) => LINKABLES.find((l) => l.id === id);
 
 const initials = (name) =>
   (name || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-
-/* Render minutes as a compact "2h 15m" / "3d 4h" string. */
-function fmtDuration(mins) {
-  const m = Math.abs(Math.round(mins));
-  if (m < 60) return `${m}m`;
-  if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`;
-  return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
-}
-
-/* Derive an SLA health bucket + remaining-time label for a ticket
-   (PMIS-FR-37.2). Resolved / closed tickets count as MET. */
-function slaFor(t) {
-  if (t.status === "RESOLVED" || t.status === "CLOSED") {
-    return { state: SLA_STATES.MET, text: "SLA met" };
-  }
-  const window = prioOf(t.priority)?.resolveMins || 1440;
-  if (t.dueInMins < 0) {
-    return { state: SLA_STATES.BREACHED, text: `Overdue ${fmtDuration(t.dueInMins)}` };
-  }
-  const atRisk = t.dueInMins <= window * 0.25;
-  return {
-    state: atRisk ? SLA_STATES.AT_RISK : SLA_STATES.ON_TRACK,
-    text: `${fmtDuration(t.dueInMins)} left`,
-  };
-}
-
-/* Intelligent routing (PMIS-FR-37.4): pick the available assignee whose
-   skills best match the ticket category, breaking ties by lowest open
-   load. Returns the suggested assignee + a short rationale. */
-function suggestAssignee(categoryCode) {
-  const want = catLabel(categoryCode);
-  const ranked = ASSIGNEES
-    .filter((a) => a.available)
-    .map((a) => ({
-      a,
-      skillHit: a.skills.some((s) => s.toLowerCase() === want.toLowerCase()) ? 1 : 0,
-    }))
-    .sort((x, y) => (y.skillHit - x.skillHit) || (x.a.load - y.a.load));
-  const top = ranked[0];
-  if (!top) return null;
-  const why = top.skillHit
-    ? `skilled in ${want}, ${top.a.load} open`
-    : `most available, ${top.a.load} open`;
-  return { id: top.a.id, name: top.a.name, why };
-}
 
 const Badge = ({ cls, children }) => <span className={`tkt-badge ${cls}`}>{children}</span>;
 
@@ -116,14 +70,13 @@ export default function TicketManagementPage() {
   }, [tickets, q, fCategory, fPriority, fStatus, fProject]);
 
   const kpis = useMemo(() => {
-    let open = 0, inProgress = 0, breached = 0, resolved = 0;
+    let open = 0, inProgress = 0, resolved = 0;
     tickets.forEach((t) => {
       if (t.status === "OPEN") open += 1;
       if (t.status === "IN_PROGRESS") inProgress += 1;
       if (t.status === "RESOLVED" || t.status === "CLOSED") resolved += 1;
-      if (slaFor(t).state.code === "BREACHED") breached += 1;
     });
-    return { open, inProgress, breached, resolved };
+    return { open, inProgress, resolved };
   }, [tickets]);
 
   // â”€â”€ selection helpers â”€â”€
@@ -184,10 +137,6 @@ export default function TicketManagementPage() {
         <div className="tkt-kpi">
           <div className="tkt-kpi-val">{kpis.inProgress}</div>
           <div className="tkt-kpi-lbl">In Progress</div>
-        </div>
-        <div className="tkt-kpi danger">
-          <div className="tkt-kpi-val">{kpis.breached}</div>
-          <div className="tkt-kpi-lbl">SLA Breached</div>
         </div>
         <div className="tkt-kpi">
           <div className="tkt-kpi-val">{kpis.resolved}</div>
@@ -283,7 +232,6 @@ export default function TicketManagementPage() {
               <th>Summary</th>
               <th style={{ width: 130 }}>Category</th>
               <th style={{ width: 90 }}>Priority</th>
-              <th style={{ width: 150 }}>SLA</th>
               <th style={{ width: 170 }}>Assignee</th>
               <th style={{ width: 120 }}>Status</th>
             </tr>
@@ -291,11 +239,10 @@ export default function TicketManagementPage() {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8}><div className="tkt-empty">No tickets match your filters.</div></td>
+                <td colSpan={7}><div className="tkt-empty">No tickets match your filters.</div></td>
               </tr>
             ) : (
               filtered.map((t) => {
-                const sla = slaFor(t);
                 const link = linkOf(t.linkId);
                 const a = assigneeOf(t.assigneeId);
                 return (
@@ -321,10 +268,6 @@ export default function TicketManagementPage() {
                     <td><Badge cls={`cat-${t.category}`}>{catLabel(t.category)}</Badge></td>
                     <td>
                       <Badge cls={`prio-${t.priority}`}>{t.priority}</Badge>
-                    </td>
-                    <td>
-                      <Badge cls={`sla-${sla.state.code}`}>{sla.state.label}</Badge>
-                      <div className="tkt-sla-time">{sla.text}</div>
                     </td>
                     <td>
                       {a ? (

@@ -21,14 +21,6 @@ import "../../styles/tickets.css";
 const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || code;
 const prioOf = (code) => PRIORITIES.find((p) => p.code === code);
 
-/* Render minutes as a compact "2h 15m" / "3d 4h" string. */
-function fmtDuration(mins) {
-  const m = Math.abs(Math.round(mins));
-  if (m < 60) return `${m}m`;
-  if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`;
-  return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
-}
-
 /* Intelligent routing (PMIS-FR-37.4): pick the available assignee whose
    skills best match the ticket category, breaking ties by lowest open
    load. Returns the suggested assignee + a short rationale. */
@@ -68,7 +60,6 @@ export default function CreateTicketPage() {
 
   // Link options are scoped to the chosen project (PMIS-FR-35.1).
   const linkOptions = LINKABLES.filter((l) => !form.projectId || l.projectId === form.projectId);
-  const prio = prioOf(form.priority);
   const suggestion = suggestAssignee(form.category);
 
   const validate = () => {
@@ -198,14 +189,10 @@ export default function CreateTicketPage() {
             {errors.description && <div className="tkt-err-msg">{errors.description}</div>}
           </div>
 
-          {/* SLA preview + intelligent routing */}
-          <div className="tkt-hint full">
-            <div>
-              <b>SLA ({form.priority})</b>: respond in {fmtDuration(prio?.respondMins || 0)},
-              resolve in {fmtDuration(prio?.resolveMins || 0)} · escalation: {prio?.escalation}
-            </div>
-            {suggestion && (
-              <div style={{ marginTop: 6 }}>
+          {/* Intelligent routing suggestion */}
+          {suggestion && (
+            <div className="tkt-hint full">
+              <div>
                 <b>Suggested assignee</b>: {suggestion.name} ({suggestion.why})
                 <button
                   type="button"
@@ -215,8 +202,8 @@ export default function CreateTicketPage() {
                   Use
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <div className="tkt-form-foot">
