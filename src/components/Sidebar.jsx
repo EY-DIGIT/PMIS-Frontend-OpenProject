@@ -69,6 +69,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const [umOpen, setUmOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
   const [mmOpen, setMmOpen] = useState(false);
+  const [tmOpen, setTmOpen] = useState(false);
 
   // Helper: is the current URL inside a given section?
   const isUnder = (prefix) =>
@@ -112,7 +113,10 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const inboxAoActive = isUnder("/approvals/activity-owner");
   const inboxActive = inboxCdActive || inboxAoActive;
 
-  const ticketsActive = isUnder("/tickets");
+  // Ticket Management — Create / All, mirroring Meeting Management.
+  const createTicketActive = isUnder("/tickets/new");
+  const allTicketsActive = isUnder("/tickets") && !createTicketActive;
+  const ticketsActive = createTicketActive || allTicketsActive;
   const assistantActive = isUnder("/assistant");
 
   // Auto-expand the section that matches the current route so the active
@@ -125,7 +129,8 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
     if (umActive) setUmOpen(true);
     if (mmActive) setMmOpen(true);
     if (inboxActive) setInboxOpen(true);
-  }, [dashActive, pmActive, masterActive, slaDataActive, vmActive, umActive, mmActive, inboxActive]);
+    if (ticketsActive) setTmOpen(true);
+  }, [dashActive, pmActive, masterActive, slaDataActive, vmActive, umActive, mmActive, inboxActive, ticketsActive]);
 
   const Chevron = ({ open }) =>
     open ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />;
@@ -409,15 +414,34 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </>
         )}
 
-        {/* Ticket & SLA Management — single entry (no submenu). The page
-            holds its own Create / filter / bulk-op controls. */}
+        {/* Ticket & SLA Management — Create Ticket / All Tickets, mirroring
+            Meeting Management. Create is its own page route, not a popup. */}
         <a
           className={ticketsActive ? "active" : ""}
-          onClick={() => navigate("/tickets")}
+          onClick={() => setTmOpen(!tmOpen)}
         >
           <FiTag size={ICON_SIZE} />
           <span className="pmis-text">Ticket Management</span>
+          <span className="pmis-submenu-arrow">
+            <Chevron open={tmOpen} />
+          </span>
         </a>
+        <div className={`pmis-submenu${tmOpen ? " open" : ""}`}>
+          <div
+            className={createTicketActive ? "active" : ""}
+            onClick={() => navigate("/tickets/new")}
+          >
+            <FiPlus size={ICON_SIZE} />
+            <span className="pmis-text">Create Ticket</span>
+          </div>
+          <div
+            className={allTicketsActive ? "active" : ""}
+            onClick={() => navigate("/tickets")}
+          >
+            <FiSearch size={ICON_SIZE} />
+            <span className="pmis-text">All Tickets</span>
+          </div>
+        </div>
 
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}

@@ -208,6 +208,17 @@
   position: sticky; bottom: 0; background: #fff;
 }
 
+/* ---------- full-page Create Ticket form (route: /tickets/new) ---------- */
+.tkt-form-card {
+  background: #fff; border: 1px solid var(--uidai-pmis-border, #dbe5f1);
+  border-radius: 10px; max-width: 880px;
+}
+.tkt-form-card .tkt-form-grid { padding: 20px; }
+.tkt-form-foot {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 14px 20px; border-top: 1px solid var(--uidai-pmis-border, #dbe5f1);
+}
+
 /* ---------- header row ---------- */
 .tkt-header {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;

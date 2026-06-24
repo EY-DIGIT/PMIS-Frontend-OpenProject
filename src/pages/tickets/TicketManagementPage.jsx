@@ -1,25 +1,26 @@
-/* ══════════════════════════════════════════════════════════════════
-   TicketManagementPage.jsx — Ticket & SLA Management (SRS §2.14).
+﻿/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   TicketManagementPage.jsx â€” Ticket & SLA Management (SRS Â§2.14).
 
    Covers, against dummy data (see data/ticketsMock.js):
-     • Create project-related tickets, linked to project/task/activity
+     â€¢ Create project-related tickets, linked to project/task/activity
        and to a parent ticket          (PMIS-FR-35, .1, .4)
-     • Categories Incident / Service Request / Change / Problem, each
+     â€¢ Categories Incident / Service Request / Change / Problem, each
        with its own workflow            (PMIS-FR-36, .1, .2, .3)
-     • Priority, description, project ref, assignee with mandatory-field
+     â€¢ Priority, description, project ref, assignee with mandatory-field
        enforcement                      (PMIS-FR-37, .1)
-     • Priority-driven SLA timelines + escalation, assignee owns SLA
+     â€¢ Priority-driven SLA timelines + escalation, assignee owns SLA
        compliance, SLA health per row   (PMIS-FR-37.2, .3)
-     • Intelligent routing suggestion (skills + availability + load)
+     â€¢ Intelligent routing suggestion (skills + availability + load)
                                          (PMIS-FR-37.4)
-     • Bulk operations — batch status update + mass assignment
+     â€¢ Bulk operations â€” batch status update + mass assignment
                                          (PMIS-FR-35.5)
 
    Everything is client-side mock state; swap the mock import for real
    API calls when the ticket service lands.
-   ══════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   TICKETS, CATEGORIES, PRIORITIES, STATUSES, SLA_STATES,
   ASSIGNEES, PROJECTS, LINKABLES,
@@ -30,7 +31,7 @@ const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || cod
 const prioOf = (code) => PRIORITIES.find((p) => p.code === code);
 const statusLabel = (code) => STATUSES.find((s) => s.code === code)?.label || code;
 const assigneeOf = (id) => ASSIGNEES.find((a) => a.id === id);
-const projectName = (id) => PROJECTS.find((p) => p.id === id)?.name || id || "—";
+const projectName = (id) => PROJECTS.find((p) => p.id === id)?.name || id || "â€”";
 const linkOf = (id) => LINKABLES.find((l) => l.id === id);
 
 const initials = (name) =>
@@ -84,6 +85,7 @@ function suggestAssignee(categoryCode) {
 const Badge = ({ cls, children }) => <span className={`tkt-badge ${cls}`}>{children}</span>;
 
 export default function TicketManagementPage() {
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState(TICKETS);
 
   // Filters
@@ -97,9 +99,6 @@ export default function TicketManagementPage() {
   const [selected, setSelected] = useState(() => new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
-
-  // Create modal
-  const [showCreate, setShowCreate] = useState(false);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -127,7 +126,7 @@ export default function TicketManagementPage() {
     return { open, inProgress, breached, resolved };
   }, [tickets]);
 
-  // ── selection helpers ──
+  // â”€â”€ selection helpers â”€â”€
   const allVisibleSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.id));
   const toggleAll = () => {
     setSelected((prev) => {
@@ -146,7 +145,7 @@ export default function TicketManagementPage() {
   };
   const clearSelection = () => setSelected(new Set());
 
-  // ── bulk ops ──
+  // â”€â”€ bulk ops â”€â”€
   const applyBulkStatus = () => {
     if (!bulkStatus) return;
     setTickets((list) => list.map((t) => (selected.has(t.id) ? { ...t, status: bulkStatus } : t)));
@@ -160,11 +159,6 @@ export default function TicketManagementPage() {
     clearSelection();
   };
 
-  const addTicket = (t) => {
-    setTickets((list) => [t, ...list]);
-    setShowCreate(false);
-  };
-
   return (
     <div className="uidai-pmis-content tkt-page">
       {/* Header */}
@@ -176,7 +170,7 @@ export default function TicketManagementPage() {
             activities. Categories drive SLA timelines, escalation and approval workflows.
           </div>
         </div>
-        <button type="button" className="tkt-btn" onClick={() => setShowCreate(true)}>
+        <button type="button" className="tkt-btn" onClick={() => navigate("/tickets/new")}>
           + Create Ticket
         </button>
       </div>
@@ -208,7 +202,7 @@ export default function TicketManagementPage() {
           <input
             id="tkt-q"
             type="search"
-            placeholder="Search ID, title or description…"
+            placeholder="Search ID, title or descriptionâ€¦"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -224,7 +218,7 @@ export default function TicketManagementPage() {
           <label htmlFor="tkt-prio">Priority</label>
           <select id="tkt-prio" value={fPriority} onChange={(e) => setFPriority(e.target.value)}>
             <option value="ALL">All priorities</option>
-            {PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.label}</option>)}
+            {PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.code} Â· {p.label}</option>)}
           </select>
         </div>
         <div className="tkt-field">
@@ -243,13 +237,13 @@ export default function TicketManagementPage() {
         </div>
       </div>
 
-      {/* Bulk action bar — PMIS-FR-35.5 */}
+      {/* Bulk action bar â€” PMIS-FR-35.5 */}
       {selected.size > 0 && (
         <div className="tkt-bulkbar">
           <span className="tkt-bulk-count">{selected.size} selected</span>
 
           <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
-            <option value="">Set status…</option>
+            <option value="">Set statusâ€¦</option>
             {STATUSES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
           <button type="button" className="tkt-btn small" disabled={!bulkStatus} onClick={applyBulkStatus}>
@@ -257,7 +251,7 @@ export default function TicketManagementPage() {
           </button>
 
           <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}>
-            <option value="">Assign to…</option>
+            <option value="">Assign toâ€¦</option>
             {ASSIGNEES.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <button type="button" className="tkt-btn small" disabled={!bulkAssignee} onClick={applyBulkAssignee}>
@@ -320,9 +314,9 @@ export default function TicketManagementPage() {
                       <div className="tkt-title">{t.title}</div>
                       <div className="tkt-sub">
                         {projectName(t.projectId)}
-                        {link && <> · {link.kind}: {link.name}</>}
+                        {link && <> Â· {link.kind}: {link.name}</>}
                       </div>
-                      {t.parentId && <span className="tkt-parent">⛓ child of {t.parentId}</span>}
+                      {t.parentId && <span className="tkt-parent">â›“ child of {t.parentId}</span>}
                     </td>
                     <td><Badge cls={`cat-${t.category}`}>{catLabel(t.category)}</Badge></td>
                     <td>
@@ -349,186 +343,6 @@ export default function TicketManagementPage() {
         </table>
       </div>
 
-      {showCreate && (
-        <CreateTicketModal
-          existing={tickets}
-          onClose={() => setShowCreate(false)}
-          onCreate={addTicket}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────
-   Create Ticket modal — enforces mandatory fields (PMIS-FR-37.1) and
-   offers an intelligent-routing suggestion for the assignee
-   (PMIS-FR-37.4). Category change re-derives the SLA preview from the
-   selected priority (PMIS-FR-37.2).
-   ────────────────────────────────────────────────────────────────── */
-function CreateTicketModal({ existing, onClose, onCreate }) {
-  const [form, setForm] = useState({
-    title: "",
-    category: "INCIDENT",
-    priority: "P3",
-    projectId: "",
-    linkId: "",
-    assigneeId: "",
-    parentId: "",
-    description: "",
-  });
-  const [errors, setErrors] = useState({});
-
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  // Link options are scoped to the chosen project (PMIS-FR-35.1).
-  const linkOptions = LINKABLES.filter((l) => !form.projectId || l.projectId === form.projectId);
-  const prio = prioOf(form.priority);
-  const suggestion = suggestAssignee(form.category);
-
-  const validate = () => {
-    const e = {};
-    if (!form.title.trim()) e.title = "Title is required.";
-    if (!form.category) e.category = "Category is required.";
-    if (!form.priority) e.priority = "Priority is required.";
-    if (!form.projectId) e.projectId = "Project reference is required.";
-    if (!form.assigneeId) e.assigneeId = "Assignee is required.";
-    if (!form.description.trim()) e.description = "Description is required.";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const submit = () => {
-    if (!validate()) return;
-    const seq = 5000 + existing.length + 1;
-    onCreate({
-      id: `TKT-${seq}`,
-      title: form.title.trim(),
-      category: form.category,
-      priority: form.priority,
-      status: "OPEN",
-      projectId: form.projectId,
-      linkId: form.linkId || null,
-      assigneeId: form.assigneeId,
-      parentId: form.parentId || null,
-      description: form.description.trim(),
-      createdAgoMins: 0,
-      dueInMins: prioOf(form.priority)?.resolveMins || 1440,
-      requester: "You",
-    });
-  };
-
-  return (
-    <div className="tkt-modal-overlay" onClick={onClose}>
-      <div className="tkt-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="tkt-modal-head">
-          <h3>Create Ticket</h3>
-          <button type="button" className="tkt-modal-x" aria-label="Close" onClick={onClose}>×</button>
-        </div>
-
-        <div className="tkt-modal-body">
-          <div className="tkt-form-grid">
-            <div className="full">
-              <label className="req">Title</label>
-              <input
-                className={errors.title ? "err" : ""}
-                value={form.title}
-                placeholder="Short summary of the issue"
-                onChange={(e) => set("title", e.target.value)}
-              />
-              {errors.title && <div className="tkt-err-msg">{errors.title}</div>}
-            </div>
-
-            <div>
-              <label className="req">Category</label>
-              <select className={errors.category ? "err" : ""} value={form.category} onChange={(e) => set("category", e.target.value)}>
-                {CATEGORIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="req">Priority</label>
-              <select className={errors.priority ? "err" : ""} value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-                {PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.label}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="req">Project reference</label>
-              <select className={errors.projectId ? "err" : ""} value={form.projectId} onChange={(e) => { set("projectId", e.target.value); set("linkId", ""); }}>
-                <option value="">Select project…</option>
-                {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              {errors.projectId && <div className="tkt-err-msg">{errors.projectId}</div>}
-            </div>
-
-            <div>
-              <label>Link to task / activity</label>
-              <select value={form.linkId} onChange={(e) => set("linkId", e.target.value)} disabled={!form.projectId}>
-                <option value="">{form.projectId ? "None (project-level)" : "Pick a project first"}</option>
-                {linkOptions.map((l) => <option key={l.id} value={l.id}>{l.kind}: {l.name}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="req">Assignee</label>
-              <select className={errors.assigneeId ? "err" : ""} value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
-                <option value="">Select assignee…</option>
-                {ASSIGNEES.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}{a.available ? "" : " (busy)"} · {a.load} open
-                  </option>
-                ))}
-              </select>
-              {errors.assigneeId && <div className="tkt-err-msg">{errors.assigneeId}</div>}
-            </div>
-
-            <div>
-              <label>Parent ticket</label>
-              <select value={form.parentId} onChange={(e) => set("parentId", e.target.value)}>
-                <option value="">None</option>
-                {existing.map((t) => <option key={t.id} value={t.id}>{t.id} — {t.title.slice(0, 40)}</option>)}
-              </select>
-            </div>
-
-            <div className="full">
-              <label className="req">Description</label>
-              <textarea
-                className={errors.description ? "err" : ""}
-                value={form.description}
-                placeholder="Describe the operational or contractual issue…"
-                onChange={(e) => set("description", e.target.value)}
-              />
-              {errors.description && <div className="tkt-err-msg">{errors.description}</div>}
-            </div>
-
-            {/* SLA preview + intelligent routing */}
-            <div className="tkt-hint">
-              <div>
-                <b>SLA ({form.priority})</b>: respond in {fmtDuration(prio?.respondMins || 0)},
-                resolve in {fmtDuration(prio?.resolveMins || 0)} · escalation: {prio?.escalation}
-              </div>
-              {suggestion && (
-                <div style={{ marginTop: 6 }}>
-                  <b>Suggested assignee</b>: {suggestion.name} ({suggestion.why})
-                  <button
-                    type="button"
-                    className="tkt-route-btn"
-                    onClick={() => set("assigneeId", suggestion.id)}
-                  >
-                    Use
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="tkt-modal-foot">
-          <button type="button" className="tkt-btn ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="tkt-btn" onClick={submit}>Create Ticket</button>
-        </div>
-      </div>
     </div>
   );
 }
