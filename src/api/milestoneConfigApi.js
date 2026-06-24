@@ -195,8 +195,8 @@ function buildMilestonePayload(project, formData) {
     dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
   };
   if (formData.priority !== undefined) body.priority = formData.priority || null;
-  /* Milestone payment release mode: on_completion | partial_activity |
-     resource_based. */
+  /* Milestone payment type from the payment-types master (partial_payment |
+     complete_payment). Nullable — omitted from the body when unset. */
   if (formData.paymentType) body.paymentType = formData.paymentType;
   return body;
 }
@@ -402,6 +402,19 @@ export async function loadResourceTypes() {
       id: r.id || "",
       code: r.code || "",
       name: r.name || r.code || ""
+    }));
+}
+
+/* Payment-type master — populates the milestone Payment Type dropdown.
+   Current catalog: partial_payment, complete_payment. */
+export async function loadPaymentTypes() {
+  const raw = await apiGet(ENDPOINTS.master.paymentTypes);
+  return extractListElements(raw)
+    .filter((p) => p && (p.code || p.id) && p.active !== false)
+    .map((p) => ({
+      id: p.id || "",
+      code: p.code || "",
+      name: p.name || p.code || ""
     }));
 }
 

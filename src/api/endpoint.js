@@ -206,6 +206,10 @@ export const ENDPOINTS = {
        NOT the /projects/ payment-module gateway. */
     costTypes: '/master/api/v3/master/cost-types',
     frequencies: '/master/api/v3/master/frequencies',
+    /* Payment-type catalog for the milestone create/edit form's Payment
+       Type dropdown. Current values: partial_payment, complete_payment.
+       Served by the same /master gateway as the other finance masters. */
+    paymentTypes: '/master/api/v3/master/payment-types',
   },
 
   resourceTypes: {

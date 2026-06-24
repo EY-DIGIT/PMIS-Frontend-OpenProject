@@ -49,6 +49,7 @@ import {
   loadResourceTypes,
   loadDivisions,
   loadPriorities,
+  loadPaymentTypes,
   loadActivityById,
   loadTaskById,
   loadSubtaskById,
@@ -161,8 +162,10 @@ function makeDefaultForm(kind, node, mode, parentNode) {
     actualStartDate: n.actualStartDate || "",
     actualEndDate: n.actualEndDate || "",
     status: n.status || "Not Completed",
-    /* Milestone-only: how payment for this milestone is released. */
-    paymentType: kind === "milestone" ? (n.paymentType || "on_completion") : "",
+    /* Milestone-only: how payment for this milestone is released. Nullable —
+       the value comes from the payment-types master (partial_payment,
+       complete_payment); empty means "not set". */
+    paymentType: kind === "milestone" ? (n.paymentType || "") : "",
     type: inheritFromParent
       ? parentNode.type
       : n.type || (kind === "milestone" ? "" : "Standard Type"),
@@ -331,6 +334,9 @@ export default function NodeModal({
   const [divisionsLoading, setDivisionsLoading] = useState(false);
   const [priorities, setPriorities] = useState([]);
   const [prioritiesLoading, setPrioritiesLoading] = useState(false);
+  /* Milestone Payment Type options, fetched from the payment-types master. */
+  const [paymentTypes, setPaymentTypes] = useState([]);
+  const [paymentTypesLoading, setPaymentTypesLoading] = useState(false);
   const [saveError, setSaveError] = useState("");
   /* Workflow audit trail + timeline data, fetched from the activity-
      workflow service for activity edit mode. `refreshKey` triggers a
@@ -391,6 +397,19 @@ export default function NodeModal({
       .finally(() => { if (!cancelled) setPrioritiesLoading(false); });
     return () => { cancelled = true; };
   }, [open]);
+
+  /* Payment types load only matters for milestones (the only kind with a
+     Payment Type field), but the fetch is cheap and harmless elsewhere. */
+  useEffect(() => {
+    if (!open || kind !== "milestone" || !getToken()) return;
+    let cancelled = false;
+    setPaymentTypesLoading(true);
+    loadPaymentTypes()
+      .then((list) => { if (!cancelled) setPaymentTypes(list); })
+      .catch(() => { if (!cancelled) setPaymentTypes([]); })
+      .finally(() => { if (!cancelled) setPaymentTypesLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, kind]);
 
   /* On Create (add mode), preselect the last entry from the priorities
      dropdown so the user isn't forced to pick one for typical low-urgency
@@ -1207,12 +1226,17 @@ export default function NodeModal({
                 className="uidai-select"
                 value={form.paymentType}
                 onChange={(e) => updateField({ paymentType: e.target.value })}
-                disabled={dis}
+                disabled={dis || paymentTypesLoading}
               >
-                <option value="on_completion">On Completion</option>
-                <option value="partial_activity">Partial Payment (based on activity)</option>
-                <option value="resource_based">Resource Based</option>
+                {/* Nullable — payment type is optional on a milestone. */}
+                <option value="">— Select payment type —</option>
+                {safeArray(paymentTypes).map((p) => (
+                  <option key={p.code} value={p.code}>{p.name}</option>
+                ))}
               </select>
+              {paymentTypesLoading && (
+                <div className="uidai-auto-hint">Loading payment types…</div>
+              )}
             </div>
           )}
 

@@ -326,21 +326,14 @@ function SummaryPanel({ totals }) {
   );
 }
 
-/* Master cost-type list plus the two product-required extras (Resource
-   Cost, Transaction Cost). Falls back to a lone "Fixed" entry when the
-   master list hasn't loaded. Extras are appended only when the master list
-   doesn't already define that code. */
+/* Cost-type options come entirely from the master list now — including
+   resource_cost and transaction_cost, which the backend added to the
+   catalog (no more frontend-side static extras). Falls back to a lone
+   "Fixed" entry only while the master list is still loading. */
 function buildCostTypeOptions(costTypes) {
-  const base =
-    Array.isArray(costTypes) && costTypes.length
-      ? costTypes
-      : [{ code: "fixed", name: "Fixed" }];
-  const extras = [
-    { code: "resource", name: "Resource Cost" },
-    { code: "transaction", name: "Transaction Cost" },
-  ];
-  const have = new Set(base.map((c) => String(c.code || "").toLowerCase()));
-  return [...base, ...extras.filter((e) => !have.has(e.code))];
+  return Array.isArray(costTypes) && costTypes.length
+    ? costTypes
+    : [{ code: "fixed", name: "Fixed" }];
 }
 
 /* ──────────────────────────────────────────────────────────────────
@@ -365,7 +358,10 @@ function AddCostItemModal({
   }, [open]);
 
   if (!open) return null;
-  const isOneTime = draft.costTypeCode === "one_time";
+  /* Only "fixed" rows are milestone-backed (phase + milestones). Every
+     other type — one_time, resource_cost, transaction_cost — is a
+     standalone amount row, so those fields are hidden/cleared. */
+  const isFixed = draft.costTypeCode === "fixed";
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -397,8 +393,8 @@ function AddCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || "default"),
-                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
+                  phase: next === "fixed" ? (d.phase || "default") : "",
+                  milestoneIds: next === "fixed" ? d.milestoneIds : [],
                 }));
               }}
             >
@@ -409,15 +405,15 @@ function AddCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Phase</label>
-            {isOneTime ? (
-              <input value="" disabled placeholder="—" />
-            ) : (
+            {isFixed ? (
               <input
                 type="text"
                 value={draft.phase}
                 placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
+            ) : (
+              <input value="" disabled placeholder="—" />
             )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -443,7 +439,7 @@ function AddCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
-            {isOneTime ? (
+            {!isFixed ? (
               <input value="" disabled placeholder="—" />
             ) : (
               <MilestoneMultiSelect
@@ -498,7 +494,7 @@ function EditCostItemModal({
 
   useEffect(() => {
     if (!open || !row) return;
-    const isOne = row.costTypeCode === "one_time";
+    const isFixedRow = row.costTypeCode === "fixed";
     const taxAmt = row.taxAmount != null
       ? row.taxAmount
       : (row.taxPercent != null
@@ -506,10 +502,10 @@ function EditCostItemModal({
           : "");
     setDraft({
       costTypeCode: row.costTypeCode || "fixed",
-      phase: isOne ? "" : (row.phase ?? "default"),
+      phase: isFixedRow ? (row.phase ?? "default") : "",
       cost: row.cost != null ? String(row.cost) : "",
       taxAmount: taxAmt === "" ? "" : String(taxAmt),
-      milestoneIds: Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
+      milestoneIds: isFixedRow && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
     });
   }, [open, row]);
 
@@ -525,7 +521,7 @@ function EditCostItemModal({
   }, [usedMilestoneIds, row]);
 
   if (!open || !row) return null;
-  const isOneTime = draft.costTypeCode === "one_time";
+  const isFixed = draft.costTypeCode === "fixed";
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -557,8 +553,8 @@ function EditCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || "default"),
-                  milestoneIds: next === "one_time" ? [] : d.milestoneIds,
+                  phase: next === "fixed" ? (d.phase || "default") : "",
+                  milestoneIds: next === "fixed" ? d.milestoneIds : [],
                 }));
               }}
             >
@@ -569,15 +565,15 @@ function EditCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Phase</label>
-            {isOneTime ? (
-              <input value="" disabled placeholder="—" />
-            ) : (
+            {isFixed ? (
               <input
                 type="text"
                 value={draft.phase}
                 placeholder="default"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
+            ) : (
+              <input value="" disabled placeholder="—" />
             )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -603,7 +599,7 @@ function EditCostItemModal({
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
-            {isOneTime ? (
+            {!isFixed ? (
               <input value="" disabled placeholder="—" />
             ) : (
               <MilestoneMultiSelect
@@ -1021,10 +1017,15 @@ export default function ProjectFinancePage() {
   // locked flag.
   const isLocked = false;
 
+  /* Phase is a free-form string now (backend accepts any string, e.g.
+     "1", "default", "phase-a"), so we collect the raw values and sort
+     them as strings rather than coercing to Number. */
   const phaseNumbersFromCosts = useMemo(() => {
     const set = new Set();
-    costItems.forEach((c) => { if (c.phase) set.add(Number(c.phase)); });
-    return Array.from(set).sort((a, b) => a - b);
+    costItems.forEach((c) => { if (c.phase != null && c.phase !== "") set.add(String(c.phase)); });
+    return Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true })
+    );
   }, [costItems]);
 
   const hasOneTime = costItems.some((c) => c.costTypeCode === "one_time");
@@ -1069,7 +1070,10 @@ export default function ProjectFinancePage() {
           milestoneIds: draft.milestoneIds,
         }
         : {
-          costTypeCode: "one_time",
+          /* one_time / resource_cost / transaction_cost — send the actual
+             selected code, not a hardcoded one_time. These are standalone
+             amount rows (no phase, no milestones). */
+          costTypeCode: draft.costTypeCode,
           cost: Number(draft.cost),
           taxAmount: Number(draft.taxAmount),
         };
@@ -1112,7 +1116,9 @@ export default function ProjectFinancePage() {
             milestoneIds: draft.milestoneIds,
           }
         : {
-            costTypeCode: "one_time",
+            /* one_time / resource_cost / transaction_cost — send the actual
+               selected code, not a hardcoded one_time. */
+            costTypeCode: draft.costTypeCode,
             cost: Number(draft.cost),
             taxAmount: Number(draft.taxAmount),
           };
@@ -1513,7 +1519,9 @@ export default function ProjectFinancePage() {
                       </td>
                     </tr>
                   ) : costItems.map((r) => {
-                    const isOneTime = r.costTypeCode === "one_time";
+                    /* Only fixed rows carry milestones + phase; one_time,
+                       resource_cost and transaction_cost show blank cells. */
+                    const isFixed = r.costTypeCode === "fixed";
                     /* Prefer the new explicit taxAmount field; fall back
                        to deriving it from taxPercent for rows saved
                        before the contract change. */
@@ -1526,13 +1534,13 @@ export default function ProjectFinancePage() {
                       <tr key={r.id}>
                         <td>{costTypeLabel(r.costTypeCode)}</td>
                         <td >
-                          {isOneTime
+                          {!isFixed
                             ? <span style={disabledCell}></span>
                             : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
                         </td>
                         <td>{inr(r.cost)}</td>
                         <td >
-                          {isOneTime
+                          {!isFixed
                             ? <span style={disabledCell}></span>
                             : (r.phase ?? "—")}
                         </td>
@@ -1897,6 +1905,11 @@ function PhasePanel({
                     .slice(0, idx + 1)
                     .reduce((s, r) => s + (Number(r.value) || 0), 0);
                   const remaining = phaseBase - scheduledSoFar;
+                  /* Activity-wise breakdown shows only while the phase is
+                     partially paid — i.e. the terms don't yet total 100%.
+                     Once they total exactly 100% the milestone is fully paid,
+                     so the activity list is hidden. */
+                  const showActivities = Math.abs(totalPercent - 100) > 0.001;
                   return (
                     <React.Fragment key={t.id}>
                     <tr style={expandedTerms.has(t.id) ? { background: "#eef5ff" } : undefined}>
@@ -1907,24 +1920,30 @@ function PhasePanel({
                         </span>
                       </td>
                       <td>
-                        {/* ⚠️ DUMMY — partial-payment milestones calculate
-                            activity-wise; the row collapses to reveal each
-                            activity's split. Placeholder until the backend
-                            returns the per-term activities. */}
-                        <button
-                          type="button"
-                          onClick={() => toggleTermExpand(t.id)}
-                          aria-expanded={expandedTerms.has(t.id)}
-                          style={{
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                            border: "1px solid #cfe0f5", background: "#eef3fb",
-                            color: "#0b3c88", fontSize: 11, fontWeight: 700,
-                            borderRadius: 999, padding: "2px 10px", cursor: "pointer",
-                          }}
-                        >
-                          <span style={{ fontSize: 9 }}>{expandedTerms.has(t.id) ? "▾" : "▸"}</span>
-                          Activities ({DUMMY_PARTIAL_ACTIVITIES.length})
-                        </button>
+                        {/* Activities (and the breakdown rows below) render
+                            only for partial-payment milestones whose phase
+                            isn't yet fully scheduled (total < 100%); otherwise
+                            the cell shows a dash.
+                            ⚠️ DUMMY list until the backend returns per-term
+                            activities. */}
+                        {showActivities ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleTermExpand(t.id)}
+                            aria-expanded={expandedTerms.has(t.id)}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 6,
+                              border: "1px solid #cfe0f5", background: "#eef3fb",
+                              color: "#0b3c88", fontSize: 11, fontWeight: 700,
+                              borderRadius: 999, padding: "2px 10px", cursor: "pointer",
+                            }}
+                          >
+                            <span style={{ fontSize: 9 }}>{expandedTerms.has(t.id) ? "▾" : "▸"}</span>
+                            Activities ({DUMMY_PARTIAL_ACTIVITIES.length})
+                          </button>
+                        ) : (
+                          <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
+                        )}
                       </td>
                       <td>
                         {t.cycleCount != null
@@ -2051,7 +2070,7 @@ function PhasePanel({
                         the milestone's value/% is split across its activities,
                         each with its own Edit action. ⚠️ DUMMY split until the
                         backend returns per-activity terms. */}
-                    {expandedTerms.has(t.id) && DUMMY_PARTIAL_ACTIVITIES.map((act, ai) => {
+                    {showActivities && expandedTerms.has(t.id) && DUMMY_PARTIAL_ACTIVITIES.map((act, ai) => {
                       const n = DUMMY_PARTIAL_ACTIVITIES.length || 1;
                       const aPct = pct / n;
                       const aVal = value / n;

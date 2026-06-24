@@ -174,8 +174,8 @@ export function mapApiMilestoneToNode(m) {
     startDate: toDateInputValue(m.startDate),
     endDate: toDateInputValue(m.endDate),
     status: mapStatusFromApi(m.status),
-    /* Milestone payment release mode (on_completion | partial_activity |
-       resource_based) — prefilled in the edit form. */
+    /* Milestone payment type from the payment-types master (partial_payment |
+       complete_payment; nullable) — prefilled in the edit form. */
     paymentType: m.paymentType || "",
     vendor: vendors.length ? vendors[0].name || "" : "",
     dependsOn: rawDeps.slice(),
