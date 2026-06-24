@@ -114,15 +114,8 @@ export default function TicketManagementPage() {
 
   return (
     <div className="uidai-pmis-content tkt-page">
-      {/* Header */}
-      <div className="tkt-header">
-        <div>
-          <h2>Ticket Management</h2>
-          <div className="tkt-lede">
-            Raise and track operational and contractual issues against projects, tasks and
-            activities. Categories drive escalation and approval workflows.
-          </div>
-        </div>
+      {/* Action bar — heading now lives in the global navbar. */}
+      <div className="tkt-header tkt-header-actions">
         <button type="button" className="tkt-btn" onClick={() => navigate("/tickets/new")}>
           + Create Ticket
         </button>

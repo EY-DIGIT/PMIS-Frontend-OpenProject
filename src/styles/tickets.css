@@ -232,6 +232,9 @@
 }
 .tkt-header .tkt-lede { font-size: 13px; color: var(--uidai-pmis-muted, #5b6b82); max-width: 620px; margin-top: 4px; }
 .tkt-header h2 { margin: 0; font-size: 20px; color: var(--uidai-pmis-navy, #173e77); }
+/* Action-only bar (heading moved to the global navbar) — push the button
+   to the right edge. */
+.tkt-header-actions { justify-content: flex-end; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {

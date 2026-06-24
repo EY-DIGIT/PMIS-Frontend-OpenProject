@@ -99,15 +99,8 @@ export default function CreateTicketPage() {
 
   return (
     <div className="uidai-pmis-content tkt-page">
-      {/* Header */}
-      <div className="tkt-header">
-        <div>
-          <h2>Create Ticket</h2>
-          <div className="tkt-lede">
-            Raise an operational or contractual issue against a project, task or activity.
-            The category and priority drive the escalation and approval workflow.
-          </div>
-        </div>
+      {/* Action bar — heading now lives in the global navbar. */}
+      <div className="tkt-header tkt-header-actions">
         <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")}>
           ← Back to tickets
         </button>

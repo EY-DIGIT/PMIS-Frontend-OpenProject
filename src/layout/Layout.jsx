@@ -30,8 +30,8 @@ const NAV_TITLES = {
     tooltip: "Schedule meetings, capture MoMs and convert decisions into tasks."
   },
   "tickets": {
-    label: "Ticket & SLA Management",
-    tooltip: "Raise and track project tickets — categories drive SLA timelines, escalation and approval workflows."
+    label: "Ticket Management",
+    tooltip: "Raise and track project tickets — categories drive escalation and approval workflows."
   }
 };
 
@@ -133,6 +133,18 @@ function resolveNavTitle(segments) {
       return {
         label: "Create a New Meeting",
         tooltip: "Fill in details, attendees, and dates to schedule a new meeting."
+      };
+    }
+  }
+
+  /* Tickets sub-routes. The list page falls through to NAV_TITLES
+     ("Ticket Management"); the Create flow gets its own title so the
+     in-page heading can be dropped. */
+  if (first === "tickets") {
+    if (segments[1] === "new") {
+      return {
+        label: "Create Ticket",
+        tooltip: "Raise a new operational or contractual ticket against a project, task or activity."
       };
     }
   }
