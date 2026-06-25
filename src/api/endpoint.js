@@ -415,5 +415,6 @@ export const ENDPOINTS = {
              assigneeEmail, baselineRef, contractRef } } */
   tickets: {
     create: '/ticket-service/tickets',
+    list: '/ticket-service/tickets',
   },
 };

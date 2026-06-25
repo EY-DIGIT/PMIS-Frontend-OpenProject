@@ -794,9 +794,8 @@ export default function MeetingDetailPage() {
           actualEndDate: endDate,
           status: "open",
           priority: TASK_PRIORITY_MAP[String(d.priority || "MEDIUM").toUpperCase()] || "p2",
-          /* Always send 0 — the backend currently errors on any other
-             position value, and only 0 is accepted for task create. */
-          position: 0,
+          /* 1-based position so tasks keep their row order (1, 2, 3, …). */
+          position: i + 1,
           assignedTo,
           dependsOn: [],
         });

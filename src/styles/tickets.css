@@ -120,11 +120,11 @@
 .cat-SERVICE_REQUEST { background: #e8f4fd; color: #1f6fb2; }
 .cat-CHANGE { background: #fff3e0; color: #b8730f; }
 .cat-PROBLEM { background: #f1ebfb; color: #7a4fbf; }
-/* priority */
-.prio-P1 { background: #c0392b; color: #fff; }
-.prio-P2 { background: #e67e22; color: #fff; }
-.prio-P3 { background: #f1c40f; color: #3a2e00; }
-.prio-P4 { background: #95a5a6; color: #fff; }
+/* priority — P1..P4 (legacy mock) + the ticket-service enum */
+.prio-P1, .prio-CRITICAL { background: #c0392b; color: #fff; }
+.prio-P2, .prio-HIGH { background: #e67e22; color: #fff; }
+.prio-P3, .prio-MEDIUM { background: #f1c40f; color: #3a2e00; }
+.prio-P4, .prio-LOW { background: #95a5a6; color: #fff; }
 /* status */
 .st-OPEN { background: #e8f0fe; color: #2c5fb0; }
 .st-IN_PROGRESS { background: #e4f7ef; color: #1d8a5b; }

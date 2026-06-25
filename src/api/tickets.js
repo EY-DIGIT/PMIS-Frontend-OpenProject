@@ -13,11 +13,13 @@
                    assigneeName, assigneeEmail, baselineRef, contractRef }
        }
 
-   The :8017 service is hit DIRECTLY (not via the gateway) and accepts
-   ONLY Content-Type. We therefore use a plain `fetch` instead of the
-   shared `api` client — the shared client force-adds Authorization /
-   Cache-Control / Pragma, which the service's CORS preflight rejects,
-   failing the request before any response is returned.
+   The :8017 service is hit DIRECTLY (not via the gateway) and its CORS
+   policy allows ONLY Content-Type. We MUST use a plain `fetch` here, not
+   the shared `api` client: the shared client force-adds Authorization /
+   Cache-Control / Pragma, and the browser's CORS preflight is then
+   rejected by the service — the call fails before any response arrives.
+   (Postman has no CORS, so it succeeds there regardless — don't be fooled
+   by that into re-adding the extra headers.)
    ══════════════════════════════════════════════════════════════════ */
 
 import { tokenStore, API_BASE, ApiError } from './client';
@@ -61,8 +63,8 @@ function buildRequestInfo() {
 
 /* POST /ticket-service/tickets — `ticket` is the ticket body; the
    requestInfo wrapper is attached here so callers only deal with the
-   ticket fields. Sends ONLY Content-Type (matches the backend Postman)
-   so the CORS preflight isn't tripped by extra headers. */
+   ticket fields. Sends ONLY Content-Type (matches the backend Postman) so
+   the browser's CORS preflight isn't rejected by extra headers. */
 export async function createTicket(ticket) {
   const url = TICKET_BASE + ENDPOINTS.tickets.create;
   const res = await fetch(url, {
@@ -83,6 +85,31 @@ export async function createTicket(ticket) {
         (payload.error?.message || payload.message || payload.errorMessage)) ||
       (typeof payload === 'string' && payload) ||
       `Create ticket failed (${res.status})`;
+    throw new ApiError(msg, { status: res.status, body: payload });
+  }
+  return payload;
+}
+
+/* GET /ticket-service/tickets?page=&size= — paged ticket list. Same plain
+   `fetch` (no Authorization / Cache-Control) so the GET stays a "simple"
+   cross-origin request and isn't blocked by the service's CORS policy.
+   Returns { totalCount, page, size, totalPages, tickets: [...] }. */
+export async function listTickets({ page = 0, size = 20 } = {}) {
+  const url = `${TICKET_BASE}${ENDPOINTS.tickets.list}?page=${page}&size=${size}`;
+  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+
+  const text = await res.text();
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); } catch { payload = text; }
+  }
+
+  if (!res.ok) {
+    const msg =
+      (payload && typeof payload === 'object' &&
+        (payload.error?.message || payload.message || payload.errorMessage)) ||
+      (typeof payload === 'string' && payload) ||
+      `Load tickets failed (${res.status})`;
     throw new ApiError(msg, { status: res.status, body: payload });
   }
   return payload;
