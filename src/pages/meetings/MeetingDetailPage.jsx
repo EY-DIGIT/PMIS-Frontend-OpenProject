@@ -165,6 +165,81 @@ function ActionStatusBadge({ status }) {
   return <span className={`badge ${AI_STATUS_CLASS[s] || "st-draft"}`}>{s.replace(/_/g, " ")}</span>;
 }
 
+/* ─── Minimal line icons (stroke-based, inherit currentColor) so the UI
+   reads as professional rather than emoji-decorated. ─── */
+function Icon({ name, size = 16 }) {
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  };
+  switch (name) {
+    case "calendar":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4.5" width="18" height="16" rx="2" />
+          <path d="M3 9h18M8 2.5v4M16 2.5v4" />
+        </svg>
+      );
+    case "clock":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 7.5V12l3 2" />
+        </svg>
+      );
+    case "pin":
+      return (
+        <svg {...common}>
+          <path d="M12 21s7-5.2 7-11a7 7 0 1 0-14 0c0 5.8 7 11 7 11Z" />
+          <circle cx="12" cy="10" r="2.5" />
+        </svg>
+      );
+    case "file":
+      return (
+        <svg {...common}>
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+          <path d="M14 3v5h5" />
+        </svg>
+      );
+    case "sparkle":
+      return (
+        <svg {...common}>
+          <path d="M12 3l1.8 4.8L18.5 9l-4.7 1.8L12 15l-1.8-4.2L5.5 9l4.7-1.2Z" />
+        </svg>
+      );
+    case "copy":
+      return (
+        <svg {...common}>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+        </svg>
+      );
+    case "lock":
+      return (
+        <svg {...common}>
+          <rect x="5" y="11" width="14" height="9" rx="2" />
+          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+        </svg>
+      );
+    case "edit":
+      return (
+        <svg {...common}>
+          <path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3Z" />
+          <path d="M13.5 6.5l4 4" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
 /* ─── Info tile (date / time / location) ─── */
 function InfoTile({ icon, label, value }) {
   return (
@@ -208,7 +283,7 @@ function LocationValue({ loc, onCopy }) {
         aria-label="Copy link"
         onClick={doCopy}
       >
-        📋
+        <Icon name="copy" size={14} />
       </button>
     </span>
   );
@@ -271,6 +346,8 @@ export default function MeetingDetailPage() {
   const [transcript, setTranscript] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
   const [generating, setGenerating] = useState(false);
+  /* Which input the user picked: "file" (Choose PDF) or "paste" (transcript text). */
+  const [momInputMode, setMomInputMode] = useState("");
 
   /* A MoM has a SINGLE status — edited once for the whole record, not
      per action item. These drive that one inline editor. */
@@ -717,7 +794,9 @@ export default function MeetingDetailPage() {
           actualEndDate: endDate,
           status: "open",
           priority: TASK_PRIORITY_MAP[String(d.priority || "MEDIUM").toUpperCase()] || "p2",
-          position: i,
+          /* Always send 0 — the backend currently errors on any other
+             position value, and only 0 is accepted for task create. */
+          position: 0,
           assignedTo,
           dependsOn: [],
         });
@@ -906,9 +985,9 @@ export default function MeetingDetailPage() {
         </div>
 
         <div className="mt-info-grid">
-          <InfoTile icon="📅" label="Date" value={fmtDate(meeting.meetingDate)} />
+          <InfoTile icon={<Icon name="calendar" />} label="Date" value={fmtDate(meeting.meetingDate)} />
           <InfoTile
-            icon="🕐"
+            icon={<Icon name="clock" />}
             label="Time (IST)"
             value={
               `${trimTime(meeting.startTime) || "—"} – ${trimTime(meeting.endTime) || "—"}` +
@@ -918,7 +997,7 @@ export default function MeetingDetailPage() {
             }
           />
           <InfoTile
-            icon="📍"
+            icon={<Icon name="pin" />}
             label="Location / Link"
             value={
               <LocationValue
@@ -1038,18 +1117,18 @@ export default function MeetingDetailPage() {
           <div
             style={{
               marginBottom: 16,
-              borderRadius: 12,
-              border: "1px solid #dfe7f1",
-              background: "linear-gradient(180deg,#f6faff 0%,#fbfdff 100%)",
+              borderRadius: 10,
+              border: "1px solid #e9eef6",
+              background: "#fbfcfe",
               overflow: "hidden",
             }}
           >
-            {/* header */}
+            {/* header — title on the left, the two mode options on the right */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 10,
+                gap: 12,
                 padding: "12px 16px",
                 borderBottom: "1px solid #e6ecf5",
               }}
@@ -1063,12 +1142,14 @@ export default function MeetingDetailPage() {
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  background: "#eaf1fb",
-                  fontSize: 16,
+                  background: "#eef4fb",
+                  border: "1px solid #d9e6f5",
+                  color: "#0b3c88",
                 }}
               >
-                ✨
+                <Icon name="sparkle" size={16} />
               </span>
+
               <div style={{ lineHeight: 1.3 }}>
                 <div style={{ fontWeight: 700, color: "#173e77" }}>
                   Generate Auto MoM
@@ -1078,9 +1159,66 @@ export default function MeetingDetailPage() {
                   Tasks table below for you to review.
                 </div>
               </div>
+
+              {/* mode selector — sits to the right of the title, same level */}
+              <div
+                style={{
+                  marginLeft: "auto",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 16,
+                  alignItems: "center",
+                }}
+              >
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    margin: 0,
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    color: "#173e77",
+                    cursor: generating || savingMom ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="momInputMode"
+                    value="file"
+                    checked={momInputMode === "file"}
+                    onChange={() => setMomInputMode("file")}
+                    disabled={generating || savingMom}
+                  />
+                  Choose file
+                </label>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    margin: 0,
+                    fontSize: 13.5,
+                    fontWeight: 600,
+                    color: "#173e77",
+                    cursor: generating || savingMom ? "not-allowed" : "pointer",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="momInputMode"
+                    value="paste"
+                    checked={momInputMode === "paste"}
+                    onChange={() => setMomInputMode("paste")}
+                    disabled={generating || savingMom}
+                  />
+                  Paste transcript
+                </label>
+              </div>
             </div>
 
-            {/* body */}
+            {/* body — only rendered once a mode is chosen */}
+            {momInputMode && (
             <div
               style={{
                 padding: 16,
@@ -1089,90 +1227,79 @@ export default function MeetingDetailPage() {
                 gap: 12,
               }}
             >
-              {/* upload row */}
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <label
-                  className="btn ghost small-btn"
+              {/* upload row — shown when "Choose file" is selected */}
+              {momInputMode === "file" && (
+                <div
                   style={{
-                    margin: 0,
-                    cursor: generating || savingMom ? "not-allowed" : "pointer",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: 10,
                   }}
                 >
-                  📄 Choose PDF
-                  <input
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                    disabled={generating || savingMom}
-                    style={{ display: "none" }}
-                  />
-                </label>
-                {uploadFile ? (
-                  <span
+                  <label
+                    className="btn ghost small-btn"
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                      fontSize: 13,
+                      margin: 0,
+                      cursor: generating || savingMom ? "not-allowed" : "pointer",
                     }}
                   >
-                    <span style={{ fontWeight: 600, color: "#173e77" }}>
-                      {uploadFile.name}
-                    </span>
-                    <button
-                      type="button"
-                      className="mt-copy-btn"
-                      title="Remove file"
-                      aria-label="Remove file"
-                      onClick={() => setUploadFile(null)}
+                    <Icon name="file" size={15} />
+                    Choose PDF
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                       disabled={generating || savingMom}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+                  {uploadFile ? (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 13,
+                      }}
                     >
-                      ✕
-                    </button>
-                  </span>
-                ) : (
-                  <span className="muted" style={{ fontSize: 12.5 }}>
-                    No file selected
-                  </span>
-                )}
-              </div>
+                      <span style={{ fontWeight: 600, color: "#173e77" }}>
+                        {uploadFile.name}
+                      </span>
+                      <button
+                        type="button"
+                        className="mt-copy-btn"
+                        title="Remove file"
+                        aria-label="Remove file"
+                        onClick={() => setUploadFile(null)}
+                        disabled={generating || savingMom}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontSize: 12.5 }}>
+                      No file selected
+                    </span>
+                  )}
+                </div>
+              )}
 
-              {/* divider */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  color: "#9aa7bd",
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                <span style={{ flex: 1, height: 1, background: "#e6ecf5" }} />
-                OR
-                <span style={{ flex: 1, height: 1, background: "#e6ecf5" }} />
-              </div>
-
-              {/* paste transcript */}
-              <div className="field full" style={{ margin: 0 }}>
-                <label htmlFor="momTranscript">Paste transcript</label>
-                <textarea
-                  id="momTranscript"
-                  className="mom-textarea"
-                  style={{ height: 130 }}
-                  placeholder="Paste the meeting transcript here…"
-                  value={transcript}
-                  onChange={(e) => setTranscript(e.target.value)}
-                  disabled={generating || savingMom}
-                />
-              </div>
+              {/* paste transcript — shown when "Paste transcript" is selected */}
+              {momInputMode === "paste" && (
+                <div className="field full" style={{ margin: 0 }}>
+                  <label htmlFor="momTranscript">Paste transcript</label>
+                  <textarea
+                    id="momTranscript"
+                    className="mom-textarea"
+                    style={{ height: 130 }}
+                    placeholder="Paste the meeting transcript here…"
+                    value={transcript}
+                    onChange={(e) => setTranscript(e.target.value)}
+                    disabled={generating || savingMom}
+                  />
+                </div>
+              )}
 
               {/* action */}
               <div
@@ -1193,22 +1320,17 @@ export default function MeetingDetailPage() {
                     (!uploadFile && !transcript.trim())
                   }
                 >
-                  {generating ? "Generating…" : "✨ Generate Auto MoM"}
+                  {!generating && <Icon name="sparkle" size={15} />}
+                  {generating ? "Generating…" : "Generate Auto MoM"}
                 </button>
-                {generating ? (
+                {generating && (
                   <span className="muted" style={{ fontSize: 12.5 }}>
                     Reading the transcript and extracting the MoM…
-                  </span>
-                ) : (
-                  <span
-                    className="muted"
-                    style={{ fontSize: 12, marginLeft: "auto" }}
-                  >
-                    A selected PDF takes priority over pasted text.
                   </span>
                 )}
               </div>
             </div>
+            )}
           </div>
 
           <div id="mom-form" className="grid" style={{ gridTemplateColumns: "1fr" }}>
@@ -1414,7 +1536,7 @@ export default function MeetingDetailPage() {
                             style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
                             title="A finalized MoM cannot be edited."
                           >
-                            🔒 Locked
+                            <Icon name="lock" size={13} /> Locked
                           </span>
                         ) : (
                           <button
@@ -1422,7 +1544,7 @@ export default function MeetingDetailPage() {
                             className="btn ghost small-btn"
                             onClick={startStatusEdit}
                           >
-                            ✎ Edit
+                            <Icon name="edit" size={13} /> Edit
                           </button>
                         )}
                       </>

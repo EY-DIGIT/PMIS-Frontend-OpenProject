@@ -954,6 +954,10 @@ export default function ProjectFinancePage() {
           id: m.id,
           name: m.name || m.title || m.id,
           status: fromApiNodeStatus(m.status),
+          /* Payment type from the payment-types master (partial_payment |
+             complete_payment; nullable) — drives whether the activity
+             list shows for the milestone's payment terms. */
+          paymentType: m.paymentType || "",
         }));
       setMilestones(list);
     } catch (err) {
@@ -1353,6 +1357,10 @@ export default function ProjectFinancePage() {
     return milestones.find((m) => m.id === id)?.status || "Not Completed";
   }
 
+  function milestonePaymentType(id) {
+    return milestones.find((m) => m.id === id)?.paymentType || "";
+  }
+
   function generateInvoice(term) {
     const name = milestoneName(term?.milestoneId);
     uiStore.showMessage(`Invoice generated for milestone "${name}".`);
@@ -1581,8 +1589,11 @@ export default function ProjectFinancePage() {
               <PhasePanel
                 key={p.phase}
                 phase={p}
+                allPhases={phases}
+                milestones={milestones}
                 milestoneName={milestoneName}
                 milestoneStatus={milestoneStatus}
+                milestonePaymentType={milestonePaymentType}
                 frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
                 onGenerateInvoice={generateInvoice}
@@ -1713,13 +1724,194 @@ export default function ProjectFinancePage() {
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   Carry Forward Cost configuration popup. Opens when a phase's Carry
+   Forward toggle is switched to "Yes". Collects:
+     • the carry-forward % — taken against the phase's REMAINING %, which
+       is treated as the 100% base (the user's "treat the 30% left as
+       100%"). carried = entered% of remaining; the rest stays.
+     • the carry-forward type — phase-based (pick a target phase) or
+       milestone-based (pick a target milestone).
+
+   ⚠️ UI-ONLY: Apply does NOT persist anything yet. The /qrg endpoint
+   currently accepts only { qrgApplied }. Once the backend accepts a
+   percentage + type + target, wire onApply to PUT them and rely on the
+   page reload for the recomputed numbers.
+   ────────────────────────────────────────────────────────────────── */
+function CarryForwardModal({
+  open, onClose, onApply, phaseLabel,
+  currentPercent = 0, remainingPercent = 0,
+  milestones = [], otherPhases = [],
+}) {
+  const [percent, setPercent] = useState("");
+  const [cfType, setCfType] = useState("phase"); // 'phase' | 'milestone'
+  const [targetPhase, setTargetPhase] = useState("");
+  const [targetMilestoneId, setTargetMilestoneId] = useState("");
+
+  // Reseed each time the popup opens.
+  useEffect(() => {
+    if (open) {
+      setPercent("");
+      setCfType("phase");
+      setTargetPhase("");
+      setTargetMilestoneId("");
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const entered = Number(percent);
+  const enteredValid = percent !== "" && Number.isFinite(entered) && entered >= 0 && entered <= 100;
+  /* entered is a share of the remaining base (remaining = 100%). */
+  const carriedOfTotal = enteredValid ? Math.round((entered / 100) * remainingPercent * 100) / 100 : 0;
+  const staysOfTotal = enteredValid ? Math.round((remainingPercent - carriedOfTotal) * 100) / 100 : 0;
+
+  const targetChosen = cfType === "phase" ? !!targetPhase : !!targetMilestoneId;
+  const canApply = enteredValid && entered > 0 && targetChosen;
+
+  const targetLabel =
+    cfType === "phase"
+      ? (targetPhase ? `Phase ${targetPhase}` : "…")
+      : (milestones.find((m) => String(m.id) === String(targetMilestoneId))?.name || "…");
+
+  const readout = (label, value) => (
+    <div style={{
+      flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
+      padding: "8px 12px", background: "#f7f9fc",
+    }}>
+      <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>{label}</div>
+      <strong style={{ color: "#173e77", fontSize: 16 }}>{value}%</strong>
+    </div>
+  );
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box" style={{ width: "min(560px, 100%)" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">Carry Forward Cost — Phase {phaseLabel}</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          Choose how much of this phase's remaining cost to carry forward, and where it goes.
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          {readout("Current (scheduled)", currentPercent)}
+          {readout("Remaining (available)", remainingPercent)}
+        </div>
+
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>% to carry forward (of the remaining {remainingPercent}%)</label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={percent}
+            placeholder="e.g. 50"
+            onChange={(e) => setPercent(e.target.value)}
+          />
+          {percent !== "" && !enteredValid && (
+            <small style={{ color: "var(--uidai-pmis-red)" }}>Enter a value between 0 and 100.</small>
+          )}
+        </div>
+
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>Carry-forward type</label>
+          <div style={{ display: "flex", gap: 18, marginTop: 4 }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600, color: "#173e77" }}>
+              <input type="radio" name="cfType" checked={cfType === "phase"} onChange={() => setCfType("phase")} />
+              Phase-based
+            </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600, color: "#173e77" }}>
+              <input type="radio" name="cfType" checked={cfType === "milestone"} onChange={() => setCfType("milestone")} />
+              Milestone-based
+            </label>
+          </div>
+        </div>
+
+        {cfType === "phase" ? (
+          <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+            <label>Target phase</label>
+            <select value={targetPhase} onChange={(e) => setTargetPhase(e.target.value)}>
+              <option value="">— Select phase —</option>
+              {otherPhases.map((p) => (
+                <option key={p.phase} value={p.phase}>Phase {p.phase}</option>
+              ))}
+            </select>
+            {otherPhases.length === 0 && (
+              <small style={{ color: "var(--uidai-pmis-muted)" }}>No other phase available.</small>
+            )}
+          </div>
+        ) : (
+          <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+            <label>Target milestone</label>
+            <select value={targetMilestoneId} onChange={(e) => setTargetMilestoneId(e.target.value)}>
+              <option value="">— Select milestone —</option>
+              {milestones.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+            {milestones.length === 0 && (
+              <small style={{ color: "var(--uidai-pmis-muted)" }}>No milestones available.</small>
+            )}
+          </div>
+        )}
+
+        {enteredValid && entered > 0 && (
+          <div style={{
+            border: "1px solid #cfe0f5", background: "#eef5ff", borderRadius: 8,
+            padding: "10px 12px", fontSize: 12.5, color: "#0b3c88", lineHeight: 1.5,
+          }}>
+            Carrying forward <strong>{carriedOfTotal}%</strong> → <strong>{targetLabel}</strong>;{" "}
+            <strong>{staysOfTotal}%</strong> stays in Phase {phaseLabel}.
+          </div>
+        )}
+
+        <div style={{ marginTop: 12, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
+          Note: not saved yet — backend carry-forward persistence is pending.
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={!canApply}
+            onClick={() => onApply({ percent: entered, cfType, targetPhase, targetMilestoneId, carriedOfTotal, staysOfTotal })}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Each phase renders as its own collapsible panel — header is always
    visible, body collapses. Frequency + % of Payment are first-class
    columns now; the row-level pencil button opens the EditTermModal
    which holds both. QGR moved out into the dedicated section below
    the Summary, so this panel stays focused on payment terms. */
 function PhasePanel({
-  phase, milestoneName, milestoneStatus = () => "Not Completed",
+  phase, allPhases = [], milestones = [],
+  milestoneName, milestoneStatus = () => "Not Completed",
+  milestonePaymentType = () => "",
   frequencies = [], onEditTerm, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
 }) {
@@ -1749,9 +1941,22 @@ function PhasePanel({
      part of that base. */
   const phaseBase = totalPercent > 0 ? totalValue / (totalPercent / 100) : 0;
   const phaseRemaining = phaseBase - totalValue;
-  const qrgApplied = !!phase.qrg?.applied;
   const canToggleQgr = typeof onSetQrgForPhase === "function";
   const qgrDisabled = qgrLocked || qgrBusy;
+
+  /* Carry Forward Cost — UI-only for now (Save is NOT wired to the backend
+     yet; the /qrg endpoint still only accepts { qrgApplied }). The toggle
+     defaults to "No"; picking "Yes" opens the configuration popup. Once
+     applied there, we flip the local flag so the toggle reflects the
+     choice. TODO: persist via the backend once it accepts a carry-forward
+     percentage + type. */
+  const [cfApplied, setCfApplied] = useState(false);
+  const [cfModalOpen, setCfModalOpen] = useState(false);
+  /* "Current" = what's already scheduled on this phase; "Remaining" = the
+     still-unscheduled %, which is the base the carry-forward % applies to
+     (the user's "treat the 30% left as 100%"). */
+  const cfCurrentPercent = Math.min(100, Math.round(totalPercent * 100) / 100);
+  const cfRemainingPercent = Math.max(0, Math.round((100 - totalPercent) * 100) / 100);
 
   return (
     <div style={{
@@ -1781,7 +1986,7 @@ function PhasePanel({
         <div style={{ display: "inline-flex", alignItems: "center", gap: 12, minWidth: 0, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
             Phase {phase.phase}
-            {qrgApplied && (
+            {cfApplied && (
               <span style={{
                 fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
                 padding: "2px 7px", borderRadius: 999,
@@ -1818,12 +2023,12 @@ function PhasePanel({
                 <button
                   type="button"
                   disabled={qgrDisabled}
-                  onClick={() => !qrgApplied && onSetQrgForPhase(phase.phase, true)}
+                  onClick={() => setCfModalOpen(true)}
                   style={{
                     padding: "4px 12px",
                     border: "none",
-                    background: qrgApplied ? "#1b7a42" : "transparent",
-                    color: qrgApplied ? "#fff" : "#173e77",
+                    background: cfApplied ? "#1b7a42" : "transparent",
+                    color: cfApplied ? "#fff" : "#173e77",
                     fontWeight: 700, fontSize: 12,
                     cursor: qgrDisabled ? "not-allowed" : "pointer",
                     opacity: qgrDisabled ? 0.5 : 1,
@@ -1834,12 +2039,12 @@ function PhasePanel({
                 <button
                   type="button"
                   disabled={qgrDisabled}
-                  onClick={() => qrgApplied && onSetQrgForPhase(phase.phase, false)}
+                  onClick={() => setCfApplied(false)}
                   style={{
                     padding: "4px 12px",
                     border: "none",
                     borderLeft: "1px solid var(--uidai-pmis-border)",
-                    background: !qrgApplied ? "#eef2f7" : "transparent",
+                    background: !cfApplied ? "#eef2f7" : "transparent",
                     color: "#173e77",
                     fontWeight: 700, fontSize: 12,
                     cursor: qgrDisabled ? "not-allowed" : "pointer",
@@ -1860,16 +2065,6 @@ function PhasePanel({
       {expanded && (
         <div style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              placeholder="Enter Carry Forward Percentage"
-              style={{ marginRight: 10, width: 150 }}
-            />
-            <div>
-              Enter your Carry Forward Percentage for this phase. This will be applied to the next phase's payment terms.
-              </div>
             <button
               type="button"
               className="uidai-pmis-btn uidai-pmis-btn-small"
@@ -1918,10 +2113,12 @@ function PhasePanel({
                     .reduce((s, r) => s + (Number(r.value) || 0), 0);
                   const remaining = phaseBase - scheduledSoFar;
                   /* Activity-wise breakdown shows only while the phase is
-                     partially paid — i.e. the terms don't yet total 100%.
-                     Once they total exactly 100% the milestone is fully paid,
-                     so the activity list is hidden. */
-                  const showActivities = Math.abs(totalPercent - 100) > 0.001;
+                     partially paid (terms don't yet total 100%) AND the
+                     milestone isn't a complete_payment one — a milestone
+                     billed in full has no activity-wise split. */
+                  const showActivities =
+                    Math.abs(totalPercent - 100) > 0.001 &&
+                    milestonePaymentType(t.milestoneId) !== "complete_payment";
                   return (
                     <React.Fragment key={t.id}>
                     <tr style={expandedTerms.has(t.id) ? { background: "#eef5ff" } : undefined}>
@@ -2269,6 +2466,24 @@ function PhasePanel({
           </div>
         </div>
       )}
+
+      <CarryForwardModal
+        open={cfModalOpen}
+        onClose={() => setCfModalOpen(false)}
+        phaseLabel={phase.phase}
+        currentPercent={cfCurrentPercent}
+        remainingPercent={cfRemainingPercent}
+        milestones={milestones}
+        otherPhases={allPhases.filter((p) => p.phase !== phase.phase)}
+        onApply={() => {
+          /* UI-only: flip the local flag so the toggle shows "Yes" and the
+             phase badge appears. Nothing is persisted yet — wire onApply to
+             the backend once /qrg accepts a percentage + type + target. */
+          setCfApplied(true);
+          setCfModalOpen(false);
+          uiStore.showMessage("Carry-forward captured (not saved yet — backend pending).");
+        }}
+      />
     </div>
   );
 }
