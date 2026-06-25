@@ -1,44 +1,49 @@
 /* ══════════════════════════════════════════════════════════════════
    CreateTicketPage.jsx — full-page "Create Ticket" form (SRS §2.14).
 
-   This is the page-route version of what used to be the in-page modal
-   on TicketManagementPage. Reached from the sidebar (Ticket Management ›
-   Create Ticket) at /tickets/new.
+   Reached from the sidebar (Ticket Management › Create Ticket) at
+   /tickets/new. Enforces the mandatory fields (PMIS-FR-37.1) and POSTs
+   to the ticket-service via src/api/tickets.js.
 
-   Enforces mandatory fields (PMIS-FR-37.1), previews the priority-driven
-   SLA window (PMIS-FR-37.2) and offers an intelligent-routing suggestion
-   for the assignee (PMIS-FR-37.4). On submit the new ticket is prepended
-   to the shared mock list and the user is returned to /tickets.
+   Category / Priority stay static catalogs (ticketsMock), but the
+   Project, Assignee and Link-to-task/activity pickers are now fed by the
+   live project / user APIs so the IDs, names and email shipped in the
+   payload are real.
    ══════════════════════════════════════════════════════════════════ */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  TICKETS, CATEGORIES, PRIORITIES, ASSIGNEES, PROJECTS, LINKABLES,
-} from "../../data/ticketsMock";
+import { CATEGORIES } from "../../data/ticketsMock";
+import * as projectsApi from "../../api/projects";
+import * as usersApi from "../../api/users";
+import { createTicket } from "../../api/tickets";
 import "../../styles/tickets.css";
 
-const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || code;
-const prioOf = (code) => PRIORITIES.find((p) => p.code === code);
+/* Flatten a project tree into the list of things a ticket can be linked
+   to — every activity and every task under it (PMIS-FR-35.1). Each entry
+   carries a `kind` so submit knows whether to populate activity* or
+   task* fields. */
+/* Priority enum the ticket-service expects (per the backend Postman
+   collection: HIGH / CRITICAL …) — NOT the P1..P4 codes the mock SLA
+   catalog uses. */
+const PRIORITY_OPTIONS = [
+  { value: "CRITICAL", label: "Critical" },
+  { value: "HIGH", label: "High" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "LOW", label: "Low" },
+];
 
-/* Intelligent routing (PMIS-FR-37.4): pick the available assignee whose
-   skills best match the ticket category, breaking ties by lowest open
-   load. Returns the suggested assignee + a short rationale. */
-function suggestAssignee(categoryCode) {
-  const want = catLabel(categoryCode);
-  const ranked = ASSIGNEES
-    .filter((a) => a.available)
-    .map((a) => ({
-      a,
-      skillHit: a.skills.some((s) => s.toLowerCase() === want.toLowerCase()) ? 1 : 0,
-    }))
-    .sort((x, y) => (y.skillHit - x.skillHit) || (x.a.load - y.a.load));
-  const top = ranked[0];
-  if (!top) return null;
-  const why = top.skillHit
-    ? `skilled in ${want}, ${top.a.load} open`
-    : `most available, ${top.a.load} open`;
-  return { id: top.a.id, name: top.a.name, why };
+function flattenLinkables(project) {
+  const out = [];
+  (project?.milestones || []).forEach((m) => {
+    (m.activities || []).forEach((a) => {
+      if (a.uuid) out.push({ id: a.uuid, kind: "Activity", name: a.name });
+      (a.tasks || []).forEach((t) => {
+        if (t.uuid) out.push({ id: t.uuid, kind: "Task", name: t.name });
+      });
+    });
+  });
+  return out;
 }
 
 export default function CreateTicketPage() {
@@ -47,20 +52,61 @@ export default function CreateTicketPage() {
   const [form, setForm] = useState({
     title: "",
     category: "INCIDENT",
-    priority: "P3",
+    subCategory: "",
+    priority: "MEDIUM",
     projectId: "",
     linkId: "",
     assigneeId: "",
-    parentId: "",
+    parentTicketUuid: "",
     description: "",
+    baselineRef: "",
+    contractRef: "",
   });
   const [errors, setErrors] = useState({});
 
+  /* Live master data. */
+  const [projects, setProjects] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [linkOptions, setLinkOptions] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingLinks, setLoadingLinks] = useState(false);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState("");
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Link options are scoped to the chosen project (PMIS-FR-35.1).
-  const linkOptions = LINKABLES.filter((l) => !form.projectId || l.projectId === form.projectId);
-  const suggestion = suggestAssignee(form.category);
+  /* Initial load: projects + user roster in parallel. */
+  useEffect(() => {
+    let alive = true;
+    setLoadingProjects(true);
+    setLoadingUsers(true);
+    projectsApi
+      .list({ pageSize: 200 })
+      .then((rows) => { if (alive) setProjects(rows); })
+      .catch((e) => { if (alive) setApiError(`Couldn't load projects: ${e.message}`); })
+      .finally(() => { if (alive) setLoadingProjects(false); });
+    usersApi
+      .listAll()
+      .then((rows) => { if (alive) setUsers(rows); })
+      .catch((e) => { if (alive) setApiError(`Couldn't load users: ${e.message}`); })
+      .finally(() => { if (alive) setLoadingUsers(false); });
+    return () => { alive = false; };
+  }, []);
+
+  /* When the project changes, pull its tree to fill the link picker. */
+  useEffect(() => {
+    let alive = true;
+    if (!form.projectId) { setLinkOptions([]); return undefined; }
+    setLoadingLinks(true);
+    projectsApi
+      .getTree(form.projectId)
+      .then((proj) => { if (alive) setLinkOptions(flattenLinkables(proj)); })
+      .catch(() => { if (alive) setLinkOptions([]); })
+      .finally(() => { if (alive) setLoadingLinks(false); });
+    return () => { alive = false; };
+  }, [form.projectId]);
 
   const validate = () => {
     const e = {};
@@ -74,28 +120,49 @@ export default function CreateTicketPage() {
     return Object.keys(e).length === 0;
   };
 
-  const submit = () => {
+  const submit = async () => {
+    setApiError("");
     if (!validate()) return;
-    const seq = 5000 + TICKETS.length + 1;
-    // Mutate the shared mock list so the All-Tickets page picks it up on
-    // its next mount. Swap for a real POST when the ticket service lands.
-    TICKETS.unshift({
-      id: `TKT-${seq}`,
-      title: form.title.trim(),
+
+    const proj = projects.find((p) => p.projectId === form.projectId);
+    const user = users.find((u) => u.userId === form.assigneeId);
+    const link = linkOptions.find((l) => l.id === form.linkId);
+    const isActivity = link?.kind === "Activity";
+    const isTask = link?.kind === "Task";
+
+    const ticket = {
       category: form.category,
+      subCategory: form.subCategory.trim(),
       priority: form.priority,
-      status: "OPEN",
-      projectId: form.projectId,
-      linkId: form.linkId || null,
-      assigneeId: form.assigneeId,
-      parentId: form.parentId || null,
+      title: form.title.trim(),
       description: form.description.trim(),
-      createdAgoMins: 0,
-      dueInMins: prioOf(form.priority)?.resolveMins || 1440,
-      requester: "You",
-    });
-    navigate("/tickets");
+      projectId: form.projectId,
+      projectName: proj?.projectName || "",
+      activityId: isActivity ? link.id : "",
+      activityName: isActivity ? link.name : "",
+      taskId: isTask ? link.id : "",
+      taskName: isTask ? link.name : "",
+      parentTicketUuid: form.parentTicketUuid.trim(),
+      assigneeUuid: form.assigneeId,
+      assigneeName: user?.fullName || "",
+      assigneeEmail: user?.email || "",
+      baselineRef: form.baselineRef.trim() || null,
+      contractRef: form.contractRef.trim() || null,
+    };
+
+    setSubmitting(true);
+    try {
+      await createTicket(ticket);
+      navigate("/tickets");
+    } catch (e) {
+      setApiError(e.message || "Failed to create ticket.");
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const userLabel = (u) =>
+    `${u.fullName || u.email || u.userId}${u.email ? ` · ${u.email}` : ""}`;
 
   return (
     <div className="uidai-pmis-content tkt-page">
@@ -107,6 +174,8 @@ export default function CreateTicketPage() {
       </div>
 
       <div className="tkt-form-card">
+        {apiError && <div className="tkt-err-msg" style={{ marginBottom: 12 }}>{apiError}</div>}
+
         <div className="tkt-form-grid">
           <div>
             <label className="req">Title</label>
@@ -127,48 +196,100 @@ export default function CreateTicketPage() {
           </div>
 
           <div>
+            <label>Sub-category</label>
+            <input
+              value={form.subCategory}
+              placeholder="Optional finer classification"
+              onChange={(e) => set("subCategory", e.target.value)}
+            />
+          </div>
+
+          <div>
             <label className="req">Priority</label>
             <select className={errors.priority ? "err" : ""} value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-              {PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.code} · {p.label}</option>)}
+              {PRIORITY_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
 
           <div>
             <label className="req">Project reference</label>
-            <select className={errors.projectId ? "err" : ""} value={form.projectId} onChange={(e) => { set("projectId", e.target.value); set("linkId", ""); }}>
-              <option value="">Select project…</option>
-              {PROJECTS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <select
+              className={errors.projectId ? "err" : ""}
+              value={form.projectId}
+              disabled={loadingProjects}
+              onChange={(e) => { set("projectId", e.target.value); set("linkId", ""); }}
+            >
+              <option value="">{loadingProjects ? "Loading projects…" : "Select project…"}</option>
+              {projects.map((p) => (
+                <option key={p.projectId} value={p.projectId}>
+                  {p.projectCode ? `${p.projectCode} — ` : ""}{p.projectName}
+                </option>
+              ))}
             </select>
             {errors.projectId && <div className="tkt-err-msg">{errors.projectId}</div>}
           </div>
 
           <div>
             <label>Link to task / activity</label>
-            <select value={form.linkId} onChange={(e) => set("linkId", e.target.value)} disabled={!form.projectId}>
-              <option value="">{form.projectId ? "None (project-level)" : "Pick a project first"}</option>
-              {linkOptions.map((l) => <option key={l.id} value={l.id}>{l.kind}: {l.name}</option>)}
+            <select
+              value={form.linkId}
+              onChange={(e) => set("linkId", e.target.value)}
+              disabled={!form.projectId || loadingLinks}
+            >
+              <option value="">
+                {!form.projectId
+                  ? "Pick a project first"
+                  : loadingLinks
+                    ? "Loading…"
+                    : "None (project-level)"}
+              </option>
+              {linkOptions.map((l) => (
+                <option key={l.id} value={l.id}>{l.kind}: {l.name}</option>
+              ))}
             </select>
           </div>
 
           <div>
             <label className="req">Assignee</label>
-            <select className={errors.assigneeId ? "err" : ""} value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
-              <option value="">Select assignee…</option>
-              {ASSIGNEES.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}{a.available ? "" : " (busy)"} · {a.load} open
-                </option>
+            <select
+              className={errors.assigneeId ? "err" : ""}
+              value={form.assigneeId}
+              disabled={loadingUsers}
+              onChange={(e) => set("assigneeId", e.target.value)}
+            >
+              <option value="">{loadingUsers ? "Loading users…" : "Select assignee…"}</option>
+              {users.map((u) => (
+                <option key={u.userId} value={u.userId}>{userLabel(u)}</option>
               ))}
             </select>
             {errors.assigneeId && <div className="tkt-err-msg">{errors.assigneeId}</div>}
           </div>
 
           <div>
-            <label>Parent ticket</label>
-            <select value={form.parentId} onChange={(e) => set("parentId", e.target.value)}>
-              <option value="">None</option>
-              {TICKETS.map((t) => <option key={t.id} value={t.id}>{t.id} — {t.title.slice(0, 40)}</option>)}
-            </select>
+            <label>Parent ticket UUID</label>
+            <input
+              value={form.parentTicketUuid}
+              placeholder="Optional — link as a child of another ticket"
+              onChange={(e) => set("parentTicketUuid", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label>Baseline reference</label>
+            <input
+              value={form.baselineRef}
+              placeholder="Optional"
+              onChange={(e) => set("baselineRef", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label>Contract reference</label>
+            <input
+              value={form.contractRef}
+              placeholder="Optional"
+              onChange={(e) => set("contractRef", e.target.value)}
+            />
           </div>
 
           <div className="full">
@@ -181,27 +302,15 @@ export default function CreateTicketPage() {
             />
             {errors.description && <div className="tkt-err-msg">{errors.description}</div>}
           </div>
-
-          {/* Intelligent routing suggestion */}
-          {suggestion && (
-            <div className="tkt-hint full">
-              <div>
-                <b>Suggested assignee</b>: {suggestion.name} ({suggestion.why})
-                <button
-                  type="button"
-                  className="tkt-route-btn"
-                  onClick={() => set("assigneeId", suggestion.id)}
-                >
-                  Use
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="tkt-form-foot">
-          <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")}>Cancel</button>
-          <button type="button" className="tkt-btn" onClick={submit}>Create Ticket</button>
+          <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")} disabled={submitting}>
+            Cancel
+          </button>
+          <button type="button" className="tkt-btn" onClick={submit} disabled={submitting}>
+            {submitting ? "Creating…" : "Create Ticket"}
+          </button>
         </div>
       </div>
     </div>

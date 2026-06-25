@@ -401,4 +401,19 @@ export const ENDPOINTS = {
     momGetByMeeting: (meetingId) => `/meetings/mom/getByMeeting/${enc(meetingId)}`,
     momUpdateStatus: (momId) => `/meetings/mom/updateStatus/${enc(momId)}`,
   },
+
+  /* Ticket & SLA Management — the ticket-service is hit DIRECTLY on
+     port 8017 (NOT through the gateway). tickets.js builds the absolute
+     base (host of API_BASE + :8017, override via VITE_TICKET_API_BASE_URL)
+     and prepends it to this path. Reference curl:
+       POST http://<host>:8017/ticket-service/tickets
+         { requestInfo: { userInfo: { uuid, userName, email,
+             roles: [{ code }] } },
+           ticket: { category, subCategory, priority, title, description,
+             projectId, projectName, activityId, activityName, taskId,
+             taskName, parentTicketUuid, assigneeUuid, assigneeName,
+             assigneeEmail, baselineRef, contractRef } } */
+  tickets: {
+    create: '/ticket-service/tickets',
+  },
 };
