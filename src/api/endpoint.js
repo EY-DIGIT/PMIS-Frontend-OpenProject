@@ -259,7 +259,11 @@ export const ENDPOINTS = {
     paymentPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-page`,
     costItems: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/cost-items`,
     paymentTerms: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-terms`,
-    qrg: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/qrg`,
+    /* Carry-forward replaces the old /qrg toggle. A phase with leftover
+       budget carries its ENTIRE leftover forward; the body only chooses the
+       distribution mode: { enabled: true, mode: "phase" | "milestone" } or
+       { enabled: false }. Response lands in phases[].carryForward. */
+    carryForward: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/carry-forward`,
     phaseFrequency: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/frequency`,
     ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
   },
@@ -268,6 +272,11 @@ export const ENDPOINTS = {
      payment-term IDs are global UUIDs — PATCH/DELETE go through these. */
   paymentTerms: {
     update: (id) => `/projects/api/v3/payment-terms/${enc(id)}`,
+    /* Per-activity split for partial-payment terms. PATCH body:
+       { activities: [{ activityId, percentOfPayment }] } — percents must
+       sum to the term's percentOfPayment; an empty list resets to an even
+       split. Returns the recomputed term with activities[]. */
+    termActivities: (id) => `/projects/api/v3/payment-terms/${enc(id)}/activities`,
   },
   costItems: {
     update: (id) => `/projects/api/v3/cost-items/${enc(id)}`,

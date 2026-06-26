@@ -10,10 +10,6 @@ import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 
-/* ⚠️ TEMP DUMMY — placeholder activities shown in the payment-term table's
-   Activity column for partial-payment milestones. Replace with the real
-   per-term activity once the backend returns it. */
-const DUMMY_PARTIAL_ACTIVITIES = ["Activity A1", "Activity A2", "Activity A3"];
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -25,11 +21,13 @@ import "../../styles/global.css";
      GET   /projects/{pid}/milestones               — milestone id → name
      POST  /projects/{pid}/cost-items               — add a cost row
      PATCH /projects/payment-terms/{tid}            — set frequency + %
-     PUT   /projects/{pid}/phases/{n}/qrg           — toggle QGR per phase
+     PATCH /projects/payment-terms/{tid}/activities — per-activity split
+     PUT   /projects/{pid}/phases/{n}/carry-forward — carry leftover fwd
      PATCH /projects/{pid}/ccn-cap                  — set CCN cap %
 
    The /payment-page response is the single source of truth — every
-   mutation refreshes it so totals, derived values and QRG stay in sync.
+   mutation refreshes it so totals, derived values and carry-forward stay
+   in sync.
    ──────────────────────────────────────────────────────────────────── */
 
 function inr(n) {
@@ -899,9 +897,13 @@ export default function ProjectFinancePage() {
   // Value buffer for the QGR / AQP variants (CCN uses ccnInput above).
   const [additionalValue, setAdditionalValue] = useState("");
 
-  // ── QGR mutation guard — blocks concurrent cascades that could
-  //    otherwise leave two phases showing Yes at once. ──
-  const [qgrSaving, setQgrSaving] = useState(false);
+  // ── Carry-forward mutation guard — blocks concurrent PUTs while the
+  //    page reload is in flight. ──
+  const [carrySaving, setCarrySaving] = useState(false);
+
+  // ── Edit per-activity split modal (partial-payment terms) ──
+  const [editingActivitiesTerm, setEditingActivitiesTerm] = useState(null);
+  const [savingActivities, setSavingActivities] = useState(false);
 
   function handleAuthError(err) {
     if (err && err.isAuth) {
@@ -1247,73 +1249,61 @@ export default function ProjectFinancePage() {
     }
   }
 
-  async function setQrgForPhase(phase, applied) {
-    /* Mutual exclusion: only one phase can carry QGR=Yes at a time.
-       When the user turns Yes on for `phase`, we PUT every other
-       currently-applied phase to false, then PUT the target to true.
-       Turning Yes off (applied=false) just updates the target.
+  /* Carry-forward — a phase with leftover budget carries its ENTIRE
+     leftover forward; the body only picks the distribution mode. There's
+     no "how much" anymore, and multiple phases may carry at once, so no
+     mutual-exclusion cascade. The silent reload re-renders every phase's
+     carryForward.* plus the per-term carryReceived from backend truth.
 
-       The `qgrSaving` flag blocks re-entry so a second click during
-       the cascade can't leave two phases looking Yes at once, and we
-       optimistically flip the local `page.phases[*].qrg.applied`
-       array so the UI reflects the single-Yes invariant immediately
-       (the silent reload at the end overwrites with backend truth). */
-    if (qgrSaving) return;
-    setQgrSaving(true);
-    const snapshot = page;
+       PUT /phases/{phase}/carry-forward
+         { enabled: true, mode: "phase" | "milestone" }   // enable
+         { enabled: false }                                // disable
+     A 422 (e.g. carry-forward not allowed on the last phase) surfaces the
+     backend's error.message via readJson. */
+  async function setCarryForward(phase, enabled, mode) {
+    if (carrySaving) return;
+    setCarrySaving(true);
     try {
-      if (applied) {
-        /* Optimistic UI — every other phase loses Yes the moment the
-           user clicks, even before the network round-trip. */
-        setPage((prev) => prev && ({
-          ...prev,
-          phases: (prev.phases || []).map((p) => {
-            if (p.phase === phase) {
-              return { ...p, qrg: { ...(p.qrg || {}), applied: true } };
-            }
-            if (p.qrg?.applied) {
-              return { ...p, qrg: { ...p.qrg, applied: false } };
-            }
-            return p;
-          }),
-        }));
-
-        const others = (snapshot?.phases || [])
-          .filter((p) => p.phase !== phase && !!p.qrg?.applied);
-        for (const p of others) {
-          const r = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.qrg(projectId, p.phase)}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ qrgApplied: false }),
-          });
-          await readJson(r);
-        }
-      } else {
-        setPage((prev) => prev && ({
-          ...prev,
-          phases: (prev.phases || []).map((p) =>
-            p.phase === phase
-              ? { ...p, qrg: { ...(p.qrg || {}), applied: false } }
-              : p
-          ),
-        }));
-      }
-
-      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.qrg(projectId, phase)}`, {
+      const body = enabled ? { enabled: true, mode } : { enabled: false };
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.carryForward(projectId, phase)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qrgApplied: !!applied }),
+        body: JSON.stringify(body),
       });
       await readJson(res);
       await loadPaymentPage({ silent: true });
+      uiStore.showMessage(enabled ? "Carry-forward enabled." : "Carry-forward disabled.");
     } catch (err) {
-      /* Revert the optimistic change on failure so the UI never shows
-         two phases with Yes after a partial cascade. */
-      setPage(snapshot);
       if (handleAuthError(err)) return;
-      uiStore.showError(err?.message || "Failed to update QGR");
+      uiStore.showError(err?.message || "Failed to update carry-forward");
     } finally {
-      setQgrSaving(false);
+      setCarrySaving(false);
+    }
+  }
+
+  /* Per-activity split — PATCH the term's activities. `activities` is an
+     array of { activityId, percentOfPayment } whose percents must sum to
+     the term's percentOfPayment; an empty array resets to an even split.
+     Returns true on success so the modal can close. */
+  async function saveTermActivities(termId, activities) {
+    if (!termId) return false;
+    setSavingActivities(true);
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.termActivities(termId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activities }),
+      });
+      await readJson(res);
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage("Activity split updated.");
+      return true;
+    } catch (err) {
+      if (handleAuthError(err)) return false;
+      uiStore.showError(err?.message || "Failed to update activity split");
+      return false;
+    } finally {
+      setSavingActivities(false);
     }
   }
 
@@ -1355,10 +1345,6 @@ export default function ProjectFinancePage() {
 
   function milestoneStatus(id) {
     return milestones.find((m) => m.id === id)?.status || "Not Completed";
-  }
-
-  function milestonePaymentType(id) {
-    return milestones.find((m) => m.id === id)?.paymentType || "";
   }
 
   function generateInvoice(term) {
@@ -1589,20 +1575,18 @@ export default function ProjectFinancePage() {
               <PhasePanel
                 key={p.phase}
                 phase={p}
-                allPhases={phases}
-                milestones={milestones}
                 milestoneName={milestoneName}
                 milestoneStatus={milestoneStatus}
-                milestonePaymentType={milestonePaymentType}
                 frequencies={frequencies}
                 onEditTerm={(t) => setEditingTerm(t)}
+                onEditActivities={(t) => setEditingActivitiesTerm(t)}
                 onGenerateInvoice={generateInvoice}
                 onApplyFrequency={applyPhaseFrequency}
                 isLocked={isLocked}
                 isLastPhase={idx === phases.length - 1}
-                qgrLocked={isLocked || qgrSaving}
-                qgrBusy={qgrSaving}
-                onSetQrgForPhase={setQrgForPhase}
+                carryLocked={isLocked || carrySaving}
+                carryBusy={carrySaving}
+                onSetCarryForward={setCarryForward}
               />
             ))}
           </div>
@@ -1674,7 +1658,7 @@ export default function ProjectFinancePage() {
           </div>
         </div>
 
-        {/* Right column — Summary + QGR fused into one sticky card so
+        {/* Right column — Summary + carry-forward fused into one sticky card so
             the eye reads them as a single status panel. The card itself
             owns the border + shadow; the inner sections render as bare
             content separated by a hairline divider. */}
@@ -1685,7 +1669,7 @@ export default function ProjectFinancePage() {
             background: "var(--uidai-pmis-border)",
             margin: "0 16px",
           }} />
-          <QgrSummarySection phases={phases} totals={totals} />
+          <CarryForwardSummarySection phases={phases} totals={totals} />
         </div>
       </div>
 
@@ -1720,69 +1704,54 @@ export default function ProjectFinancePage() {
         submitting={savingTerm}
         milestoneName={milestoneName}
       />
+      <EditActivitiesModal
+        open={!!editingActivitiesTerm}
+        term={editingActivitiesTerm}
+        onClose={() => setEditingActivitiesTerm(null)}
+        submitting={savingActivities}
+        milestoneName={milestoneName}
+        onSubmit={async (activities) => {
+          const ok = await saveTermActivities(editingActivitiesTerm?.id, activities);
+          if (ok) setEditingActivitiesTerm(null);
+        }}
+      />
     </div>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   Carry Forward Cost configuration popup. Opens when a phase's Carry
-   Forward toggle is switched to "Yes". Collects:
-     • the carry-forward % — taken against the phase's REMAINING %, which
-       is treated as the 100% base (the user's "treat the 30% left as
-       100%"). carried = entered% of remaining; the rest stays.
-     • the carry-forward type — phase-based (pick a target phase) or
-       milestone-based (pick a target milestone).
-
-   ⚠️ UI-ONLY: Apply does NOT persist anything yet. The /qrg endpoint
-   currently accepts only { qrgApplied }. Once the backend accepts a
-   percentage + type + target, wire onApply to PUT them and rely on the
-   page reload for the recomputed numbers.
+   Edit Activities modal — per-activity split for a partial-payment term.
+   The term's percentOfPayment is divided across its activities; the
+   percents must sum back to that term %. "Reset to even" sends an empty
+   list, which the backend re-splits evenly. Save PATCHes
+   /payment-terms/{id}/activities and the parent re-loads the page.
    ────────────────────────────────────────────────────────────────── */
-function CarryForwardModal({
-  open, onClose, onApply, phaseLabel,
-  currentPercent = 0, remainingPercent = 0,
-  milestones = [], otherPhases = [],
-}) {
-  const [percent, setPercent] = useState("");
-  const [cfType, setCfType] = useState("phase"); // 'phase' | 'milestone'
-  const [targetPhase, setTargetPhase] = useState("");
-  const [targetMilestoneId, setTargetMilestoneId] = useState("");
+function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milestoneName }) {
+  const [rows, setRows] = useState([]);
 
-  // Reseed each time the popup opens.
   useEffect(() => {
-    if (open) {
-      setPercent("");
-      setCfType("phase");
-      setTargetPhase("");
-      setTargetMilestoneId("");
-    }
-  }, [open]);
+    if (!open || !term) return;
+    setRows(
+      (term.activities || []).map((a) => ({
+        activityId: a.activityId,
+        activityDisplayCode: a.activityDisplayCode || a.activityId,
+        percentOfPayment:
+          a.percentOfPayment === null || a.percentOfPayment === undefined
+            ? ""
+            : String(a.percentOfPayment),
+      }))
+    );
+  }, [open, term]);
 
-  if (!open) return null;
+  if (!open || !term) return null;
 
-  const entered = Number(percent);
-  const enteredValid = percent !== "" && Number.isFinite(entered) && entered >= 0 && entered <= 100;
-  /* entered is a share of the remaining base (remaining = 100%). */
-  const carriedOfTotal = enteredValid ? Math.round((entered / 100) * remainingPercent * 100) / 100 : 0;
-  const staysOfTotal = enteredValid ? Math.round((remainingPercent - carriedOfTotal) * 100) / 100 : 0;
+  const termPct = Number(term.percentOfPayment) || 0;
+  const sum = rows.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
+  const sumRounded = Math.round(sum * 100) / 100;
+  const sumOk = Math.abs(sumRounded - termPct) < 0.001;
 
-  const targetChosen = cfType === "phase" ? !!targetPhase : !!targetMilestoneId;
-  const canApply = enteredValid && entered > 0 && targetChosen;
-
-  const targetLabel =
-    cfType === "phase"
-      ? (targetPhase ? `Phase ${targetPhase}` : "…")
-      : (milestones.find((m) => String(m.id) === String(targetMilestoneId))?.name || "…");
-
-  const readout = (label, value) => (
-    <div style={{
-      flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
-      padding: "8px 12px", background: "#f7f9fc",
-    }}>
-      <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>{label}</div>
-      <strong style={{ color: "#173e77", fontSize: 16 }}>{value}%</strong>
-    </div>
-  );
+  const setRowPct = (idx, val) =>
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, percentOfPayment: val } : r)));
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -1799,104 +1768,80 @@ function CarryForwardModal({
         >
           ×
         </button>
-        <h3 className="uidai-modal__title">Carry Forward Cost — Phase {phaseLabel}</h3>
+        <h3 className="uidai-modal__title">Edit Activity Split</h3>
         <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
-          Choose how much of this phase's remaining cost to carry forward, and where it goes.
+          Milestone <strong style={{ color: "#173e77" }}>{milestoneName(term.milestoneId)}</strong>
+          {" · "}Term total <strong style={{ color: "#173e77" }}>{termPct}%</strong>. The activity
+          percentages must add up to this.
         </div>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-          {readout("Current (scheduled)", currentPercent)}
-          {readout("Remaining (available)", remainingPercent)}
-        </div>
-
-        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-          <label>% to carry forward (of the remaining {remainingPercent}%)</label>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            value={percent}
-            placeholder="e.g. 50"
-            onChange={(e) => setPercent(e.target.value)}
-          />
-          {percent !== "" && !enteredValid && (
-            <small style={{ color: "var(--uidai-pmis-red)" }}>Enter a value between 0 and 100.</small>
-          )}
-        </div>
-
-        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-          <label>Carry-forward type</label>
-          <div style={{ display: "flex", gap: 18, marginTop: 4 }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600, color: "#173e77" }}>
-              <input type="radio" name="cfType" checked={cfType === "phase"} onChange={() => setCfType("phase")} />
-              Phase-based
-            </label>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 600, color: "#173e77" }}>
-              <input type="radio" name="cfType" checked={cfType === "milestone"} onChange={() => setCfType("milestone")} />
-              Milestone-based
-            </label>
-          </div>
-        </div>
-
-        {cfType === "phase" ? (
-          <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-            <label>Target phase</label>
-            <select value={targetPhase} onChange={(e) => setTargetPhase(e.target.value)}>
-              <option value="">— Select phase —</option>
-              {otherPhases.map((p) => (
-                <option key={p.phase} value={p.phase}>Phase {p.phase}</option>
-              ))}
-            </select>
-            {otherPhases.length === 0 && (
-              <small style={{ color: "var(--uidai-pmis-muted)" }}>No other phase available.</small>
-            )}
+        {rows.length === 0 ? (
+          <div style={{ ...muted, fontSize: 13, padding: "8px 0" }}>
+            No activities on this term.
           </div>
         ) : (
-          <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-            <label>Target milestone</label>
-            <select value={targetMilestoneId} onChange={(e) => setTargetMilestoneId(e.target.value)}>
-              <option value="">— Select milestone —</option>
-              {milestones.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
-            {milestones.length === 0 && (
-              <small style={{ color: "var(--uidai-pmis-muted)" }}>No milestones available.</small>
-            )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {rows.map((r, idx) => (
+              <div key={r.activityId} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ flex: 1, color: "#173e77", fontWeight: 600, fontSize: 13 }}>
+                  {r.activityDisplayCode}
+                </span>
+                <div className="uidai-pmis-field" style={{ marginBottom: 0, width: 140 }}>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={r.percentOfPayment}
+                    onChange={(e) => setRowPct(idx, e.target.value)}
+                  />
+                </div>
+                <span style={{ ...muted, fontSize: 12, width: 16 }}>%</span>
+              </div>
+            ))}
           </div>
         )}
 
-        {enteredValid && entered > 0 && (
-          <div style={{
-            border: "1px solid #cfe0f5", background: "#eef5ff", borderRadius: 8,
-            padding: "10px 12px", fontSize: 12.5, color: "#0b3c88", lineHeight: 1.5,
-          }}>
-            Carrying forward <strong>{carriedOfTotal}%</strong> → <strong>{targetLabel}</strong>;{" "}
-            <strong>{staysOfTotal}%</strong> stays in Phase {phaseLabel}.
-          </div>
-        )}
-
-        <div style={{ marginTop: 12, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
-          Note: not saved yet — backend carry-forward persistence is pending.
+        <div style={{
+          marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center",
+          fontSize: 13, fontWeight: 700,
+          color: sumOk ? "#1b7a42" : "var(--uidai-pmis-red)",
+        }}>
+          <span>Sum: {sumRounded}% / {termPct}%</span>
+          {!sumOk && <span>Must equal {termPct}%</span>}
         </div>
 
-        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+        <div className="uidai-modal__actions" style={{ justifyContent: "space-between" }}>
           <button
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
-            onClick={onClose}
+            disabled={submitting || rows.length === 0}
+            title="Reset to an even split across all activities"
+            onClick={() => onSubmit([])}
           >
-            Cancel
+            Reset to even
           </button>
-          <button
-            type="button"
-            className="uidai-pmis-btn uidai-pmis-btn-small"
-            style={{ marginTop: 0 }}
-            disabled={!canApply}
-            onClick={() => onApply({ percent: entered, cfType, targetPhase, targetMilestoneId, carriedOfTotal, staysOfTotal })}
-          >
-            Apply
-          </button>
+          <div style={{ display: "inline-flex", gap: 8 }}>
+            <button
+              type="button"
+              className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="uidai-pmis-btn uidai-pmis-btn-small"
+              style={{ marginTop: 0 }}
+              disabled={submitting || !sumOk || rows.length === 0}
+              onClick={() => onSubmit(rows.map((r) => ({
+                activityId: r.activityId,
+                percentOfPayment: Number(r.percentOfPayment) || 0,
+              })))}
+            >
+              {submitting ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1906,14 +1851,13 @@ function CarryForwardModal({
 /* Each phase renders as its own collapsible panel — header is always
    visible, body collapses. Frequency + % of Payment are first-class
    columns now; the row-level pencil button opens the EditTermModal
-   which holds both. QGR moved out into the dedicated section below
-   the Summary, so this panel stays focused on payment terms. */
+   which holds both. The carry-forward on/off toggle + mode picker live
+   in the header; the read-only roll-up is in the summary section below. */
 function PhasePanel({
-  phase, allPhases = [], milestones = [],
+  phase,
   milestoneName, milestoneStatus = () => "Not Completed",
-  milestonePaymentType = () => "",
-  frequencies = [], onEditTerm, onGenerateInvoice, onApplyFrequency,
-  isLocked, isLastPhase, qgrLocked, qgrBusy, onSetQrgForPhase,
+  frequencies = [], onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
+  isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
 }) {
   const [expanded, setExpanded] = useState(true);
   /* Which payment-term rows are expanded to reveal their activity-wise
@@ -1941,22 +1885,19 @@ function PhasePanel({
      part of that base. */
   const phaseBase = totalPercent > 0 ? totalValue / (totalPercent / 100) : 0;
   const phaseRemaining = phaseBase - totalValue;
-  const canToggleQgr = typeof onSetQrgForPhase === "function";
-  const qgrDisabled = qgrLocked || qgrBusy;
+  const canToggleCarry = typeof onSetCarryForward === "function";
 
-  /* Carry Forward Cost — UI-only for now (Save is NOT wired to the backend
-     yet; the /qrg endpoint still only accepts { qrgApplied }). The toggle
-     defaults to "No"; picking "Yes" opens the configuration popup. Once
-     applied there, we flip the local flag so the toggle reflects the
-     choice. TODO: persist via the backend once it accepts a carry-forward
-     percentage + type. */
-  const [cfApplied, setCfApplied] = useState(false);
-  const [cfModalOpen, setCfModalOpen] = useState(false);
-  /* "Current" = what's already scheduled on this phase; "Remaining" = the
-     still-unscheduled %, which is the base the carry-forward % applies to
-     (the user's "treat the 30% left as 100%"). */
-  const cfCurrentPercent = Math.min(100, Math.round(totalPercent * 100) / 100);
-  const cfRemainingPercent = Math.max(0, Math.round((100 - totalPercent) * 100) / 100);
+  /* Carry-forward state is backend-owned (phase.carryForward). When enabled
+     the phase carries its ENTIRE leftover forward; the only choice is the
+     distribution mode. The last phase can't carry forward (nothing later to
+     receive it), so the toggle is disabled there. `pendingMode` only governs
+     the picker while OFF — once ON, the dropdown reflects the saved mode. */
+  const cf = phase.carryForward || {};
+  const cfEnabled = !!cf.enabled;
+  const cfIsLast = cf.isLastPhase ?? isLastPhase;
+  const cfDisabled = carryLocked || carryBusy || cfIsLast;
+  const [pendingMode, setPendingMode] = useState("milestone");
+  const modeValue = cfEnabled ? (cf.mode || "milestone") : pendingMode;
 
   return (
     <div style={{
@@ -1967,9 +1908,9 @@ function PhasePanel({
       overflow: "hidden",
       boxShadow: "0 1px 2px rgba(20, 50, 110, 0.04)",
     }}>
-      {/* Header is a div (not a button) so the QGR Yes/No segmented
-          control can live inside it without nesting buttons. Clicking
-          anywhere except the QGR control toggles the collapse. */}
+      {/* Header is a div (not a button) so the carry-forward control can
+          live inside it without nesting buttons. Clicking anywhere except
+          that control toggles the collapse. */}
       <div
         onClick={() => setExpanded((e) => !e)}
         style={{
@@ -1986,7 +1927,7 @@ function PhasePanel({
         <div style={{ display: "inline-flex", alignItems: "center", gap: 12, minWidth: 0, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
             Phase {phase.phase}
-            {cfApplied && (
+            {cfEnabled && (
               <span style={{
                 fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
                 padding: "2px 7px", borderRadius: 999,
@@ -2006,7 +1947,7 @@ function PhasePanel({
             )}
           </span>
 
-          {canToggleQgr && (
+          {canToggleCarry && (
             <div
               onClick={(e) => e.stopPropagation()}
               style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
@@ -2014,47 +1955,73 @@ function PhasePanel({
               <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
                 Carry Forward Cost
               </span>
-              <div role="group" aria-label={`Apply Carry Forward Cost to Phase ${phase.phase}`}
+              <div role="group" aria-label={`Carry forward leftover from Phase ${phase.phase}`}
                 style={{
                   display: "inline-flex",
                   border: "1px solid var(--uidai-pmis-border)",
                   borderRadius: 999, overflow: "hidden", background: "#fff",
+                  opacity: cfDisabled ? 0.6 : 1,
                 }}>
                 <button
                   type="button"
-                  disabled={qgrDisabled}
-                  onClick={() => setCfModalOpen(true)}
+                  disabled={cfDisabled}
+                  onClick={() => onSetCarryForward(phase.phase, true, modeValue)}
                   style={{
                     padding: "4px 12px",
                     border: "none",
-                    background: cfApplied ? "#1b7a42" : "transparent",
-                    color: cfApplied ? "#fff" : "#173e77",
+                    background: cfEnabled ? "#1b7a42" : "transparent",
+                    color: cfEnabled ? "#fff" : "#173e77",
                     fontWeight: 700, fontSize: 12,
-                    cursor: qgrDisabled ? "not-allowed" : "pointer",
-                    opacity: qgrDisabled ? 0.5 : 1,
+                    cursor: cfDisabled ? "not-allowed" : "pointer",
                   }}
                 >
                   Yes
                 </button>
                 <button
                   type="button"
-                  disabled={qgrDisabled}
-                  onClick={() => setCfApplied(false)}
+                  disabled={cfDisabled}
+                  onClick={() => onSetCarryForward(phase.phase, false)}
                   style={{
                     padding: "4px 12px",
                     border: "none",
                     borderLeft: "1px solid var(--uidai-pmis-border)",
-                    background: !cfApplied ? "#eef2f7" : "transparent",
+                    background: !cfEnabled ? "#eef2f7" : "transparent",
                     color: "#173e77",
                     fontWeight: 700, fontSize: 12,
-                    cursor: qgrDisabled ? "not-allowed" : "pointer",
-                    opacity: qgrDisabled ? 0.5 : 1,
+                    cursor: cfDisabled ? "not-allowed" : "pointer",
                   }}
                 >
                   No
                 </button>
-
               </div>
+
+              {/* Distribution mode — split the leftover across later phases
+                  or later milestones. Changing it while ON re-sends the PUT. */}
+              <select
+                aria-label="Carry-forward distribution mode"
+                value={modeValue}
+                disabled={cfDisabled}
+                onChange={(e) => {
+                  const m = e.target.value;
+                  if (cfEnabled) onSetCarryForward(phase.phase, true, m);
+                  else setPendingMode(m);
+                }}
+                style={{
+                  border: "1px solid var(--uidai-pmis-border)",
+                  borderRadius: 999, padding: "4px 8px",
+                  fontSize: 12, fontWeight: 700, color: "#173e77", background: "#fff",
+                  cursor: cfDisabled ? "not-allowed" : "pointer",
+                }}
+              >
+                <option value="milestone">Milestone-wise</option>
+                <option value="phase">Phase-wise</option>
+              </select>
+
+              {cfIsLast && (
+                <span style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>
+                  Last phase — n/a
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -2112,13 +2079,12 @@ function PhasePanel({
                     .slice(0, idx + 1)
                     .reduce((s, r) => s + (Number(r.value) || 0), 0);
                   const remaining = phaseBase - scheduledSoFar;
-                  /* Activity-wise breakdown shows only while the phase is
-                     partially paid (terms don't yet total 100%) AND the
-                     milestone isn't a complete_payment one — a milestone
-                     billed in full has no activity-wise split. */
-                  const showActivities =
-                    Math.abs(totalPercent - 100) > 0.001 &&
-                    milestonePaymentType(t.milestoneId) !== "complete_payment";
+                  /* Per-activity split — the backend returns activities[]
+                     only for partial-payment terms (complete_payment terms
+                     come back with []). So presence of the array is the
+                     single source of truth for whether the row expands. */
+                  const acts = Array.isArray(t.activities) ? t.activities : [];
+                  const showActivities = acts.length > 0;
                   return (
                     <React.Fragment key={t.id}>
                     <tr style={expandedTerms.has(t.id) ? { background: "#eef5ff" } : undefined}>
@@ -2129,12 +2095,9 @@ function PhasePanel({
                         </span>
                       </td>
                       <td>
-                        {/* Activities (and the breakdown rows below) render
-                            only for partial-payment milestones whose phase
-                            isn't yet fully scheduled (total < 100%); otherwise
-                            the cell shows a dash.
-                            ⚠️ DUMMY list until the backend returns per-term
-                            activities. */}
+                        {/* Activities expand only for partial-payment terms
+                            (those the backend returned activities[] for);
+                            complete-payment terms show a dash. */}
                         {showActivities ? (
                           <button
                             type="button"
@@ -2148,7 +2111,7 @@ function PhasePanel({
                             }}
                           >
                             <span style={{ fontSize: 9 }}>{expandedTerms.has(t.id) ? "▾" : "▸"}</span>
-                            Activities ({DUMMY_PARTIAL_ACTIVITIES.length})
+                            Activities ({acts.length})
                           </button>
                         ) : (
                           <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
@@ -2275,27 +2238,26 @@ function PhasePanel({
                        </div>
                       </td>
                     </tr>
-                    {/* Activity-wise breakdown for a partial-payment milestone —
-                        the milestone's value/% is split across its activities,
-                        each with its own Edit action. ⚠️ DUMMY split until the
-                        backend returns per-activity terms. */}
-                    {showActivities && expandedTerms.has(t.id) && DUMMY_PARTIAL_ACTIVITIES.map((act, ai) => {
-                      const n = DUMMY_PARTIAL_ACTIVITIES.length || 1;
-                      const aPct = pct / n;
-                      const aVal = value / n;
-                      const last = ai === n - 1;
+                    {/* Activity-wise breakdown for a partial-payment term —
+                        the term's value/% split across its activities, as
+                        returned by the backend. The Edit pencil opens the
+                        weightage modal for the whole term. */}
+                    {showActivities && expandedTerms.has(t.id) && acts.map((a, ai) => {
+                      const aPct = Number(a.percentOfPayment) || 0;
+                      const aVal = Number(a.value) || 0;
+                      const last = ai === acts.length - 1;
+                      const code = a.activityDisplayCode || a.activityId;
                       return (
-                        <tr key={`${t.id}-act-${ai}`} style={{ background: "#f6faff" }}>
+                        <tr key={`${t.id}-act-${a.activityId || ai}`} style={{ background: "#f6faff" }}>
                           <td style={{ borderLeft: "3px solid #0aa1c0", borderBottom: last ? undefined : "none" }} />
                           <td style={{ paddingLeft: 14 }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#0aa1c0", display: "inline-block" }} />
-                              <span style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}>{act}</span>
-                              <span style={{ fontSize: 10, color: "var(--uidai-pmis-muted)", fontWeight: 500 }}>(dummy)</span>
+                              <span style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}>{code}</span>
                             </span>
                           </td>
                           <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                          <td><strong style={{ color: "#173e77" }}>{aPct.toFixed(2)} %</strong></td>
+                          <td><strong style={{ color: "#173e77" }}>{aPct} %</strong></td>
                           <td style={{ fontWeight: 700, color: "#173e77" }}>₹ {aVal.toLocaleString("en-IN")}</td>
                           <td>
                             <span style={{
@@ -2307,10 +2269,10 @@ function PhasePanel({
                           <td style={{ textAlign: "center" }}>
                             <button
                               type="button"
-                              title={`Edit ${act}`}
-                              aria-label={`Edit ${act}`}
+                              title="Edit activity split"
+                              aria-label={`Edit activity split for ${code}`}
                               disabled={isLocked}
-                              onClick={() => onEditTerm(t)}
+                              onClick={() => onEditActivities(t)}
                               style={{
                                 width: 28, height: 28,
                                 display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -2466,37 +2428,18 @@ function PhasePanel({
           </div>
         </div>
       )}
-
-      <CarryForwardModal
-        open={cfModalOpen}
-        onClose={() => setCfModalOpen(false)}
-        phaseLabel={phase.phase}
-        currentPercent={cfCurrentPercent}
-        remainingPercent={cfRemainingPercent}
-        milestones={milestones}
-        otherPhases={allPhases.filter((p) => p.phase !== phase.phase)}
-        onApply={() => {
-          /* UI-only: flip the local flag so the toggle shows "Yes" and the
-             phase badge appears. Nothing is persisted yet — wire onApply to
-             the backend once /qrg accepts a percentage + type + target. */
-          setCfApplied(true);
-          setCfModalOpen(false);
-          uiStore.showMessage("Carry-forward captured (not saved yet — backend pending).");
-        }}
-      />
     </div>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   QgrSummarySection — read-only per-phase summary in the right column
-   below the Summary card. The Yes/No toggles live in each phase's
-   collapsible header on the left; this panel reports, for every phase:
-   the scheduled term count + %, the phase Fixed total, and (when the
-   phase carries QGR) the held-back %/₹ value. Total Contract Cost is
-   intentionally omitted here — it already shows in the Summary above.
+   CarryForwardSummarySection — read-only per-phase roll-up in the right
+   column below the Summary card. The on/off toggle + mode picker live in
+   each phase's collapsible header on the left; this panel reports, for
+   every phase: scheduled %, delivery cost, and (from phase.carryForward)
+   the leftover carried out and the amount received from earlier phases.
    ────────────────────────────────────────────────────────────────── */
-function QgrSummarySection({ phases, totals }) {
+function CarryForwardSummarySection({ phases, totals }) {
   if (!phases || phases.length === 0) return null;
 
   /* Remaining balance = Total Contract Cost minus everything already
@@ -2538,9 +2481,11 @@ function QgrSummarySection({ phases, totals }) {
           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
           const phaseTotal = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
           const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
-          const yes = !!p.qrg?.applied;
-          const qgrPercent = yes ? Number(p.qrg?.percent) || 0 : 0;
-          const qgrValue = yes ? Number(p.qrg?.value) || 0 : 0;
+          const cf = p.carryForward || {};
+          const yes = !!cf.enabled;
+          const cfMode = cf.mode || "milestone";
+          const carriedOut = Number(cf.carriedOut) || 0;
+          const received = (Number(cf.received) || 0) + (Number(cf.receivedMilestone) || 0);
           return (
             <div
               key={p.phase}
@@ -2579,16 +2524,19 @@ function QgrSummarySection({ phases, totals }) {
                 {stat("Scheduled", `${totalPercent}%`,
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
-                {stat("Carry Forward Cost Hold-back",
-                  yes ? `${qgrPercent}% · ${inr(qgrValue)}` : "—",
+                {stat("Carried Forward",
+                  yes ? `${inr(carriedOut)} · ${cfMode === "phase" ? "phase-wise" : "milestone-wise"}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
+                {stat("Received",
+                  received > 0 ? inr(received) : "—",
+                  { color: received > 0 ? "#173e77" : "#a3afc1" })}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Total remaining balance — sum of QGR hold-back across all phases. */}
+      {/* Total remaining balance — contract cost not yet committed to terms. */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         marginTop: 14, padding: "12px 14px",
