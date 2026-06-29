@@ -37,43 +37,46 @@ const DEFAULT_ASSIGNEE_ID = "71e53819-ee1b-4ddb-aad2-42d010c41632";
    labels like "Speaker 1", not real user ids). */
 const MEETING_WEBHOOK_URL = "http://10.1.131.199:5678/webhook/meeting";
 
-/* Map the webhook's structured JSON response into the three editable
-   textareas — descriptions only, since owners are speaker labels rather
-   than real user ids. Falls back to parsing the plain-text `content`
-   block if the structured arrays are absent. */
-function momFormFromResponse(data) {
+/* Build task rows from the webhook's structured JSON response, keeping
+   each item's task name (`taskname`) alongside its `description`. Items
+   come back as { taskname, description, ... }; risks carry no taskname,
+   so those rows get an empty Task Name. Order matches the old flattened
+   shape: action items, then decisions, then risks. Falls back to parsing
+   the plain-text `content` block (descriptions only) when no structured
+   arrays are present. Returns [] when nothing usable is found. */
+function tasksFromResponse(data) {
   const root = Array.isArray(data) ? data[0] : data?.data ?? data;
-  if (!root || typeof root !== "object") return null;
-  /* Prefix each line with a bullet so the textareas read as a list.
-     parseLines strips these back off before saving. */
-  const bulletize = (text) =>
-    String(text || "")
-      .split(/\r?\n/)
-      .map((l) => l.replace(/^[-*•]\s*/, "").trim())
-      .filter(Boolean)
-      .map((l) => `• ${l}`)
-      .join("\n");
-  const descs = (arr) =>
-    bulletize(
-      (Array.isArray(arr) ? arr : [])
-        .map((x) => (typeof x === "string" ? x : x?.description || ""))
-        .filter(Boolean)
-        .join("\n")
-    );
-  const decisions = descs(root.decisions);
-  const actions = descs(root.actionItems ?? root.actions);
-  const risks = descs(root.risks);
-  if (decisions || actions || risks) return { decisions, actions, risks };
+  if (!root || typeof root !== "object") return [];
+  const clean = (s) => String(s || "").replace(/^[-*•]\s*/, "").trim();
+  const fromArr = (arr) =>
+    (Array.isArray(arr) ? arr : [])
+      .map((x) =>
+        typeof x === "string"
+          ? { taskName: "", description: clean(x), dueDate: "" }
+          : {
+              taskName: clean(x?.taskname ?? x?.taskName),
+              description: clean(x?.description),
+              /* Action items carry a `dueDate` (YYYY-MM-DD); decisions and
+                 risks don't, so it stays "". */
+              dueDate: typeof x?.dueDate === "string" ? x.dueDate.trim() : "",
+            }
+      )
+      .filter((r) => r.taskName || r.description);
+  /* Risks are NOT tasks — only action items and decisions become rows. */
+  const rows = [
+    ...fromArr(root.actionItems ?? root.actions),
+    ...fromArr(root.decisions),
+  ];
+  if (rows.length) return rows;
   /* No structured arrays — fall back to the plain-text content block. */
   if (typeof root.content === "string" && root.content.trim()) {
     const fb = parseMoM(root.content);
-    return {
-      decisions: bulletize(fb.decisions),
-      actions: bulletize(fb.actions),
-      risks: bulletize(fb.risks),
-    };
+    return [
+      ...parseLines(fb.actions),
+      ...parseLines(fb.decisions),
+    ].map((description) => ({ taskName: "", description: clean(description) }));
   }
-  return null;
+  return [];
 }
 
 /* ─── Small helpers (date / time / strings) ─── */
@@ -665,22 +668,21 @@ export default function MeetingDetailPage() {
         });
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const parsed = momFormFromResponse(await res.json().catch(() => null));
-      if (!parsed || (!parsed.decisions && !parsed.actions && !parsed.risks)) {
+      const parsed = tasksFromResponse(await res.json().catch(() => null));
+      if (!parsed.length) {
         show("Couldn't read a MoM from the response.", "warn");
         return;
       }
-      /* Every extracted line (decisions / actions / risks) becomes a task
-         row — the user reviews and fills in dates / owner / priority. */
-      const rows = [
-        ...parseLines(parsed.actions),
-        ...parseLines(parsed.decisions),
-        ...parseLines(parsed.risks),
-      ].map((description) => ({ ...emptyTaskRow(), description }));
-      if (!rows.length) {
-        show("Couldn't read any tasks from the response.", "warn");
-        return;
-      }
+      /* Each action item / decision / risk becomes a task row — the
+         webhook fills Task Name + Description; the user reviews and adds
+         dates / owner / priority before saving. */
+      const rows = parsed.map((t) => ({
+        ...emptyTaskRow(),
+        taskName: t.taskName,
+        description: t.description,
+        /* Prefill the Due Date column when the webhook returned one. */
+        endDate: t.dueDate || "",
+      }));
       setMomForm((f) => ({
         ...f,
         title: f.title || meeting?.title || "",
@@ -1366,7 +1368,7 @@ export default function MeetingDetailPage() {
                       <th style={{ minWidth: 160 }}>Task Name</th>
                       <th style={{ minWidth: 220 }}>Task Description</th>
                       <th style={{ minWidth: 150 }}>Start Date</th>
-                      <th style={{ minWidth: 150 }}>End Date</th>
+                      <th style={{ minWidth: 150 }}>Due Date</th>
                       <th style={{ minWidth: 180 }}>Assigned To</th>
                       <th style={{ minWidth: 130 }}>Priority</th>
                       <th aria-label="Remove" style={{ width: 44 }} />
@@ -1394,6 +1396,7 @@ export default function MeetingDetailPage() {
                           <td>
                             <input
                               value={detail.description || ""}
+                              title={detail.description || ""}
                               placeholder="What needs to be done"
                               onChange={(e) =>
                                 updateMomDetail("actionDetails", index, "description", e.target.value)
@@ -1562,7 +1565,7 @@ export default function MeetingDetailPage() {
                           <th style={{ minWidth: 160 }}>Task Name</th>
                           <th style={{ minWidth: 240 }}>Task Description</th>
                           <th>Start Date</th>
-                          <th>End Date</th>
+                          <th>Due Date</th>
                           <th>Assigned To</th>
                           <th>Priority</th>
                         </tr>
@@ -1571,9 +1574,19 @@ export default function MeetingDetailPage() {
                         {actionItems.map((a) => (
                           <tr key={a.id}>
                             <td>{a.taskName || "—"}</td>
-                            <td>{a.description}</td>
+                            <td
+                              title={a.description || ""}
+                              style={{
+                                maxWidth: 320,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {a.description || "—"}
+                            </td>
                             <td>{a.startDate ? fmtDate(a.startDate) : "—"}</td>
-                            <td>{fmtDate(a.dueDate)}</td>
+                            <td>{a.dueDate ? fmtDate(a.dueDate) : "—"}</td>
                             <td>{labelFor(a.assignedToUserId)}</td>
                             <td>{a.priority || "—"}</td>
                           </tr>

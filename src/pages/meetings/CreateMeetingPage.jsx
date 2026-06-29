@@ -308,8 +308,6 @@ function SearchableSelect({ id, value, options, onChange, placeholder, disabled,
 /* Location helpers — the backend stores a single `meetingLink` string, so
    the three modes below are just UX scaffolding around that one value. */
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
-const mapsSearchUrl = (s) =>
-  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(s || "").trim())}`;
 
 const LOCATION_TYPES = [
   {
@@ -322,13 +320,13 @@ const LOCATION_TYPES = [
     help: "Paste the full video-call URL — attendees open it with one click.",
   },
   {
-    key: "map",
-    icon: "🗺️",
-    name: "Google Maps / Address",
-    // desc: "Map link or full address",
-    label: "Maps link or address",
-    placeholder: "Paste a Google Maps link or a full address",
-    help: "Paste a maps.google.com link, or a full address to generate one.",
+    key: "venue",
+    icon: "📍",
+    name: "Location",
+    // desc: "Physical venue / address",
+    label: "Location",
+    placeholder: "e.g. Conference Room 2, 3rd Floor, Head Office",
+    help: "Enter the venue or address as plain text.",
   },
 ];
 
@@ -342,7 +340,7 @@ export default function CreateMeetingPage() {
     date: "",
     start: "",
     end: "",
-    locationType: "online", /* online | map — UI only, value lands in `location` */
+    locationType: "online", /* online | venue — UI only, value lands in `location` */
     location: "",
     agenda: "",
     attendees: [],
@@ -546,7 +544,9 @@ export default function CreateMeetingPage() {
         attachments
       };
       const created = await createMeeting(payload);
-      show(`Meeting #${created?.id ?? ""} created.`, "ok");
+      const createdName =
+        created?.title || created?.meetingCode || payload.title || "Meeting";
+      show(`“${createdName}” created.`, "ok");
       setTimeout(() => navigate("/meetings"), 350);
     } catch (e) {
       show(e.message || "Failed to create meeting.", "warn");
@@ -770,36 +770,24 @@ export default function CreateMeetingPage() {
                 />
                 <div className="help">{cfg.help}</div>
 
-                {/* Live preview — open/verify the location before saving. */}
-                {loc && (
+                {/* Live preview — open/verify an online link before saving. */}
+                {loc && draft.locationType === "online" && valueIsUrl && (
                   <div style={{ marginTop: 8 }}>
-                    {draft.locationType === "online" && valueIsUrl && (
-                      <a
-                        className="pill-link"
-                        href={loc}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        🎥 Open meeting link ↗
-                      </a>
-                    )}
-                    {draft.locationType === "map" && (
-                      <a
-                        className="pill-link"
-                        href={valueIsUrl ? loc : mapsSearchUrl(loc)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        🗺️ {valueIsUrl ? "Open in Google Maps ↗" : "Search on Google Maps ↗"}
-                      </a>
-                    )}
+                    <a
+                      className="pill-link"
+                      href={loc}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      🎥 Open meeting link ↗
+                    </a>
                   </div>
                 )}
 
                 {linkModeButNotUrl && (
                   <div className="help" style={{ color: "var(--red)" }}>
                     This doesn't look like a link — start it with https:// or
-                    switch to “Google Maps / Address”.
+                    switch to “Location”.
                   </div>
                 )}
               </>

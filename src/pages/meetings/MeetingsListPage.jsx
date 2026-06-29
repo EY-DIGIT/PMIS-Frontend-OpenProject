@@ -56,6 +56,10 @@ export default function MeetingsListPage() {
     last: true,
   });
   const [projects, setProjects] = useState([]);
+  /* Set of project identifiers (id + code) that have at least one meeting.
+     `null` until the scan below finishes — used to hide meeting-less
+     projects from the Project filter. */
+  const [projectsWithMeetings, setProjectsWithMeetings] = useState(null);
 
   const [q, setQ] = useState("");
   const [fProject, setFProject] = useState("ALL");
@@ -98,6 +102,33 @@ export default function MeetingsListPage() {
     return () => { alive = false; };
   }, []);
 
+  /* Scan every meeting once (all pages, unfiltered) to learn which projects
+     actually have meetings — the Project filter then hides the rest. */
+  useEffect(() => {
+    let alive = true;
+    const ids = new Set();
+    (async () => {
+      const SIZE = 200;
+      for (let page = 0; page < 50; page++) {
+        const res = await listMeetings({
+          projectId: "ALL",
+          status: "ALL",
+          page,
+          size: SIZE,
+        });
+        const content = Array.isArray(res?.content) ? res.content : [];
+        content.forEach((m) => {
+          if (m?.projectId) ids.add(m.projectId);
+          if (m?.projectCode) ids.add(m.projectCode);
+        });
+        if (res?.last || content.length < SIZE) break;
+      }
+    })()
+      .then(() => { if (alive) setProjectsWithMeetings(ids); })
+      .catch(() => { if (alive) setProjectsWithMeetings(new Set()); });
+    return () => { alive = false; };
+  }, []);
+
   /* Project name lookup for the table column. Supports both UUID and
      legacy code (the API returns either depending on when the meeting
      was created). */
@@ -109,6 +140,17 @@ export default function MeetingsListPage() {
     });
     return (id) => m.get(id) || id || "—";
   }, [projects]);
+
+  /* Only projects that have at least one meeting appear in the filter.
+     Until the scan finishes (`null`) show all so the dropdown isn't empty. */
+  const projectOptions = useMemo(() => {
+    if (!projectsWithMeetings) return projects;
+    return projects.filter(
+      (p) =>
+        (p.projectId && projectsWithMeetings.has(p.projectId)) ||
+        (p.projectCode && projectsWithMeetings.has(p.projectCode))
+    );
+  }, [projects, projectsWithMeetings]);
 
   const loadPage = (page = 0) => {
     setLoading(true);
@@ -184,7 +226,7 @@ export default function MeetingsListPage() {
               onChange={(e) => setFProject(e.target.value)}
             >
               <option value="ALL">All projects</option>
-              {projects.map((p) => (
+              {projectOptions.map((p) => (
                 <option key={p.projectId} value={p.projectId}>
                   {p.projectCode ? `${p.projectCode} — ` : ""}
                   {p.projectName}

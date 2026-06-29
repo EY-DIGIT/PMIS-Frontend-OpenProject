@@ -277,16 +277,6 @@ function SummaryPanel({ totals }) {
   const total = Number(totals?.totalContractCost) || 0;
   return (
     <div style={{ padding: 18 }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        fontSize: 14, fontWeight: 800, color: "#173e77",
-        letterSpacing: 0.5, textTransform: "uppercase",
-        paddingBottom: 12, marginBottom: 14,
-        borderBottom: "1px solid var(--uidai-pmis-border)",
-      }}>
-        Summary
-      </div>
-
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -828,6 +818,86 @@ function EditTermModal({
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   StructureWarningModal — a deliberate "review before you proceed" gate
+   shown before editing OR deleting a Project Cost row. Both actions force
+   the backend to recompute the whole payment structure (phase totals,
+   every term's % + value, carry-forward), so this makes the blast radius
+   explicit before the user commits.
+   ────────────────────────────────────────────────────────────────── */
+function StructureWarningModal({ open, action, rowLabel, onCancel, onProceed }) {
+  if (!open) return null;
+  const isDelete = action === "delete";
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onCancel}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <span aria-hidden="true" style={{
+            width: 34, height: 34, flex: "0 0 auto",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            borderRadius: "50%", background: "#fdecec", color: "#c0392b",
+            fontSize: 20, fontWeight: 800,
+          }}>
+            ⚠
+          </span>
+          <h3 className="uidai-modal__title" style={{ margin: 0 }}>
+            Review before you proceed
+          </h3>
+        </div>
+
+        <div style={{ fontSize: 13.5, color: "var(--uidai-pmis-text)", lineHeight: 1.6 }}>
+          You're about to <strong>{isDelete ? "delete" : "edit"}</strong>
+          {rowLabel ? <> <strong style={{ color: "#173e77" }}>{rowLabel}</strong></> : " this cost item"}.
+          <div style={{
+            marginTop: 10, padding: "10px 12px", borderRadius: 8,
+            background: "#fff7ed", border: "1px solid #f3d4a8", color: "#9a5b00",
+          }}>
+            This changes the <strong>entire payment structure</strong>. Phase totals,
+            every payment term's % and value, the activity-wise split, and any
+            carry-forward distribution will be <strong>recalculated</strong>
+            {isDelete && <> — and a delete <strong>cannot be undone</strong></>}.
+            Please review the impact before continuing.
+          </div>
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{
+              marginTop: 0,
+              ...(isDelete ? { background: "#c0392b", borderColor: "#c0392b" } : {}),
+            }}
+            onClick={onProceed}
+          >
+            {isDelete ? "Proceed & Delete" : "Proceed to Edit"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ProjectFinancePage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -885,6 +955,10 @@ export default function ProjectFinancePage() {
   // ── Per-row delete busy state (keyed by cost-item id) ──
   const [deletingCostItemId, setDeletingCostItemId] = useState("");
 
+  // ── "Affects the whole structure" gate before a cost-row edit/delete.
+  //    { action: 'edit' | 'delete', row } while pending, else null. ──
+  const [structureWarn, setStructureWarn] = useState(null);
+
   // ── Edit Payment Term modal ──
   const [editingTerm, setEditingTerm] = useState(null);
   const [savingTerm, setSavingTerm] = useState(false);
@@ -904,6 +978,9 @@ export default function ProjectFinancePage() {
   // ── Edit per-activity split modal (partial-payment terms) ──
   const [editingActivitiesTerm, setEditingActivitiesTerm] = useState(null);
   const [savingActivities, setSavingActivities] = useState(false);
+
+  // ── Right-column summary collapse ──
+  const [summaryOpen, setSummaryOpen] = useState(true);
 
   function handleAuthError(err) {
     if (err && err.isAuth) {
@@ -1151,10 +1228,10 @@ export default function ProjectFinancePage() {
     }
   }
 
+  /* The confirmation is handled by StructureWarningModal before this runs,
+     so there's no window.confirm here. */
   async function deleteCostItem(row) {
     if (!row?.id) return;
-    const label = row.costTypeCode === "one_time" ? "the One-Time cost row" : `the ${costTypeLabel(row.costTypeCode)} cost row`;
-    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return;
     setDeletingCostItemId(row.id);
     try {
       const res = await authorizedFetch(
@@ -1546,8 +1623,8 @@ export default function ProjectFinancePage() {
                             row={r}
                             isLocked={isLocked}
                             isDeleting={deletingCostItemId === r.id}
-                            onEdit={() => setEditingCostItem(r)}
-                            onDelete={() => deleteCostItem(r)}
+                            onEdit={() => setStructureWarn({ action: "edit", row: r })}
+                            onDelete={() => setStructureWarn({ action: "delete", row: r })}
                           />
                         </td>
                       </tr>
@@ -1575,6 +1652,7 @@ export default function ProjectFinancePage() {
               <PhasePanel
                 key={p.phase}
                 phase={p}
+                allPhases={phases}
                 milestoneName={milestoneName}
                 milestoneStatus={milestoneStatus}
                 frequencies={frequencies}
@@ -1658,18 +1736,53 @@ export default function ProjectFinancePage() {
           </div>
         </div>
 
-        {/* Right column — Summary + carry-forward fused into one sticky card so
-            the eye reads them as a single status panel. The card itself
-            owns the border + shadow; the inner sections render as bare
-            content separated by a hairline divider. */}
+        {/* Right column — Summary + carry-forward in one collapsible card.
+            The card owns the border + shadow; the inner sections render as
+            bare content separated by a hairline divider. */}
         <div className="uidai-pmis-finance-summary">
-          <SummaryPanel totals={totals} />
-          <div style={{
-            height: 1,
-            background: "var(--uidai-pmis-border)",
-            margin: "0 16px",
-          }} />
-          <CarryForwardSummarySection phases={phases} totals={totals} />
+          {/* Collapse header — clicking toggles the whole panel. When
+              collapsed it shows the total contract cost so the headline
+              number stays visible. */}
+          <button
+            type="button"
+            onClick={() => setSummaryOpen((o) => !o)}
+            aria-expanded={summaryOpen}
+            style={{
+              width: "100%", border: "none", background: "transparent",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: 8, padding: "12px 16px", cursor: "pointer", textAlign: "left",
+              borderBottom: summaryOpen ? "1px solid var(--uidai-pmis-border)" : "none",
+            }}
+          >
+            <span style={{
+              fontSize: 13, fontWeight: 800, color: "#173e77",
+              letterSpacing: 0.5, textTransform: "uppercase",
+            }}>
+              Financial Summary
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {!summaryOpen && (
+                <strong style={{ color: "#173e77", fontSize: 13 }}>
+                  {inr(totals?.totalContractCost)}
+                </strong>
+              )}
+              <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 13 }}>
+                {summaryOpen ? "▲" : "▼"}
+              </span>
+            </span>
+          </button>
+
+          {summaryOpen && (
+            <>
+              <SummaryPanel totals={totals} />
+              <div style={{
+                height: 1,
+                background: "var(--uidai-pmis-border)",
+                margin: "0 16px",
+              }} />
+              <CarryForwardSummarySection phases={phases} totals={totals} />
+            </>
+          )}
         </div>
       </div>
 
@@ -1713,6 +1826,25 @@ export default function ProjectFinancePage() {
         onSubmit={async (activities) => {
           const ok = await saveTermActivities(editingActivitiesTerm?.id, activities);
           if (ok) setEditingActivitiesTerm(null);
+        }}
+      />
+      <StructureWarningModal
+        open={!!structureWarn}
+        action={structureWarn?.action}
+        rowLabel={
+          structureWarn?.row
+            ? (structureWarn.row.costTypeCode === "one_time"
+                ? "the One-Time cost row"
+                : `the ${costTypeLabel(structureWarn.row.costTypeCode)} cost row`)
+            : ""
+        }
+        onCancel={() => setStructureWarn(null)}
+        onProceed={() => {
+          const pending = structureWarn;
+          setStructureWarn(null);
+          if (!pending?.row) return;
+          if (pending.action === "edit") setEditingCostItem(pending.row);
+          else if (pending.action === "delete") deleteCostItem(pending.row);
         }}
       />
     </div>
@@ -1848,13 +1980,236 @@ function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milest
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   Carry-forward configuration popup. Opens when a phase's "Yes" is
+   clicked. Collects:
+     • type   — Milestone-based or Phase-based (the distribution `mode`)
+     • method — Equal (auto, even split) or Custom (per-target amounts)
+     • when Custom: a per-target editor whose rows switch with the type —
+       one row per LATER phase (phase-based) or per NEXT-phase milestone
+       (milestone-based). Amounts can be entered as % (must sum to 100) or
+       ₹ (must sum to the phase leftover).
+
+   ⚠️ The backend only persists { enabled, mode } (equal split). The
+   chosen method + custom allocations are captured CLIENT-SIDE and handed
+   back via onApply so the parent can display them; they are NOT yet sent
+   to the server. Wire them through once the API accepts allocations.
+   ────────────────────────────────────────────────────────────────── */
+function CarryForwardModal({
+  open, onClose, onApply, phaseLabel,
+  initialMode = "milestone", leftover = 0,
+  laterPhases = [], nextPhaseMilestones = [],
+}) {
+  const [mode, setMode] = useState(initialMode);     // 'milestone' | 'phase'
+  const [method, setMethod] = useState("equal");     // 'equal' | 'custom'
+  const [unit, setUnit] = useState("percent");       // 'percent' | 'amount'
+  const [alloc, setAlloc] = useState({});            // targetId -> string
+
+  useEffect(() => {
+    if (open) {
+      setMode(initialMode);
+      setMethod("equal");
+      setUnit("percent");
+      setAlloc({});
+    }
+  }, [open, initialMode]);
+
+  const targets = useMemo(() => (
+    mode === "phase"
+      ? laterPhases.map((p) => ({ id: String(p.phase), label: `Phase ${p.phase}` }))
+      : nextPhaseMilestones.map((m) => ({ id: String(m.id), label: m.name }))
+  ), [mode, laterPhases, nextPhaseMilestones]);
+
+  if (!open) return null;
+
+  const setOne = (id, v) => setAlloc((prev) => ({ ...prev, [id]: v }));
+
+  /* Pre-fill the custom rows with an even split so the user starts from a
+     valid state and only tweaks what they need. */
+  const fillEven = () => {
+    const n = targets.length || 1;
+    const each = unit === "percent"
+      ? Math.round((100 / n) * 100) / 100
+      : Math.round((leftover / n) * 100) / 100;
+    const next = {};
+    targets.forEach((t) => { next[t.id] = String(each); });
+    setAlloc(next);
+  };
+
+  const sum = targets.reduce((s, t) => s + (Number(alloc[t.id]) || 0), 0);
+  const sumRounded = Math.round(sum * 100) / 100;
+  const target = unit === "percent" ? 100 : Math.round(leftover * 100) / 100;
+  const sumOk = Math.abs(sumRounded - target) < 0.5; // ₹ rounding tolerance
+  const canApply =
+    method === "equal" || (targets.length > 0 && sumOk);
+
+  const seg = (active) => ({
+    padding: "6px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 700,
+    border: active ? "1px solid #173e77" : "1px solid var(--uidai-pmis-border)",
+    background: active ? "#173e77" : "#fff",
+    color: active ? "#fff" : "#173e77",
+    cursor: "pointer",
+  });
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box" style={{ width: "min(580px, 100%)" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">Carry Forward — Phase {phaseLabel}</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          The phase's entire leftover{" "}
+          <strong style={{ color: "#173e77" }}>{inr(leftover)}</strong>{" "}
+          is carried forward. Choose how it's distributed.
+        </div>
+
+        {/* Type */}
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>Distribute across</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button type="button" style={seg(mode === "milestone")} onClick={() => setMode("milestone")}>
+              Milestone-wise
+            </button>
+            <button type="button" style={seg(mode === "phase")} onClick={() => setMode("phase")}>
+              Phase-wise
+            </button>
+          </div>
+        </div>
+
+        {/* Method */}
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>Method</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button type="button" style={seg(method === "equal")} onClick={() => setMethod("equal")}>
+              Equal distribution
+            </button>
+            <button type="button" style={seg(method === "custom")} onClick={() => setMethod("custom")}>
+              Custom
+            </button>
+          </div>
+        </div>
+
+        {method === "equal" ? (
+          <div style={{
+            border: "1px solid #cfe0f5", background: "#eef5ff", borderRadius: 8,
+            padding: "10px 12px", fontSize: 12.5, color: "#0b3c88", lineHeight: 1.5,
+          }}>
+            Split equally across {targets.length}{" "}
+            {mode === "phase" ? "later phase(s)" : "milestone(s) in the next phase"}.
+          </div>
+        ) : (
+          <div>
+            {/* Unit toggle + even-fill helper */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" style={seg(unit === "percent")} onClick={() => { setUnit("percent"); setAlloc({}); }}>
+                  %
+                </button>
+                <button type="button" style={seg(unit === "amount")} onClick={() => { setUnit("amount"); setAlloc({}); }}>
+                  ₹
+                </button>
+              </div>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                onClick={fillEven}
+                disabled={targets.length === 0}
+              >
+                Distribute evenly
+              </button>
+            </div>
+
+            {targets.length === 0 ? (
+              <div style={{ ...muted, fontSize: 13, padding: "8px 0" }}>
+                No {mode === "phase" ? "later phases" : "milestones in the next phase"} to distribute to.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
+                {targets.map((t) => (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ flex: 1, color: "#173e77", fontWeight: 600, fontSize: 13 }}>{t.label}</span>
+                    <div className="uidai-pmis-field" style={{ marginBottom: 0, width: 150 }}>
+                      <input
+                        type="number"
+                        min="0"
+                        value={alloc[t.id] ?? ""}
+                        placeholder={unit === "percent" ? "%" : "₹"}
+                        onChange={(e) => setOne(t.id, e.target.value)}
+                      />
+                    </div>
+                    <span style={{ ...muted, fontSize: 12, width: 16 }}>{unit === "percent" ? "%" : "₹"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {targets.length > 0 && (
+              <div style={{
+                marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
+                fontSize: 13, fontWeight: 700,
+                color: sumOk ? "#1b7a42" : "var(--uidai-pmis-red)",
+              }}>
+                <span>
+                  Sum: {unit === "percent" ? `${sumRounded}% / 100%` : `${inr(sumRounded)} / ${inr(target)}`}
+                </span>
+                {!sumOk && <span>Must total {unit === "percent" ? "100%" : inr(target)}</span>}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
+          Note: the distribution mode is saved; a custom split is captured locally
+          (backend persistence pending).
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={!canApply}
+            onClick={() => onApply({
+              mode,
+              method,
+              unit,
+              allocations: method === "custom"
+                ? targets.map((t) => ({ targetId: t.id, label: t.label, value: Number(alloc[t.id]) || 0 }))
+                : [],
+            })}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Each phase renders as its own collapsible panel — header is always
    visible, body collapses. Frequency + % of Payment are first-class
    columns now; the row-level pencil button opens the EditTermModal
-   which holds both. The carry-forward on/off toggle + mode picker live
-   in the header; the read-only roll-up is in the summary section below. */
+   which holds both. The carry-forward on/off toggle opens a config popup;
+   the read-only roll-up is in the summary section below. */
 function PhasePanel({
-  phase,
+  phase, allPhases = [],
   milestoneName, milestoneStatus = () => "Not Completed",
   frequencies = [], onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
@@ -1888,16 +2243,35 @@ function PhasePanel({
   const canToggleCarry = typeof onSetCarryForward === "function";
 
   /* Carry-forward state is backend-owned (phase.carryForward). When enabled
-     the phase carries its ENTIRE leftover forward; the only choice is the
-     distribution mode. The last phase can't carry forward (nothing later to
-     receive it), so the toggle is disabled there. `pendingMode` only governs
-     the picker while OFF — once ON, the dropdown reflects the saved mode. */
+     the phase carries its ENTIRE leftover forward. Clicking "Yes" opens the
+     config popup (type + method + custom split). The last phase can't carry
+     forward (nothing later to receive it), so the toggle is disabled there. */
   const cf = phase.carryForward || {};
   const cfEnabled = !!cf.enabled;
+  const cfMode = cf.mode || "milestone";
   const cfIsLast = cf.isLastPhase ?? isLastPhase;
   const cfDisabled = carryLocked || carryBusy || cfIsLast;
-  const [pendingMode, setPendingMode] = useState("milestone");
-  const modeValue = cfEnabled ? (cf.mode || "milestone") : pendingMode;
+  const cfLeftover = Number(cf.leftover) || phaseRemaining || 0;
+  const [cfModalOpen, setCfModalOpen] = useState(false);
+  /* Custom split captured client-side (backend persists only enabled+mode).
+     Cleared when carry-forward is turned off. */
+  const [customCfg, setCustomCfg] = useState(null);
+
+  /* Targets for the popup: later phases (phase-wise) or the NEXT phase's
+     milestones (milestone-wise), derived from the full phase list. */
+  const myIdx = allPhases.findIndex((p) => p.phase === phase.phase);
+  const laterPhases = myIdx >= 0 ? allPhases.slice(myIdx + 1) : [];
+  const nextPhase = laterPhases[0] || null;
+  const nextPhaseMilestones = nextPhase
+    ? Array.from(
+        new Map(
+          (nextPhase.paymentTerms || [])
+            .filter((t) => t.milestoneId)
+            .map((t) => [t.milestoneId, milestoneName(t.milestoneId)])
+        ),
+        ([id, name]) => ({ id, name })
+      )
+    : [];
 
   return (
     <div style={{
@@ -1955,21 +2329,24 @@ function PhasePanel({
               <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
                 Carry Forward Cost
               </span>
+              {/* Two separate pill buttons (not a fused segmented control) so
+                  both Yes and No are always clearly visible: the active one is
+                  filled, the inactive one is outlined. "Yes" opens the config
+                  popup; "No" turns carry-forward off. */}
               <div role="group" aria-label={`Carry forward leftover from Phase ${phase.phase}`}
-                style={{
-                  display: "inline-flex",
-                  border: "1px solid var(--uidai-pmis-border)",
-                  borderRadius: 999, overflow: "hidden", background: "#fff",
-                  opacity: cfDisabled ? 0.6 : 1,
-                }}>
+                style={{ display: "inline-flex", gap: 6, opacity: cfDisabled ? 0.6 : 1 }}>
                 <button
                   type="button"
                   disabled={cfDisabled}
-                  onClick={() => onSetCarryForward(phase.phase, true, modeValue)}
+                  aria-pressed={cfEnabled}
+                  onClick={() => setCfModalOpen(true)}
                   style={{
-                    padding: "4px 12px",
-                    border: "none",
-                    background: cfEnabled ? "#1b7a42" : "transparent",
+                    padding: "4px 16px",
+                    minWidth: 48,
+                    textAlign: "center",
+                    borderRadius: 999,
+                    border: cfEnabled ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
+                    background: cfEnabled ? "#1b7a42" : "#fff",
                     color: cfEnabled ? "#fff" : "#173e77",
                     fontWeight: 700, fontSize: 12,
                     cursor: cfDisabled ? "not-allowed" : "pointer",
@@ -1980,13 +2357,16 @@ function PhasePanel({
                 <button
                   type="button"
                   disabled={cfDisabled}
-                  onClick={() => onSetCarryForward(phase.phase, false)}
+                  aria-pressed={!cfEnabled}
+                  onClick={() => { setCustomCfg(null); onSetCarryForward(phase.phase, false); }}
                   style={{
-                    padding: "4px 12px",
-                    border: "none",
-                    borderLeft: "1px solid var(--uidai-pmis-border)",
-                    background: !cfEnabled ? "#eef2f7" : "transparent",
-                    color: "#173e77",
+                    padding: "4px 16px",
+                    minWidth: 48,
+                    textAlign: "center",
+                    borderRadius: 999,
+                    border: !cfEnabled ? "1px solid #5b6b82" : "1px solid var(--uidai-pmis-border)",
+                    background: !cfEnabled ? "#5b6b82" : "#fff",
+                    color: !cfEnabled ? "#fff" : "#173e77",
                     fontWeight: 700, fontSize: 12,
                     cursor: cfDisabled ? "not-allowed" : "pointer",
                   }}
@@ -1995,27 +2375,25 @@ function PhasePanel({
                 </button>
               </div>
 
-              {/* Distribution mode — split the leftover across later phases
-                  or later milestones. Changing it while ON re-sends the PUT. */}
-              <select
-                aria-label="Carry-forward distribution mode"
-                value={modeValue}
-                disabled={cfDisabled}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  if (cfEnabled) onSetCarryForward(phase.phase, true, m);
-                  else setPendingMode(m);
-                }}
-                style={{
-                  border: "1px solid var(--uidai-pmis-border)",
-                  borderRadius: 999, padding: "4px 8px",
-                  fontSize: 12, fontWeight: 700, color: "#173e77", background: "#fff",
-                  cursor: cfDisabled ? "not-allowed" : "pointer",
-                }}
-              >
-                <option value="milestone">Milestone-wise</option>
-                <option value="phase">Phase-wise</option>
-              </select>
+              {/* When enabled, show the saved mode + (local) method, and let
+                  the user reopen the popup to edit. */}
+              {cfEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setCfModalOpen(true)}
+                  style={{
+                    border: "1px solid var(--uidai-pmis-border)",
+                    borderRadius: 999, padding: "3px 10px",
+                    fontSize: 11, fontWeight: 700, color: "#173e77", background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  {cfMode === "phase" ? "Phase-wise" : "Milestone-wise"}
+                  {" · "}
+                  {customCfg ? "Custom" : "Equal"}
+                  {" ✎"}
+                </button>
+              )}
 
               {cfIsLast && (
                 <span style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>
@@ -2428,6 +2806,26 @@ function PhasePanel({
           </div>
         </div>
       )}
+
+      <CarryForwardModal
+        open={cfModalOpen}
+        onClose={() => setCfModalOpen(false)}
+        phaseLabel={phase.phase}
+        initialMode={cfMode}
+        leftover={cfLeftover}
+        laterPhases={laterPhases}
+        nextPhaseMilestones={nextPhaseMilestones}
+        onApply={(cfg) => {
+          /* Persist enabled + mode (the only thing the backend takes today);
+             keep the chosen method + custom allocations client-side. */
+          setCustomCfg(cfg.method === "custom" ? cfg : null);
+          setCfModalOpen(false);
+          onSetCarryForward(phase.phase, true, cfg.mode);
+          if (cfg.method === "custom") {
+            uiStore.showMessage("Custom split captured locally — backend persistence pending.");
+          }
+        }}
+      />
     </div>
   );
 }
