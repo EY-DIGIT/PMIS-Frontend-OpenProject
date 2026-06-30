@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { listMeetings } from "../../api/meetings";
+import { listMeetings, getMoM } from "../../api/meetings";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
 
@@ -45,6 +45,26 @@ function trimTime(hms) {
   return String(hms).slice(0, 5);
 }
 
+/* Pull the action-item list out of whatever wrapper /meetings/mom/getByMeeting
+   returns ({data:{mom}}, {mom}, {data}, or the record itself). Used only to
+   decide whether a meeting already has created tasks. Returns []. */
+function actionItemsOf(mom) {
+  if (!mom) return [];
+  const candidates = [mom?.data?.mom, mom?.mom, mom?.data, mom];
+  const rec = candidates.find(
+    (c) =>
+      c &&
+      typeof c === "object" &&
+      (Array.isArray(c.actionItems) || Array.isArray(c.actions))
+  );
+  if (!rec) return [];
+  return Array.isArray(rec.actionItems)
+    ? rec.actionItems
+    : Array.isArray(rec.actions)
+    ? rec.actions
+    : [];
+}
+
 export default function ProjectMeetingsPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -52,6 +72,9 @@ export default function ProjectMeetingsPage() {
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  /* Id of the meeting whose MoM we're checking on click (disables the row
+     so a double-click can't fire two lookups). */
+  const [routingId, setRoutingId] = useState(null);
   const [q, setQ] = useState("");
   const [pageInfo, setPageInfo] = useState({
     page: 0,
@@ -83,6 +106,24 @@ export default function ProjectMeetingsPage() {
     loadPage(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  /* Decide where a meeting row should go: if the meeting already has a MoM
+     with created tasks, open the editable Linked-Task view; otherwise fall
+     back to the meeting detail page (where the MoM/tasks get created). A
+     failed/absent MoM lookup is treated as "no tasks" → detail page. */
+  const openMeeting = async (meetingId) => {
+    if (!meetingId || routingId) return;
+    setRoutingId(meetingId);
+    try {
+      const mom = await getMoM(meetingId);
+      const hasTasks = actionItemsOf(mom).length > 0;
+      navigate(hasTasks ? `/meetings/${meetingId}/tasks` : `/meetings/${meetingId}`);
+    } catch {
+      navigate(`/meetings/${meetingId}`);
+    } finally {
+      setRoutingId(null);
+    }
+  };
 
   /* The getAll rows echo back projectName/projectCode — use the first
      row to label the header so we don't need a separate project fetch. */
@@ -173,9 +214,11 @@ export default function ProjectMeetingsPage() {
                   <tr
                     key={m.id}
                     className="clickable"
-                    onClick={() => navigate(`/meetings/${m.id}`)}
+                    aria-busy={routingId === m.id}
+                    style={routingId === m.id ? { opacity: 0.6 } : undefined}
+                    onClick={() => openMeeting(m.id)}
                   >
-                    <td><span className="link">#{m.meetingCode}</span></td>
+                    <td><span className="link">{m.meetingCode}</span></td>
                     <td>{m.title}</td>
                     <td>{fmtDate(m.meetingDate)}</td>
                     <td>

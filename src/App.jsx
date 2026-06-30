@@ -40,6 +40,7 @@ import MeetingsListPage from './pages/meetings/MeetingsListPage';
 import CreateMeetingPage from './pages/meetings/CreateMeetingPage';
 import MeetingDetailPage from './pages/meetings/MeetingDetailPage';
 import ProjectMeetingsPage from './pages/meetings/ProjectMeetingsPage';
+import LinkedTaskMeeting from './pages/meetings/LinkedTaskMeeting';
 import { DataProvider, useData } from './data/DataContext';
 import "./styles/global.css";
 
@@ -741,6 +742,7 @@ export default function MainApp() {
                                                 <Route path="sla-masters" element={<SlaMastersPage />} />
                                                 <Route path="sla-masters/onboard" element={<SlaOnboardingPage />} />
                                                 <Route path="sla-masters/view/:slaId" element={<SlaMastersPage />} />
+                                                <Route path="meetings/:id/tasks" element={<RequirePermission action="viewMeetings"><LinkedTaskMeeting /></RequirePermission>} />
                                                 <Route path="meetings/:id" element={<RequirePermission action="viewMeetings"><MeetingDetailPage /></RequirePermission>} />
                                             </Routes>
                                         </Layout>

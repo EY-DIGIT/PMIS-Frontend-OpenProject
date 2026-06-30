@@ -210,6 +210,10 @@ export const ENDPOINTS = {
        Type dropdown. Current values: partial_payment, complete_payment.
        Served by the same /master gateway as the other finance masters. */
     paymentTypes: '/master/api/v3/master/payment-types',
+    /* Carry-forward method catalog (8 methods). Each row carries
+       { code, name, method: phase|milestone|time, variant: evenly|custom,
+       position } — the Finance page groups the picker by method × variant. */
+    carryForwardMethods: '/master/api/v3/master/carry-forward-methods',
   },
 
   resourceTypes: {
@@ -259,11 +263,22 @@ export const ENDPOINTS = {
     paymentPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-page`,
     costItems: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/cost-items`,
     paymentTerms: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-terms`,
-    /* Carry-forward replaces the old /qrg toggle. A phase with leftover
-       budget carries its ENTIRE leftover forward; the body only chooses the
-       distribution mode: { enabled: true, mode: "phase" | "milestone" } or
-       { enabled: false }. Response lands in phases[].carryForward. */
+    /* Carry-forward replaces the old /qrg toggle. A phase carries its
+       ENTIRE leftover forward; the body chooses the distribution method:
+         { enabled: false }                                   // clear
+         { enabled: true, methodCode: "milestone_evenly" }    // evenly / time_*
+         { enabled: true, methodCode: "phase_custom",         // custom
+           allocationMode: "percent" | "amount",
+           allocations: [{ recipientKey, value }, …] }
+       methodCode comes from the carry-forward-methods master. Response lands
+       in phases[].carryForward (methodCode, leftover, carriedOut, received,
+       receivedMilestone, isLastPhase, allocations[]). */
     carryForward: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/carry-forward`,
+    /* Frequency is now a SINGLE project-level setting (drives every
+       cycleCount + time-based carry-forward). Body: { frequencyCode }.
+       The legacy per-phase route still works but also sets the project
+       frequency (the {phase} segment is ignored server-side). */
+    frequency: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/frequency`,
     phaseFrequency: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/frequency`,
     ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
   },

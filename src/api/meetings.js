@@ -106,3 +106,30 @@ export async function momUpdateStatus(momId, status) {
 export async function createActivityTask(activityId, body) {
   return api.post(ENDPOINTS.activities.taskCreate(activityId), body);
 }
+
+/* GET /projects/api/v3/activities/{activityId}/tasks — the real tasks under
+   an activity. Response: { data: { _embedded: { elements: [Task…] }, total,
+   count, pageSize, offset } }. The Linked-Task view sources its rows (and the
+   task UUIDs it PATCHes) from here. offset is 1-based; pull a big page so all
+   tasks for the meeting's activity come back in one call. */
+export async function listActivityTasks(
+  activityId,
+  { offset = 1, pageSize = 200, includeDeleted = false } = {}
+) {
+  return api.get(ENDPOINTS.activities.tasks(activityId), {
+    query: { offset, pageSize, includeDeleted },
+  });
+}
+
+/* PATCH /projects/api/v3/tasks/{id} — update a single activity task in
+   place. Used by the Linked-Task view to push edited description /
+   assignee / priority back onto the real task. */
+export async function updateTask(taskId, body) {
+  return api.patch(ENDPOINTS.tasks.update(taskId), body);
+}
+
+/* DELETE /projects/api/v3/tasks/{id} — remove a single activity task. Used
+   by the Linked-Task view's per-row delete. */
+export async function deleteTask(taskId) {
+  return api.del(ENDPOINTS.tasks.remove(taskId));
+}

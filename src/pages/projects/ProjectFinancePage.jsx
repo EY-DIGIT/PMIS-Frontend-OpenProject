@@ -938,6 +938,9 @@ export default function ProjectFinancePage() {
   const [costTypes, setCostTypes] = useState([]);
   const [frequencies, setFrequencies] = useState([]);
   const [milestones, setMilestones] = useState([]);
+  /* Carry-forward methods (8) — { code, name, method, variant, position }.
+     Drives the per-phase carry-forward method picker. */
+  const [carryMethods, setCarryMethods] = useState([]);
 
   // ── Live payment-page state (single source of truth) ──
   const [page, setPage] = useState(null);
@@ -1020,6 +1023,27 @@ export default function ProjectFinancePage() {
     }
   }
 
+  async function loadCarryForwardMethods() {
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.master.carryForwardMethods}`);
+      const payload = await readJson(res);
+      const list = extractElements(payload)
+        .filter((m) => m && m.code && m.active !== false)
+        .map((m) => ({
+          code: m.code,
+          name: m.name || m.code,
+          method: m.method || "",      // phase | milestone | time
+          variant: m.variant || "",    // evenly | custom (time variants vary)
+          position: typeof m.position === "number" ? m.position : 0,
+        }))
+        .sort((a, b) => a.position - b.position);
+      setCarryMethods(list);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      uiStore.showError(err?.message || "Failed to load carry-forward methods");
+    }
+  }
+
   async function loadMilestones() {
     if (!projectId) return;
     try {
@@ -1075,6 +1099,7 @@ export default function ProjectFinancePage() {
     if (!projectId || !getToken()) return;
     loadCostTypes();
     loadFrequencies();
+    loadCarryForwardMethods();
     loadMilestones();
     loadPaymentPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1091,7 +1116,23 @@ export default function ProjectFinancePage() {
 
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
-  const phases = page?.phases || [];
+  /* Order phases chronologically — earliest startDate first, latest endDate
+     last. This makes "subsequent phases" (used to divide a phase's
+     carry-forward) mean the phases that come AFTER it in time: laterPhases
+     = phases.slice(idx + 1) on this sorted list. Phases missing a startDate
+     sort to the end. */
+  const phases = useMemo(() => {
+    const list = page?.phases || [];
+    const ts = (d) => {
+      const t = d ? Date.parse(d) : NaN;
+      return Number.isNaN(t) ? Infinity : t;
+    };
+    return [...list].sort((a, b) => {
+      const sa = ts(a.startDate), sb = ts(b.startDate);
+      if (sa !== sb) return sa - sb;
+      return ts(a.endDate) - ts(b.endDate);
+    });
+  }, [page]);
   const totals = page?.totals || {};
   const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
@@ -1327,21 +1368,22 @@ export default function ProjectFinancePage() {
   }
 
   /* Carry-forward — a phase with leftover budget carries its ENTIRE
-     leftover forward; the body only picks the distribution mode. There's
-     no "how much" anymore, and multiple phases may carry at once, so no
+     leftover forward; the body chooses the distribution method (from the
+     carry-forward-methods master). Multiple phases may carry at once, so no
      mutual-exclusion cascade. The silent reload re-renders every phase's
-     carryForward.* plus the per-term carryReceived from backend truth.
+     carryForward.* from backend truth.
 
        PUT /phases/{phase}/carry-forward
-         { enabled: true, mode: "phase" | "milestone" }   // enable
-         { enabled: false }                                // disable
-     A 422 (e.g. carry-forward not allowed on the last phase) surfaces the
-     backend's error.message via readJson. */
-  async function setCarryForward(phase, enabled, mode) {
+         { enabled: false }                                       // disable
+         { enabled: true, methodCode }                            // evenly / time_*
+         { enabled: true, methodCode, allocationMode, allocations } // *_custom
+     `body` is built by the caller (the config popup). A 422 (e.g. last
+     phase, no project frequency for a time method, or an under-allocated
+     custom split) surfaces the backend's error.message via readJson. */
+  async function setCarryForward(phase, body) {
     if (carrySaving) return;
     setCarrySaving(true);
     try {
-      const body = enabled ? { enabled: true, mode } : { enabled: false };
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.carryForward(projectId, phase)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1349,7 +1391,7 @@ export default function ProjectFinancePage() {
       });
       await readJson(res);
       await loadPaymentPage({ silent: true });
-      uiStore.showMessage(enabled ? "Carry-forward enabled." : "Carry-forward disabled.");
+      uiStore.showMessage(body?.enabled ? "Carry-forward enabled." : "Carry-forward disabled.");
     } catch (err) {
       if (handleAuthError(err)) return;
       uiStore.showError(err?.message || "Failed to update carry-forward");
@@ -1656,6 +1698,8 @@ export default function ProjectFinancePage() {
                 milestoneName={milestoneName}
                 milestoneStatus={milestoneStatus}
                 frequencies={frequencies}
+                carryMethods={carryMethods}
+                projectFrequencyCode={page?.frequencyCode || ""}
                 onEditTerm={(t) => setEditingTerm(t)}
                 onEditActivities={(t) => setEditingActivitiesTerm(t)}
                 onGenerateInvoice={generateInvoice}
@@ -1780,7 +1824,7 @@ export default function ProjectFinancePage() {
                 background: "var(--uidai-pmis-border)",
                 margin: "0 16px",
               }} />
-              <CarryForwardSummarySection phases={phases} totals={totals} />
+              <CarryForwardSummarySection phases={phases} totals={totals} carryMethods={carryMethods} />
             </>
           )}
         </div>
@@ -1997,51 +2041,77 @@ function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milest
    ────────────────────────────────────────────────────────────────── */
 function CarryForwardModal({
   open, onClose, onApply, phaseLabel,
-  initialMode = "milestone", leftover = 0,
-  laterPhases = [], nextPhaseMilestones = [],
+  methods = [], initialMethodCode = "", initialAllocations = [],
+  leftover = 0, laterPhases = [], laterMilestones = [],
+  projectFrequencyCode = "",
 }) {
-  const [mode, setMode] = useState(initialMode);     // 'milestone' | 'phase'
-  const [method, setMethod] = useState("equal");     // 'equal' | 'custom'
-  const [unit, setUnit] = useState("percent");       // 'percent' | 'amount'
-  const [alloc, setAlloc] = useState({});            // targetId -> string
+  const [methodCode, setMethodCode] = useState(initialMethodCode);
+  const [unit, setUnit] = useState("percent");       // allocationMode: 'percent' | 'amount'
+  const [alloc, setAlloc] = useState({});            // recipientKey -> string
 
+  /* Seed on open: select the saved method and pre-fill any saved custom
+     split (backend returns allocations[] with recipientKey + allocMode +
+     inputValue/percent). */
   useEffect(() => {
     if (open) {
-      setMode(initialMode);
-      setMethod("equal");
-      setUnit("percent");
-      setAlloc({});
+      setMethodCode(initialMethodCode || "");
+      const seed = {};
+      let unitSeed = "percent";
+      (initialAllocations || []).forEach((a) => {
+        if (a == null || a.recipientKey == null) return;
+        const m = a.allocMode || a.allocationMode;
+        if (m === "amount") unitSeed = "amount";
+        const v = a.inputValue ?? a.value ?? a.percent;
+        seed[String(a.recipientKey)] = v != null ? String(v) : "";
+      });
+      setUnit(unitSeed);
+      setAlloc(seed);
     }
-  }, [open, initialMode]);
+  }, [open, initialMethodCode, initialAllocations]);
 
-  const targets = useMemo(() => (
-    mode === "phase"
-      ? laterPhases.map((p) => ({ id: String(p.phase), label: `Phase ${p.phase}` }))
-      : nextPhaseMilestones.map((m) => ({ id: String(m.id), label: m.name }))
-  ), [mode, laterPhases, nextPhaseMilestones]);
+  const selected = methods.find((m) => m.code === methodCode) || null;
+  const selMethod = selected?.method || "";          // phase | milestone | time
+  const isCustom = (selected?.variant || "") === "custom";
+  const isTime = selMethod === "time";
+
+  /* Recipients only matter for the *_custom variants: later phases for
+     phase_custom, subsequent milestones for milestone_custom. */
+  const recipients = useMemo(() => (
+    selMethod === "phase"
+      ? laterPhases.map((p) => ({ key: String(p.phase), label: `Phase ${p.phase}` }))
+      : selMethod === "milestone"
+        ? laterMilestones.map((m) => ({ key: String(m.id), label: m.name }))
+        : []
+  ), [selMethod, laterPhases, laterMilestones]);
 
   if (!open) return null;
 
-  const setOne = (id, v) => setAlloc((prev) => ({ ...prev, [id]: v }));
+  const setOne = (k, v) => setAlloc((prev) => ({ ...prev, [k]: v }));
 
-  /* Pre-fill the custom rows with an even split so the user starts from a
-     valid state and only tweaks what they need. */
+  /* Pre-fill the custom rows with an even split so the user starts valid. */
   const fillEven = () => {
-    const n = targets.length || 1;
+    const n = recipients.length || 1;
     const each = unit === "percent"
       ? Math.round((100 / n) * 100) / 100
       : Math.round((leftover / n) * 100) / 100;
     const next = {};
-    targets.forEach((t) => { next[t.id] = String(each); });
+    recipients.forEach((r) => { next[r.key] = String(each); });
     setAlloc(next);
   };
 
-  const sum = targets.reduce((s, t) => s + (Number(alloc[t.id]) || 0), 0);
+  const sum = recipients.reduce((s, r) => s + (Number(alloc[r.key]) || 0), 0);
   const sumRounded = Math.round(sum * 100) / 100;
   const target = unit === "percent" ? 100 : Math.round(leftover * 100) / 100;
   const sumOk = Math.abs(sumRounded - target) < 0.5; // ₹ rounding tolerance
+  const timeBlocked = isTime && !projectFrequencyCode;
   const canApply =
-    method === "equal" || (targets.length > 0 && sumOk);
+    !!selected && !timeBlocked && (!isCustom || (recipients.length > 0 && sumOk));
+
+  /* Picker options grouped by method family. */
+  const groupLabel = { phase: "Phase-based", milestone: "Milestone-based", time: "Time-based" };
+  const groups = ["phase", "milestone", "time"]
+    .map((g) => ({ g, label: groupLabel[g] || g, items: methods.filter((m) => m.method === g) }))
+    .filter((grp) => grp.items.length > 0);
 
   const seg = (active) => ({
     padding: "6px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 700,
@@ -2073,41 +2143,47 @@ function CarryForwardModal({
           is carried forward. Choose how it's distributed.
         </div>
 
-        {/* Type */}
+        {/* Method picker — master-driven, grouped by family. */}
         <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-          <label>Distribute across</label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button type="button" style={seg(mode === "milestone")} onClick={() => setMode("milestone")}>
-              Milestone-wise
-            </button>
-            <button type="button" style={seg(mode === "phase")} onClick={() => setMode("phase")}>
-              Phase-wise
-            </button>
-          </div>
+          <label>Carry-forward method</label>
+          <select value={methodCode} onChange={(e) => setMethodCode(e.target.value)}>
+            <option value="">— Select method —</option>
+            {groups.map((grp) => (
+              <optgroup key={grp.g} label={grp.label}>
+                {grp.items.map((m) => (
+                  <option key={m.code} value={m.code}>{m.name}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {methods.length === 0 && (
+            <small style={{ color: "var(--uidai-pmis-muted)" }}>No carry-forward methods available.</small>
+          )}
         </div>
 
-        {/* Method */}
-        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-          <label>Method</label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button type="button" style={seg(method === "equal")} onClick={() => setMethod("equal")}>
-              Equal distribution
-            </button>
-            <button type="button" style={seg(method === "custom")} onClick={() => setMethod("custom")}>
-              Custom
-            </button>
+        {isTime && (
+          <div style={{
+            border: timeBlocked ? "1px solid #f0c0c0" : "1px solid #cfe0f5",
+            background: timeBlocked ? "#fdecec" : "#eef5ff",
+            borderRadius: 8, padding: "10px 12px", fontSize: 12.5,
+            color: timeBlocked ? "#a3261f" : "#0b3c88", lineHeight: 1.5,
+          }}>
+            {timeBlocked
+              ? "Set a project frequency first — time-based carry-forward weights the split by each later phase's cycle count."
+              : `Leftover is split across later phases, weighted by each phase's cycle count at the project frequency (${projectFrequencyCode}).`}
           </div>
-        </div>
+        )}
 
-        {method === "equal" ? (
+        {selected && !isCustom && !isTime && (
           <div style={{
             border: "1px solid #cfe0f5", background: "#eef5ff", borderRadius: 8,
             padding: "10px 12px", fontSize: 12.5, color: "#0b3c88", lineHeight: 1.5,
           }}>
-            Split equally across {targets.length}{" "}
-            {mode === "phase" ? "later phase(s)" : "milestone(s) in the next phase"}.
+            Split equally across {selMethod === "phase" ? "the later phases" : "the subsequent milestones"}.
           </div>
-        ) : (
+        )}
+
+        {isCustom && (
           <div>
             {/* Unit toggle + even-fill helper */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
@@ -2123,28 +2199,28 @@ function CarryForwardModal({
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
                 onClick={fillEven}
-                disabled={targets.length === 0}
+                disabled={recipients.length === 0}
               >
                 Distribute evenly
               </button>
             </div>
 
-            {targets.length === 0 ? (
+            {recipients.length === 0 ? (
               <div style={{ ...muted, fontSize: 13, padding: "8px 0" }}>
-                No {mode === "phase" ? "later phases" : "milestones in the next phase"} to distribute to.
+                No {selMethod === "phase" ? "later phases" : "subsequent milestones"} to distribute to.
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 240, overflowY: "auto" }}>
-                {targets.map((t) => (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ flex: 1, color: "#173e77", fontWeight: 600, fontSize: 13 }}>{t.label}</span>
+                {recipients.map((r) => (
+                  <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ flex: 1, color: "#173e77", fontWeight: 600, fontSize: 13 }}>{r.label}</span>
                     <div className="uidai-pmis-field" style={{ marginBottom: 0, width: 150 }}>
                       <input
                         type="number"
                         min="0"
-                        value={alloc[t.id] ?? ""}
+                        value={alloc[r.key] ?? ""}
                         placeholder={unit === "percent" ? "%" : "₹"}
-                        onChange={(e) => setOne(t.id, e.target.value)}
+                        onChange={(e) => setOne(r.key, e.target.value)}
                       />
                     </div>
                     <span style={{ ...muted, fontSize: 12, width: 16 }}>{unit === "percent" ? "%" : "₹"}</span>
@@ -2153,7 +2229,7 @@ function CarryForwardModal({
               </div>
             )}
 
-            {targets.length > 0 && (
+            {recipients.length > 0 && (
               <div style={{
                 marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
                 fontSize: 13, fontWeight: 700,
@@ -2169,8 +2245,8 @@ function CarryForwardModal({
         )}
 
         <div style={{ marginTop: 14, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
-          Note: the distribution mode is saved; a custom split is captured locally
-          (backend persistence pending).
+          Saved to the backend, which recomputes every phase. Note: only
+          testable once the carry-forward backend is deployed.
         </div>
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
@@ -2186,14 +2262,16 @@ function CarryForwardModal({
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
             disabled={!canApply}
-            onClick={() => onApply({
-              mode,
-              method,
-              unit,
-              allocations: method === "custom"
-                ? targets.map((t) => ({ targetId: t.id, label: t.label, value: Number(alloc[t.id]) || 0 }))
-                : [],
-            })}
+            onClick={() => onApply(
+              isCustom
+                ? {
+                    enabled: true,
+                    methodCode,
+                    allocationMode: unit,
+                    allocations: recipients.map((r) => ({ recipientKey: r.key, value: Number(alloc[r.key]) || 0 })),
+                  }
+                : { enabled: true, methodCode }
+            )}
           >
             Apply
           </button>
@@ -2211,7 +2289,8 @@ function CarryForwardModal({
 function PhasePanel({
   phase, allPhases = [],
   milestoneName, milestoneStatus = () => "Not Completed",
-  frequencies = [], onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
+  frequencies = [], carryMethods = [], projectFrequencyCode = "",
+  onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -2243,35 +2322,33 @@ function PhasePanel({
   const canToggleCarry = typeof onSetCarryForward === "function";
 
   /* Carry-forward state is backend-owned (phase.carryForward). When enabled
-     the phase carries its ENTIRE leftover forward. Clicking "Yes" opens the
-     config popup (type + method + custom split). The last phase can't carry
+     the phase carries its ENTIRE leftover forward via the chosen method.
+     Clicking "Yes" opens the config popup; the last phase can't carry
      forward (nothing later to receive it), so the toggle is disabled there. */
   const cf = phase.carryForward || {};
   const cfEnabled = !!cf.enabled;
-  const cfMode = cf.mode || "milestone";
+  const cfMethodCode = cf.methodCode || "";
+  const cfMethodName = carryMethods.find((m) => m.code === cfMethodCode)?.name || cfMethodCode || "";
   const cfIsLast = cf.isLastPhase ?? isLastPhase;
   const cfDisabled = carryLocked || carryBusy || cfIsLast;
   const cfLeftover = Number(cf.leftover) || phaseRemaining || 0;
+  const cfAllocations = Array.isArray(cf.allocations) ? cf.allocations : [];
   const [cfModalOpen, setCfModalOpen] = useState(false);
-  /* Custom split captured client-side (backend persists only enabled+mode).
-     Cleared when carry-forward is turned off. */
-  const [customCfg, setCustomCfg] = useState(null);
 
-  /* Targets for the popup: later phases (phase-wise) or the NEXT phase's
-     milestones (milestone-wise), derived from the full phase list. */
+  /* Recipients for the popup's custom variants, derived from the full phase
+     list: later phases (phase_custom) or the milestones across all later
+     phases (milestone_custom). */
   const myIdx = allPhases.findIndex((p) => p.phase === phase.phase);
   const laterPhases = myIdx >= 0 ? allPhases.slice(myIdx + 1) : [];
-  const nextPhase = laterPhases[0] || null;
-  const nextPhaseMilestones = nextPhase
-    ? Array.from(
-        new Map(
-          (nextPhase.paymentTerms || [])
-            .filter((t) => t.milestoneId)
-            .map((t) => [t.milestoneId, milestoneName(t.milestoneId)])
-        ),
-        ([id, name]) => ({ id, name })
-      )
-    : [];
+  const laterMilestones = Array.from(
+    new Map(
+      laterPhases
+        .flatMap((p) => p.paymentTerms || [])
+        .filter((t) => t.milestoneId)
+        .map((t) => [t.milestoneId, milestoneName(t.milestoneId)])
+    ),
+    ([id, name]) => ({ id, name })
+  );
 
   return (
     <div style={{
@@ -2358,7 +2435,7 @@ function PhasePanel({
                   type="button"
                   disabled={cfDisabled}
                   aria-pressed={!cfEnabled}
-                  onClick={() => { setCustomCfg(null); onSetCarryForward(phase.phase, false); }}
+                  onClick={() => onSetCarryForward(phase.phase, { enabled: false })}
                   style={{
                     padding: "4px 16px",
                     minWidth: 48,
@@ -2388,9 +2465,7 @@ function PhasePanel({
                     cursor: "pointer",
                   }}
                 >
-                  {cfMode === "phase" ? "Phase-wise" : "Milestone-wise"}
-                  {" · "}
-                  {customCfg ? "Custom" : "Equal"}
+                  {cfMethodName || "Configure"}
                   {" ✎"}
                 </button>
               )}
@@ -2811,19 +2886,16 @@ function PhasePanel({
         open={cfModalOpen}
         onClose={() => setCfModalOpen(false)}
         phaseLabel={phase.phase}
-        initialMode={cfMode}
+        methods={carryMethods}
+        initialMethodCode={cfMethodCode}
+        initialAllocations={cfAllocations}
         leftover={cfLeftover}
         laterPhases={laterPhases}
-        nextPhaseMilestones={nextPhaseMilestones}
-        onApply={(cfg) => {
-          /* Persist enabled + mode (the only thing the backend takes today);
-             keep the chosen method + custom allocations client-side. */
-          setCustomCfg(cfg.method === "custom" ? cfg : null);
+        laterMilestones={laterMilestones}
+        projectFrequencyCode={projectFrequencyCode}
+        onApply={(body) => {
           setCfModalOpen(false);
-          onSetCarryForward(phase.phase, true, cfg.mode);
-          if (cfg.method === "custom") {
-            uiStore.showMessage("Custom split captured locally — backend persistence pending.");
-          }
+          onSetCarryForward(phase.phase, body);
         }}
       />
     </div>
@@ -2837,7 +2909,7 @@ function PhasePanel({
    every phase: scheduled %, delivery cost, and (from phase.carryForward)
    the leftover carried out and the amount received from earlier phases.
    ────────────────────────────────────────────────────────────────── */
-function CarryForwardSummarySection({ phases, totals }) {
+function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
   if (!phases || phases.length === 0) return null;
 
   /* Remaining balance = Total Contract Cost minus everything already
@@ -2881,7 +2953,8 @@ function CarryForwardSummarySection({ phases, totals }) {
           const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
           const cf = p.carryForward || {};
           const yes = !!cf.enabled;
-          const cfMode = cf.mode || "milestone";
+          const cfMethodName =
+            carryMethods.find((m) => m.code === cf.methodCode)?.name || cf.methodCode || "";
           const carriedOut = Number(cf.carriedOut) || 0;
           const received = (Number(cf.received) || 0) + (Number(cf.receivedMilestone) || 0);
           return (
@@ -2923,7 +2996,7 @@ function CarryForwardSummarySection({ phases, totals }) {
                   { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
                 {stat("Carried Forward",
-                  yes ? `${inr(carriedOut)} · ${cfMode === "phase" ? "phase-wise" : "milestone-wise"}` : "—",
+                  yes ? `${inr(carriedOut)}${cfMethodName ? ` · ${cfMethodName}` : ""}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
                 {stat("Received",
                   received > 0 ? inr(received) : "—",
