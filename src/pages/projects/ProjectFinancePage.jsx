@@ -953,6 +953,11 @@ export default function ProjectFinancePage() {
   /* Payment Terms: phases render as tabs (like the org tabs at the top);
      only the selected phase's panel is shown. */
   const [activePhaseIdx, setActivePhaseIdx] = useState(0);
+  /* One-time-cost distribution across phases — UI-only for now (no backend
+     persistence yet). Keyed by phase → { enabled, mode: 'percent'|'amount',
+     value }. Seeded to 100% on the first phase (the backend currently books
+     the whole one-time cost there). */
+  const [oneTimeAllocs, setOneTimeAllocs] = useState({});
 
   function handleAuthError(err) {
     if (err && err.isAuth) {
@@ -1107,6 +1112,31 @@ export default function ProjectFinancePage() {
     if (phases.length > 0 && activePhaseIdx > phases.length - 1) setActivePhaseIdx(0);
   }, [phases.length, activePhaseIdx]);
   const totals = page?.totals || {};
+
+  /* ── One-time-cost distribution (UI-only) ──────────────────────────── */
+  const oneTimeTotal = Number(totals?.oneTimeCost) || 0;
+  /* Seed the first phase with 100% once phases + a one-time cost exist. */
+  useEffect(() => {
+    if (phases.length === 0 || oneTimeTotal <= 0) return;
+    setOneTimeAllocs((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      return { [phases[0].phase]: { enabled: true, mode: "percent", value: 100 } };
+    });
+  }, [phases, oneTimeTotal]);
+  /* ₹ amount a given { enabled, mode, value } config resolves to. */
+  const oneTimeAmountOf = (cfg) => {
+    if (!cfg || !cfg.enabled) return 0;
+    return cfg.mode === "amount"
+      ? (Number(cfg.value) || 0)
+      : ((Number(cfg.value) || 0) / 100) * oneTimeTotal;
+  };
+  const oneTimeAllocated = phases.reduce(
+    (s, p) => s + oneTimeAmountOf(oneTimeAllocs[p.phase]), 0
+  );
+  const oneTimeRemaining = Math.round((oneTimeTotal - oneTimeAllocated) * 100) / 100;
+  function setOneTimeForPhase(phaseKey, cfg) {
+    setOneTimeAllocs((prev) => ({ ...prev, [phaseKey]: cfg }));
+  }
   const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
   // Finance page is always actionable — the user can edit terms, generate
@@ -1726,6 +1756,13 @@ export default function ProjectFinancePage() {
                     carryLocked={isLocked || carrySaving}
                     carryBusy={carrySaving}
                     onSetCarryForward={setCarryForward}
+                    oneTimeTotal={oneTimeTotal}
+                    oneTimeConfig={oneTimeAllocs[phases[activePhaseIdx].phase]}
+                    oneTimeAllocatedElsewhere={
+                      oneTimeAllocated - oneTimeAmountOf(oneTimeAllocs[phases[activePhaseIdx].phase])
+                    }
+                    oneTimeRemaining={oneTimeRemaining}
+                    onSetOneTime={setOneTimeForPhase}
                   />
                 )}
               </>
@@ -2044,6 +2081,164 @@ function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milest
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   One-Time Cost distribution popup. Lets the user add a slice of the
+   project's total one-time cost to this phase — Enable/Disable, then an
+   amount in % (of the total) or ₹, with a live "remaining" tracker. The
+   last phase auto-absorbs any unallocated remainder.
+
+   ⚠️ UI-only for now — the backend books the whole one-time cost on the
+   first phase; this state is client-side until an endpoint exists.
+   ────────────────────────────────────────────────────────────────── */
+function OneTimeCostModal({
+  open, onClose, onApply, phaseLabel,
+  total = 0, available = 0, initialConfig = null,
+  isLastPhase = false, autoRemainder = 0,
+}) {
+  const [enabled, setEnabled] = useState(false);
+  const [mode, setMode] = useState("percent");   // 'percent' | 'amount'
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setEnabled(!!initialConfig?.enabled);
+    setMode(initialConfig?.mode || "percent");
+    setValue(initialConfig?.value != null ? String(initialConfig.value) : "");
+  }, [open, initialConfig]);
+
+  if (!open) return null;
+
+  const entered = Number(value) || 0;
+  const amount = mode === "amount" ? entered : (entered / 100) * total;
+  const maxAmount = Math.max(0, available);
+  const overBudget = enabled && amount > maxAmount + 0.5;
+  const validValue = !enabled || (value !== "" && entered >= 0 && !overBudget);
+  const remainingAfter = Math.round((maxAmount - (enabled ? amount : 0)) * 100) / 100;
+
+  const seg = (active) => ({
+    padding: "6px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 700,
+    border: active ? "1px solid #173e77" : "1px solid var(--uidai-pmis-border)",
+    background: active ? "#173e77" : "#fff",
+    color: active ? "#fff" : "#173e77",
+    cursor: "pointer",
+  });
+
+  return (
+    <div className="uidai-modal" role="dialog" aria-modal="true">
+      <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: "absolute", top: 8, right: 10, width: 28, height: 28,
+            border: "none", background: "transparent", fontSize: 22, lineHeight: 1,
+            cursor: "pointer", color: "#666", padding: 0,
+          }}
+        >
+          ×
+        </button>
+        <h3 className="uidai-modal__title">One-Time Cost — Phase {phaseLabel}</h3>
+        <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
+          Add a share of the project's one-time cost to this phase.
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, padding: "8px 12px", background: "#f7f9fc" }}>
+            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>Total one-time cost</div>
+            <strong style={{ color: "#173e77", fontSize: 15 }}>{inr(total)}</strong>
+          </div>
+          <div style={{ flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, padding: "8px 12px", background: "#f7f9fc" }}>
+            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>Available to this phase</div>
+            <strong style={{ color: "#173e77", fontSize: 15 }}>{inr(maxAmount)}</strong>
+          </div>
+        </div>
+
+        {/* Enable / Disable */}
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>Add one-time cost to this phase?</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button type="button" style={seg(enabled)} onClick={() => setEnabled(true)}>Yes</button>
+            <button type="button" style={seg(!enabled)} onClick={() => setEnabled(false)}>No</button>
+          </div>
+        </div>
+
+        {enabled && (
+          <>
+            <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+              <label>Amount</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button type="button" style={seg(mode === "percent")} onClick={() => { setMode("percent"); setValue(""); }}>%</button>
+                <button type="button" style={seg(mode === "amount")} onClick={() => { setMode("amount"); setValue(""); }}>₹</button>
+                <input
+                  type="number"
+                  min="0"
+                  value={value}
+                  placeholder={mode === "percent" ? "% of total" : "₹ amount"}
+                  onChange={(e) => setValue(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+              </div>
+              {mode === "percent" && (
+                <div style={{ fontSize: 11.5, color: "var(--uidai-pmis-muted)", marginTop: 6 }}>
+                  = {inr(amount)} of {inr(total)}
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              fontSize: 13, fontWeight: 700,
+              color: overBudget ? "var(--uidai-pmis-red)" : "#1b7a42",
+            }}>
+              <span>This phase: {inr(amount)}</span>
+              <span>Remaining after: {inr(remainingAfter)}</span>
+            </div>
+            {overBudget && (
+              <div style={{ fontSize: 12, color: "var(--uidai-pmis-red)", marginTop: 6 }}>
+                Exceeds the amount available to this phase ({inr(maxAmount)}).
+              </div>
+            )}
+          </>
+        )}
+
+        {isLastPhase && autoRemainder > 0 && (
+          <div style={{
+            marginTop: 12, border: "1px solid #cfe0f5", background: "#eef5ff",
+            borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#0b3c88",
+          }}>
+            This is the last phase — it auto-absorbs the unallocated one-time cost
+            of <strong>{inr(autoRemainder)}</strong>.
+          </div>
+        )}
+
+        <div style={{ marginTop: 12, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
+          UI-only for now — one-time distribution isn't persisted to the backend yet.
+        </div>
+
+        <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
+          <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            disabled={!validValue}
+            onClick={() => onApply(
+              enabled
+                ? { enabled: true, mode, value: entered }
+                : { enabled: false }
+            )}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Carry-forward configuration popup. Opens when a phase's "Yes" is
    clicked. Collects:
      • type   — Milestone-based or Phase-based (the distribution `mode`)
@@ -2061,9 +2256,11 @@ function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milest
 function CarryForwardModal({
   open, onClose, onApply, phaseLabel,
   methods = [], initialMethodCode = "", initialAllocations = [],
+  initialEnabled = false,
   leftover = 0, laterPhases = [], laterMilestones = [],
   projectFrequencyCode = "",
 }) {
+  const [enabled, setEnabled] = useState(false);     // Enable/Disable carry-forward
   const [methodCode, setMethodCode] = useState(initialMethodCode);
   const [unit, setUnit] = useState("percent");       // allocationMode: 'percent' | 'amount'
   const [alloc, setAlloc] = useState({});            // recipientKey -> string
@@ -2073,6 +2270,7 @@ function CarryForwardModal({
      inputValue/percent). */
   useEffect(() => {
     if (open) {
+      setEnabled(!!initialEnabled);
       setMethodCode(initialMethodCode || "");
       const seed = {};
       let unitSeed = "percent";
@@ -2086,7 +2284,7 @@ function CarryForwardModal({
       setUnit(unitSeed);
       setAlloc(seed);
     }
-  }, [open, initialMethodCode, initialAllocations]);
+  }, [open, initialEnabled, initialMethodCode, initialAllocations]);
 
   const selected = methods.find((m) => m.code === methodCode) || null;
   const selMethod = selected?.method || "";          // phase | milestone | time
@@ -2124,7 +2322,7 @@ function CarryForwardModal({
   const sumOk = Math.abs(sumRounded - target) < 0.5; // ₹ rounding tolerance
   const timeBlocked = isTime && !projectFrequencyCode;
   const canApply =
-    !!selected && !timeBlocked && (!isCustom || (recipients.length > 0 && sumOk));
+    !enabled || (!!selected && !timeBlocked && (!isCustom || (recipients.length > 0 && sumOk)));
 
   /* Picker options grouped by method family. */
   const groupLabel = { phase: "Phase-based", milestone: "Milestone-based", time: "Time-based" };
@@ -2162,6 +2360,16 @@ function CarryForwardModal({
           is carried forward. Choose how it's distributed.
         </div>
 
+        {/* Enable / Disable */}
+        <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
+          <label>Enable carry-forward for this phase?</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button type="button" style={seg(enabled)} onClick={() => setEnabled(true)}>Yes</button>
+            <button type="button" style={seg(!enabled)} onClick={() => setEnabled(false)}>No</button>
+          </div>
+        </div>
+
+        {enabled && (<>
         {/* Method picker — master-driven, grouped by family. */}
         <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
           <label>Carry-forward method</label>
@@ -2267,6 +2475,7 @@ function CarryForwardModal({
           Saved to the backend, which recomputes every phase. Note: only
           testable once the carry-forward backend is deployed.
         </div>
+        </>)}
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
           <button
@@ -2282,14 +2491,16 @@ function CarryForwardModal({
             style={{ marginTop: 0 }}
             disabled={!canApply}
             onClick={() => onApply(
-              isCustom
-                ? {
-                    enabled: true,
-                    methodCode,
-                    allocationMode: unit,
-                    allocations: recipients.map((r) => ({ recipientKey: r.key, value: Number(alloc[r.key]) || 0 })),
-                  }
-                : { enabled: true, methodCode }
+              !enabled
+                ? { enabled: false }
+                : isCustom
+                  ? {
+                      enabled: true,
+                      methodCode,
+                      allocationMode: unit,
+                      allocations: recipients.map((r) => ({ recipientKey: r.key, value: Number(alloc[r.key]) || 0 })),
+                    }
+                  : { enabled: true, methodCode }
             )}
           >
             Apply
@@ -2311,6 +2522,8 @@ function PhasePanel({
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
+  oneTimeTotal = 0, oneTimeConfig = null, oneTimeAllocatedElsewhere = 0,
+  oneTimeRemaining = 0, onSetOneTime,
 }) {
   /* Which payment-term rows are expanded to reveal their activity-wise
      breakdown (partial-payment milestones). */
@@ -2352,6 +2565,20 @@ function PhasePanel({
   const cfLeftover = Number(cf.leftover) || phaseRemaining || 0;
   const cfAllocations = Array.isArray(cf.allocations) ? cf.allocations : [];
   const [cfModalOpen, setCfModalOpen] = useState(false);
+
+  /* One-time-cost distribution (UI-only). This phase's ₹ share of the total
+     one-time cost, plus what's still available to allocate. The last phase
+     auto-absorbs any unallocated remainder. */
+  const otEnabled = !!oneTimeConfig?.enabled;
+  const otAmount = otEnabled
+    ? (oneTimeConfig.mode === "amount"
+        ? (Number(oneTimeConfig.value) || 0)
+        : ((Number(oneTimeConfig.value) || 0) / 100) * oneTimeTotal)
+    : 0;
+  const otAvailable = Math.round((oneTimeTotal - oneTimeAllocatedElsewhere) * 100) / 100;
+  const otLastAbsorb = isLastPhase && oneTimeRemaining > 0.001 ? oneTimeRemaining : 0;
+  const canToggleOneTime = typeof onSetOneTime === "function" && oneTimeTotal > 0;
+  const [otModalOpen, setOtModalOpen] = useState(false);
 
   /* Recipients for the popup's custom variants, derived from the full phase
      list: later phases (phase_custom) or the milestones across all later
@@ -2403,79 +2630,53 @@ function PhasePanel({
           {canToggleCarry && (
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
             >
-              <span style={{ fontSize: 11, fontWeight: 800, color: "#173e77", letterSpacing: 0.3 }}>
-                Carry Forward Cost
-              </span>
-              {/* Two separate pill buttons (not a fused segmented control) so
-                  both Yes and No are always clearly visible: the active one is
-                  filled, the inactive one is outlined. "Yes" opens the config
-                  popup; "No" turns carry-forward off. */}
-              <div role="group" aria-label={`Carry forward leftover from Phase ${phase.phase}`}
-                style={{ display: "inline-flex", gap: 6, opacity: cfDisabled ? 0.6 : 1 }}>
-                <button
-                  type="button"
-                  disabled={cfDisabled}
-                  aria-pressed={cfEnabled}
-                  onClick={() => setCfModalOpen(true)}
-                  style={{
-                    padding: "4px 16px",
-                    minWidth: 48,
-                    textAlign: "center",
-                    borderRadius: 999,
-                    border: cfEnabled ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
-                    background: cfEnabled ? "#1b7a42" : "#fff",
-                    color: cfEnabled ? "#fff" : "#173e77",
-                    fontWeight: 700, fontSize: 12,
-                    cursor: cfDisabled ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Yes
-                </button>
-                <button
-                  type="button"
-                  disabled={cfDisabled}
-                  aria-pressed={!cfEnabled}
-                  onClick={() => onSetCarryForward(phase.phase, { enabled: false })}
-                  style={{
-                    padding: "4px 16px",
-                    minWidth: 48,
-                    textAlign: "center",
-                    borderRadius: 999,
-                    border: !cfEnabled ? "1px solid #5b6b82" : "1px solid var(--uidai-pmis-border)",
-                    background: !cfEnabled ? "#5b6b82" : "#fff",
-                    color: !cfEnabled ? "#fff" : "#173e77",
-                    fontWeight: 700, fontSize: 12,
-                    cursor: cfDisabled ? "not-allowed" : "pointer",
-                  }}
-                >
-                  No
-                </button>
-              </div>
+              {/* Carry Forward — a single status button that opens the config
+                  popup (Enable/Disable + distribution method). */}
+              <button
+                type="button"
+                disabled={cfDisabled}
+                onClick={() => setCfModalOpen(true)}
+                title={cfIsLast ? "Carry-forward doesn't apply to the last phase" : "Configure carry-forward"}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: cfEnabled ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
+                  background: cfEnabled ? "#eaf7ee" : "#fff",
+                  color: cfEnabled ? "#1b7a42" : "#5b6b82",
+                  borderRadius: 999, padding: "5px 12px",
+                  fontSize: 12, fontWeight: 700,
+                  cursor: cfDisabled ? "not-allowed" : "pointer",
+                  opacity: cfDisabled ? 0.55 : 1,
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: cfEnabled ? "#1b7a42" : "#c2cdda" }} />
+                Carry Forward: {cfIsLast ? "n/a" : cfEnabled ? (cfMethodName || "On") : "Off"}
+                {!cfIsLast && <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
+              </button>
 
-              {/* When enabled, show the saved mode + (local) method, and let
-                  the user reopen the popup to edit. */}
-              {cfEnabled && (
+              {/* One-Time Cost distribution — status button opens its popup. */}
+              {canToggleOneTime && (
                 <button
                   type="button"
-                  onClick={() => setCfModalOpen(true)}
+                  onClick={() => setOtModalOpen(true)}
+                  title="Distribute one-time cost to this phase"
                   style={{
-                    border: "1px solid var(--uidai-pmis-border)",
-                    borderRadius: 999, padding: "3px 10px",
-                    fontSize: 11, fontWeight: 700, color: "#173e77", background: "#fff",
-                    cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    border: otEnabled ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
+                    background: otEnabled ? "#e9f6fb" : "#fff",
+                    color: otEnabled ? "#0b6b8f" : "#5b6b82",
+                    borderRadius: 999, padding: "5px 12px",
+                    fontSize: 12, fontWeight: 700, cursor: "pointer",
                   }}
                 >
-                  {cfMethodName || "Configure"}
-                  {" ✎"}
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: otEnabled ? "#0b6b8f" : "#c2cdda" }} />
+                  One-Time: {otEnabled ? inr(otAmount) : "Off"}
+                  {otLastAbsorb > 0 && (
+                    <span style={{ fontWeight: 600, opacity: 0.85 }}>+{inr(otLastAbsorb)} auto</span>
+                  )}
+                  <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>
                 </button>
-              )}
-
-              {cfIsLast && (
-                <span style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>
-                  Last phase — n/a
-                </span>
               )}
             </div>
           )}
@@ -2840,6 +3041,7 @@ function PhasePanel({
         onClose={() => setCfModalOpen(false)}
         phaseLabel={phase.phase}
         methods={carryMethods}
+        initialEnabled={cfEnabled}
         initialMethodCode={cfMethodCode}
         initialAllocations={cfAllocations}
         leftover={cfLeftover}
@@ -2849,6 +3051,21 @@ function PhasePanel({
         onApply={(body) => {
           setCfModalOpen(false);
           onSetCarryForward(phase.phase, body);
+        }}
+      />
+
+      <OneTimeCostModal
+        open={otModalOpen}
+        onClose={() => setOtModalOpen(false)}
+        phaseLabel={phase.phase}
+        total={oneTimeTotal}
+        available={otAvailable}
+        initialConfig={oneTimeConfig}
+        isLastPhase={isLastPhase}
+        autoRemainder={otLastAbsorb}
+        onApply={(cfg) => {
+          setOtModalOpen(false);
+          onSetOneTime(phase.phase, cfg);
         }}
       />
     </div>
