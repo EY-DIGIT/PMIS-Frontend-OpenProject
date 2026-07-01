@@ -629,40 +629,15 @@ function EditCostItemModal({
    Action column of the Project Cost table.
    ────────────────────────────────────────────────────────────────── */
 function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
-  const baseBtn = {
-    width: 32, height: 32,
-    display: "inline-flex", alignItems: "center", justifyContent: "center",
-    border: "1px solid var(--uidai-pmis-border)",
-    background: "#fff",
-    borderRadius: 6,
-    padding: 0,
-    transition: "background .15s, border-color .15s, transform .15s",
-  };
   return (
     <div style={{ display: "inline-flex", gap: 6 }}>
       <button
         type="button"
+        className="uidai-pmis-iconbtn"
         title="Edit cost item"
         aria-label="Edit cost item"
         disabled={isLocked || isDeleting}
         onClick={onEdit}
-        style={{
-          ...baseBtn,
-          color: "#173e77",
-          cursor: isLocked ? "not-allowed" : "pointer",
-          opacity: isLocked ? 0.5 : 1,
-        }}
-        onMouseEnter={(e) => {
-          if (isLocked) return;
-          e.currentTarget.style.background = "#eaf4ff";
-          e.currentTarget.style.borderColor = "#0aa1c0";
-          e.currentTarget.style.transform = "translateY(-1px)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "#fff";
-          e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
-          e.currentTarget.style.transform = "translateY(0)";
-        }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" strokeWidth="2"
@@ -673,27 +648,11 @@ function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
       </button>
       <button
         type="button"
+        className="uidai-pmis-iconbtn is-danger"
         title="Delete cost item"
         aria-label="Delete cost item"
         disabled={isLocked || isDeleting}
         onClick={onDelete}
-        style={{
-          ...baseBtn,
-          color: "#9b1c1c",
-          cursor: isLocked || isDeleting ? "not-allowed" : "pointer",
-          opacity: isLocked || isDeleting ? 0.5 : 1,
-        }}
-        onMouseEnter={(e) => {
-          if (isLocked || isDeleting) return;
-          e.currentTarget.style.background = "#fdecec";
-          e.currentTarget.style.borderColor = "#e3a5a5";
-          e.currentTarget.style.transform = "translateY(-1px)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "#fff";
-          e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
-          e.currentTarget.style.transform = "translateY(0)";
-        }}
       >
         {isDeleting ? (
           <span style={{ fontSize: 11, fontWeight: 700 }}>…</span>
@@ -983,7 +942,14 @@ export default function ProjectFinancePage() {
   const [savingActivities, setSavingActivities] = useState(false);
 
   // ── Right-column summary collapse ──
-  const [summaryOpen, setSummaryOpen] = useState(true);
+  /* Collapse the summary column "to the side" — the left content goes
+     full-width and the panel shrinks to a thin vertical rail with an expand
+     arrow. The collapse/expand control is a vertically-centered handle on
+     the panel's edge. */
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  /* Payment Terms: phases render as tabs (like the org tabs at the top);
+     only the selected phase's panel is shown. */
+  const [activePhaseIdx, setActivePhaseIdx] = useState(0);
 
   function handleAuthError(err) {
     if (err && err.isAuth) {
@@ -1133,6 +1099,10 @@ export default function ProjectFinancePage() {
       return ts(a.endDate) - ts(b.endDate);
     });
   }, [page]);
+  /* Keep the selected Payment-Terms phase tab in range as phases load/change. */
+  useEffect(() => {
+    if (phases.length > 0 && activePhaseIdx > phases.length - 1) setActivePhaseIdx(0);
+  }, [phases.length, activePhaseIdx]);
   const totals = page?.totals || {};
   const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
@@ -1140,17 +1110,6 @@ export default function ProjectFinancePage() {
   // invoices, add cost rows, etc. at any time regardless of the server's
   // locked flag.
   const isLocked = false;
-
-  /* Phase is a free-form string now (backend accepts any string, e.g.
-     "1", "default", "phase-a"), so we collect the raw values and sort
-     them as strings rather than coercing to Number. */
-  const phaseNumbersFromCosts = useMemo(() => {
-    const set = new Set();
-    costItems.forEach((c) => { if (c.phase != null && c.phase !== "") set.add(String(c.phase)); });
-    return Array.from(set).sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true })
-    );
-  }, [costItems]);
 
   const hasOneTime = costItems.some((c) => c.costTypeCode === "one_time");
 
@@ -1593,7 +1552,7 @@ export default function ProjectFinancePage() {
       {/* Page-wide 2-column grid: every editable section sits on the
           left; the Summary panel sits on the right and sticks while
           the user scrolls through the long left column. */}
-      <div className="uidai-pmis-finance-grid">
+      <div className={`uidai-pmis-finance-grid${summaryCollapsed ? " is-summary-collapsed" : ""}`}>
         <div className="uidai-pmis-finance-main">
           {/* Section 1 — Project Cost */}
           <div className="uidai-pmis-card">
@@ -1650,7 +1609,27 @@ export default function ProjectFinancePage() {
                         <td >
                           {isOneTime
                             ? <span style={disabledCell}></span>
-                            : ((r.milestoneIds || []).map(milestoneName).join(", ") || "—")}
+                            : (() => {
+                                /* Clamp long milestone lists to 2 lines with an
+                                   ellipsis; the full text shows on hover via the
+                                   native title tooltip. */
+                                const names = (r.milestoneIds || []).map(milestoneName).join(", ");
+                                return names ? (
+                                  <span
+                                    title={names}
+                                    style={{
+                                      display: "-webkit-box",
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: "vertical",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      wordBreak: "break-word",
+                                    }}
+                                  >
+                                    {names}
+                                  </span>
+                                ) : "—";
+                              })()}
                         </td>
                         <td>{inr(r.cost)}</td>
                         <td >
@@ -1682,35 +1661,74 @@ export default function ProjectFinancePage() {
             </div>
           </div>
 
-          {/* Section 2 — Payment Terms (per phase, collapsible) */}
+          {/* Section 2 — Payment Terms. Phases render as tabs (like the org
+              tabs above); clicking a tab shows only that phase's panel. */}
           <div className="uidai-pmis-card">
             <div style={sectionHead}><span style={stepBadge}>2</span> Payment Term</div>
 
-            {phases.length === 0 && phaseNumbersFromCosts.length === 0 ? (
+            {phases.length === 0 ? (
               <div style={{ padding: 18, textAlign: "center", ...muted, fontSize: 13 }}>
                 Add a Fixed cost row with milestones to populate payment terms.
               </div>
-            ) : phases.map((p, idx) => (
-              <PhasePanel
-                key={p.phase}
-                phase={p}
-                allPhases={phases}
-                milestoneName={milestoneName}
-                milestoneStatus={milestoneStatus}
-                frequencies={frequencies}
-                carryMethods={carryMethods}
-                projectFrequencyCode={page?.frequencyCode || ""}
-                onEditTerm={(t) => setEditingTerm(t)}
-                onEditActivities={(t) => setEditingActivitiesTerm(t)}
-                onGenerateInvoice={generateInvoice}
-                onApplyFrequency={applyPhaseFrequency}
-                isLocked={isLocked}
-                isLastPhase={idx === phases.length - 1}
-                carryLocked={isLocked || carrySaving}
-                carryBusy={carrySaving}
-                onSetCarryForward={setCarryForward}
-              />
-            ))}
+            ) : (
+              <>
+                {/* Phase tabs */}
+                <div
+                  role="tablist"
+                  aria-label="Phases"
+                  style={{
+                    display: "flex", gap: 4, flexWrap: "wrap",
+                    borderBottom: "2px solid var(--uidai-pmis-border)",
+                    marginBottom: 14,
+                  }}
+                >
+                  {phases.map((p, i) => {
+                    const active = i === activePhaseIdx;
+                    const carrying = !!p.carryForward?.enabled;
+                    return (
+                      <button
+                        key={p.phase}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setActivePhaseIdx(i)}
+                        className={`uidai-pmis-phasetab${active ? " is-active" : ""}`}
+                      >
+                        Phase {p.phase}
+                        {carrying && (
+                          <span
+                            title="Carry-forward enabled"
+                            style={{ width: 7, height: 7, borderRadius: "50%", background: "#1b7a42", display: "inline-block" }}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {phases[activePhaseIdx] && (
+                  <PhasePanel
+                    key={phases[activePhaseIdx].phase}
+                    phase={phases[activePhaseIdx]}
+                    allPhases={phases}
+                    milestoneName={milestoneName}
+                    milestoneStatus={milestoneStatus}
+                    frequencies={frequencies}
+                    carryMethods={carryMethods}
+                    projectFrequencyCode={page?.frequencyCode || ""}
+                    onEditTerm={(t) => setEditingTerm(t)}
+                    onEditActivities={(t) => setEditingActivitiesTerm(t)}
+                    onGenerateInvoice={generateInvoice}
+                    onApplyFrequency={applyPhaseFrequency}
+                    isLocked={isLocked}
+                    isLastPhase={activePhaseIdx === phases.length - 1}
+                    carryLocked={isLocked || carrySaving}
+                    carryBusy={carrySaving}
+                    onSetCarryForward={setCarryForward}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* Section 3 — Additional Cost Type. The dropdown sits at the top;
@@ -1780,44 +1798,44 @@ export default function ProjectFinancePage() {
           </div>
         </div>
 
-        {/* Right column — Summary + carry-forward in one collapsible card.
-            The card owns the border + shadow; the inner sections render as
-            bare content separated by a hairline divider. */}
-        <div className="uidai-pmis-finance-summary">
-          {/* Collapse header — clicking toggles the whole panel. When
-              collapsed it shows the total contract cost so the headline
-              number stays visible. */}
+        {/* Right column — Summary + carry-forward. When open it's a normal
+            panel with a ▶ toggle in the gap to close it. When closed it
+            becomes a fixed tab pinned to the right edge of the screen; the
+            main content takes the full width. Clicking the tab reopens it. */}
+        {summaryCollapsed ? (
           <button
             type="button"
-            onClick={() => setSummaryOpen((o) => !o)}
-            aria-expanded={summaryOpen}
-            style={{
-              width: "100%", border: "none", background: "transparent",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-              gap: 8, padding: "12px 16px", cursor: "pointer", textAlign: "left",
-              borderBottom: summaryOpen ? "1px solid var(--uidai-pmis-border)" : "none",
-            }}
+            className="uidai-pmis-finance-reopen"
+            onClick={() => setSummaryCollapsed(false)}
+            title="Show Financial Summary"
+            aria-label="Show Financial Summary"
           >
-            <span style={{
-              fontSize: 13, fontWeight: 800, color: "#173e77",
-              letterSpacing: 0.5, textTransform: "uppercase",
-            }}>
-              Financial Summary
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              {!summaryOpen && (
-                <strong style={{ color: "#173e77", fontSize: 13 }}>
-                  {inr(totals?.totalContractCost)}
-                </strong>
-              )}
-              <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 13 }}>
-                {summaryOpen ? "▲" : "▼"}
-              </span>
-            </span>
+            <span aria-hidden="true" style={{ fontSize: 14 }}>◀</span>
+            <span className="uidai-pmis-finance-reopen-label">Financial Summary</span>
           </button>
-
-          {summaryOpen && (
-            <>
+        ) : (
+          <div className="uidai-pmis-finance-summary">
+            <button
+              type="button"
+              className="uidai-pmis-finance-toggle"
+              onClick={() => setSummaryCollapsed(true)}
+              title="Hide Financial Summary"
+              aria-label="Hide Financial Summary"
+            >
+              ▶
+            </button>
+            <div className="uidai-pmis-finance-summary-body">
+              <div style={{
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--uidai-pmis-border)",
+              }}>
+                <span style={{
+                  fontSize: 13, fontWeight: 800, color: "#173e77",
+                  letterSpacing: 0.5, textTransform: "uppercase",
+                }}>
+                  Financial Summary
+                </span>
+              </div>
               <SummaryPanel totals={totals} />
               <div style={{
                 height: 1,
@@ -1825,9 +1843,9 @@ export default function ProjectFinancePage() {
                 margin: "0 16px",
               }} />
               <CarryForwardSummarySection phases={phases} totals={totals} carryMethods={carryMethods} />
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <AddCostItemModal
@@ -2293,7 +2311,6 @@ function PhasePanel({
   onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
 }) {
-  const [expanded, setExpanded] = useState(true);
   /* Which payment-term rows are expanded to reveal their activity-wise
      breakdown (partial-payment milestones). */
   const [expandedTerms, setExpandedTerms] = useState(() => new Set());
@@ -2359,44 +2376,28 @@ function PhasePanel({
       overflow: "hidden",
       boxShadow: "0 1px 2px rgba(20, 50, 110, 0.04)",
     }}>
-      {/* Header is a div (not a button) so the carry-forward control can
-          live inside it without nesting buttons. Clicking anywhere except
-          that control toggles the collapse. */}
+      {/* Phase toolbar — the phase is selected via the tabs above, so this is
+          a static bar (no collapse) holding the cycle badge + carry-forward. */}
       <div
-        onClick={() => setExpanded((e) => !e)}
         style={{
           width: "100%",
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+          display: "flex", alignItems: "center",
           gap: 12, flexWrap: "wrap",
           background: "linear-gradient(90deg, #eef4fc 0%, #f5f9ff 100%)",
-          borderBottom: expanded ? "1px solid var(--uidai-pmis-border)" : "none",
-          padding: "12px 16px",
-          cursor: "pointer",
-          textAlign: "left",
+          borderBottom: "1px solid var(--uidai-pmis-border)",
+          padding: "10px 16px",
         }}
       >
         <div style={{ display: "inline-flex", alignItems: "center", gap: 12, minWidth: 0, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 800, color: "#173e77", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            Phase {phase.phase}
-            {cfEnabled && (
-              <span style={{
-                fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
-                padding: "2px 7px", borderRadius: 999,
-                background: "#e6f6ec", color: "#1b7a42", border: "1px solid #c4e9d0",
-              }}>
-                Carry Forward Cost
-              </span>
-            )}
-            {phase.cycleCount != null && (
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
-                padding: "2px 7px", borderRadius: 999,
-                background: "#eef4fc", color: "#173e77", border: "1px solid #cfe0f5",
-              }}>
-                {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Cycle" : "Cycles"}
-              </span>
-            )}
-          </span>
+          {phase.cycleCount != null && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+              padding: "2px 7px", borderRadius: 999,
+              background: "#eef4fc", color: "#173e77", border: "1px solid #cfe0f5",
+            }}>
+              {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Cycle" : "Cycles"}
+            </span>
+          )}
 
           {canToggleCarry && (
             <div
@@ -2478,12 +2479,9 @@ function PhasePanel({
             </div>
           )}
         </div>
-
-        <span style={{ color: "var(--uidai-pmis-muted)", fontSize: 14, flex: "0 0 auto" }}>{expanded ? "▲ Collapse" : "▼ Expand"}</span>
       </div>
 
-      {expanded && (
-        <div style={{ padding: 16 }}>
+      <div style={{ padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
             <button
               type="button"
@@ -2505,14 +2503,22 @@ function PhasePanel({
           <div className="uidai-pmis-table-wrap">
             <table className="uidai-pmis-table uidai-pmis-table-compact">
               <thead>
-                <tr>
-                  <th>Milestone</th>
-                  <th style={{ width: 160 }}>Activity</th>
-                  <th style={{ width: 110 }}>Cycle</th>
-                  <th style={{ width: 130 }}>% of Payment (Fixed + One-time)</th>
-                  <th style={{ width: 170 }}>Value</th>
+                <tr style={{ verticalAlign: "middle" }}>
+                  <th style={{ minWidth: 240 }}>Milestone</th>
+                  <th style={{ width: 150 }}>Activity</th>
+                  <th style={{ width: 80, textAlign: "center" }}>Cycle</th>
+                  <th style={{ width: 110, textAlign: "right" }}>
+                    % of Payment
+                    <span style={{
+                      display: "block", fontWeight: 500, fontSize: 10.5,
+                      color: "var(--uidai-pmis-muted)", textTransform: "none", letterSpacing: 0,
+                    }}>
+                      (Fixed + One-time)
+                    </span>
+                  </th>
+                  <th style={{ width: 130, textAlign: "right" }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
-                  <th style={{ width: 220, textAlign: "center" }}>Action</th>
+                  <th style={{ width: 200, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -2570,7 +2576,7 @@ function PhasePanel({
                           <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                         )}
                       </td>
-                      <td>
+                      <td style={{ textAlign: "center" }}>
                         {t.cycleCount != null
                           ? <span style={{
                               display: "inline-block", padding: "2px 8px", borderRadius: 999,
@@ -2579,12 +2585,12 @@ function PhasePanel({
                             }}>{t.cycleCount}</span>
                           : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
                       </td>
-                      <td>
+                      <td style={{ textAlign: "right" }}>
                         {t.percentOfPayment == null
                           ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
-                      <td style={{ fontWeight: 700, color: "#173e77" }}>
+                      <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>
                         ₹ {value.toLocaleString("en-IN")}
                       </td>
                       <td>
@@ -2600,33 +2606,11 @@ function PhasePanel({
                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <button
                           type="button"
+                          className="uidai-pmis-iconbtn"
                           title="Edit payment term"
                           aria-label="Edit payment term"
                           disabled={isLocked}
                           onClick={() => onEditTerm(t)}
-                          style={{
-                            width: 32, height: 32,
-                            display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            border: "1px solid var(--uidai-pmis-border)",
-                            background: "#fff",
-                            color: "#173e77",
-                            borderRadius: 6,
-                            cursor: isLocked ? "not-allowed" : "pointer",
-                            opacity: isLocked ? 0.5 : 1,
-                            padding: 0,
-                            transition: "background .15s, border-color .15s, transform .15s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (isLocked) return;
-                            e.currentTarget.style.background = "#eaf4ff";
-                            e.currentTarget.style.borderColor = "#0aa1c0";
-                            e.currentTarget.style.transform = "translateY(-1px)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "#fff";
-                            e.currentTarget.style.borderColor = "var(--uidai-pmis-border)";
-                            e.currentTarget.style.transform = "translateY(0)";
-                          }}
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" strokeWidth="2"
@@ -2641,6 +2625,7 @@ function PhasePanel({
                           return (
                             <button
                               type="button"
+                              className="uidai-pmis-pillbtn"
                               title={
                                 msComplete
                                   ? "Generate invoice for this milestone"
@@ -2649,33 +2634,6 @@ function PhasePanel({
                               aria-label="Generate invoice"
                               disabled={genDisabled}
                               onClick={() => onGenerateInvoice(t)}
-                              style={{
-                                height: 32,
-                                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                gap: 6,
-                                padding: "0 10px",
-                                border: "1px solid var(--uidai-pmis-border)",
-                                background: genDisabled ? "#f4f6f9" : "#173e77",
-                                color: genDisabled ? "var(--uidai-pmis-muted)" : "#fff",
-                                borderColor: genDisabled ? "var(--uidai-pmis-border)" : "#173e77",
-                                borderRadius: 6,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                whiteSpace: "nowrap",
-                                cursor: genDisabled ? "not-allowed" : "pointer",
-                                opacity: genDisabled ? 0.7 : 1,
-                                transition: "background .15s, border-color .15s, transform .15s",
-                              }}
-                              onMouseEnter={(e) => {
-                                if (genDisabled) return;
-                                e.currentTarget.style.background = "#0f2f5e";
-                                e.currentTarget.style.transform = "translateY(-1px)";
-                              }}
-                              onMouseLeave={(e) => {
-                                if (genDisabled) return;
-                                e.currentTarget.style.background = "#173e77";
-                                e.currentTarget.style.transform = "translateY(0)";
-                              }}
                             >
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" strokeWidth="2"
@@ -2709,9 +2667,9 @@ function PhasePanel({
                               <span style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}>{code}</span>
                             </span>
                           </td>
-                          <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                          <td><strong style={{ color: "#173e77" }}>{aPct} %</strong></td>
-                          <td style={{ fontWeight: 700, color: "#173e77" }}>₹ {aVal.toLocaleString("en-IN")}</td>
+                          <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                          <td style={{ textAlign: "right" }}><strong style={{ color: "#173e77" }}>{aPct} %</strong></td>
+                          <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>₹ {aVal.toLocaleString("en-IN")}</td>
                           <td>
                             <span style={{
                               display: "inline-block", padding: "1px 8px", borderRadius: 999,
@@ -2767,7 +2725,7 @@ function PhasePanel({
                     <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
                     </td>
-                    <td style={{ fontWeight: 800, color: "#173e77" }}>
+                    <td style={{ fontWeight: 800, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>
                       ₹ {totalValue.toLocaleString("en-IN")}
                     </td>
                     <td style={{ fontSize: 11, lineHeight: 1.4, fontWeight: 700 }}>
@@ -2788,29 +2746,23 @@ function PhasePanel({
                 payment terms have to total exactly 100%. Flag any shortfall
                 or overage so it can't be left unbalanced. */}
             {isLastPhase && terms.length > 0 && totalPercent !== 100 ? (
-              <div style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                fontSize: 12, fontWeight: 700, color: "var(--uidai-pmis-red)",
-                background: "#fdecec", border: "1px solid #f5c2c2",
-                borderRadius: 8, padding: "6px 10px",
-              }}>
+              <span className="uidai-pmis-chip is-bad" style={{ borderRadius: 8 }}>
                 <span aria-hidden="true">⚠</span>
                 Last phase must total 100% — currently {totalPercent}%
                 {totalPercent < 100
                   ? ` (${100 - totalPercent}% short)`
                   : ` (${totalPercent - 100}% over)`}
-              </div>
+              </span>
             ) : <span />}
-            <div style={{
-              fontSize: 13,
-              color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
-              fontWeight: 700,
-            }}>
-              Scheduled: {totalPercent}%{totalPercent > 100 && " — over 100%"}
-            </div>
+            <span
+              className={`uidai-pmis-chip${
+                totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
+              }`}
+            >
+              Scheduled: {totalPercent}%{totalPercent > 100 && " · over 100%"}
+            </span>
           </div>
         </div>
-      )}
 
       {showFreqModal && (
         <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -2925,11 +2877,12 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
 
   const stat = (label, value, opts = {}) => (
     <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
-      fontSize: 12,
+      display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+      fontSize: 12, padding: "5px 0",
+      borderTop: opts.first ? "none" : "1px solid #eef1f6",
     }}>
       <span style={muted}>{label}</span>
-      <strong style={{ color: opts.color || "#173e77" }}>{value}</strong>
+      <strong style={{ color: opts.color || "#173e77", fontVariantNumeric: "tabular-nums" }}>{value}</strong>
     </div>
   );
 
@@ -2991,9 +2944,9 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                 <span style={{ fontWeight: 800, color: "#173e77" }}>{inr(phaseTotal)}</span>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", flexDirection: "column" }}>
                 {stat("Scheduled", `${totalPercent}%`,
-                  { color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
+                  { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
                 {stat("Carried Forward",
                   yes ? `${inr(carriedOut)}${cfMethodName ? ` · ${cfMethodName}` : ""}` : "—",

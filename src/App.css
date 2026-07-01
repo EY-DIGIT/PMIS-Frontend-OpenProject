@@ -36,7 +36,13 @@ body {
 .pmis-wrap {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  /* Fixed to the viewport so the header, navbar and footer stay put and
+     .pmis-content becomes the internal scroll container (flex:1 +
+     overflow:auto below). This is what makes position:sticky work for
+     in-page panels like the finance Summary; with min-height:100vh the
+     whole page grew and the window scrolled instead, breaking sticky. */
+  height: 100vh;
+  overflow: hidden;
   font-family: Inter, sans-serif;
   background: var(--light);
   color: var(--text);

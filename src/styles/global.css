@@ -693,30 +693,220 @@
 .uidai-pmis-finance-main { min-width: 0; }
 .uidai-pmis-finance-summary {
   position: sticky;
-  top: 16px;
+  top: 4px;
   background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%);
   border: 1px solid var(--uidai-pmis-border);
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(20, 50, 110, 0.06);
-  max-height: calc(100vh - 32px);
+  /* Fit within the scrollable content area (viewport minus the app header,
+     navbar, footer and the content padding) so the whole panel is visible
+     without scrolling to the bottom. The body scrolls if the summary is
+     taller than this. */
+  max-height: calc(100vh - 210px);
+  /* visible so the toggle can hang into the gap between the panels */
+  overflow: visible;
+}
+.uidai-pmis-finance-summary-body {
+  max-height: calc(100vh - 210px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  border-radius: 12px;
 }
+/* Small floating toggle that sits in the gap between the two panels,
+   vertically centered — like a little popup tab. Straddles the summary's
+   left edge (half in the gap). */
+.uidai-pmis-finance-toggle {
+  position: absolute;
+  left: -13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--uidai-pmis-border);
+  border-radius: 8px;
+  background: #fff;
+  color: #173e77;
+  font-size: 13px;
+  box-shadow: 0 2px 6px rgba(20, 50, 110, 0.14);
+  cursor: pointer;
+  z-index: 5;
+}
+.uidai-pmis-finance-toggle:hover { background: #eef4fc; }
+/* Collapsed: the summary column disappears and main goes full-width. A
+   little right gutter keeps content clear of the fixed reopen tab. */
+.uidai-pmis-finance-grid.is-summary-collapsed {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.uidai-pmis-finance-grid.is-summary-collapsed .uidai-pmis-finance-main {
+  padding-right: 30px;
+}
+/* Reopen tab — fixed to the right edge of the screen, vertically centered,
+   always visible while the panel is closed. */
+.uidai-pmis-finance-reopen {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px;
+  border: 1px solid var(--uidai-pmis-border);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%);
+  color: #173e77;
+  box-shadow: -3px 2px 12px rgba(20, 50, 110, 0.16);
+  cursor: pointer;
+  z-index: 40;
+}
+.uidai-pmis-finance-reopen:hover { background: #eef4fc; }
+.uidai-pmis-finance-reopen-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── Finance table polish (scoped so other pages keep their styling) ──
+   Keeps the cell borders, but refines the header band, adds gentle row
+   hover + zebra, and frames the table in a rounded container. */
+.uidai-pmis-finance-grid .uidai-pmis-table-wrap {
+  border: 1px solid var(--uidai-pmis-border);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 50, 110, 0.04);
+}
+.uidai-pmis-finance-grid .uidai-pmis-table { margin-top: 0; }
+.uidai-pmis-finance-grid .uidai-pmis-table th {
+  background: #eef4fc;
+  color: #51607a;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 11px 12px;
+  border: 1px solid var(--uidai-pmis-border);
+}
+.uidai-pmis-finance-grid .uidai-pmis-table td {
+  padding: 12px;
+  border: 1px solid var(--uidai-pmis-border);
+}
+/* Zebra only on the Project Cost table (the compact Payment-Terms table
+   has custom-coloured activity/total rows, so leave it un-striped). */
+.uidai-pmis-finance-grid .uidai-pmis-table:not(.uidai-pmis-table-compact) tbody tr:nth-child(even) {
+  background: #fafcff;
+}
+.uidai-pmis-finance-grid .uidai-pmis-table tbody tr:hover {
+  background: #eef5ff;
+  transition: background .12s ease;
+}
+
 @media (max-width: 1100px) {
   /* Stack the panels; the Summary un-sticks and grows to its content
      so it reads as a normal block at the bottom of the page. */
-  .uidai-pmis-finance-grid { grid-template-columns: 1fr; gap: 16px; }
+  .uidai-pmis-finance-grid,
+  .uidai-pmis-finance-grid.is-summary-collapsed { grid-template-columns: 1fr; gap: 16px; }
   .uidai-pmis-finance-summary {
     position: static;
     max-height: none;
     overflow: visible;
   }
+  .uidai-pmis-finance-summary-body { max-height: none; overflow: visible; }
+  .uidai-pmis-finance-grid.is-summary-collapsed .uidai-pmis-finance-main { padding-right: 0; }
+  /* On stacked layouts you can't newly collapse (hide the ▶), but keep the
+     reopen tab so a panel collapsed on desktop can still be brought back. */
+  .uidai-pmis-finance-toggle { display: none; }
 }
 @media (max-width: 992px) {
   /* Keep the finance tables readable — let them scroll horizontally
      inside their wrapper instead of squashing the columns. */
   .uidai-pmis-finance-grid .uidai-pmis-table { min-width: 760px; }
 }
+
+/* ── Unified finance action buttons ─────────────────────────────────
+   Consistent rounded ghost buttons (icon + pill) with a lift on hover. */
+.uidai-pmis-iconbtn {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--uidai-pmis-border);
+  background: #fff; color: #173e77;
+  border-radius: 8px; padding: 0; cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s, box-shadow .15s;
+}
+.uidai-pmis-iconbtn:hover:not(:disabled) {
+  background: #eaf4ff; border-color: #0aa1c0;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(10, 161, 192, 0.18);
+}
+.uidai-pmis-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
+.uidai-pmis-iconbtn.is-danger { color: #9b1c1c; }
+.uidai-pmis-iconbtn.is-danger:hover:not(:disabled) {
+  background: #fdecec; border-color: #e3a5a5;
+  box-shadow: 0 3px 8px rgba(155, 28, 28, 0.16);
+}
+.uidai-pmis-pillbtn {
+  height: 32px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--uidai-pmis-border);
+  background: #fff; color: #173e77;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .12s, box-shadow .15s;
+}
+.uidai-pmis-pillbtn:hover:not(:disabled) {
+  background: #eaf4ff; border-color: #0aa1c0;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(10, 161, 192, 0.15);
+}
+.uidai-pmis-pillbtn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Phase tabs — pill/folder tabs with a subtle active lift ─────────── */
+.uidai-pmis-phasetab {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--uidai-pmis-border);
+  border-bottom-color: transparent;
+  border-radius: 10px 10px 0 0;
+  background: #eef4fc; color: #5b6b82;
+  font-weight: 600; font-size: 13px;
+  padding: 9px 18px; margin-bottom: -2px; cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s, transform .12s, box-shadow .15s;
+}
+.uidai-pmis-phasetab:hover { background: #e3eefb; color: #173e77; }
+.uidai-pmis-phasetab.is-active {
+  background: #fff; color: #173e77; font-weight: 800;
+  border-color: var(--uidai-pmis-border);
+  border-bottom-color: #fff;
+  box-shadow: 0 -3px 10px rgba(20, 50, 110, 0.07);
+}
+/* Navy accent bar across the top of the active tab. */
+.uidai-pmis-phasetab.is-active::before {
+  content: "";
+  position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(90deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan));
+}
+
+/* ── Small "chip" for at-a-glance values (e.g. Scheduled %) ─────────── */
+.uidai-pmis-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  background: #eef4fc; color: #173e77; border: 1px solid #cfe0f5;
+}
+.uidai-pmis-chip.is-good { background: #eef9f0; color: #1b7a42; border-color: #c4e9d0; }
+.uidai-pmis-chip.is-warn { background: #fff5e9; color: #b54708; border-color: #f5d9b5; }
+.uidai-pmis-chip.is-bad  { background: #fdecec; color: #b42318; border-color: #f5c2c2; }
 
 /* =====================================================================
    Role / Permissions assignment — inline card + modal.
