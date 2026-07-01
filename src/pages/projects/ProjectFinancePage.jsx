@@ -1424,6 +1424,15 @@ export default function ProjectFinancePage() {
     return milestones.find((m) => m.id === id)?.name || id || "—";
   }
 
+  /* Short label for compact display — the code prefix before " - " (e.g.
+     "D1 - AS-IS Assessment…" → "D1"). Falls back to the full name when the
+     milestone isn't code-prefixed. */
+  function milestoneShort(id) {
+    const name = milestones.find((m) => m.id === id)?.name || "";
+    if (!name) return id || "—";
+    return name.split(/\s[-–—]\s/)[0].trim() || name;
+  }
+
   function milestoneStatus(id) {
     return milestones.find((m) => m.id === id)?.status || "Not Completed";
   }
@@ -1613,25 +1622,14 @@ export default function ProjectFinancePage() {
                           {isOneTime
                             ? <span style={disabledCell}></span>
                             : (() => {
-                                /* Clamp long milestone lists to 2 lines with an
-                                   ellipsis; the full text shows on hover via the
-                                   native title tooltip. */
-                                const names = (r.milestoneIds || []).map(milestoneName).join(", ");
-                                return names ? (
-                                  <span
-                                    title={names}
-                                    style={{
-                                      display: "-webkit-box",
-                                      WebkitLineClamp: 2,
-                                      WebkitBoxOrient: "vertical",
-                                      overflow: "hidden",
-                                      textOverflow: "ellipsis",
-                                      wordBreak: "break-word",
-                                    }}
-                                  >
-                                    {names}
-                                  </span>
-                                ) : "—";
+                                /* Show just the short codes (D1, D2, …) so all
+                                   milestones fit on one line; hover shows the
+                                   full names via the native title tooltip. */
+                                const ids = r.milestoneIds || [];
+                                if (ids.length === 0) return "—";
+                                const shorts = ids.map(milestoneShort).join(", ");
+                                const full = ids.map(milestoneName).join(", ");
+                                return <span title={full}>{shorts}</span>;
                               })()}
                         </td>
                         <td>{inr(r.cost)}</td>
