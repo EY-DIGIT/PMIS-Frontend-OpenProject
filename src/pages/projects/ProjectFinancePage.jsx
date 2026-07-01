@@ -216,7 +216,9 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
         }}
       >
         <span style={{
+          flex: 1, minWidth: 0,
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          textAlign: "left",
           color: labels.length ? "var(--uidai-pmis-text)" : "var(--uidai-pmis-muted)",
         }}>
           {labels.length ? labels.join(", ") : "Select milestones…"}
@@ -334,13 +336,13 @@ function AddCostItemModal({
   costTypes, milestones, hasOneTime, disabledMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
-        costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
+        costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
       });
     }
   }, [open]);
@@ -381,7 +383,7 @@ function AddCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || "default"),
+                  phase: next === "one_time" ? "" : d.phase,
                   milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
@@ -397,9 +399,10 @@ function AddCostItemModal({
               <input value="" disabled placeholder="—" />
             ) : (
               <input
+              mandatory
                 type="text"
                 value={draft.phase}
-                placeholder="default"
+                placeholder="Phase"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
             )}
@@ -415,7 +418,7 @@ function AddCostItemModal({
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Tax Amount (₹)</label>
             <input
@@ -453,7 +456,7 @@ function AddCostItemModal({
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
-            disabled={submitting}
+            disabled={submitting || !draft.phase || !draft.cost || !draft.taxAmount}
             onClick={() => onSubmit(draft, hasOneTime)}
           >
             {submitting ? "Adding…" : "Save Cost Item"}
@@ -477,7 +480,7 @@ function EditCostItemModal({
   costTypes, milestones, row, usedMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: "default", cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
   });
 
   useEffect(() => {
@@ -490,7 +493,7 @@ function EditCostItemModal({
           : "");
     setDraft({
       costTypeCode: row.costTypeCode || "fixed",
-      phase: isOne ? "" : (row.phase ?? "default"),
+      phase: isOne ? "" : (row.phase ?? ""),
       cost: row.cost != null ? String(row.cost) : "",
       taxAmount: taxAmt === "" ? "" : String(taxAmt),
       milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
@@ -541,7 +544,7 @@ function EditCostItemModal({
                 setDraft((d) => ({
                   ...d,
                   costTypeCode: next,
-                  phase: next === "one_time" ? "" : (d.phase || "default"),
+                  phase: next === "one_time" ? "" : d.phase,
                   milestoneIds: next === "one_time" ? [] : d.milestoneIds,
                 }));
               }}
@@ -559,7 +562,7 @@ function EditCostItemModal({
               <input
                 type="text"
                 value={draft.phase}
-                placeholder="default"
+                placeholder="Phase"
                 onChange={(e) => setDraft((d) => ({ ...d, phase: e.target.value }))}
               />
             )}
@@ -575,7 +578,7 @@ function EditCostItemModal({
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Tax Amount (₹)</label>
             <input

@@ -83,6 +83,9 @@
 .uidai-pmis-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
 .uidai-pmis-full { grid-column: 1 / -1; }
 
+/* Let field wrappers shrink inside grids/flex rows so long content (e.g. a
+   milestone list) truncates instead of forcing the container to overflow. */
+.uidai-pmis-field { min-width: 0; }
 .uidai-pmis-field label {
   font-weight: 600;
   display: block;
