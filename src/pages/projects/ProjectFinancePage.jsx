@@ -516,7 +516,7 @@ function AddCostItemModal({
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
-            disabled={submitting || !draft.phase || !draft.cost || !draft.taxAmount}
+            disabled={submitting || !draft.cost}
             onClick={() => onSubmit(draft, hasOneTime)}
           >
             {submitting ? "Adding…" : "Save Cost Item"}
