@@ -953,11 +953,8 @@ export default function ProjectFinancePage() {
   /* Payment Terms: phases render as tabs (like the org tabs at the top);
      only the selected phase's panel is shown. */
   const [activePhaseIdx, setActivePhaseIdx] = useState(0);
-  /* One-time-cost distribution across phases — UI-only for now (no backend
-     persistence yet). Keyed by phase → { enabled, mode: 'percent'|'amount',
-     value }. Seeded to 100% on the first phase (the backend currently books
-     the whole one-time cost there). */
-  const [oneTimeAllocs, setOneTimeAllocs] = useState({});
+  /* Guards the one-time-distribution PUT while the page reload is in flight. */
+  const [oneTimeSaving, setOneTimeSaving] = useState(false);
 
   function handleAuthError(err) {
     if (err && err.isAuth) {
@@ -1113,30 +1110,17 @@ export default function ProjectFinancePage() {
   }, [phases.length, activePhaseIdx]);
   const totals = page?.totals || {};
 
-  /* ── One-time-cost distribution (UI-only) ──────────────────────────── */
+  /* ── One-time-cost distribution (backend-owned) ─────────────────────
+     One-time is a project pool phases opt into. Per-phase allocation lives
+     on phase.oneTimeAllocated / oneTimeEnabled / oneTimeMode / oneTimeValue.
+     The chronologically last phase auto-absorbs the remainder. */
   const oneTimeTotal = Number(totals?.oneTimeCost) || 0;
-  /* Seed the first phase with 100% once phases + a one-time cost exist. */
-  useEffect(() => {
-    if (phases.length === 0 || oneTimeTotal <= 0) return;
-    setOneTimeAllocs((prev) => {
-      if (Object.keys(prev).length > 0) return prev;
-      return { [phases[0].phase]: { enabled: true, mode: "percent", value: 100 } };
-    });
-  }, [phases, oneTimeTotal]);
-  /* ₹ amount a given { enabled, mode, value } config resolves to. */
-  const oneTimeAmountOf = (cfg) => {
-    if (!cfg || !cfg.enabled) return 0;
-    return cfg.mode === "amount"
-      ? (Number(cfg.value) || 0)
-      : ((Number(cfg.value) || 0) / 100) * oneTimeTotal;
-  };
-  const oneTimeAllocated = phases.reduce(
-    (s, p) => s + oneTimeAmountOf(oneTimeAllocs[p.phase]), 0
-  );
-  const oneTimeRemaining = Math.round((oneTimeTotal - oneTimeAllocated) * 100) / 100;
-  function setOneTimeForPhase(phaseKey, cfg) {
-    setOneTimeAllocs((prev) => ({ ...prev, [phaseKey]: cfg }));
-  }
+  const lastPhaseKey = phases.length ? phases[phases.length - 1].phase : null;
+  /* Headroom used up by the non-last phases (the last phase's allocation is
+     the auto remainder, not user-chosen, so it doesn't consume headroom). */
+  const oneTimeNonLastAllocated = phases
+    .filter((p) => p.phase !== lastPhaseKey)
+    .reduce((s, p) => s + (Number(p.oneTimeAllocated) || 0), 0);
   const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
   // Finance page is always actionable — the user can edit terms, generate
@@ -1389,6 +1373,31 @@ export default function ProjectFinancePage() {
       uiStore.showError(err?.message || "Failed to update carry-forward");
     } finally {
       setCarrySaving(false);
+    }
+  }
+
+  /* One-time distribution — opt a phase into the one-time pool (or clear it).
+       PUT /phases/{phase}/one-time
+         { enabled: false }
+         { enabled: true, mode: "percent" | "amount", value }
+     Returns the full recomputed page; the last phase auto-absorbs the rest. */
+  async function setOneTimeForPhase(phase, body) {
+    if (oneTimeSaving) return;
+    setOneTimeSaving(true);
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.oneTime(projectId, phase)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      await readJson(res);
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage(body?.enabled ? "One-time cost updated." : "One-time cost cleared for this phase.");
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      uiStore.showError(err?.message || "Failed to update one-time cost");
+    } finally {
+      setOneTimeSaving(false);
     }
   }
 
@@ -1757,11 +1766,10 @@ export default function ProjectFinancePage() {
                     carryBusy={carrySaving}
                     onSetCarryForward={setCarryForward}
                     oneTimeTotal={oneTimeTotal}
-                    oneTimeConfig={oneTimeAllocs[phases[activePhaseIdx].phase]}
                     oneTimeAllocatedElsewhere={
-                      oneTimeAllocated - oneTimeAmountOf(oneTimeAllocs[phases[activePhaseIdx].phase])
+                      oneTimeNonLastAllocated - (Number(phases[activePhaseIdx].oneTimeAllocated) || 0)
                     }
-                    oneTimeRemaining={oneTimeRemaining}
+                    oneTimeBusy={oneTimeSaving}
                     onSetOneTime={setOneTimeForPhase}
                   />
                 )}
@@ -2111,7 +2119,10 @@ function OneTimeCostModal({
   const amount = mode === "amount" ? entered : (entered / 100) * total;
   const maxAmount = Math.max(0, available);
   const overBudget = enabled && amount > maxAmount + 0.5;
-  const validValue = !enabled || (value !== "" && entered >= 0 && !overBudget);
+  /* Backend rule: a percentage share must be < 100 (the last phase absorbs
+     the remainder, so a non-last phase can't take the whole pool). */
+  const pctTooHigh = enabled && mode === "percent" && entered >= 100;
+  const validValue = !enabled || (value !== "" && entered > 0 && !overBudget && !pctTooHigh);
   const remainingAfter = Math.round((maxAmount - (enabled ? amount : 0)) * 100) / 100;
 
   const seg = (active) => ({
@@ -2198,6 +2209,11 @@ function OneTimeCostModal({
                 Exceeds the amount available to this phase ({inr(maxAmount)}).
               </div>
             )}
+            {pctTooHigh && (
+              <div style={{ fontSize: 12, color: "var(--uidai-pmis-red)", marginTop: 6 }}>
+                A percentage share must be below 100% — the last phase absorbs the rest.
+              </div>
+            )}
           </>
         )}
 
@@ -2210,10 +2226,6 @@ function OneTimeCostModal({
             of <strong>{inr(autoRemainder)}</strong>.
           </div>
         )}
-
-        <div style={{ marginTop: 12, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
-          UI-only for now — one-time distribution isn't persisted to the backend yet.
-        </div>
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
           <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={onClose}>
@@ -2522,8 +2534,7 @@ function PhasePanel({
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
-  oneTimeTotal = 0, oneTimeConfig = null, oneTimeAllocatedElsewhere = 0,
-  oneTimeRemaining = 0, onSetOneTime,
+  oneTimeTotal = 0, oneTimeAllocatedElsewhere = 0, oneTimeBusy = false, onSetOneTime,
 }) {
   /* Which payment-term rows are expanded to reveal their activity-wise
      breakdown (partial-payment milestones). */
@@ -2566,17 +2577,18 @@ function PhasePanel({
   const cfAllocations = Array.isArray(cf.allocations) ? cf.allocations : [];
   const [cfModalOpen, setCfModalOpen] = useState(false);
 
-  /* One-time-cost distribution (UI-only). This phase's ₹ share of the total
-     one-time cost, plus what's still available to allocate. The last phase
-     auto-absorbs any unallocated remainder. */
-  const otEnabled = !!oneTimeConfig?.enabled;
-  const otAmount = otEnabled
-    ? (oneTimeConfig.mode === "amount"
-        ? (Number(oneTimeConfig.value) || 0)
-        : ((Number(oneTimeConfig.value) || 0) / 100) * oneTimeTotal)
-    : 0;
+  /* One-time-cost distribution (backend-owned). This phase's ₹ share of the
+     one-time pool comes from phase.oneTimeAllocated; the last phase can't be
+     set — it auto-absorbs the remainder. */
+  const otEnabled = !!phase.oneTimeEnabled;
+  const otAmount = Number(phase.oneTimeAllocated) || 0;
   const otAvailable = Math.round((oneTimeTotal - oneTimeAllocatedElsewhere) * 100) / 100;
-  const otLastAbsorb = isLastPhase && oneTimeRemaining > 0.001 ? oneTimeRemaining : 0;
+  const otLastAbsorb = isLastPhase ? (Number(phase.oneTimeAllocated) || 0) : 0;
+  const otInitialConfig = {
+    enabled: !!phase.oneTimeEnabled,
+    mode: phase.oneTimeMode || "percent",
+    value: phase.oneTimeValue,
+  };
   const canToggleOneTime = typeof onSetOneTime === "function" && oneTimeTotal > 0;
   const [otModalOpen, setOtModalOpen] = useState(false);
 
@@ -2655,27 +2667,32 @@ function PhasePanel({
                 {!cfIsLast && <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
               </button>
 
-              {/* One-Time Cost distribution — status button opens its popup. */}
+              {/* One-Time Cost distribution — status button opens its popup.
+                  The last phase is display-only (auto-absorbs the remainder). */}
               {canToggleOneTime && (
                 <button
                   type="button"
-                  onClick={() => setOtModalOpen(true)}
-                  title="Distribute one-time cost to this phase"
+                  disabled={isLastPhase || oneTimeBusy}
+                  onClick={() => { if (!isLastPhase) setOtModalOpen(true); }}
+                  title={isLastPhase
+                    ? "Last phase auto-absorbs the remaining one-time cost"
+                    : "Distribute one-time cost to this phase"}
                   style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
-                    border: otEnabled ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
-                    background: otEnabled ? "#e9f6fb" : "#fff",
-                    color: otEnabled ? "#0b6b8f" : "#5b6b82",
+                    border: otAmount > 0 ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
+                    background: otAmount > 0 ? "#e9f6fb" : "#fff",
+                    color: otAmount > 0 ? "#0b6b8f" : "#5b6b82",
                     borderRadius: 999, padding: "5px 12px",
-                    fontSize: 12, fontWeight: 700, cursor: "pointer",
+                    fontSize: 12, fontWeight: 700,
+                    cursor: isLastPhase ? "default" : "pointer",
+                    opacity: oneTimeBusy ? 0.6 : 1,
                   }}
                 >
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: otEnabled ? "#0b6b8f" : "#c2cdda" }} />
-                  One-Time: {otEnabled ? inr(otAmount) : "Off"}
-                  {otLastAbsorb > 0 && (
-                    <span style={{ fontWeight: 600, opacity: 0.85 }}>+{inr(otLastAbsorb)} auto</span>
-                  )}
-                  <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: otAmount > 0 ? "#0b6b8f" : "#c2cdda" }} />
+                  One-Time: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
+                  {isLastPhase
+                    ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(auto)</span>
+                    : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
                 </button>
               )}
             </div>
@@ -2692,10 +2709,11 @@ function PhasePanel({
               disabled={isLocked || terms.length === 0}
               onClick={() => {
                 /* Start/end come from the phase (read-only); seed frequency
-                   from the first term when nothing has been chosen yet. */
+                   from the current project-level frequency (not a static
+                   per-term default). */
                 setFreqStart(toDateInput(phase.startDate));
                 setFreqEnd(toDateInput(phase.endDate));
-                setFreqCode((c) => c || terms[0]?.frequencyCode || "");
+                setFreqCode((c) => c || projectFrequencyCode || "");
                 setShowFreqModal(true);
               }}
             >
@@ -3060,7 +3078,7 @@ function PhasePanel({
         phaseLabel={phase.phase}
         total={oneTimeTotal}
         available={otAvailable}
-        initialConfig={oneTimeConfig}
+        initialConfig={otInitialConfig}
         isLastPhase={isLastPhase}
         autoRemainder={otLastAbsorb}
         onApply={(cfg) => {
@@ -3117,11 +3135,13 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {phases.map((p) => {
+        {phases.map((p, i) => {
+          const isLast = i === phases.length - 1;
           const terms = p.paymentTerms || [];
           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
           const phaseTotal = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
           const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
+          const oneTimeAllocated = Number(p.oneTimeAllocated) || 0;
           const cf = p.carryForward || {};
           const yes = !!cf.enabled;
           const cfMethodName =
@@ -3166,6 +3186,11 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                 {stat("Scheduled", `${totalPercent}%`,
                   { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
+                {oneTimeAllocated > 0 && stat(
+                  isLast ? "One-Time Cost (auto)" : "One-Time Cost",
+                  inr(oneTimeAllocated),
+                  { color: "#0b6b8f" }
+                )}
                 {stat("Carried Forward",
                   yes ? `${inr(carriedOut)}${cfMethodName ? ` · ${cfMethodName}` : ""}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}

@@ -12,10 +12,7 @@
    catalog itself is editable (PMIS-FR-36.1); each carries its own SLA
    profile + approval workflow (PMIS-FR-36.2). */
 export const CATEGORIES = [
-  { code: "INCIDENT", label: "Incident", workflow: "Restore service", configurable: true },
-  { code: "SERVICE_REQUEST", label: "Service Request", workflow: "Fulfilment", configurable: true },
-  { code: "CHANGE", label: "Change", workflow: "CAB / baseline governance", configurable: true },
-  { code: "PROBLEM", label: "Problem", workflow: "Root-cause analysis", configurable: true },
+  { code: "PMIS_SUPPORT", label: "PMIS Support", workflow: "SUPPORT", configurable: true },  
 ];
 
 /* Priority drives SLA timelines + escalation path (PMIS-FR-37.2). The
@@ -24,7 +21,7 @@ export const PRIORITIES = [
   { code: "P1", label: "Critical", respondMins: 30, resolveMins: 240, escalation: "Manager → Head" },
   { code: "P2", label: "High", respondMins: 60, resolveMins: 480, escalation: "Lead → Manager" },
   { code: "P3", label: "Medium", respondMins: 240, resolveMins: 1440, escalation: "Assignee → Lead" },
-  { code: "P4", label: "Low", respondMins: 480, resolveMins: 2880, escalation: "Assignee" },
+  // { code: "P4", label: "Low", respondMins: 480, resolveMins: 2880, escalation: "Assignee" },
 ];
 
 export const STATUSES = [

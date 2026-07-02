@@ -274,6 +274,14 @@ export const ENDPOINTS = {
        in phases[].carryForward (methodCode, leftover, carriedOut, received,
        receivedMilestone, isLastPhase, allocations[]). */
     carryForward: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/carry-forward`,
+    /* One-time cost is a project-level pool phases opt into. Body:
+         { enabled: false }                              // clear this phase
+         { enabled: true, mode: "percent", value: 30 }   // 30% of the pool
+         { enabled: true, mode: "amount", value: 15000 } // ₹15,000
+       The chronologically last phase auto-absorbs the remainder (can't be
+       set). Response lands in phases[].oneTimeAllocated / oneTimeEnabled /
+       oneTimeMode / oneTimeValue. Returns the full recomputed page. */
+    oneTime: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/one-time`,
     /* Frequency is now a SINGLE project-level setting (drives every
        cycleCount + time-based carry-forward). Body: { frequencyCode }.
        The legacy per-phase route still works but also sets the project

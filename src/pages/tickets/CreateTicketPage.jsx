@@ -27,10 +27,10 @@ import "../../styles/tickets.css";
    collection: HIGH / CRITICAL …) — NOT the P1..P4 codes the mock SLA
    catalog uses. */
 const PRIORITY_OPTIONS = [
-  { value: "CRITICAL", label: "Critical" },
-  { value: "HIGH", label: "High" },
-  { value: "MEDIUM", label: "Medium" },
-  { value: "LOW", label: "Low" },
+  { value: "P1", label: "Critical" },
+  { value: "P2", label: "High" },
+  { value: "P3", label: "Medium" },
+  { value: "P4", label: "Low" },
 ];
 
 function flattenLinkables(project) {
@@ -51,9 +51,9 @@ export default function CreateTicketPage() {
 
   const [form, setForm] = useState({
     title: "",
-    category: "INCIDENT",
+    category: "PMIS Support",
     subCategory: "",
-    priority: "MEDIUM",
+    priority: "",
     projectId: "",
     linkId: "",
     assigneeId: "",
@@ -114,7 +114,6 @@ export default function CreateTicketPage() {
     if (!form.category) e.category = "Category is required.";
     if (!form.priority) e.priority = "Priority is required.";
     if (!form.projectId) e.projectId = "Project reference is required.";
-    if (!form.assigneeId) e.assigneeId = "Assignee is required.";
     if (!form.description.trim()) e.description = "Description is required.";
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -195,14 +194,7 @@ export default function CreateTicketPage() {
             </select>
           </div>
 
-          <div>
-            <label>Sub-category</label>
-            <input
-              value={form.subCategory}
-              placeholder="Optional finer classification"
-              onChange={(e) => set("subCategory", e.target.value)}
-            />
-          </div>
+          
 
           <div>
             <label className="req">Priority</label>
@@ -229,7 +221,7 @@ export default function CreateTicketPage() {
             {errors.projectId && <div className="tkt-err-msg">{errors.projectId}</div>}
           </div>
 
-          <div>
+          {/* <div>
             <label>Link to task / activity</label>
             <select
               value={form.linkId}
@@ -247,50 +239,22 @@ export default function CreateTicketPage() {
                 <option key={l.id} value={l.id}>{l.kind}: {l.name}</option>
               ))}
             </select>
-          </div>
+          </div> */}
 
-          <div>
-            <label className="req">Assignee</label>
-            <select
-              className={errors.assigneeId ? "err" : ""}
-              value={form.assigneeId}
-              disabled={loadingUsers}
-              onChange={(e) => set("assigneeId", e.target.value)}
-            >
-              <option value="">{loadingUsers ? "Loading users…" : "Select assignee…"}</option>
-              {users.map((u) => (
-                <option key={u.userId} value={u.userId}>{userLabel(u)}</option>
-              ))}
-            </select>
-            {errors.assigneeId && <div className="tkt-err-msg">{errors.assigneeId}</div>}
-          </div>
+          
 
-          <div>
+          {/* <div>
             <label>Parent ticket UUID</label>
             <input
               value={form.parentTicketUuid}
               placeholder="Optional — link as a child of another ticket"
               onChange={(e) => set("parentTicketUuid", e.target.value)}
             />
-          </div>
+          </div> */}
 
-          <div>
-            <label>Baseline reference</label>
-            <input
-              value={form.baselineRef}
-              placeholder="Optional"
-              onChange={(e) => set("baselineRef", e.target.value)}
-            />
-          </div>
+        
 
-          <div>
-            <label>Contract reference</label>
-            <input
-              value={form.contractRef}
-              placeholder="Optional"
-              onChange={(e) => set("contractRef", e.target.value)}
-            />
-          </div>
+         
 
           <div className="full">
             <label className="req">Description</label>
