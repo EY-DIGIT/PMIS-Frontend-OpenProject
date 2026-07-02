@@ -50,6 +50,45 @@ function fmtDMY(value) {
 }
 
 
+/* Rupee amount → words (Indian numbering: Crore / Lakh / Thousand). Used as
+   an inline confirmation under the Cost / Tax inputs. Integer part only. */
+function amountToWords(value) {
+  const n = Math.floor(Math.abs(Number(value) || 0));
+  if (!Number.isFinite(n) || n === 0) return "";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+    "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+    "Seventeen", "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (num) => num < 20 ? ones[num] : (tens[Math.floor(num / 10)] + (num % 10 ? " " + ones[num % 10] : ""));
+  const three = (num) => {
+    const h = Math.floor(num / 100), r = num % 100;
+    return (h ? ones[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : "");
+  };
+  const parts = [];
+  const crore = Math.floor(n / 10000000);
+  const lakh = Math.floor((n % 10000000) / 100000);
+  const thousand = Math.floor((n % 100000) / 1000);
+  const hundred = n % 1000;
+  if (crore) parts.push(three(crore) + " Crore");
+  if (lakh) parts.push(two(lakh) + " Lakh");
+  if (thousand) parts.push(two(thousand) + " Thousand");
+  if (hundred) parts.push(three(hundred));
+  return parts.join(" ").trim();
+}
+
+/* Small ₹/% segmented toggle used on the Tax field. */
+const segStyle = (active) => ({
+  padding: "9px 12px", borderRadius: 6, fontSize: 13, fontWeight: 700,
+  border: active ? "1px solid #173e77" : "1px solid var(--uidai-pmis-border)",
+  background: active ? "#173e77" : "#fff",
+  color: active ? "#fff" : "#173e77", cursor: "pointer", flex: "0 0 auto",
+});
+/* Muted "in words" hint shown under a rupee input. */
+function wordsHint(amount) {
+  const w = amountToWords(amount);
+  return w ? `${w} Rupees` : "";
+}
+
 const ctrl = {
   width: "100%",
   padding: "10px",
@@ -336,13 +375,13 @@ function AddCostItemModal({
   costTypes, milestones, hasOneTime, disabledMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
-        costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
+        costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
       });
     }
   }, [open]);
@@ -415,18 +454,39 @@ function AddCostItemModal({
               value={draft.cost}
               onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
             />
+            {draft.cost !== "" && wordsHint(draft.cost) && (
+              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
+            )}
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Tax Amount (₹)</label>
-            <input
-              type="number"
-              min="0"
-              value={draft.taxAmount}
-              onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
-            />
+            <label>Tax {draft.taxMode === "percent" ? "(%)" : "(₹)"}</label>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" style={segStyle(draft.taxMode !== "percent")}
+                onClick={() => setDraft((d) => ({ ...d, taxMode: "amount" }))}>₹</button>
+              <button type="button" style={segStyle(draft.taxMode === "percent")}
+                onClick={() => setDraft((d) => ({ ...d, taxMode: "percent" }))}>%</button>
+              <input
+                type="number"
+                min="0"
+                value={draft.taxAmount}
+                placeholder={draft.taxMode === "percent" ? "% of cost" : "₹ amount"}
+                onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
+                style={{ flex: 1 }}
+              />
+            </div>
+            {draft.taxAmount !== "" && (
+              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>
+                {draft.taxMode === "percent"
+                  ? (() => {
+                      const amt = ((Number(draft.cost) || 0) * (Number(draft.taxAmount) || 0)) / 100;
+                      return `= ${inr(amt)}${wordsHint(amt) ? ` · ${wordsHint(amt)}` : ""}`;
+                    })()
+                  : wordsHint(draft.taxAmount)}
+              </small>
+            )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
@@ -480,22 +540,24 @@ function EditCostItemModal({
   costTypes, milestones, row, usedMilestoneIds,
 }) {
   const [draft, setDraft] = useState({
-    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", milestoneIds: [],
+    costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
   });
 
   useEffect(() => {
     if (!open || !row) return;
     const isOne = row.costTypeCode === "one_time";
-    const taxAmt = row.taxAmount != null
-      ? row.taxAmount
-      : (row.taxPercent != null
-          ? (Number(row.cost) || 0) * (Number(row.taxPercent) / 100)
-          : "");
+    /* Seed the tax input in whichever unit the row was saved with — percent
+       if a taxPercent is present, otherwise the rupee taxAmount. */
+    const usePercent = row.taxPercent != null;
+    const taxSeed = usePercent
+      ? String(row.taxPercent)
+      : (row.taxAmount != null ? String(row.taxAmount) : "");
     setDraft({
       costTypeCode: row.costTypeCode || "fixed",
       phase: isOne ? "" : (row.phase ?? ""),
       cost: row.cost != null ? String(row.cost) : "",
-      taxAmount: taxAmt === "" ? "" : String(taxAmt),
+      taxAmount: taxSeed,
+      taxMode: usePercent ? "percent" : "amount",
       milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
     });
   }, [open, row]);
@@ -575,18 +637,39 @@ function EditCostItemModal({
               value={draft.cost}
               onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
             />
+            {draft.cost !== "" && wordsHint(draft.cost) && (
+              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
+            )}
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Tax Amount (₹)</label>
-            <input
-              type="number"
-              min="0"
-              value={draft.taxAmount}
-              onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
-            />
+            <label>Tax {draft.taxMode === "percent" ? "(%)" : "(₹)"}</label>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" style={segStyle(draft.taxMode !== "percent")}
+                onClick={() => setDraft((d) => ({ ...d, taxMode: "amount" }))}>₹</button>
+              <button type="button" style={segStyle(draft.taxMode === "percent")}
+                onClick={() => setDraft((d) => ({ ...d, taxMode: "percent" }))}>%</button>
+              <input
+                type="number"
+                min="0"
+                value={draft.taxAmount}
+                placeholder={draft.taxMode === "percent" ? "% of cost" : "₹ amount"}
+                onChange={(e) => setDraft((d) => ({ ...d, taxAmount: e.target.value }))}
+                style={{ flex: 1 }}
+              />
+            </div>
+            {draft.taxAmount !== "" && (
+              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>
+                {draft.taxMode === "percent"
+                  ? (() => {
+                      const amt = ((Number(draft.cost) || 0) * (Number(draft.taxAmount) || 0)) / 100;
+                      return `= ${inr(amt)}${wordsHint(amt) ? ` · ${wordsHint(amt)}` : ""}`;
+                    })()
+                  : wordsHint(draft.taxAmount)}
+              </small>
+            )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>Milestones</label>
@@ -1148,8 +1231,8 @@ export default function ProjectFinancePage() {
   // ── Mutations ────────────────────────────────────────────────────
   async function submitNewCostItem(draft, hasOneTimeNow) {
     if (!projectId) return;
-    if (draft.cost === "" || draft.taxAmount === "") {
-      uiStore.showError("Enter both Cost and Tax Amount.");
+    if (draft.cost === "") {
+      uiStore.showError("Enter the Cost.");
       return;
     }
     if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
@@ -1160,13 +1243,17 @@ export default function ProjectFinancePage() {
       uiStore.showError("Only one One-Time cost row is allowed per project.");
       return;
     }
+    /* Tax entered as a % (of cost) → taxPercent; as rupees → taxAmount. */
+    const taxField = draft.taxMode === "percent"
+      ? { taxPercent: Number(draft.taxAmount) }
+      : { taxAmount: Number(draft.taxAmount) };
     const body =
       draft.costTypeCode === "one_time"
         ? {
           /* one_time is the only standalone row — no phase, no milestones. */
           costTypeCode: "one_time",
           cost: Number(draft.cost),
-          taxAmount: Number(draft.taxAmount),
+          ...taxField,
         }
         : {
           /* fixed / resource_cost / transaction_cost — all carry phase +
@@ -1174,7 +1261,7 @@ export default function ProjectFinancePage() {
           costTypeCode: draft.costTypeCode,
           phase: draft.phase || "default",
           cost: Number(draft.cost),
-          taxAmount: Number(draft.taxAmount),
+          ...taxField,
           milestoneIds: draft.milestoneIds,
         };
     setAddingRow(true);
@@ -1198,21 +1285,25 @@ export default function ProjectFinancePage() {
 
   async function submitCostItemEdit(draft) {
     if (!editingCostItem) return;
-    if (draft.cost === "" || draft.taxAmount === "") {
-      uiStore.showError("Enter both Cost and Tax Amount.");
+    if (draft.cost === "") {
+      uiStore.showError("Enter the Cost.");
       return;
     }
     if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
       uiStore.showError("Pick at least one milestone for a Fixed cost row.");
       return;
     }
+    /* Tax entered as a % (of cost) → taxPercent; as rupees → taxAmount. */
+    const taxField = draft.taxMode === "percent"
+      ? { taxPercent: Number(draft.taxAmount) }
+      : { taxAmount: Number(draft.taxAmount) };
     const body =
       draft.costTypeCode === "one_time"
         ? {
             /* one_time is the only standalone row — no phase, no milestones. */
             costTypeCode: "one_time",
             cost: Number(draft.cost),
-            taxAmount: Number(draft.taxAmount),
+            ...taxField,
           }
         : {
             /* fixed / resource_cost / transaction_cost — all carry phase +
@@ -1220,7 +1311,7 @@ export default function ProjectFinancePage() {
             costTypeCode: draft.costTypeCode,
             phase: draft.phase || "default",
             cost: Number(draft.cost),
-            taxAmount: Number(draft.taxAmount),
+            ...taxField,
             milestoneIds: draft.milestoneIds,
           };
     setSavingCostItem(true);
