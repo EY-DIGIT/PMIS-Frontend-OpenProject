@@ -2210,10 +2210,7 @@ function OneTimeCostModal({
   const amount = mode === "amount" ? entered : (entered / 100) * total;
   const maxAmount = Math.max(0, available);
   const overBudget = enabled && amount > maxAmount + 0.5;
-  /* Backend rule: a percentage share must be < 100 (the last phase absorbs
-     the remainder, so a non-last phase can't take the whole pool). */
-  const pctTooHigh = enabled && mode === "percent" && entered >= 100;
-  const validValue = !enabled || (value !== "" && entered > 0 && !overBudget && !pctTooHigh);
+  const validValue = !enabled || (value !== "" && entered > 0 && !overBudget);
   const remainingAfter = Math.round((maxAmount - (enabled ? amount : 0)) * 100) / 100;
 
   const seg = (active) => ({
@@ -2298,11 +2295,6 @@ function OneTimeCostModal({
             {overBudget && (
               <div style={{ fontSize: 12, color: "var(--uidai-pmis-red)", marginTop: 6 }}>
                 Exceeds the amount available to this phase ({inr(maxAmount)}).
-              </div>
-            )}
-            {pctTooHigh && (
-              <div style={{ fontSize: 12, color: "var(--uidai-pmis-red)", marginTop: 6 }}>
-                A percentage share must be below 100% — the last phase absorbs the rest.
               </div>
             )}
           </>
@@ -2907,7 +2899,7 @@ function PhasePanel({
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
                           <span style={muted}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
-                          <span style={{ color: "#173e77" }}>{pct}% of Payment: {inr(value)}</span>
+                          <span style={{ color: "#173e77" }}>{pct}% of Total Payment: {inr(value)}</span>
                           <span style={{ fontWeight: 700, color: remaining > 0 ? "#b54708" : "#1b7a42" }}>
                             Remaining: {inr(remaining)}
                           </span>
@@ -2933,7 +2925,9 @@ function PhasePanel({
                         {(() => {
                           const msComplete = milestoneStatus(t.milestoneId) === "Completed";
                           const genDisabled = isLocked || !msComplete;
-                          return (
+                          /* Generate Invoice hidden for now — flip `false` to
+                             restore it. */
+                          return false && (
                             <button
                               type="button"
                               className="uidai-pmis-pillbtn"
@@ -3039,9 +3033,8 @@ function PhasePanel({
                     <td style={{ fontWeight: 800, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>
                       ₹ {totalValue.toLocaleString("en-IN")}
                     </td>
-                    <td style={{ fontSize: 11, lineHeight: 1.4, fontWeight: 700 }}>
-                      <div style={{ color: "#173e77" }}>Total: {inr(phaseBase)}</div>
-                      <div style={{ color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }}>
+                    <td style={{ lineHeight: 1.3, fontWeight: 800 }}>
+                      <div style={{ fontSize: 15, color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }}>
                         Remaining: {inr(phaseRemaining)}
                       </div>
                     </td>
@@ -3285,7 +3278,7 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                 {stat("Carried Forward",
                   yes ? `${inr(carriedOut)}${cfMethodName ? ` · ${cfMethodName}` : ""}` : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
-                {stat("Received",
+                {stat("Carry Forward Received",
                   received > 0 ? inr(received) : "—",
                   { color: received > 0 ? "#173e77" : "#a3afc1" })}
               </div>
