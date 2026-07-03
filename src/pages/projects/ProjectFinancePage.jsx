@@ -1313,11 +1313,11 @@ export default function ProjectFinancePage() {
 
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
-  /* Order phases chronologically — earliest startDate first, latest endDate
-     last. This makes "subsequent phases" (used to divide a phase's
-     carry-forward) mean the phases that come AFTER it in time: laterPhases
-     = phases.slice(idx + 1) on this sorted list. Phases missing a startDate
-     sort to the end. */
+  /* Order phases by the backend's authoritative `sequence` (1-based). This
+     makes "subsequent phases" (used to divide a phase's carry-forward) mean
+     the phases that come AFTER it — laterPhases = phases.slice(idx + 1) on
+     this list, and the last entry is the last phase. Falls back to a
+     start/end-date sort when `sequence` is absent. */
   const phases = useMemo(() => {
     const list = page?.phases || [];
     const ts = (d) => {
@@ -1325,6 +1325,9 @@ export default function ProjectFinancePage() {
       return Number.isNaN(t) ? Infinity : t;
     };
     return [...list].sort((a, b) => {
+      const seqA = Number(a.sequence), seqB = Number(b.sequence);
+      const hasSeq = Number.isFinite(seqA) && Number.isFinite(seqB);
+      if (hasSeq && seqA !== seqB) return seqA - seqB;
       const sa = ts(a.startDate), sb = ts(b.startDate);
       if (sa !== sb) return sa - sb;
       return ts(a.endDate) - ts(b.endDate);
@@ -2662,10 +2665,6 @@ function CarryForwardModal({
           </div>
         )}
 
-        <div style={{ marginTop: 14, fontSize: 11, color: "var(--uidai-pmis-muted)" }}>
-          Saved to the backend, which recomputes every phase. Note: only
-          testable once the carry-forward backend is deployed.
-        </div>
         </>)}
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
@@ -2822,6 +2821,18 @@ function PhasePanel({
               background: "#eef4fc", color: "#173e77", border: "1px solid #cfe0f5",
             }}>
               {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Cycle" : "Cycles"}
+            </span>
+          )}
+          {phase.pendingCycles != null && (
+            <span
+              title="Project-frequency periods remaining after this phase (how far a frequency carry-forward would spread)"
+              style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                padding: "2px 7px", borderRadius: 999,
+                background: "#fff5e9", color: "#b54708", border: "1px solid #f5d9b5",
+              }}
+            >
+              {phase.pendingCycles} {Number(phase.pendingCycles) === 1 ? "Cycle" : "Cycles"} left
             </span>
           )}
 
