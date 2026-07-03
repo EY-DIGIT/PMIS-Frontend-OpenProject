@@ -365,6 +365,52 @@ function buildCostTypeOptions(costTypes) {
     : [{ code: "fixed", name: "Fixed" }];
 }
 
+/* Validate a cost-row draft and build the POST/PATCH body. one_time is a
+   standalone amount; fixed / resource_cost / transaction_cost all carry a
+   phase + ≥1 milestone. transaction_cost's value is perTransactionCost ×
+   plannedTransactions; resource/transaction also carry a lineLabel. Tax is
+   sent as taxPercent (% mode) or taxAmount (₹ mode). Returns { error } or
+   { body }. */
+function buildCostItemBody(draft) {
+  const isTxn = draft.costTypeCode === "transaction_cost";
+  const isOne = draft.costTypeCode === "one_time";
+  if (isTxn) {
+    if (draft.perTransactionCost === "" || draft.plannedTransactions === "") {
+      return { error: "Enter both Per-Transaction Cost and Planned Transactions." };
+    }
+  } else if (draft.cost === "") {
+    return { error: "Enter the Cost." };
+  }
+  if (!isOne && (!Array.isArray(draft.milestoneIds) || draft.milestoneIds.length === 0)) {
+    return { error: "Pick at least one milestone for this cost row." };
+  }
+  const taxField = draft.taxMode === "percent"
+    ? { taxPercent: Number(draft.taxAmount) }
+    : { taxAmount: Number(draft.taxAmount) };
+  if (isOne) {
+    return { body: { costTypeCode: "one_time", cost: Number(draft.cost), ...taxField } };
+  }
+  const amountFields = isTxn
+    ? {
+        perTransactionCost: Number(draft.perTransactionCost),
+        plannedTransactions: Number(draft.plannedTransactions),
+      }
+    : { cost: Number(draft.cost) };
+  const labelField = (isTxn || draft.costTypeCode === "resource_cost")
+    ? { lineLabel: (draft.lineLabel || "").trim() }
+    : {};
+  return {
+    body: {
+      costTypeCode: draft.costTypeCode,
+      phase: draft.phase || "default",
+      ...amountFields,
+      ...labelField,
+      ...taxField,
+      milestoneIds: draft.milestoneIds,
+    },
+  };
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Add Cost Item modal — replaces the previous inline form. Renders
    into the standard `.uidai-modal` shell so it inherits the project's
@@ -376,12 +422,14 @@ function AddCostItemModal({
 }) {
   const [draft, setDraft] = useState({
     costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
+    lineLabel: "", perTransactionCost: "", plannedTransactions: "",
   });
   // Reseed the draft each time the modal opens.
   useEffect(() => {
     if (open) {
       setDraft({
         costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
+    lineLabel: "", perTransactionCost: "", plannedTransactions: "",
       });
     }
   }, [open]);
@@ -391,6 +439,12 @@ function AddCostItemModal({
      fixed, resource_cost and transaction_cost all carry phase +
      milestones, so those fields show for everything except one_time. */
   const isOneTime = draft.costTypeCode === "one_time";
+  /* resource_cost / transaction_cost are first-class lines like fixed: they
+     carry a phase + milestones and a display label. transaction_cost's value
+     is perTransactionCost × plannedTransactions instead of a single cost. */
+  const isTxn = draft.costTypeCode === "transaction_cost";
+  const isResource = draft.costTypeCode === "resource_cost";
+  const showLabel = isTxn || isResource;
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -438,7 +492,6 @@ function AddCostItemModal({
               <input value="" disabled placeholder="—" />
             ) : (
               <input
-              mandatory
                 type="text"
                 value={draft.phase}
                 placeholder="Phase"
@@ -446,19 +499,59 @@ function AddCostItemModal({
               />
             )}
           </div>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Cost (₹)</label>
-            <input
-              type="number"
-              min="0"
-              value={draft.cost}
-              onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
-            />
-            {draft.cost !== "" && wordsHint(draft.cost) && (
-              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
-            )}
-          </div>
+          {isTxn ? (
+            <>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>Per-Transaction Cost (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.perTransactionCost}
+                  onChange={(e) => setDraft((d) => ({ ...d, perTransactionCost: e.target.value }))}
+                />
+              </div>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>Planned Transactions</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.plannedTransactions}
+                  onChange={(e) => setDraft((d) => ({ ...d, plannedTransactions: e.target.value }))}
+                />
+                {draft.perTransactionCost !== "" && draft.plannedTransactions !== "" && (
+                  <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>
+                    Total: {inr((Number(draft.perTransactionCost) || 0) * (Number(draft.plannedTransactions) || 0))}
+                  </small>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+              <label>Cost (₹)</label>
+              <input
+                type="number"
+                min="0"
+                value={draft.cost}
+                onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
+              />
+              {draft.cost !== "" && wordsHint(draft.cost) && (
+                <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
+              )}
+            </div>
+          )}
         </div>
+
+        {showLabel && (
+          <div className="uidai-pmis-field" style={{ marginBottom: 0, marginTop: 14 }}>
+            <label>Line Label</label>
+            <input
+              type="text"
+              value={draft.lineLabel}
+              placeholder="e.g. On-site engineer, Gateway fees"
+              onChange={(e) => setDraft((d) => ({ ...d, lineLabel: e.target.value }))}
+            />
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -516,7 +609,7 @@ function AddCostItemModal({
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
-            disabled={submitting || !draft.cost}
+            disabled={submitting || (isTxn ? (!draft.perTransactionCost || !draft.plannedTransactions) : !draft.cost)}
             onClick={() => onSubmit(draft, hasOneTime)}
           >
             {submitting ? "Adding…" : "Save Cost Item"}
@@ -541,6 +634,7 @@ function EditCostItemModal({
 }) {
   const [draft, setDraft] = useState({
     costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
+    lineLabel: "", perTransactionCost: "", plannedTransactions: "",
   });
 
   useEffect(() => {
@@ -559,6 +653,9 @@ function EditCostItemModal({
       taxAmount: taxSeed,
       taxMode: usePercent ? "percent" : "amount",
       milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
+      lineLabel: row.lineLabel || "",
+      perTransactionCost: row.perTransactionCost != null ? String(row.perTransactionCost) : "",
+      plannedTransactions: row.plannedTransactions != null ? String(row.plannedTransactions) : "",
     });
   }, [open, row]);
 
@@ -575,6 +672,12 @@ function EditCostItemModal({
 
   if (!open || !row) return null;
   const isOneTime = draft.costTypeCode === "one_time";
+  /* resource_cost / transaction_cost are first-class lines like fixed: they
+     carry a phase + milestones and a display label. transaction_cost's value
+     is perTransactionCost × plannedTransactions instead of a single cost. */
+  const isTxn = draft.costTypeCode === "transaction_cost";
+  const isResource = draft.costTypeCode === "resource_cost";
+  const showLabel = isTxn || isResource;
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -629,19 +732,59 @@ function EditCostItemModal({
               />
             )}
           </div>
-          <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Cost (₹)</label>
-            <input
-              type="number"
-              min="0"
-              value={draft.cost}
-              onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
-            />
-            {draft.cost !== "" && wordsHint(draft.cost) && (
-              <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
-            )}
-          </div>
+          {isTxn ? (
+            <>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>Per-Transaction Cost (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.perTransactionCost}
+                  onChange={(e) => setDraft((d) => ({ ...d, perTransactionCost: e.target.value }))}
+                />
+              </div>
+              <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                <label>Planned Transactions</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.plannedTransactions}
+                  onChange={(e) => setDraft((d) => ({ ...d, plannedTransactions: e.target.value }))}
+                />
+                {draft.perTransactionCost !== "" && draft.plannedTransactions !== "" && (
+                  <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>
+                    Total: {inr((Number(draft.perTransactionCost) || 0) * (Number(draft.plannedTransactions) || 0))}
+                  </small>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+              <label>Cost (₹)</label>
+              <input
+                type="number"
+                min="0"
+                value={draft.cost}
+                onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
+              />
+              {draft.cost !== "" && wordsHint(draft.cost) && (
+                <small style={{ color: "var(--uidai-pmis-muted)", fontSize: 11 }}>{wordsHint(draft.cost)}</small>
+              )}
+            </div>
+          )}
         </div>
+
+        {showLabel && (
+          <div className="uidai-pmis-field" style={{ marginBottom: 0, marginTop: 14 }}>
+            <label>Line Label</label>
+            <input
+              type="text"
+              value={draft.lineLabel}
+              placeholder="e.g. On-site engineer, Gateway fees"
+              onChange={(e) => setDraft((d) => ({ ...d, lineLabel: e.target.value }))}
+            />
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, 200px) minmax(0, 1fr)", gap: 14, marginTop: 14 }}>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -1231,39 +1374,12 @@ export default function ProjectFinancePage() {
   // ── Mutations ────────────────────────────────────────────────────
   async function submitNewCostItem(draft, hasOneTimeNow) {
     if (!projectId) return;
-    if (draft.cost === "") {
-      uiStore.showError("Enter the Cost.");
-      return;
-    }
-    if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
-      uiStore.showError("Pick at least one milestone for a Fixed cost row.");
-      return;
-    }
     if (draft.costTypeCode === "one_time" && hasOneTimeNow) {
       uiStore.showError("Only one One-Time cost row is allowed per project.");
       return;
     }
-    /* Tax entered as a % (of cost) → taxPercent; as rupees → taxAmount. */
-    const taxField = draft.taxMode === "percent"
-      ? { taxPercent: Number(draft.taxAmount) }
-      : { taxAmount: Number(draft.taxAmount) };
-    const body =
-      draft.costTypeCode === "one_time"
-        ? {
-          /* one_time is the only standalone row — no phase, no milestones. */
-          costTypeCode: "one_time",
-          cost: Number(draft.cost),
-          ...taxField,
-        }
-        : {
-          /* fixed / resource_cost / transaction_cost — all carry phase +
-             milestones; send the actual selected code. */
-          costTypeCode: draft.costTypeCode,
-          phase: draft.phase || "default",
-          cost: Number(draft.cost),
-          ...taxField,
-          milestoneIds: draft.milestoneIds,
-        };
+    const { error, body } = buildCostItemBody(draft);
+    if (error) { uiStore.showError(error); return; }
     setAddingRow(true);
     try {
       const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.costItems(projectId)}`, {
@@ -1285,35 +1401,8 @@ export default function ProjectFinancePage() {
 
   async function submitCostItemEdit(draft) {
     if (!editingCostItem) return;
-    if (draft.cost === "") {
-      uiStore.showError("Enter the Cost.");
-      return;
-    }
-    if (draft.costTypeCode === "fixed" && draft.milestoneIds.length === 0) {
-      uiStore.showError("Pick at least one milestone for a Fixed cost row.");
-      return;
-    }
-    /* Tax entered as a % (of cost) → taxPercent; as rupees → taxAmount. */
-    const taxField = draft.taxMode === "percent"
-      ? { taxPercent: Number(draft.taxAmount) }
-      : { taxAmount: Number(draft.taxAmount) };
-    const body =
-      draft.costTypeCode === "one_time"
-        ? {
-            /* one_time is the only standalone row — no phase, no milestones. */
-            costTypeCode: "one_time",
-            cost: Number(draft.cost),
-            ...taxField,
-          }
-        : {
-            /* fixed / resource_cost / transaction_cost — all carry phase +
-               milestones; send the actual selected code. */
-            costTypeCode: draft.costTypeCode,
-            phase: draft.phase || "default",
-            cost: Number(draft.cost),
-            ...taxField,
-            milestoneIds: draft.milestoneIds,
-          };
+    const { error, body } = buildCostItemBody(draft);
+    if (error) { uiStore.showError(error); return; }
     setSavingCostItem(true);
     try {
       const res = await authorizedFetch(
@@ -1747,7 +1836,14 @@ export default function ProjectFinancePage() {
                           : null);
                     return (
                       <tr key={r.id}>
-                        <td>{costTypeLabel(r.costTypeCode)}</td>
+                        <td>
+                          {costTypeLabel(r.costTypeCode)}
+                          {r.lineLabel && (
+                            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600, marginTop: 2 }}>
+                              {r.lineLabel}
+                            </div>
+                          )}
+                        </td>
                         <td >
                           {isOneTime
                             ? <span style={disabledCell}></span>
@@ -2658,7 +2754,14 @@ function PhasePanel({
   const cfDisabled = carryLocked || carryBusy || cfIsLast;
   const cfLeftover = Number(cf.leftover) || phaseRemaining || 0;
   const cfAllocations = Array.isArray(cf.allocations) ? cf.allocations : [];
+  /* Frequency (time_*) carry-forward is a POOL: a dated installment schedule
+     over the periods after the phase ends. It is NOT added to any phase/
+     milestone total — it just shows here as a schedule. Applied (phase/
+     milestone) methods return an empty pool. */
+  const cfPool = Array.isArray(cf.pool) ? cf.pool : [];
+  const cfPoolPerPeriod = Number(cf.poolPerPeriod) || 0;
   const [cfModalOpen, setCfModalOpen] = useState(false);
+  const [poolOpen, setPoolOpen] = useState(false);
 
   /* One-time-cost distribution (backend-owned). This phase's ₹ share of the
      one-time pool comes from phase.oneTimeAllocated; the last phase can't be
@@ -2784,6 +2887,74 @@ function PhasePanel({
       </div>
 
       <div style={{ padding: 16 }}>
+          {/* Frequency carry-forward pool — a dated installment schedule that
+              is NOT added to any total (it stays out until invoicing). Shown
+              only for time_* methods (applied methods return an empty pool). */}
+          {cfPool.length > 0 && (
+            <div style={{
+              marginBottom: 12, border: "1px solid #cfe0f5", borderRadius: 8,
+              background: "#f6faff", overflow: "hidden",
+            }}>
+              <button
+                type="button"
+                onClick={() => setPoolOpen((o) => !o)}
+                aria-expanded={poolOpen}
+                style={{
+                  width: "100%", border: "none", background: "transparent", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 8, padding: "10px 12px", textAlign: "left",
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0b3c88", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span aria-hidden="true">📅</span>
+                  Carry-Forward Schedule ({cfMethodName})
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999,
+                    background: "#e6eefb", color: "#0b3c88", border: "1px solid #cfe0f5",
+                  }}>
+                    {cfPool.length} {cfPool.length === 1 ? "installment" : "installments"}
+                  </span>
+                </span>
+                <span style={{ fontSize: 12, color: "var(--uidai-pmis-muted)" }}>
+                  {inr(cfPoolPerPeriod)} / period {poolOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              {poolOpen && (
+                <div style={{ padding: "0 12px 12px" }}>
+                  <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", marginBottom: 8 }}>
+                    The leftover {inr(cfLeftover)} is scheduled across the periods after this phase —
+                    not added to any phase or milestone total.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {cfPool.map((row, i) => (
+                      <div key={row.periodIndex ?? i} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        gap: 8, fontSize: 12, padding: "5px 8px",
+                        background: "#fff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 6,
+                      }}>
+                        <span style={{ color: "#173e77", fontWeight: 600 }}>
+                          {fmtDMY(row.periodStart)} – {fmtDMY(row.periodEnd)}
+                        </span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 700, color: "#173e77", fontVariantNumeric: "tabular-nums" }}>
+                            {inr(row.amount)}
+                          </span>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999,
+                            background: row.status === "on_invoice" ? "#eef9f0" : "#fff5e9",
+                            color: row.status === "on_invoice" ? "#1b7a42" : "#b54708",
+                            border: `1px solid ${row.status === "on_invoice" ? "#c4e9d0" : "#f5d9b5"}`,
+                          }}>
+                            {row.status === "on_invoice" ? "Invoiced" : "Pending"}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
             <button
               type="button"
