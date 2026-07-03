@@ -83,6 +83,7 @@ import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
 import AssistantPage from "./pages/AssistantPage";
 import TicketManagementPage from "./pages/tickets/TicketManagementPage";
 import CreateTicketPage from "./pages/tickets/CreateTicketPage";
+import TicketDetailPage from "./pages/tickets/TicketDetailPage";
 import { usePageContext } from "./utils/pageContext";
 /* ─────────────────────────────────────────────────────────────
    PageTitle — kept as a no-op stub. All route-driven page headings
@@ -676,6 +677,7 @@ export default function MainApp() {
                                                 <Route path="/assistant" element={<AssistantPage />} />
                                                 <Route path="/tickets" element={<TicketManagementPage />} />
                                                 <Route path="/tickets/new" element={<CreateTicketPage />} />
+                                                <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
 
                                                 <Route path="/projects" element={<RequirePermission action="viewProjects"><ProjectsListPage /></RequirePermission>} />
 

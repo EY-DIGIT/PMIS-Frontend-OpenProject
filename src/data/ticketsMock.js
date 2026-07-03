@@ -32,6 +32,32 @@ export const STATUSES = [
   { code: "CLOSED", label: "Closed" },
 ];
 
+/* Workflow stages — these are the ticket-service `status` values (which
+   double as the workflow state). Ordered as the ticket progresses. `OPEN`
+   is shown as "Pending Assignment" because a freshly-created ticket has no
+   assignee yet. Kept in sync with GET /ticket-service/workflow. */
+export const STAGES = [
+  { code: "OPEN", label: "Pending Assignment" },
+  { code: "ASSIGNED", label: "Assigned" },
+  { code: "IN_PROGRESS", label: "In Progress" },
+  { code: "PENDING", label: "Pending" },
+  { code: "SENT_BACK", label: "Sent Back" },
+  { code: "RESOLVED", label: "Resolved" },
+  { code: "CLOSED", label: "Closed" },
+  { code: "CANCELLED", label: "Cancelled" },
+];
+
+export const stageLabel = (code) => STAGES.find((s) => s.code === code)?.label || code || "—";
+
+/* Ticket priority enum the ticket-service uses — exactly P1 / P2 / P3
+   (no descriptive labels). Shared by the create form, list and detail. */
+export const TICKET_PRIORITIES = [
+  { code: "P1", label: "P1" },
+  { code: "P2", label: "P2" },
+  { code: "P3", label: "P3" },
+];
+export const priorityLabel = (code) => TICKET_PRIORITIES.find((p) => p.code === code)?.label || code || "—";
+
 /* SLA health buckets (PMIS-FR-37.2 / .3) — derived from the time left
    against the resolve window. */
 export const SLA_STATES = {

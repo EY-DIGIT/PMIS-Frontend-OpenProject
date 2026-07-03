@@ -13,7 +13,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORIES } from "../../data/ticketsMock";
+import { CATEGORIES, TICKET_PRIORITIES } from "../../data/ticketsMock";
 import * as projectsApi from "../../api/projects";
 import * as usersApi from "../../api/users";
 import { createTicket } from "../../api/tickets";
@@ -23,16 +23,6 @@ import "../../styles/tickets.css";
    to — every activity and every task under it (PMIS-FR-35.1). Each entry
    carries a `kind` so submit knows whether to populate activity* or
    task* fields. */
-/* Priority enum the ticket-service expects (per the backend Postman
-   collection: HIGH / CRITICAL …) — NOT the P1..P4 codes the mock SLA
-   catalog uses. */
-const PRIORITY_OPTIONS = [
-  { value: "P1", label: "Critical" },
-  { value: "P2", label: "High" },
-  { value: "P3", label: "Medium" },
-  { value: "P4", label: "Low" },
-];
-
 function flattenLinkables(project) {
   const out = [];
   (project?.milestones || []).forEach((m) => {
@@ -199,7 +189,8 @@ export default function CreateTicketPage() {
           <div>
             <label className="req">Priority</label>
             <select className={errors.priority ? "err" : ""} value={form.priority} onChange={(e) => set("priority", e.target.value)}>
-              {PRIORITY_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              <option value="">Select priority…</option>
+              {TICKET_PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
             </select>
           </div>
 

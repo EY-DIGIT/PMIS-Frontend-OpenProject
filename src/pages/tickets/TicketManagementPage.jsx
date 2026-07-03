@@ -3,37 +3,24 @@
 
    Reads live tickets from the ticket-service
    (GET /ticket-service/tickets?page=&size=, via src/api/tickets.js) and
-   renders them with client-side search, filtering and KPIs. The catalog
-   look-ups (categories / statuses) stay as static enums from
-   ticketsMock — they match the codes the service returns.
+   renders them with client-side search, filtering and KPIs.
 
-   Bulk status update is applied to the loaded list locally (not yet
-   persisted) until the update-status endpoint is wired.
+   The ticket `status` doubles as its WORKFLOW STAGE (OPEN → ASSIGNED →
+   IN_PROGRESS → … per GET /ticket-service/workflow), so the table shows a
+   "Stage" column instead of an assignee. Each row links to the ticket
+   detail page (/tickets/:uuid) where the stage/workflow + assignment live.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORIES, STATUSES } from "../../data/ticketsMock";
+import { CATEGORIES, STAGES, stageLabel, TICKET_PRIORITIES, priorityLabel } from "../../data/ticketsMock";
 import { listTickets } from "../../api/tickets";
 import "../../styles/tickets.css";
 
 const PAGE_SIZE = 50;
 
-/* Priority enum the ticket-service uses. */
-const PRIORITIES = [
-  { code: "CRITICAL", label: "Critical" },
-  { code: "HIGH", label: "High" },
-  { code: "MEDIUM", label: "Medium" },
-  { code: "LOW", label: "Low" },
-];
-
 const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || code;
-const statusLabel = (code) => STATUSES.find((s) => s.code === code)?.label || code;
-const prioLabel = (code) => PRIORITIES.find((p) => p.code === code)?.label || code;
 const slaLabel = (code) => (code ? code.replace(/_/g, " ") : "—");
-
-const initials = (name) =>
-  (name || "?").split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
 /* Map a raw ticket-service record into the flat shape this table uses. */
 function normalize(t) {
@@ -43,7 +30,6 @@ function normalize(t) {
     title: t.title || "",
     description: t.description || "",
     category: t.category || "",
-    subCategory: t.subCategory || "",
     priority: t.priority || "",
     status: t.status || "",
     projectId: t.projectId || "",
@@ -51,7 +37,6 @@ function normalize(t) {
     activityName: t.activityName || "",
     taskName: t.taskName || "",
     assigneeName: t.assignee?.name || "",
-    assigneeEmail: t.assignee?.email || "",
     slaStatus: t.slaStatus || "",
     slaBreached: !!t.slaBreached,
     childCount: Array.isArray(t.childTickets) ? t.childTickets.length : 0,
@@ -73,12 +58,8 @@ export default function TicketManagementPage() {
   const [q, setQ] = useState("");
   const [fCategory, setFCategory] = useState("ALL");
   const [fPriority, setFPriority] = useState("ALL");
-  const [fStatus, setFStatus] = useState("ALL");
+  const [fStage, setFStage] = useState("ALL");
   const [fProject, setFProject] = useState("ALL");
-
-  // Bulk selection (PMIS-FR-35.5) — local only for now.
-  const [selected, setSelected] = useState(() => new Set());
-  const [bulkStatus, setBulkStatus] = useState("");
 
   const load = (pageNum) => {
     setLoading(true);
@@ -127,7 +108,7 @@ export default function TicketManagementPage() {
     return tickets.filter((t) => {
       if (fCategory !== "ALL" && t.category !== fCategory) return false;
       if (fPriority !== "ALL" && t.priority !== fPriority) return false;
-      if (fStatus !== "ALL" && t.status !== fStatus) return false;
+      if (fStage !== "ALL" && t.status !== fStage) return false;
       if (fProject !== "ALL" && t.projectId !== fProject) return false;
       if (needle) {
         const hay = `${t.id} ${t.title} ${t.description} ${t.assigneeName}`.toLowerCase();
@@ -135,44 +116,18 @@ export default function TicketManagementPage() {
       }
       return true;
     });
-  }, [tickets, q, fCategory, fPriority, fStatus, fProject]);
+  }, [tickets, q, fCategory, fPriority, fStage, fProject]);
 
   const kpis = useMemo(() => {
-    let open = 0, inProgress = 0, resolved = 0, breached = 0;
+    let pending = 0, inProgress = 0, resolved = 0, breached = 0;
     tickets.forEach((t) => {
-      if (t.status === "OPEN") open += 1;
+      if (t.status === "OPEN") pending += 1;
       if (t.status === "IN_PROGRESS") inProgress += 1;
       if (t.status === "RESOLVED" || t.status === "CLOSED") resolved += 1;
       if (t.slaBreached) breached += 1;
     });
-    return { open, inProgress, resolved, breached };
+    return { pending, inProgress, resolved, breached };
   }, [tickets]);
-
-  // ── selection helpers ──
-  const allVisibleSelected = filtered.length > 0 && filtered.every((t) => selected.has(t.uuid));
-  const toggleAll = () => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) filtered.forEach((t) => next.delete(t.uuid));
-      else filtered.forEach((t) => next.add(t.uuid));
-      return next;
-    });
-  };
-  const toggleOne = (uuid) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(uuid) ? next.delete(uuid) : next.add(uuid);
-      return next;
-    });
-  };
-  const clearSelection = () => setSelected(new Set());
-
-  const applyBulkStatus = () => {
-    if (!bulkStatus) return;
-    setTickets((list) => list.map((t) => (selected.has(t.uuid) ? { ...t, status: bulkStatus } : t)));
-    setBulkStatus("");
-    clearSelection();
-  };
 
   const hasMore = tickets.length < totalCount;
 
@@ -190,8 +145,8 @@ export default function TicketManagementPage() {
       {/* KPI summary */}
       <div className="tkt-kpis">
         <div className="tkt-kpi">
-          <div className="tkt-kpi-val">{kpis.open}</div>
-          <div className="tkt-kpi-lbl">Open</div>
+          <div className="tkt-kpi-val">{kpis.pending}</div>
+          <div className="tkt-kpi-lbl">Pending Assignment</div>
         </div>
         <div className="tkt-kpi">
           <div className="tkt-kpi-val">{kpis.inProgress}</div>
@@ -230,14 +185,14 @@ export default function TicketManagementPage() {
           <label htmlFor="tkt-prio">Priority</label>
           <select id="tkt-prio" value={fPriority} onChange={(e) => setFPriority(e.target.value)}>
             <option value="ALL">All priorities</option>
-            {PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+            {TICKET_PRIORITIES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
           </select>
         </div>
         <div className="tkt-field">
-          <label htmlFor="tkt-status">Status</label>
-          <select id="tkt-status" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-            <option value="ALL">All statuses</option>
-            {STATUSES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+          <label htmlFor="tkt-stage">Stage</label>
+          <select id="tkt-stage" value={fStage} onChange={(e) => setFStage(e.target.value)}>
+            <option value="ALL">All stages</option>
+            {STAGES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
         </div>
         <div className="tkt-field">
@@ -249,53 +204,23 @@ export default function TicketManagementPage() {
         </div>
       </div>
 
-      {/* Bulk action bar — PMIS-FR-35.5 (local only) */}
-      {selected.size > 0 && (
-        <div className="tkt-bulkbar">
-          <span className="tkt-bulk-count">{selected.size} selected</span>
-
-          <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
-            <option value="">Set status…</option>
-            {STATUSES.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
-          </select>
-          <button type="button" className="tkt-btn small" disabled={!bulkStatus} onClick={applyBulkStatus}>
-            Apply
-          </button>
-
-          <span className="tkt-bulk-spacer" />
-          <button type="button" className="tkt-btn ghost small" onClick={clearSelection}>
-            Clear
-          </button>
-        </div>
-      )}
-
       {/* Ticket table */}
       <div className="tkt-table-wrap">
         <table className="tkt-table">
           <thead>
             <tr>
-              <th style={{ width: 36 }}>
-                <input
-                  type="checkbox"
-                  className="tkt-checkbox"
-                  aria-label="Select all"
-                  checked={allVisibleSelected}
-                  onChange={toggleAll}
-                />
-              </th>
               <th style={{ width: 130 }}>Ticket</th>
               <th>Summary</th>
               <th style={{ width: 130 }}>Category</th>
               <th style={{ width: 90 }}>Priority</th>
-              <th style={{ width: 170 }}>Assignee</th>
+              <th style={{ width: 170 }}>Stage</th>
               <th style={{ width: 110 }}>SLA</th>
-              <th style={{ width: 120 }}>Status</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={6}>
                   <div className="tkt-empty">
                     {loading ? "Loading tickets…" : "No tickets match your filters."}
                   </div>
@@ -303,16 +228,12 @@ export default function TicketManagementPage() {
               </tr>
             ) : (
               filtered.map((t) => (
-                <tr key={t.uuid}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      className="tkt-checkbox"
-                      aria-label={`Select ${t.id}`}
-                      checked={selected.has(t.uuid)}
-                      onChange={() => toggleOne(t.uuid)}
-                    />
-                  </td>
+                <tr
+                  key={t.uuid}
+                  className="tkt-row-link"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => navigate(`/tickets/${t.uuid}`)}
+                >
                   <td><span className="tkt-id">{t.id}</span></td>
                   <td>
                     <div className="tkt-title">{t.title}</div>
@@ -324,21 +245,13 @@ export default function TicketManagementPage() {
                     {t.childCount > 0 && <span className="tkt-parent">⛓ {t.childCount} child ticket(s)</span>}
                   </td>
                   <td><Badge cls={`cat-${t.category}`}>{catLabel(t.category)}</Badge></td>
-                  <td><Badge cls={`prio-${t.priority}`}>{prioLabel(t.priority)}</Badge></td>
-                  <td>
-                    {t.assigneeName ? (
-                      <div className="tkt-assignee">
-                        <span className="tkt-avatar">{initials(t.assigneeName)}</span>
-                        <span>{t.assigneeName}</span>
-                      </div>
-                    ) : <span className="tkt-sub">Unassigned</span>}
-                  </td>
+                  <td><Badge cls={`prio-${t.priority}`}>{priorityLabel(t.priority)}</Badge></td>
+                  <td><Badge cls={`stg-${t.status}`}>{stageLabel(t.status)}</Badge></td>
                   <td>
                     {t.slaStatus
                       ? <Badge cls={`sla-${t.slaStatus}`}>{slaLabel(t.slaStatus)}</Badge>
                       : <span className="tkt-sub">—</span>}
                   </td>
-                  <td><Badge cls={`st-${t.status}`}>{statusLabel(t.status)}</Badge></td>
                 </tr>
               ))
             )}

@@ -448,5 +448,20 @@ export const ENDPOINTS = {
   tickets: {
     create: '/ticket-service/tickets',
     list: '/ticket-service/tickets',
+    get: (uuid) => `/ticket-service/tickets/${enc(uuid)}`,
+    /* PATCH — move a ticket to a new workflow state and/or set the
+       assignee. Body: { requestInfo, ticket: { status, comment,
+       assigneeUuid, assigneeName, assigneeEmail } }. */
+    update: (uuid) => `/ticket-service/tickets/${enc(uuid)}`,
+    /* Workflow definition (states + allowed actions → nextState + roles)
+       and the allowed-actions lookup for a given state. */
+    workflow: '/ticket-service/workflow',
+    workflowActions: '/ticket-service/workflow/actions',
+    escalationLogs: (uuid) => `/ticket-service/escalation/tickets/${enc(uuid)}/logs`,
+    /* Escalation matrix — the priority × level → { triggerHours, emails,
+       isActive } config. GET lists all rows; PATCH edits one row (body:
+       { triggerHours, emails, isActive } — no requestInfo wrapper). */
+    escalationMatrix: '/ticket-service/escalation/matrix',
+    escalationMatrixItem: (uuid) => `/ticket-service/escalation/matrix/${enc(uuid)}`,
   },
 };

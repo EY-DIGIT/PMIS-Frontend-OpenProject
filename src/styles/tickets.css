@@ -47,7 +47,8 @@
 .tkt-field.grow { flex: 1 1 220px; min-width: 180px; }
 .tkt-field label { font-size: 11.5px; font-weight: 700; color: var(--uidai-pmis-muted, #5b6b82); letter-spacing: .2px; }
 .tkt-field input,
-.tkt-field select {
+.tkt-field select,
+.tkt-field textarea {
   font: inherit;
   font-size: 13px;
   padding: 8px 10px;
@@ -57,8 +58,10 @@
   color: inherit;
   min-width: 150px;
 }
+.tkt-field textarea { resize: vertical; min-height: 72px; width: 100%; }
 .tkt-field input:focus,
-.tkt-field select:focus { outline: none; border-color: var(--uidai-pmis-cyan, #17a2b8); box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.12); }
+.tkt-field select:focus,
+.tkt-field textarea:focus { outline: none; border-color: var(--uidai-pmis-cyan, #17a2b8); box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.12); }
 
 /* ---------- bulk action bar (PMIS-FR-35.5) ---------- */
 .tkt-bulkbar {
@@ -131,12 +134,24 @@
 .st-ON_HOLD { background: #fdf0e3; color: #b8730f; }
 .st-RESOLVED { background: #e9f9ec; color: #2e7d32; }
 .st-CLOSED { background: #eceff3; color: #5b6b82; }
+/* workflow stage (ticket `status` = workflow state) */
+.stg-OPEN { background: #fdf0e3; color: #b8730f; }
+.stg-ASSIGNED { background: #e8f0fe; color: #2c5fb0; }
+.stg-IN_PROGRESS { background: #e4f7ef; color: #1d8a5b; }
+.stg-PENDING { background: #fff3e0; color: #b8730f; }
+.stg-SENT_BACK { background: #f1ebfb; color: #7a4fbf; }
+.stg-RESOLVED { background: #e9f9ec; color: #2e7d32; }
+.stg-CLOSED { background: #eceff3; color: #5b6b82; }
+.stg-CANCELLED { background: #fdecea; color: #c0392b; }
 /* sla */
 .sla-ON_TRACK { background: #e9f9ec; color: #2e7d32; }
 .sla-AT_RISK { background: #fff3e0; color: #b8730f; }
 .sla-BREACHED { background: #fdecea; color: #c0392b; }
 .sla-MET { background: #eceff3; color: #5b6b82; }
 .tkt-sla-time { font-size: 11px; color: var(--uidai-pmis-muted, #5b6b82); margin-top: 3px; }
+
+/* clickable rows link to the ticket detail page */
+.tkt-row-link:hover td { background: #f4f8ff; }
 
 /* assignee */
 .tkt-assignee { display: flex; align-items: center; gap: 8px; }
@@ -235,6 +250,71 @@
 /* Action-only bar (heading moved to the global navbar) — push the button
    to the right edge. */
 .tkt-header-actions { justify-content: flex-end; }
+
+/* ---------- ticket detail page (/tickets/:id) ---------- */
+.tkt-detail-head {
+  background: #fff;
+  border: 1px solid var(--uidai-pmis-border, #dbe5f1);
+  border-top: 3px solid var(--uidai-pmis-cyan, #17a2b8);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(20, 50, 110, 0.05);
+}
+.tkt-detail-idrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tkt-detail-title {
+  font-size: 20px; font-weight: 800; color: var(--uidai-pmis-navy, #173e77);
+  margin-top: 10px; line-height: 1.25;
+}
+
+.tkt-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.tkt-detail-card {
+  background: #fff;
+  border: 1px solid var(--uidai-pmis-border, #dbe5f1);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(20, 50, 110, 0.04);
+}
+.tkt-detail-card:last-child { margin-bottom: 0; }
+.tkt-cardtitle {
+  margin: 0 0 12px; font-size: 12.5px; font-weight: 800;
+  color: var(--uidai-pmis-navy, #173e77);
+  text-transform: uppercase; letter-spacing: .5px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--uidai-pmis-border, #dbe5f1);
+}
+.tkt-drow { display: flex; gap: 12px; padding: 8px 0; align-items: baseline; }
+.tkt-drow + .tkt-drow { border-top: 1px solid #eef3f9; }
+.tkt-dlabel { width: 120px; flex: 0 0 120px; color: var(--uidai-pmis-muted, #5b6b82); font-size: 12.5px; }
+.tkt-dval { font-size: 13.5px; color: var(--uidai-pmis-navy, #173e77); font-weight: 600; min-width: 0; word-break: break-word; }
+.tkt-dval .tkt-dmuted { font-weight: 400; color: var(--uidai-pmis-muted, #5b6b82); }
+.tkt-detail-desc { font-size: 13.5px; line-height: 1.65; color: var(--uidai-pmis-text, #33414f); white-space: pre-wrap; }
+
+/* form controls inside detail cards */
+.tkt-detail-card label { display: block; font-size: 11.5px; font-weight: 700; color: var(--uidai-pmis-muted, #5b6b82); margin-bottom: 5px; }
+.tkt-detail-card select,
+.tkt-detail-card textarea,
+.tkt-detail-card input[type="text"],
+.tkt-detail-card input[type="number"] {
+  width: 100%; font: inherit; font-size: 13px; padding: 9px 11px;
+  border: 1px solid var(--uidai-pmis-border, #dbe5f1); border-radius: 8px; background: #fff; color: inherit;
+}
+.tkt-detail-card textarea { resize: vertical; min-height: 70px; }
+.tkt-detail-card select:focus,
+.tkt-detail-card textarea:focus,
+.tkt-detail-card input:focus { outline: none; border-color: var(--uidai-pmis-cyan, #17a2b8); box-shadow: 0 0 0 3px rgba(23, 162, 184, 0.12); }
+
+.tkt-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tkt-crumb-cur { color: var(--uidai-pmis-navy, #173e77); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .tkt-detail-grid { grid-template-columns: 1fr; }
+}
 
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
