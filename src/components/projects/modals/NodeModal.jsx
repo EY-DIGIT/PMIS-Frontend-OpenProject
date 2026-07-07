@@ -288,6 +288,11 @@ export default function NodeModal({
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
   const assignableVendorId = enclosingActivity?.vendorId || "";
+  const [showPopup, setShowPopup] = useState(false);
+const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+const [attendanceFile, setAttendanceFile] = useState(null);
+const [uploading, setUploading] = useState(false);
   useEffect(() => {
     if (!open || (kind !== "task" && kind !== "subtask")) {
       setAssignableUsers([]);
@@ -838,6 +843,44 @@ export default function NodeModal({
       setPosting(false);
     }
   }
+  const handleAttendanceUpload = async () => {
+  if (!attendanceFile) {
+    alert("Please select an Excel file.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", attendanceFile);
+
+  try {
+    setUploading(true);
+
+    const response = await fetch(
+      `http://10.1.131.199/leaves/api/attendance/monthly?month=${selectedMonth}&year=${selectedYear}`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Upload failed");
+    }
+
+    const data = await response.text(); // or response.json() if API returns JSON
+
+    console.log(data);
+    alert("Attendance uploaded successfully!");
+
+    setShowPopup(false);
+    setAttendanceFile(null);
+  } catch (error) {
+    console.error(error);
+    alert("Failed to upload attendance.");
+  } finally {
+    setUploading(false);
+  }
+};
 
   const navigate = useNavigate();
 
@@ -904,7 +947,7 @@ export default function NodeModal({
   const effectiveBoxStyle = asPage
     ? { position: "relative", width: "100%", maxWidth: "100%", maxHeight: "none", overflow: "visible", margin: 0 }
     : boxStyle;
-
+    
   /* Body layout for activity-edit: a single flex row with two scrolling
      columns. Left column stacks banner → form → comments; right column
      holds the approval panel + audit trail. Outside activity edit, the
@@ -1030,6 +1073,25 @@ export default function NodeModal({
           );
         })()}
         <button
+  type="button"
+  onClick={() => setShowPopup(true)}
+  style={{
+    ...iconBtnStyle,
+    top: 8,
+    right: 170,
+    fontSize: 14,
+    lineHeight: 1,
+    width: "auto",
+    padding: "8px 16px",
+    background: "linear-gradient(90deg, #0b3c88, #129ab8)",
+    borderRadius: 4,
+    color: "#fff",
+    marginTop: 4,
+  }}
+>
+  Leave Management
+</button>
+        <button
           type="button"
           aria-label="Close"
           onClick={onCancel}
@@ -1037,6 +1099,7 @@ export default function NodeModal({
         >
           ×
         </button>
+        
         <h3 className="uidai-modal__title">{title}</h3>
         <div className="uidai-hint" style={{ marginBottom: 12 }}>
           {hintText}
@@ -1527,22 +1590,132 @@ export default function NodeModal({
         )}
 
         <div className="uidai-modal__actions">
-          {editable && (
-            <button
-              type="button"
-              className="uidai-btn"
-              onClick={save}
-              disabled={disableSave}
-            >
-              Save
-            </button>
-          )}
-          <button type="button" className="uidai-btn uidai-btn--cancel" onClick={onCancel}>
-            Close
-          </button>
-        </div>
+  {editable && (
+    <button
+      type="button"
+      className="uidai-btn"
+      onClick={save}
+      disabled={disableSave}
+    >
+      Save
+    </button>
+  )}
+
+  <button
+    type="button"
+    className="uidai-btn uidai-btn--cancel"
+    onClick={onCancel}
+  >
+    Close
+  </button>
+</div>
+
+{/* Leave Management Confirmation */}
+{showPopup && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.4)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    }}
+  >
+    <div
+      style={{
+        width: 450,
+        background: "#fff",
+        borderRadius: 8,
+        padding: 24,
+      }}
+    >
+      <h3>Upload Attendance</h3>
+
+      <div style={{ marginTop: 20 }}>
+        <label>Month</label>
+
+        <select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="uidai-select"
+        >
+          {[
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+          ].map((m, index) => (
+            <option key={index} value={index + 1}>
+              {m}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ marginTop: 15 }}>
+        <label>Year</label>
+
+        <select
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(e.target.value)}
+          className="uidai-select"
+        >
+          {[2025, 2026, 2027, 2028].map((y) => (
+            <option key={y}>{y}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ marginTop: 15 }}>
+        <label>Attendance Excel</label>
+
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => setAttendanceFile(e.target.files[0])}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 10,
+          marginTop: 25,
+        }}
+      >
+        <button
+          className="uidai-btn uidai-btn--cancel"
+          onClick={() => setShowPopup(false)}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="uidai-btn"
+          onClick={handleAttendanceUpload}
+          disabled={uploading}
+        >
+          {uploading ? "Uploading..." : "Upload"}
+        </button>
       </div>
     </div>
+  </div>
+)}
+
+</div>
+</div>
+      
   );
 }
 
