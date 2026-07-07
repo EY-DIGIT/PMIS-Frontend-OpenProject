@@ -140,6 +140,7 @@ async function readJson(res) {
     const msg =
       payload?.error?.message ||
       payload?.message ||
+      payload?.detail?.[0]?.msg ||   
       payload?.detail ||
       `Request failed (${res.status})`;
     throw new Error(msg);
@@ -1942,8 +1943,8 @@ export default function ProjectFinancePage() {
                             ? <span style={disabledCell}></span>
                             : (r.phase ?? "—")}
                         </td>
-                        <td>{taxAmt == null ? "—" : inr(taxAmt)}</td>
-                        <td style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</td>
+                        <td title={taxAmt == null ? "" : wordsHint(taxAmt)}>  {taxAmt == null ? "—" : inr(taxAmt)}</td>
+                        <td title={wordsHint(r.total)} style={{ fontWeight: 700, color: "#173e77" }}>{inr(r.total)}</td>
                         <td style={{ textAlign: "center" }}>
                           <CostItemActions
                             row={r}
