@@ -66,9 +66,36 @@ export function getPermissions(role = currentRole) {
   return rolesConfig.roles[role]?.permissions || {};
 }
 
-export function can(action, role = currentRole) {
+function getUserPermissionValues(user = tokenStore.getUser()) {
+  if (!user) return [];
+  const candidates = [
+    user.permissions,
+    user.permissionSet,
+    user.scopes,
+    user.authz?.permissions,
+    user.authz?.scopes,
+  ];
+  const values = [];
+  candidates.forEach((entry) => {
+    if (Array.isArray(entry)) {
+      entry.forEach((value) => value != null && values.push(String(value)));
+    } else if (entry && typeof entry === 'object') {
+      Object.entries(entry).forEach(([key, value]) => {
+        if (value === true || value === 1 || value === 'true') values.push(key);
+      });
+    }
+  });
+  return Array.from(new Set(values));
+}
+
+export function hasPermission(permission, role = currentRole) {
   const perms = getPermissions(role);
-  return perms[action] === true;
+  if (perms[permission] === true) return true;
+  return getUserPermissionValues().includes(permission);
+}
+
+export function can(action, role = currentRole) {
+  return hasPermission(action, role);
 }
 
 function subscribe(cb) {

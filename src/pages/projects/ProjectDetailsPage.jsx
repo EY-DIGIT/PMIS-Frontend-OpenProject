@@ -181,6 +181,7 @@ export default function ProjectDetailsPage() {
   const canManageDocuments = useCan('manageProjectDocuments');
   const canViewDocuments = useCan('viewProjectDocuments');
   const canViewMeetings = useCan('viewMeetings');
+  const canViewFinance = useCan('payment:read');
   const [form, setForm] = useState(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1040,8 +1041,9 @@ export default function ProjectDetailsPage() {
       key: "finance",
       label: "Finance",
       onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`),
-      // Hidden when the project has no milestones (count known to be 0).
-      visible: milestoneCount !== 0
+      // Hidden when the project has no milestones (count known to be 0)
+      // or the user lacks finance read access.
+      visible: milestoneCount !== 0 && canViewFinance
     },
     {
       key: "Severity And LD Configure",

@@ -190,7 +190,7 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
      list. Render the panel position:fixed (anchored to the toggle) so it
      floats above the modal — same technique as the Manage Team picker. */
   useLayoutEffect(() => {
-    if (!open) { setPos((p) => ({ ...p, ready: false })); return; }
+    if (!open) return;
     const place = () => {
       const toggleEl = toggleRef.current;
       const panel = panelRef.current;
@@ -420,19 +420,10 @@ function AddCostItemModal({
   open, onClose, onSubmit, submitting,
   costTypes, milestones, hasOneTime, disabledMilestoneIds,
 }) {
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState(() => ({
     costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
     lineLabel: "", perTransactionCost: "", plannedTransactions: "",
-  });
-  // Reseed the draft each time the modal opens.
-  useEffect(() => {
-    if (open) {
-      setDraft({
-        costTypeCode: "fixed", phase: "", cost: "", taxAmount: "", taxMode: "amount", milestoneIds: [],
-    lineLabel: "", perTransactionCost: "", plannedTransactions: "",
-      });
-    }
-  }, [open]);
+  }));
 
   if (!open) return null;
   /* Only one_time is a standalone amount row (no phase, no milestones).
@@ -639,24 +630,27 @@ function EditCostItemModal({
 
   useEffect(() => {
     if (!open || !row) return;
-    const isOne = row.costTypeCode === "one_time";
-    /* Seed the tax input in whichever unit the row was saved with — percent
-       if a taxPercent is present, otherwise the rupee taxAmount. */
-    const usePercent = row.taxPercent != null;
-    const taxSeed = usePercent
-      ? String(row.taxPercent)
-      : (row.taxAmount != null ? String(row.taxAmount) : "");
-    setDraft({
-      costTypeCode: row.costTypeCode || "fixed",
-      phase: isOne ? "" : (row.phase ?? ""),
-      cost: row.cost != null ? String(row.cost) : "",
-      taxAmount: taxSeed,
-      taxMode: usePercent ? "percent" : "amount",
-      milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
-      lineLabel: row.lineLabel || "",
-      perTransactionCost: row.perTransactionCost != null ? String(row.perTransactionCost) : "",
-      plannedTransactions: row.plannedTransactions != null ? String(row.plannedTransactions) : "",
-    });
+    const timeout = setTimeout(() => {
+      const isOne = row.costTypeCode === "one_time";
+      /* Seed the tax input in whichever unit the row was saved with — percent
+         if a taxPercent is present, otherwise the rupee taxAmount. */
+      const usePercent = row.taxPercent != null;
+      const taxSeed = usePercent
+        ? String(row.taxPercent)
+        : (row.taxAmount != null ? String(row.taxAmount) : "");
+      setDraft({
+        costTypeCode: row.costTypeCode || "fixed",
+        phase: isOne ? "" : (row.phase ?? ""),
+        cost: row.cost != null ? String(row.cost) : "",
+        taxAmount: taxSeed,
+        taxMode: usePercent ? "percent" : "amount",
+        milestoneIds: !isOne && Array.isArray(row.milestoneIds) ? row.milestoneIds.slice() : [],
+        lineLabel: row.lineLabel || "",
+        perTransactionCost: row.perTransactionCost != null ? String(row.perTransactionCost) : "",
+        plannedTransactions: row.plannedTransactions != null ? String(row.plannedTransactions) : "",
+      });
+    }, 0);
+    return () => clearTimeout(timeout);
   }, [open, row]);
 
   /* Disable milestones used by other cost rows — but keep THIS row's
@@ -857,7 +851,7 @@ function EditCostItemModal({
    CostItemActions — pencil + trash icon buttons rendered in the
    Action column of the Project Cost table.
    ────────────────────────────────────────────────────────────────── */
-function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
+function CostItemActions({  isLocked, isDeleting, onEdit, onDelete }) {
   return (
     <div style={{ display: "inline-flex", gap: 6 }}>
       <button
@@ -910,16 +904,11 @@ function CostItemActions({ row, isLocked, isDeleting, onEdit, onDelete }) {
 function EditTermModal({
   open, onClose, term, onSubmit, submitting, milestoneName,
 }) {
-  const [percentOfPayment, setPercentOfPayment] = useState("");
-
-  useEffect(() => {
-    if (!open || !term) return;
-    setPercentOfPayment(
-      term.percentOfPayment === null || term.percentOfPayment === undefined
-        ? ""
-        : String(term.percentOfPayment)
-    );
-  }, [open, term]);
+  const [percentOfPayment, setPercentOfPayment] = useState(
+    term?.percentOfPayment === null || term?.percentOfPayment === undefined
+      ? ""
+      : String(term?.percentOfPayment || "")
+  );
 
   if (!open || !term) return null;
 
@@ -1134,6 +1123,10 @@ export default function ProjectFinancePage() {
   const [page, setPage] = useState(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
+  const [showValidateModal, setShowValidateModal] = useState(false);
+  const [validationLoading, setValidationLoading] = useState(false);
+  const [validationResult, setValidationResult] = useState(null);
+  const [validationError, setValidationError] = useState("");
 
   // ── Add Cost modal ──
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1267,6 +1260,26 @@ export default function ProjectFinancePage() {
     }
   }
 
+  async function loadValidationResult({ silent = false } = {}) {
+    if (!projectId) return;
+    if (!silent) {
+      setValidationLoading(true);
+      setValidationError("");
+    }
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.paymentPageValidate(projectId)}`);
+      const payload = await readJson(res);
+      setValidationResult(payload?.data ?? payload ?? null);
+      setValidationError("");
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setValidationResult(null);
+      setValidationError(err?.message || "Failed to validate finance page");
+    } finally {
+      if (!silent) setValidationLoading(false);
+    }
+  }
+
   async function loadPaymentPage({ silent = false } = {}) {
     if (!projectId) return;
     if (!silent) {
@@ -1278,6 +1291,9 @@ export default function ProjectFinancePage() {
       const payload = await readJson(res);
       const data = payload?.data ?? payload;
       setPage(data);
+      if (showValidateModal) {
+        loadValidationResult({ silent: true });
+      }
       if (!silent || ccnInput === "") {
         const cap = data?.ccn?.capPercent;
         setCcnInput(cap !== null && cap !== undefined ? String(cap) : "");
@@ -1286,6 +1302,11 @@ export default function ProjectFinancePage() {
       }
     } catch (err) {
       if (handleAuthError(err)) return;
+      if (err?.status === 403 || /permission denied/i.test(err?.message || "")) {
+        setPageError("You do not have access to this finance page.");
+        navigate(`/projects/${encodeURIComponent(projectId)}`, { replace: true });
+        return;
+      }
       setPageError(err?.message || "Failed to load payment page");
     } finally {
       if (!silent) setPageLoading(false);
@@ -1313,6 +1334,8 @@ export default function ProjectFinancePage() {
 
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
+  const validationChecks = Array.isArray(validationResult?.checks) ? validationResult.checks : [];
+  const validationAllPass = Boolean(validationResult?.allPass);
   /* Order phases by the backend's authoritative `sequence` (1-based). This
      makes "subsequent phases" (used to divide a phase's carry-forward) mean
      the phases that come AFTER it — laterPhases = phases.slice(idx + 1) on
@@ -1350,7 +1373,7 @@ export default function ProjectFinancePage() {
   const oneTimeNonLastAllocated = phases
     .filter((p) => p.phase !== lastPhaseKey)
     .reduce((s, p) => s + (Number(p.oneTimeAllocated) || 0), 0);
-  const ccnCapPctServer = page?.ccn?.capPercent;
+  // const ccnCapPctServer = page?.ccn?.capPercent;
   const ccnValueServer = page?.ccn?.value;
   // Finance page is always actionable — the user can edit terms, generate
   // invoices, add cost rows, etc. at any time regardless of the server's
@@ -1716,17 +1739,67 @@ export default function ProjectFinancePage() {
           type="button"
           className="uidai-pmis-btn uidai-pmis-btn-small"
           style={{ marginTop: 0 }}
-          onClick={() =>
-            navigate(`/projects/${encodeURIComponent(projectId)}`, {
-              // Signal the detail page to auto-open the Publish modal when
-              // the project isn't published yet (final step of the flow).
-              state: { autoPublish: true },
-            })
-          }
+          onClick={() => {
+            setShowValidateModal(true);
+            loadValidationResult();
+          }}
         >
-          Save and Next →
+          Validate
         </button>
       </div>
+
+      {showValidateModal && createPortal(
+        <div style={{ position: "fixed", inset: 0, background: "rgba(11, 19, 32, 0.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 3000 }}>
+          <div style={{ width: "min(760px, 100%)", maxHeight: "84vh", overflowY: "auto", background: "#fff", borderRadius: 14, boxShadow: "0 18px 45px rgba(0, 0, 0, 0.25)", padding: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#173e77" }}>Finance Validation</div>
+                <div style={{ color: "var(--uidai-pmis-muted)", marginTop: 4 }}>Backend-driven checks for the finance page.</div>
+              </div>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => setShowValidateModal(false)}>Close</button>
+            </div>
+            {validationLoading ? (
+              <div style={{ padding: 12, color: "var(--uidai-pmis-muted)" }}>Running validation…</div>
+            ) : validationError ? (
+              <div style={{ padding: 12, color: "#c0392b", fontWeight: 600 }}>{validationError}</div>
+            ) : validationChecks.length === 0 ? (
+              <div style={{ padding: 12, color: "var(--uidai-pmis-muted)" }}>No validation results were returned.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {validationChecks.map((check) => (
+                  <div key={check.id || check.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "12px 14px", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, background: check.pass ? "#f3fbf7" : "#fff7f7" }}>
+                    <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
+                      <span style={{ color: check.pass ? "#14804a" : "#c0392b", fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{check.pass ? "✓" : "✕"}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: "#173e77" }}>{check.label || check.id || "Validation check"}</div>
+                        {!check.pass && check.reason ? <div style={{ color: "#c0392b", marginTop: 3, fontSize: 13 }}>{check.reason}</div> : null}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: check.pass ? "#14804a" : "#c0392b", whiteSpace: "nowrap" }}>{check.pass ? "Passed" : "Needs attention"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+              <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => setShowValidateModal(false)}>Cancel</button>
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-small"
+                disabled={!validationAllPass || validationLoading || validationError !== ""}
+                onClick={() => {
+                  setShowValidateModal(false);
+                  navigate(`/projects/${encodeURIComponent(projectId)}`, {
+                    state: { autoPublish: true },
+                  });
+                }}
+              >
+                Save and Next →
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Project name now lives in the global navbar's right-side pill
           (NavProjectName in Layout, fed via setPageContext above), so the
@@ -1861,7 +1934,9 @@ export default function ProjectFinancePage() {
                                 return <span title={full}>{shorts}</span>;
                               })()}
                         </td>
-                        <td>{inr(r.cost)}</td>
+                       <td title={wordsHint(r.cost)}>
+  {inr(r.cost)}
+</td>
                         <td >
                           {isOneTime
                             ? <span style={disabledCell}></span>
@@ -2157,21 +2232,16 @@ export default function ProjectFinancePage() {
    /payment-terms/{id}/activities and the parent re-loads the page.
    ────────────────────────────────────────────────────────────────── */
 function EditActivitiesModal({ open, onClose, term, onSubmit, submitting, milestoneName }) {
-  const [rows, setRows] = useState([]);
-
-  useEffect(() => {
-    if (!open || !term) return;
-    setRows(
-      (term.activities || []).map((a) => ({
-        activityId: a.activityId,
-        activityDisplayCode: a.activityDisplayCode || a.activityId,
-        percentOfPayment:
-          a.percentOfPayment === null || a.percentOfPayment === undefined
-            ? ""
-            : String(a.percentOfPayment),
-      }))
-    );
-  }, [open, term]);
+  const computedRows = useMemo(() => (term && term.activities) ? (term.activities || []).map((a) => ({
+    activityId: a.activityId,
+    activityDisplayCode: a.activityDisplayCode || a.activityId,
+    percentOfPayment:
+      a.percentOfPayment === null || a.percentOfPayment === undefined
+        ? ""
+        : String(a.percentOfPayment),
+  })) : [], [term, term?.activities]);
+  
+  const [rows, setRows] = useState(computedRows);
 
   if (!open || !term) return null;
 
@@ -2292,16 +2362,23 @@ function OneTimeCostModal({
   total = 0, available = 0, initialConfig = null,
   isLastPhase = false, autoRemainder = 0,
 }) {
-  const [enabled, setEnabled] = useState(false);
-  const [mode, setMode] = useState("percent");   // 'percent' | 'amount'
-  const [value, setValue] = useState("");
+  const [config, setConfig] = useState(() => {
+    if (initialConfig) {
+      return {
+        enabled: !!initialConfig.enabled,
+        mode: initialConfig.mode || "percent",
+        value: initialConfig.value != null ? String(initialConfig.value) : "",
+      };
+    }
+    return { enabled: false, mode: "percent", value: "" };
+  });
 
-  useEffect(() => {
-    if (!open) return;
-    setEnabled(!!initialConfig?.enabled);
-    setMode(initialConfig?.mode || "percent");
-    setValue(initialConfig?.value != null ? String(initialConfig.value) : "");
-  }, [open, initialConfig]);
+  const enabled = config.enabled;
+  const mode = config.mode;
+  const value = config.value;
+  const setEnabled = (val) => setConfig(prev => ({ ...prev, enabled: val }));
+  const setMode = (val) => setConfig(prev => ({ ...prev, mode: val }));
+  const setValue = (val) => setConfig(prev => ({ ...prev, value: val }));
 
   if (!open) return null;
 
@@ -2464,19 +2541,25 @@ function CarryForwardModal({
      inputValue/percent). */
   useEffect(() => {
     if (open) {
-      setEnabled(!!initialEnabled);
-      setMethodCode(initialMethodCode || "");
-      const seed = {};
-      let unitSeed = "percent";
-      (initialAllocations || []).forEach((a) => {
-        if (a == null || a.recipientKey == null) return;
-        const m = a.allocMode || a.allocationMode;
-        if (m === "amount") unitSeed = "amount";
-        const v = a.inputValue ?? a.value ?? a.percent;
-        seed[String(a.recipientKey)] = v != null ? String(v) : "";
-      });
-      setUnit(unitSeed);
-      setAlloc(seed);
+      // Defer state updates to avoid synchronous setState within effect
+      // which can trigger cascading renders. Using setTimeout(0) yields
+      // a microtask after the current render.
+      const t = setTimeout(() => {
+        setEnabled(!!initialEnabled);
+        setMethodCode(initialMethodCode || "");
+        const seed = {};
+        let unitSeed = "percent";
+        (initialAllocations || []).forEach((a) => {
+          if (a == null || a.recipientKey == null) return;
+          const m = a.allocMode || a.allocationMode;
+          if (m === "amount") unitSeed = "amount";
+          const v = a.inputValue ?? a.value ?? a.percent;
+          seed[String(a.recipientKey)] = v != null ? String(v) : "";
+        });
+        setUnit(unitSeed);
+        setAlloc(seed);
+      }, 0);
+      return () => clearTimeout(t);
     }
   }, [open, initialEnabled, initialMethodCode, initialAllocations]);
 
@@ -2487,14 +2570,19 @@ function CarryForwardModal({
 
   /* Recipients only matter for the *_custom variants: later phases for
      phase_custom, subsequent milestones for milestone_custom. */
-  const recipients = useMemo(() => (
-    selMethod === "phase"
-      ? laterPhases.map((p) => ({ key: String(p.phase), label: `Phase ${p.phase}` }))
-      : selMethod === "milestone"
-        ? laterMilestones.map((m) => ({ key: String(m.id), label: m.name }))
-        : []
-  ), [selMethod, laterPhases, laterMilestones]);
 
+const recipients =
+  selMethod === "phase"
+    ? laterPhases.map((p) => ({
+        key: String(p.phase),
+        label: `Phase ${p.phase}`,
+      }))
+    : selMethod === "milestone"
+      ? laterMilestones.map((m) => ({
+          key: String(m.id),
+          label: m.name,
+        }))
+      : [];
   if (!open) return null;
 
   const setOne = (k, v) => setAlloc((prev) => ({ ...prev, [k]: v }));
@@ -2708,9 +2796,9 @@ function CarryForwardModal({
    the read-only roll-up is in the summary section below. */
 function PhasePanel({
   phase, allPhases = [],
-  milestoneName, milestoneStatus = () => "Not Completed",
+  milestoneName = () => "Not Completed",
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
-  onEditTerm, onEditActivities, onGenerateInvoice, onApplyFrequency,
+  onEditTerm, onEditActivities, onApplyFrequency,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
   oneTimeTotal = 0, oneTimeAllocatedElsewhere = 0, oneTimeBusy = false, onSetOneTime,
 }) {
@@ -2991,7 +3079,7 @@ function PhasePanel({
                 <tr style={{ verticalAlign: "middle" }}>
                   <th style={{ minWidth: 240 }}>Milestone</th>
                   <th style={{ width: 150 }}>Activity</th>
-                  <th style={{ width: 80, textAlign: "center" }}>Cycle</th>
+                  <th style={{ width: 80, textAlign: "center" }}>Quarter</th>
                   <th style={{ width: 110, textAlign: "right" }}>
                     % of Payment
                     <span style={{
@@ -3104,35 +3192,7 @@ function PhasePanel({
                             <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                           </svg>
                         </button>
-                        {(() => {
-                          const msComplete = milestoneStatus(t.milestoneId) === "Completed";
-                          const genDisabled = isLocked || !msComplete;
-                          /* Generate Invoice hidden for now — flip `false` to
-                             restore it. */
-                          return false && (
-                            <button
-                              type="button"
-                              className="uidai-pmis-pillbtn"
-                              title={
-                                msComplete
-                                  ? "Generate invoice for this milestone"
-                                  : "Available only when the milestone status is Completed"
-                              }
-                              aria-label="Generate invoice"
-                              disabled={genDisabled}
-                              onClick={() => onGenerateInvoice(t)}
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" strokeWidth="2"
-                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <path d="M14 2v6h6" />
-                                <path d="M9 13h6M9 17h6" />
-                              </svg>
-                              Generate Invoice
-                            </button>
-                          );
-                        })()}
+                        {/* Generate Invoice hidden */}
                        </div>
                       </td>
                     </tr>
@@ -3227,7 +3287,7 @@ function PhasePanel({
             </table>
           </div>
 
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "right", flexWrap: "wrap", gap: 10 }}>
             {/* The final phase must schedule the full contract — i.e. its
                 payment terms have to total exactly 100%. Flag any shortfall
                 or overage so it can't be left unbalanced. */}
@@ -3246,6 +3306,14 @@ function PhasePanel({
               }`}
             >
               Scheduled: {totalPercent}%{totalPercent > 100 && " · over 100%"}
+            </span>
+            <span
+              className={`uidai-pmis-chip${
+                totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
+              }`}
+              
+            >
+              Remaining: {totalPercent < 100 && ` · ${100 - totalPercent}% remaining`}
             </span>
           </div>
         </div>

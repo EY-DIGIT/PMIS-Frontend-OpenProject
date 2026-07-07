@@ -2,7 +2,7 @@
 // MainApp.jsx  –  Providers + Router + Routes only
 // ============================================================
 import { Suspense, lazy, useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, useLocation, Navigate, useParams } from "react-router-dom";
 
 import { ProjectProvider } from "./store/Projectstore";
 import { OnboardProvider } from "./store/Onboardstore";
@@ -602,6 +602,16 @@ function RequirePermission({ action, children }) {
     );
 }
 
+function RequireFinanceAccess({ children }) {
+    const { projectId } = useParams();
+    const allowed = useCan("viewProjects") && useCan("payment:read");
+    if (allowed) return children;
+    if (projectId) {
+        return <Navigate to={`/projects/${encodeURIComponent(projectId)}`} replace />;
+    }
+    return <Navigate to="/" replace />;
+}
+
 /* Gate a route by a workflow role read straight off the user object
    (these live outside roles.json — e.g. division_approver for the
    Approval Inbox). Subscribing to useCurrentRole() keeps the guard
@@ -704,7 +714,7 @@ export default function MainApp() {
                                                     element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/finance" element={<RequirePermission action="viewProjects"><ProjectFinancePage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />

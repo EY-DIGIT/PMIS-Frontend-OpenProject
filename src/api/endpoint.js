@@ -261,6 +261,7 @@ export const ENDPOINTS = {
        The /payment-page GET is the authoritative read; mutations live
        under /cost-items, /payment-terms, /phases/{n}/qrg and /ccn-cap. */
     paymentPage: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-page`,
+    paymentPageValidate: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-page/validate`,
     costItems: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/cost-items`,
     paymentTerms: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/payment-terms`,
     /* Carry-forward replaces the old /qrg toggle. A phase carries its
