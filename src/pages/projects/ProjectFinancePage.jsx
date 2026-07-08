@@ -1812,6 +1812,45 @@ export default function ProjectFinancePage() {
           (NavProjectName in Layout, fed via setPageContext above), so the
           in-page header pill was removed. */}
 
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          marginBottom: 14,
+          padding: "12px 14px",
+          borderRadius: 12,
+          border: "1px solid #dfe8f7",
+          background: "linear-gradient(90deg, #f7fbff 0%, #eef5ff 100%)",
+          boxShadow: "0 1px 2px rgba(20, 50, 110, 0.05)",
+        }}
+      >
+        <div style={{ minWidth: 160 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "#5b6b82" }}>
+            Contract Value
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginTop: 2 }}>
+            {inr(totals?.totalContractCost || 0)}
+          </div>
+        </div>
+        <div style={{ minWidth: 120 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "#5b6b82" }}>
+            Phases
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginTop: 2 }}>
+            {phases.length}
+          </div>
+        </div>
+        <div style={{ minWidth: 140 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "#5b6b82" }}>
+            Organizations
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginTop: 2 }}>
+            {orgs.length || 1}
+          </div>
+        </div>
+      </div>
+
       {/* Organization tabs — one per organization (vendor) assigned to this
           project. Selecting a tab sets the active organization; the finance
           sections below render under it. */}
@@ -1853,7 +1892,8 @@ export default function ProjectFinancePage() {
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  transition: "background .15s, color .15s",
+                  transition: "background .16s ease, color .16s ease, border-color .16s ease, transform .16s ease",
+                  boxShadow: active ? "0 2px 8px rgba(23, 62, 119, 0.08)" : "none",
                 }}
               >
                 {name}
@@ -2005,6 +2045,10 @@ export default function ProjectFinancePage() {
                         aria-selected={active}
                         onClick={() => setActivePhaseIdx(i)}
                         className={`uidai-pmis-phasetab${active ? " is-active" : ""}`}
+                        style={{
+                          transition: "all .16s ease",
+                          boxShadow: active ? "0 2px 8px rgba(23, 62, 119, 0.08)" : "none",
+                        }}
                       >
                         Phase {p.phase}
                         {carrying && (
@@ -2856,6 +2900,13 @@ function PhasePanel({
   const cfPoolPerPeriod = Number(cf.poolPerPeriod) || 0;
   const [cfModalOpen, setCfModalOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
+  const canApplyFrequency = typeof onApplyFrequency === "function";
+  const openFreqModal = () => {
+    setFreqStart(toDateInput(phase.startDate));
+    setFreqEnd(toDateInput(phase.endDate));
+    setFreqCode((c) => c || projectFrequencyCode || "");
+    setShowFreqModal(true);
+  };
 
   /* One-time-cost distribution (backend-owned). This phase's ₹ share of the
      one-time pool comes from phase.oneTimeAllocated; the last phase can't be
@@ -2901,7 +2952,7 @@ function PhasePanel({
       <div
         style={{
           width: "100%",
-          display: "flex", alignItems: "center",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: 12, flexWrap: "wrap",
           background: "linear-gradient(90deg, #eef4fc 0%, #f5f9ff 100%)",
           borderBottom: "1px solid var(--uidai-pmis-border)",
@@ -2930,14 +2981,41 @@ function PhasePanel({
               {phase.pendingCycles} {Number(phase.pendingCycles) === 1 ? "Cycle" : "Cycles"} left
             </span>
           )}
+        </div>
 
-          {canToggleCarry && (
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
-            >
-              {/* Carry Forward — a single status button that opens the config
-                  popup (Enable/Disable + distribution method). */}
+        {(canToggleCarry || canApplyFrequency) && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+              marginLeft: "auto", padding: "4px", borderRadius: 999,
+              background: "rgba(255,255,255,0.7)", border: "1px solid rgba(207,224,245,0.8)",
+            }}
+          >
+            {canApplyFrequency && (
+              <button
+                type="button"
+                disabled={isLocked || terms.length === 0}
+                onClick={openFreqModal}
+                title="Apply frequency to this phase"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: "1px solid #cfe0f5", background: "#fff", color: "#0b3c88",
+                  borderRadius: 999, padding: "6px 12px",
+                  fontSize: 12, fontWeight: 700,
+                  cursor: (isLocked || terms.length === 0) ? "not-allowed" : "pointer",
+                  opacity: (isLocked || terms.length === 0) ? 0.6 : 1,
+                  boxShadow: "0 1px 2px rgba(20, 50, 110, 0.06)",
+                }}
+              >
+                <span aria-hidden="true" style={{ fontSize: 12 }}>⏱</span>
+                Apply Frequency
+              </button>
+            )}
+
+            {/* Carry Forward — a single status button that opens the config
+                popup (Enable/Disable + distribution method). */}
+            {canToggleCarry && (
               <button
                 type="button"
                 disabled={cfDisabled}
@@ -2948,48 +3026,50 @@ function PhasePanel({
                   border: cfEnabled ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
                   background: cfEnabled ? "#eaf7ee" : "#fff",
                   color: cfEnabled ? "#1b7a42" : "#5b6b82",
-                  borderRadius: 999, padding: "5px 12px",
+                  borderRadius: 999, padding: "6px 12px",
                   fontSize: 12, fontWeight: 700,
                   cursor: cfDisabled ? "not-allowed" : "pointer",
                   opacity: cfDisabled ? 0.55 : 1,
+                  boxShadow: "0 1px 2px rgba(20, 50, 110, 0.06)",
                 }}
               >
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: cfEnabled ? "#1b7a42" : "#c2cdda" }} />
                 Carry Forward: {cfIsLast ? "n/a" : cfEnabled ? (cfMethodName || "On") : "Off"}
                 {!cfIsLast && <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
               </button>
+            )}
 
-              {/* One-Time Cost distribution — status button opens its popup.
-                  The last phase is display-only (auto-absorbs the remainder). */}
-              {canToggleOneTime && (
-                <button
-                  type="button"
-                  disabled={isLastPhase || oneTimeBusy}
-                  onClick={() => { if (!isLastPhase) setOtModalOpen(true); }}
-                  title={isLastPhase
-                    ? "Last phase auto-absorbs the remaining one-time cost"
-                    : "Distribute one-time cost to this phase"}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 6,
-                    border: otAmount > 0 ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
-                    background: otAmount > 0 ? "#e9f6fb" : "#fff",
-                    color: otAmount > 0 ? "#0b6b8f" : "#5b6b82",
-                    borderRadius: 999, padding: "5px 12px",
-                    fontSize: 12, fontWeight: 700,
-                    cursor: isLastPhase ? "default" : "pointer",
-                    opacity: oneTimeBusy ? 0.6 : 1,
-                  }}
-                >
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: otAmount > 0 ? "#0b6b8f" : "#c2cdda" }} />
-                  One-Time: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
-                  {isLastPhase
-                    ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(auto)</span>
-                    : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+            {/* One-Time Cost distribution — status button opens its popup.
+                The last phase is display-only (auto-absorbs the remainder). */}
+            {canToggleOneTime && (
+              <button
+                type="button"
+                disabled={isLastPhase || oneTimeBusy}
+                onClick={() => { if (!isLastPhase) setOtModalOpen(true); }}
+                title={isLastPhase
+                  ? "Last phase auto-absorbs the remaining one-time cost"
+                  : "Distribute one-time cost to this phase"}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: otAmount > 0 ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
+                  background: otAmount > 0 ? "#e9f6fb" : "#fff",
+                  color: otAmount > 0 ? "#0b6b8f" : "#5b6b82",
+                  borderRadius: 999, padding: "6px 12px",
+                  fontSize: 12, fontWeight: 700,
+                  cursor: isLastPhase ? "default" : "pointer",
+                  opacity: oneTimeBusy ? 0.6 : 1,
+                  boxShadow: "0 1px 2px rgba(20, 50, 110, 0.06)",
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: otAmount > 0 ? "#0b6b8f" : "#c2cdda" }} />
+                One-Time: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
+                {isLastPhase
+                  ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(auto)</span>
+                  : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: 16 }}>
@@ -3061,25 +3141,6 @@ function PhasePanel({
               )}
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-            <button
-              type="button"
-              className="uidai-pmis-btn uidai-pmis-btn-small"
-              style={{ marginTop: 0 }}
-              disabled={isLocked || terms.length === 0}
-              onClick={() => {
-                /* Start/end come from the phase (read-only); seed frequency
-                   from the current project-level frequency (not a static
-                   per-term default). */
-                setFreqStart(toDateInput(phase.startDate));
-                setFreqEnd(toDateInput(phase.endDate));
-                setFreqCode((c) => c || projectFrequencyCode || "");
-                setShowFreqModal(true);
-              }}
-            >
-              Apply Frequency
-            </button>
-          </div>
           <div className="uidai-pmis-table-wrap">
             <table className="uidai-pmis-table uidai-pmis-table-compact">
               <thead>
@@ -3556,7 +3617,7 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
         boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
       }}>
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
-          Total Remaining Balance
+          Carry Forward Remaining Balance
         </span>
         <strong style={{ fontSize: 16, color: "#fff" }} title={wordsHint(totalRemaining)}>
           {inr(totalRemaining)}
