@@ -327,7 +327,9 @@ function SummaryPanel({ totals }) {
           borderRadius: 8, padding: "8px 12px",
         }}>
           <span style={muted}>Fixed Cost</span>
-          <strong style={{ color: "#173e77" }}>{inr(fixed)}</strong>
+          <strong style={{ color: "#173e77" }} title={wordsHint(fixed)}>
+            {inr(fixed)}
+          </strong>
         </div>
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -336,7 +338,9 @@ function SummaryPanel({ totals }) {
           borderRadius: 8, padding: "8px 12px",
         }}>
           <span style={muted}>One-Time Cost</span>
-          <strong style={{ color: "#173e77" }}>{inr(oneTime)}</strong>
+          <strong style={{ color: "#173e77" }} title={wordsHint(oneTime)}>
+            {inr(oneTime)}
+          </strong>
         </div>
         <div style={{
           display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
@@ -349,7 +353,9 @@ function SummaryPanel({ totals }) {
           <span style={{ fontSize: 11, opacity: 0.9, letterSpacing: 0.5, textTransform: "uppercase" }}>
             Total Contract Cost
           </span>
-          <strong style={{ fontSize: 18, color: "#fff" }}>{inr(total)}</strong>
+          <strong style={{ fontSize: 18, color: "#fff" }} title={wordsHint(total)}>
+            {inr(total)}
+          </strong>
         </div>
       </div>
     </div>
@@ -3164,14 +3170,14 @@ function PhasePanel({
                           ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
-                      <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>
+                      <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(value)}>
                         ₹ {value.toLocaleString("en-IN")}
                       </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
-                          <span style={muted}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
-                          <span style={{ color: "#173e77" }}>{pct}% of Total Payment: {inr(value)}</span>
-                          <span style={{ fontWeight: 700, color: remaining > 0 ? "#b54708" : "#1b7a42" }}>
+                          <span style={muted} title={wordsHint(phaseBase)}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
+                          <span style={{ color: "#173e77" }} title={wordsHint(value)}>{pct}% of Total Payment: {inr(value)}</span>
+                          <span title={wordsHint(remaining)} style={{fontWeight: 700,color: remaining > 0 ? "#b54708" : "#1b7a42",}}>
                             Remaining: {inr(remaining)}
                           </span>
                         </div>
@@ -3273,11 +3279,11 @@ function PhasePanel({
                     <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
                     </td>
-                    <td style={{ fontWeight: 800, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>
+                    <td style={{ fontWeight: 800, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(totalValue)}>
                       ₹ {totalValue.toLocaleString("en-IN")}
                     </td>
                     <td style={{ lineHeight: 1.3, fontWeight: 800 }}>
-                      <div style={{ fontSize: 15, color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }}>
+                      <div style={{ fontSize: 15, color: phaseRemaining > 0 ? "#b54708" : "#1b7a42" }} title={wordsHint(phaseRemaining)}>
                         Remaining: {inr(phaseRemaining)}
                       </div>
                     </td>
@@ -3504,31 +3510,34 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
               }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   Phase {p.phase}
-                  {yes && (
+                  {/* {yes && (
                     <span style={{
                       fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
                       padding: "1px 6px", borderRadius: 999,
                       background: "#1b7a42", color: "#fff",
-                    }}>
+                    }}
+                    >
                       Carry Forward Cost
                     </span>
-                  )}
+                  )} */}
                 </span>
-                <span style={{ fontWeight: 800, color: "#173e77" }}>{inr(phaseTotal)}</span>
+                <span style={{ fontWeight: 800, color: "#173e77" }} title={wordsHint(phaseTotal)}>{inr(phaseTotal)}</span>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {stat("Scheduled", `${totalPercent}%`,
                   { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Delivery Cost", inr(phaseFixed))}
+                
                 {oneTimeAllocated > 0 && stat(
                   isLast ? "One-Time Cost (auto)" : "One-Time Cost",
                   inr(oneTimeAllocated),
                   { color: "#0b6b8f" }
                 )}
                 {stat("Carried Forward",
-                  yes ? `${inr(carriedOut)}${cfMethodName ? ` · ${cfMethodName}` : ""}` : "—",
+                  yes ? inr(carriedOut) : "—",
                   { color: yes ? "#1b7a42" : "#a3afc1" })}
+                {cfMethodName && yes ? stat("Type", cfMethodName, { color: "#0b6b8f" }) : null}
                 {stat("Carry Forward Received",
                   received > 0 ? inr(received) : "—",
                   { color: received > 0 ? "#173e77" : "#a3afc1" })}
@@ -3549,7 +3558,9 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
           Total Remaining Balance
         </span>
-        <strong style={{ fontSize: 16, color: "#fff" }}>{inr(totalRemaining)}</strong>
+        <strong style={{ fontSize: 16, color: "#fff" }} title={wordsHint(totalRemaining)}>
+          {inr(totalRemaining)}
+        </strong>
       </div>
     </div>
   );
