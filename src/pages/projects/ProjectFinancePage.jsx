@@ -1175,7 +1175,7 @@ export default function ProjectFinancePage() {
      full-width and the panel shrinks to a thin vertical rail with an expand
      arrow. The collapse/expand control is a vertically-centered handle on
      the panel's edge. */
-  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  const [summaryCollapsed, setSummaryCollapsed] = useState(true);
   /* Payment Terms: phases render as tabs (like the org tabs at the top);
      only the selected phase's panel is shown. */
   const [activePhaseIdx, setActivePhaseIdx] = useState(0);
@@ -3582,7 +3582,7 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                     </span>
                   )} */}
                 </span>
-                <span style={{ fontWeight: 800, color: "#173e77" }} title={wordsHint(phaseTotal)}>{inr(phaseTotal)}</span>
+                {/* <span style={{ fontWeight: 800, color: "#173e77" }} title={wordsHint(phaseTotal)}>{inr(phaseTotal)}</span> */}
               </div>
 
               <div style={{ display: "flex", flexDirection: "column" }}>
