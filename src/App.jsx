@@ -64,6 +64,8 @@ import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
 import SlaMastersPage from "./pages/sla/SlaMastersPage";
 import SlaOnboardingPage from "./pages/sla/SlaOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
+import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
+import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
@@ -116,6 +118,8 @@ function Breadcrumbs() {
         track: "Track Progress",
         "audit-logs": "Audit Logs",
         finance: "Finance",
+        resource: "Resource",
+        attendance: "Attendance",
         "activities-started": "Activity Started List",
         vendors: "Organizations",
         users: "Users",
@@ -306,6 +310,32 @@ function Breadcrumbs() {
                 </Link>
                 <span style={{ color: "#999" }}>›</span>
                 <span style={{ color: "#333", fontWeight: 600 }}>Finance</span>
+            </nav>
+        );
+    }
+    if (segments[0] === "projects" && (segments[2] === "resource" || segments[2] === "attendance")) {
+        const pid = decodeURIComponent(segments[1]);
+        const projectUrl = `/projects/${encodeURIComponent(pid)}`;
+        const label = segments[2] === "resource" ? "Resource" : "Attendance";
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Home
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <Link to={projectUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Project Detail
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <span style={{ color: "#333", fontWeight: 600 }}>{label}</span>
             </nav>
         );
     }
@@ -715,6 +745,8 @@ export default function MainApp() {
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
+                                                <Route path="/projects/:projectId/resource" element={<RequirePermission action="viewProjects"><ProjectResourcePage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/attendance" element={<RequirePermission action="viewProjects"><ProjectAttendancePage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />

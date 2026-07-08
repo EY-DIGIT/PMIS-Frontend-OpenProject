@@ -1046,6 +1046,18 @@ export default function ProjectDetailsPage() {
       visible: milestoneCount !== 0 && canViewFinance
     },
     {
+  key: "resource",
+  label: "Resource",
+  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/resource`),
+  visible: true
+},
+{
+  key: "attendance",
+  label: "Attendance System",
+  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/attendance`),
+  visible: true
+},
+    {
       key: "Severity And LD Configure",
       label: "Severity And LD Configure",
       onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/severity`),

@@ -281,6 +281,27 @@ export default function NodeModal({
     }
     return null;
   }, [open, project, kind, mode, nodeUid, parentUid]);
+  /* Resolve the enclosing Milestone for this node so the attendance /
+   leave upload can be scoped to it. For a milestone modal the node IS
+   the milestone; for activity / task / subtask we walk up the tree. */
+const enclosingMilestone = useMemo(() => {
+  if (!open || !project) return null;
+  if (kind === "milestone") return node || null;
+  const targetUid =
+    (mode === "edit" || mode === "view") && nodeUid ? nodeUid : parentUid;
+  if (!targetUid) return null;
+  const loc = locateNode(project, targetUid);
+  if (!loc) return null;
+  if (loc.kind === "milestone") return loc.node;
+  for (const step of (loc.chain || [])) {
+    if (step && step.kind === "milestone") return step.node;
+  }
+  // An activity's direct parent is the milestone.
+  if (loc.parent && loc.kind === "activity") return loc.parent;
+  return null;
+}, [open, project, kind, mode, nodeUid, parentUid, node]);
+
+const milestoneApiId = enclosingMilestone?.apiId || "";
 
   /* Users assignable to this task / subtask — fetched from the vendor's
      assignable-users endpoint, scoped to the enclosing activity's vendor.
@@ -289,10 +310,17 @@ export default function NodeModal({
   const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
   const assignableVendorId = enclosingActivity?.vendorId || "";
   const [showPopup, setShowPopup] = useState(false);
-const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+const [selectedMonth, setSelectedMonth] = useState("");
+const [selectedYear, setSelectedYear] = useState("");
 const [attendanceFile, setAttendanceFile] = useState(null);
 const [uploading, setUploading] = useState(false);
+const currentYear = new Date().getFullYear();
+
+const years = [
+  currentYear,
+  ...Array.from({ length: 20 }, (_, i) => currentYear + i + 1), // Future years
+  ...Array.from({ length: currentYear - 2000 }, (_, i) => currentYear - (i + 1)), // Past years
+];
   useEffect(() => {
     if (!open || (kind !== "task" && kind !== "subtask")) {
       setAssignableUsers([]);
@@ -843,9 +871,17 @@ const [uploading, setUploading] = useState(false);
       setPosting(false);
     }
   }
-  const handleAttendanceUpload = async () => {
+ const handleAttendanceUpload = async () => {
   if (!attendanceFile) {
     alert("Please select an Excel file.");
+    return;
+  }
+  if (!selectedMonth || !selectedYear) {
+    alert("Please select both month and year.");
+    return;
+  }
+  if (!milestoneApiId) {
+    alert("Couldn't determine the milestone for this item.");
     return;
   }
 
@@ -854,24 +890,28 @@ const [uploading, setUploading] = useState(false);
 
   try {
     setUploading(true);
+    const token = getToken();   // ← was localStorage.getItem("token")
+
+    const params = new URLSearchParams({
+      month: String(selectedMonth),
+      year: String(selectedYear),
+      milestoneId: milestoneApiId,
+    });
 
     const response = await fetch(
-      `http://10.1.131.199/leaves/api/attendance/monthly?month=${selectedMonth}&year=${selectedYear}`,
+      `http://10.1.131.199/leaves/api/attendance/monthly?${params.toString()}`,
       {
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       }
     );
 
-    if (!response.ok) {
-      throw new Error("Upload failed");
-    }
+    if (!response.ok) throw new Error("Upload failed");
 
-    const data = await response.text(); // or response.json() if API returns JSON
-
+    const data = await response.text();
     console.log(data);
     alert("Attendance uploaded successfully!");
-
     setShowPopup(false);
     setAttendanceFile(null);
   } catch (error) {
@@ -881,6 +921,8 @@ const [uploading, setUploading] = useState(false);
     setUploading(false);
   }
 };
+console.log("localStorage:", localStorage.getItem("token"));
+console.log("getToken():", getToken());
 
   const navigate = useNavigate();
 
@@ -1637,43 +1679,53 @@ const [uploading, setUploading] = useState(false);
         <label>Month</label>
 
         <select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="uidai-select"
-        >
-          {[
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-          ].map((m, index) => (
-            <option key={index} value={index + 1}>
-              {m}
-            </option>
-          ))}
-        </select>
+  value={selectedMonth}
+  onChange={(e) => setSelectedMonth(e.target.value)}
+  className="uidai-select"
+>
+  <option value="" disabled>
+    Select Month
+  </option>
+
+  {[
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ].map((m, index) => (
+    <option key={index} value={index + 1}>
+      {m}
+    </option>
+  ))}
+</select>
       </div>
 
       <div style={{ marginTop: 15 }}>
         <label>Year</label>
 
         <select
-          value={selectedYear}
-          onChange={(e) => setSelectedYear(e.target.value)}
-          className="uidai-select"
-        >
-          {[2025, 2026, 2027, 2028].map((y) => (
-            <option key={y}>{y}</option>
-          ))}
-        </select>
+  value={selectedYear}
+  onChange={(e) => setSelectedYear(e.target.value)}
+  className="uidai-select"
+>
+  <option value="" disabled>
+    Select Year
+  </option>
+
+  {years.map((year) => (
+    <option key={year} value={year}>
+      {year}
+    </option>
+  ))}
+</select>
       </div>
 
       <div style={{ marginTop: 15 }}>
