@@ -1047,100 +1047,110 @@ console.log("getToken():", getToken());
   return (
     <div className={asPage ? "uidai-nodeedit-page" : "uidai-modal"}>
       <div className="uidai-modal__box uidai-modal__box--wide" style={effectiveBoxStyle}>
-        {kind === "activity" && node?.apiId && (
-          <button
-            type="button"
-            aria-label="SLA Mapping"
-            title="Manage SLA activity mappings"
-            onClick={() => {
+        {/* Header action bar — all top-right buttons live in one flex row anchored
+    at the top-right, so they sit side by side with a fixed gap and never
+    overlap, regardless of which are visible for this node kind. */}
+<div
+  style={{
+    position: "absolute",
+    top: 8,
+    right: 10,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    zIndex: 3,
+  }}
+>
+  {kind === "activity" && node?.apiId && (
+    <button
+      type="button"
+      aria-label="SLA Mapping"
+      title="Manage SLA activity mappings"
+      onClick={() => {
               // Nested under the project so the global breadcrumb extends as
               // Project Detail › Milestone › Activity › Map SLA. The milestone /
               // activity names ride along as query params for those crumbs.
-              const loc = locateNode(project, node.uid);
-              const params = new URLSearchParams({ activityId:node.apiId });
-              const code=node.serverDisplayCode || node.id;
-              if(code) params.set("activityCode", code);
-              if (loc?.parent?.name) params.set("milestoneName", loc.parent.name);
-              if (node?.name) params.set("activityName", node.name);
+        const loc = locateNode(project, node.uid);
+        const params = new URLSearchParams({ activityId: node.apiId });
+        const code = node.serverDisplayCode || node.id;
+        if (code) params.set("activityCode", code);
+        if (loc?.parent?.name) params.set("milestoneName", loc.parent.name);
+        if (node?.name) params.set("activityName", node.name);
               // Carry the activity's node uid + the form mode so the SLA page's
               // breadcrumb can link back to THIS activity page (not just the
               // milestone list).
-              if (node?.uid) params.set("nodeUid", node.uid);
-              params.set("activityMode", mode === "view" ? "view" : "edit");
-              navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);
-            }}
-            style={{ ...iconBtnStyle, top: 8, right: 110, fontSize: 14, lineHeight: 1 ,width:"auto",padding: "8px 16px",background: "linear-gradient(90deg, #0b3c88, #129ab8)", borderRadius: 4, color: "#ffffff" ,marginTop:4}}
-          >
-            SLA Mapping
-          </button>
-        )}
-        {kind === "milestone" && !isAdd && (() => {
+        if (node?.uid) params.set("nodeUid", node.uid);
+        params.set("activityMode", mode === "view" ? "view" : "edit");
+        navigate(`/projects/${encodeURIComponent(project.projectId)}/activity-slas?${params.toString()}`);
+      }}
+      style={{
+        border: "none", cursor: "pointer", padding: "8px 16px",
+        fontSize: 14, lineHeight: 1, borderRadius: 4, color: "#fff",
+        background: "linear-gradient(90deg, #0b3c88, #129ab8)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      SLA Mapping
+    </button>
+  )}
+  {kind === "milestone" && !isAdd && (() => {
           // Gate on the persisted (API) status, not the unsaved form value —
           // the button only enables once the milestone is actually saved as
           // Completed on the server.
-          const msComplete = node?.status === "Completed";
-          return (
-            <button
-              type="button"
-              aria-label="Raise Invoice"
-              title={
-                msComplete
-                  ? "Raise an invoice for this milestone"
-                  : "Available only when the milestone status is Completed"
-              }
-              disabled={!msComplete}
-              onClick={() => {
-                if (!project.projectId) return;
-                navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`);
-              }}
-              style={{
-                ...iconBtnStyle,
-                top: 8,
-                right: 48,
-                fontSize: 14,
-                lineHeight: 1,
-                width: "auto",
-                padding: "8px 16px",
-                background: msComplete
-                  ? "linear-gradient(90deg, #0b3c88, #129ab8)"
-                  : "#e6e8ec",
-                borderRadius: 4,
-                color: msComplete ? "#ffffff" : "#9aa1ab",
-                cursor: msComplete ? "pointer" : "not-allowed",
-                marginTop: 4,
-              }}
-            >
-              Raise Invoice
-            </button>
-          );
-        })()}
-        <button
-  type="button"
-  onClick={() => setShowPopup(true)}
-  style={{
-    ...iconBtnStyle,
-    top: 8,
-    right: 170,
-    fontSize: 14,
-    lineHeight: 1,
-    width: "auto",
-    padding: "8px 16px",
-    background: "linear-gradient(90deg, #0b3c88, #129ab8)",
-    borderRadius: 4,
-    color: "#fff",
-    marginTop: 4,
-  }}
->
-  Leave Management
-</button>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={onCancel}
-          style={{ ...iconBtnStyle, top: 8, right: 10, fontSize: 22, lineHeight: 1 ,marginTop:4}}
-        >
-          ×
-        </button>
+    const msComplete = node?.status === "Completed";
+    return (
+      <button
+        type="button"
+        aria-label="Raise Invoice"
+        title={
+          msComplete
+            ? "Raise an invoice for this milestone"
+            : "Available only when the milestone status is Completed"
+        }
+        disabled={!msComplete}
+        onClick={() => {
+          if (!project.projectId) return;
+          navigate(`/projects/${encodeURIComponent(project.projectId)}/finance`);
+        }}
+        style={{
+          border: "none",
+          cursor: msComplete ? "pointer" : "not-allowed",
+          padding: "8px 16px", fontSize: 14, lineHeight: 1, borderRadius: 4,
+          background: msComplete
+            ? "linear-gradient(90deg, #0b3c88, #129ab8)"
+            : "#e6e8ec",
+          color: msComplete ? "#ffffff" : "#9aa1ab",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Raise Invoice
+      </button>
+    );
+  })()}
+  <button
+    type="button"
+    onClick={() => setShowPopup(true)}
+    style={{
+      border: "none", cursor: "pointer", padding: "8px 16px",
+      fontSize: 14, lineHeight: 1, borderRadius: 4, color: "#fff",
+      background: "linear-gradient(90deg, #0b3c88, #129ab8)",
+      whiteSpace: "nowrap",
+    }}
+  >
+    Leave Management
+  </button>
+  <button
+    type="button"
+    aria-label="Close"
+    onClick={onCancel}
+    style={{
+      ...iconBtnStyle, position: "static", top: "auto", right: "auto",
+      fontSize: 22, lineHeight: 1,
+    }}
+  >
+    ×
+  </button>
+</div>
         
         <h3 className="uidai-modal__title">{title}</h3>
         <div className="uidai-hint" style={{ marginBottom: 12 }}>

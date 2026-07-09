@@ -26,6 +26,11 @@ import { tokenStore, API_BASE, ApiError } from './client';
 import { ENDPOINTS } from './endpoint';
 import { readAllRoleNames, readRoleFromUser } from '../auth/roleNormalize';
 
+function authHeaders() {
+  const token = tokenStore.get();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /* Absolute base for the ticket-service. Prefer an explicit override; else
    take the host of API_BASE and force port 8017. */
 const TICKET_BASE = (() => {
@@ -139,14 +144,21 @@ async function parseTicketResponse(res, fallbackLabel) {
    Returns { totalCount, page, size, totalPages, tickets: [...] }. */
 export async function listTickets({ page = 0, size = 20 } = {}) {
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.list}?page=${page}&size=${size}`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+  const headers = { Accept: '*/*', ...authHeaders() };
+  try {
+    const token = headers.Authorization ? headers.Authorization.replace(/^Bearer\s+/, '') : null;
+    // Mask token in logs (show only last 6 chars) to help debugging without leaking token.
+    // eslint-disable-next-line no-console
+    console.debug('[tickets] listTickets - attaching Authorization?', !!token, token ? `****${token.slice(-6)}` : 'no-token');
+  } catch (e) { /* ignore logging errors */ }
+  const res = await fetch(url, { method: 'GET', headers });
   return parseTicketResponse(res, 'Load tickets failed');
 }
 
 /* GET /ticket-service/tickets/{uuid} — a single ticket's full record. */
 export async function getTicket(uuid) {
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.get(uuid)}`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*', ...authHeaders() } });
   return parseTicketResponse(res, 'Load ticket failed');
 }
 
@@ -155,7 +167,7 @@ export async function getTicket(uuid) {
      roles }], startState, terminateState }] }. */
 export async function getWorkflow() {
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.workflow}`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' ,...authHeaders() } });
   return parseTicketResponse(res, 'Load workflow failed');
 }
 
@@ -163,7 +175,7 @@ export async function getWorkflow() {
    for a ticket (may be empty). */
 export async function getEscalationLogs(uuid) {
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.escalationLogs(uuid)}`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*', ...authHeaders() } });
   return parseTicketResponse(res, 'Load escalation logs failed');
 }
 
@@ -171,7 +183,7 @@ export async function getEscalationLogs(uuid) {
    ({ uuid, priority, level, triggerHours, emails, isActive, updatedAt }). */
 export async function getEscalationMatrix() {
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.escalationMatrix}`;
-  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*' } });
+  const res = await fetch(url, { method: 'GET', headers: { Accept: '*/*', ...authHeaders() } });
   return parseTicketResponse(res, 'Load escalation matrix failed');
 }
 
