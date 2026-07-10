@@ -316,7 +316,16 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
 function SummaryPanel({ totals }) {
   const fixed = Number(totals?.fixedCost) || 0;
   const oneTime = Number(totals?.oneTimeCost) || 0;
+  const recurring = Number(totals?.recurringCost) || 0;
   const total = Number(totals?.totalContractCost) || 0;
+
+  const rowStyle = {
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    gap: 8, fontSize: 13,
+    background: "#fff", border: "1px solid var(--uidai-pmis-border)",
+    borderRadius: 8, padding: "8px 12px",
+  };
+  
   return (
     <div style={{ padding: 18 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -340,6 +349,12 @@ function SummaryPanel({ totals }) {
           <span style={muted}>One-Time Cost</span>
           <strong style={{ color: "#173e77" }} title={wordsHint(oneTime)}>
             {inr(oneTime)}
+          </strong>
+        </div>
+        <div style={rowStyle}>
+          <span style={muted}>Recurring Cost</span>
+          <strong style={{ color: "#173e77" }} title={wordsHint(recurring)}>
+            {inr(recurring)}
           </strong>
         </div>
         <div style={{
