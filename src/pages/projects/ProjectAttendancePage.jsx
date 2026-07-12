@@ -1,10 +1,25 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
+import "../../styles/global.css";
 
-// Swap this for your shared API client / env base URL if you have one.
-const API_BASE = "http://10.1.131.199:8019";
+const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
+
+// ---------- design tokens (matched to ProjectResourcePage) ----------
+const C = {
+  primary: "#0b3c88",
+  primaryDark: "#051f4a",
+  ink: "#1e2a3a",
+  muted: "#6b7a90",
+  border: "#dbe5f1",
+  surface: "#f4f7fb",
+  divider: "#eef1f6",
+  green: "#0f9d58",
+  greenBg: "#e6f6ee",
+  red: "#d32f2f",
+  accentBg: "#eef2ff",
+};
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",
@@ -20,34 +35,28 @@ const CURRENT_YEAR = now.getFullYear();
 const CURRENT_QUARTER = Math.floor(now.getMonth() / 3) + 1;
 const YEAR_OPTIONS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2];
 
-// "0.5 hrs" -> 0.5
+// ---------- helpers ----------
+const pad2 = (n) => String(n).padStart(2, "0");
+
 function parseHours(value) {
   const n = parseFloat(String(value ?? ""));
   return Number.isFinite(n) ? n : 0;
 }
-
 function totalShortHours(shortHours) {
   if (!shortHours) return 0;
   return Object.values(shortHours).reduce((sum, v) => sum + parseHours(v), 0);
 }
-
-// The per-resource calc fields may be nested under `calculation` or flat.
 function getCalc(resource) {
   return resource?.calculation ?? resource ?? {};
 }
-
 function isWeekdayName(name) {
   return WEEKDAY_NAMES.has(String(name ?? "").trim().toLowerCase());
 }
-
-function parseDate(s) {
-  return new Date(`${s}T00:00:00`);
-}
 function dayNum(s) {
-  return parseDate(s).getDate();
+  return Number(s.slice(8, 10));
 }
 function weekdayShort(s) {
-  return WEEKDAY_SHORT[parseDate(s).getDay()];
+  return WEEKDAY_SHORT[new Date(`${s}T00:00:00`).getDay()];
 }
 
 // Collapse the raw [{date,name}] list: dedupe by date, prefer real holiday
@@ -73,14 +82,14 @@ function normalizeHolidays(raw) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function groupHolidaysByMonth(holidays) {
-  const groups = new Map();
-  for (const h of holidays) {
-    const m = Number(h.date.slice(5, 7));
-    if (!groups.has(m)) groups.set(m, []);
-    groups.get(m).push(h);
-  }
-  return [...groups.entries()].sort((a, b) => a[0] - b[0]);
+function buildMonthGrid(year, month) {
+  const startDay = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
 }
 
 export default function ProjectAttendancePage() {
@@ -88,7 +97,7 @@ export default function ProjectAttendancePage() {
   const project = useProject(projectId);
 
   const [year, setYear] = useState(CURRENT_YEAR);
-  const [selectedMonth, setSelectedMonth] = useState("all"); // "all" | 1..12
+  const [selectedMonth, setSelectedMonth] = useState("all");
   const [quarter, setQuarter] = useState(CURRENT_QUARTER);
   const [expanded, setExpanded] = useState({});
 
@@ -117,31 +126,25 @@ export default function ProjectAttendancePage() {
     if (!projectId) return;
     let active = true;
     const controller = new AbortController();
-
     (async () => {
       setSummaryLoading(true);
       setSummaryError(null);
       try {
         const res = await fetch(
           `${API_BASE}/api/attendance/summary?year=${year}&month=all&projectId=${projectId}`,
-          { signal: controller.signal } // add { headers: { Authorization: ... } } here if needed
+          { signal: controller.signal }
         );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
         if (active) setSummary(data);
       } catch (err) {
-        if (active && err.name !== "AbortError") {
+        if (active && err.name !== "AbortError")
           setSummaryError(err.message || "Failed to load attendance summary");
-        }
       } finally {
         if (active) setSummaryLoading(false);
       }
     })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
+    return () => { active = false; controller.abort(); };
   }, [projectId, year]);
 
   // Quarterly leave policy
@@ -149,7 +152,6 @@ export default function ProjectAttendancePage() {
     if (!projectId) return;
     let active = true;
     const controller = new AbortController();
-
     (async () => {
       setQuarterlyLoading(true);
       setQuarterlyError(null);
@@ -162,26 +164,20 @@ export default function ProjectAttendancePage() {
         const data = await res.json();
         if (active) setQuarterly(data);
       } catch (err) {
-        if (active && err.name !== "AbortError") {
+        if (active && err.name !== "AbortError")
           setQuarterlyError(err.message || "Failed to load quarterly leave");
-        }
       } finally {
         if (active) setQuarterlyLoading(false);
       }
     })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
+    return () => { active = false; controller.abort(); };
   }, [projectId, year, quarter]);
 
-  // Holidays + calendar — lazy fetch when the modal opens (or year changes while open).
+  // Holidays + calendar — lazy fetch when modal opens (or year changes while open).
   useEffect(() => {
     if (!holidayOpen) return;
     let active = true;
     const controller = new AbortController();
-
     (async () => {
       setHolidayLoading(true);
       setHolidayError(null);
@@ -192,24 +188,19 @@ export default function ProjectAttendancePage() {
         ]);
         if (!hRes.ok) throw new Error(`Holidays request failed (${hRes.status})`);
         const hData = await hRes.json();
-        const cData = cRes.ok ? await cRes.json() : null; // calendar is supplementary
+        const cData = cRes.ok ? await cRes.json() : null;
         if (active) {
           setHolidays(normalizeHolidays(hData));
           setCalendar(cData);
         }
       } catch (err) {
-        if (active && err.name !== "AbortError") {
+        if (active && err.name !== "AbortError")
           setHolidayError(err.message || "Failed to load holidays");
-        }
       } finally {
         if (active) setHolidayLoading(false);
       }
     })();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
+    return () => { active = false; controller.abort(); };
   }, [holidayOpen, year]);
 
   const toggleRow = (key) =>
@@ -222,92 +213,98 @@ export default function ProjectAttendancePage() {
       ? allMonths
       : allMonths.filter((m) => m.month === Number(selectedMonth));
 
+  const uniqueEmployees = new Set();
+  visibleMonths.forEach((m) =>
+    (m.employees ?? []).forEach((e) => uniqueEmployees.add(e.attendanceId))
+  );
+
   return (
-    <div style={styles.page}>
-      <div style={styles.headerRow}>
-        <div>
-          <h1 style={styles.title}>Attendance</h1>
-          <div style={styles.subtitle}>{project?.projectName || "Project"}</div>
+    <div className="uidai-pmis-content att-page">
+      <style>{ATT_CSS}</style>
+
+      {/* Header */}
+      <div style={{ marginBottom: 28 }}>
+        <div className="att-eyebrow">{project?.projectName || "Project"}</div>
+        <h1 className="uidai-pmis-title" style={{ marginBottom: 6 }}>Attendance</h1>
+        <p className="uidai-pmis-subtitle">
+          Monthly attendance, short hours and quarterly leave for your project team
+        </p>
+
+        <div className="att-stats">
+          <span className="att-stat">
+            <b>{visibleMonths.length}</b> month{visibleMonths.length === 1 ? "" : "s"} reported
+          </span>
+          <span className="att-dot" />
+          <span className="att-stat">
+            <b style={{ color: C.green }}>{uniqueEmployees.size}</b> employees
+          </span>
         </div>
-        <div style={styles.controlsRow}>
-          <label style={styles.control}>
-            Year
+      </div>
+
+      {/* Controls */}
+      <div className="att-toolbar">
+        <div className="att-controls">
+          <Field label="Year">
             <select
+              className="att-select"
               value={year}
-              onChange={(e) => {
-                setYear(Number(e.target.value));
-                setSelectedMonth("all");
-              }}
-              style={styles.select}
+              onChange={(e) => { setYear(Number(e.target.value)); setSelectedMonth("all"); }}
             >
-              {YEAR_OPTIONS.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
+              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
-          </label>
-          <label style={styles.control}>
-            Month
+          </Field>
+          <Field label="Month">
             <select
+              className="att-select"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              style={styles.select}
             >
               <option value="all">All months</option>
               {availableMonths.map((m) => (
                 <option key={m} value={m}>{MONTH_NAMES[m]}</option>
               ))}
             </select>
-          </label>
-          <button
-            type="button"
-            style={styles.holidayBtn}
-            onClick={() => setHolidayOpen(true)}
-          >
-            <CalendarIcon />
-            Holiday list
-          </button>
+          </Field>
         </div>
+        <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
+          <CalendarIcon />
+          Holiday list
+        </button>
       </div>
 
-      {/* ---- Monthly summary ---- */}
-      <section style={styles.section}>
-        <h2 style={styles.sectionTitle}>Monthly summary</h2>
-
-        {summaryLoading && <div style={styles.muted}>Loading summary…</div>}
-        {summaryError && <div style={styles.error}>{summaryError}</div>}
+      {/* Monthly summary */}
+      <section style={{ marginTop: 8 }}>
+        <h2 className="att-section-title">Monthly summary</h2>
+        {summaryLoading && <div className="att-muted">Loading summary…</div>}
+        {summaryError && <div className="att-error">{summaryError}</div>}
         {!summaryLoading && !summaryError && visibleMonths.length === 0 && (
-          <div style={styles.muted}>
+          <div className="att-empty">
             {selectedMonth === "all"
               ? `No attendance recorded for ${year}.`
               : `No attendance recorded for ${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
           </div>
         )}
-
         {visibleMonths.map((m) => (
           <MonthCard key={m.month} month={m} expanded={expanded} onToggle={toggleRow} />
         ))}
       </section>
 
-      {/* ---- Quarterly leave ---- */}
-      <section style={styles.section}>
-        <div style={styles.headerRow}>
-          <h2 style={styles.sectionTitle}>Quarterly leave</h2>
-          <label style={styles.control}>
-            Quarter
+      {/* Quarterly leave */}
+      <section style={{ marginTop: 28 }}>
+        <div className="att-section-head">
+          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly leave</h2>
+          <Field label="Quarter">
             <select
+              className="att-select"
               value={quarter}
               onChange={(e) => setQuarter(Number(e.target.value))}
-              style={styles.select}
             >
-              {[1, 2, 3, 4].map((q) => (
-                <option key={q} value={q}>Q{q}</option>
-              ))}
+              {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
             </select>
-          </label>
+          </Field>
         </div>
-
-        {quarterlyLoading && <div style={styles.muted}>Loading quarterly leave…</div>}
-        {quarterlyError && <div style={styles.error}>{quarterlyError}</div>}
+        {quarterlyLoading && <div className="att-muted">Loading quarterly leave…</div>}
+        {quarterlyError && <div className="att-error">{quarterlyError}</div>}
         {!quarterlyLoading && !quarterlyError && quarterly && (
           <QuarterlyPanel data={quarterly} expanded={expanded} onToggle={toggleRow} />
         )}
@@ -327,83 +324,159 @@ export default function ProjectAttendancePage() {
   );
 }
 
-function CalendarIcon() {
+/* ---------- small building blocks ---------- */
+function Field({ label, children }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M3 9h18M8 3v3M16 3v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
+    <label className="att-field">
+      <span className="att-field-label">{label}</span>
+      {children}
+    </label>
   );
 }
 
+function Chip({ children, accent }) {
+  return <span className={accent ? "att-chip att-chip-accent" : "att-chip"}>{children}</span>;
+}
+
+/* =====================================================================
+   Holiday modal — calendar mode
+   ===================================================================== */
 function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
+  const today = new Date();
+  const initialMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
+  const [viewMonth, setViewMonth] = useState(initialMonth);
+
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    setViewMonth(today.getFullYear() === year ? today.getMonth() + 1 : 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
+    const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
+      document.body.style.overflow = prev;
     };
   }, [onClose]);
 
-  const grouped = holidays ? groupHolidaysByMonth(holidays) : [];
+  const holidayMap = useMemo(() => {
+    const m = new Map();
+    (holidays ?? []).forEach((h) => { if (h.named) m.set(h.date, h); });
+    return m;
+  }, [holidays]);
+
   const namedCount = holidays ? holidays.filter((h) => h.named).length : 0;
+  const monthHolidays = (holidays ?? []).filter(
+    (h) => h.named && Number(h.date.slice(5, 7)) === viewMonth
+  );
+  const monthMeta = calendar?.months?.find((m) => m.month === viewMonth);
+
+  const cells = buildMonthGrid(year, viewMonth);
+  const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
 
   return (
-    <div style={styles.backdrop} onClick={onClose}>
-      <div
-        style={styles.modal}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Holidays ${year}`}
-      >
-        <div style={styles.modalHeader}>
+    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true" aria-label={`Holidays ${year}`}>
+        <div className="att-modal-head">
           <div>
-            <h2 style={styles.modalTitle}>Holidays · {year}</h2>
-            <div style={styles.subtitle}>Public holidays & weekend summary</div>
+            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Calendar</div>
+            <h2 className="att-modal-title">Holidays · {year}</h2>
           </div>
-          <button type="button" style={styles.closeBtn} onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {loading && <div style={styles.muted}>Loading holidays…</div>}
-        {error && <div style={styles.error}>{error}</div>}
+        {loading && <div className="att-muted">Loading holidays…</div>}
+        {error && <div className="att-error">{error}</div>}
 
         {!loading && !error && (
           <>
-            <div style={styles.chips}>
+            <div className="att-chips" style={{ marginBottom: 14 }}>
               {calendar && (
                 <>
-                  <span style={styles.chip}>{calendar.saturdays} Saturdays</span>
-                  <span style={styles.chip}>{calendar.sundays} Sundays</span>
-                  <span style={styles.chip}>{calendar.totalWeekendDays} weekend days</span>
+                  <Chip>{calendar.saturdays} Saturdays</Chip>
+                  <Chip>{calendar.sundays} Sundays</Chip>
+                  <Chip>{calendar.totalWeekendDays} weekend days</Chip>
                 </>
               )}
-              <span style={{ ...styles.chip, ...styles.chipAccent }}>{namedCount} holidays</span>
+              <Chip accent>{namedCount} holidays</Chip>
             </div>
 
-            <div style={styles.modalBody}>
-              {grouped.length === 0 ? (
-                <div style={styles.muted}>No holidays found for {year}.</div>
+            {/* Calendar nav */}
+            <div className="att-cal-nav">
+              <button
+                className="att-nav-btn"
+                onClick={() => setViewMonth((m) => Math.max(1, m - 1))}
+                disabled={viewMonth === 1}
+                aria-label="Previous month"
+              >‹</button>
+              <div className="att-cal-title">{MONTH_NAMES[viewMonth]} {year}</div>
+              <button
+                className="att-nav-btn"
+                onClick={() => setViewMonth((m) => Math.min(12, m + 1))}
+                disabled={viewMonth === 12}
+                aria-label="Next month"
+              >›</button>
+            </div>
+
+            {/* Calendar grid */}
+            <div className="att-cal-grid att-cal-weekhead">
+              {WEEKDAY_SHORT.map((w) => (
+                <div key={w} className="att-cal-wd">{w}</div>
+              ))}
+            </div>
+            <div className="att-cal-grid">
+              {cells.map((d, i) => {
+                if (d == null) return <div key={`e-${i}`} className="att-cal-cell att-cal-empty" />;
+                const dateStr = `${year}-${pad2(viewMonth)}-${pad2(d)}`;
+                const dow = new Date(year, viewMonth - 1, d).getDay();
+                const isWeekend = dow === 0 || dow === 6;
+                const holiday = holidayMap.get(dateStr);
+                const isToday = dateStr === todayStr;
+                const cls = [
+                  "att-cal-cell",
+                  isWeekend ? "att-cal-weekend" : "",
+                  holiday ? "att-cal-holiday" : "",
+                  isToday ? "att-cal-today" : "",
+                ].join(" ").trim();
+                return (
+                  <div key={dateStr} className={cls} title={holiday ? holiday.name : undefined}>
+                    <span className="att-cal-day">{d}</span>
+                    {holiday && <span className="att-cal-mark" />}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend */}
+            <div className="att-legend">
+              <span className="att-legend-item"><span className="att-sw att-sw-holiday" /> Public holiday</span>
+              <span className="att-legend-item"><span className="att-sw att-sw-weekend" /> Weekend</span>
+              <span className="att-legend-item"><span className="att-sw att-sw-today" /> Today</span>
+            </div>
+
+            {/* This month's holidays */}
+            <div className="att-cal-list">
+              <div className="att-cal-list-head">
+                Holidays in {MONTH_NAMES[viewMonth]}
+                {monthMeta && (
+                  <span className="att-cal-list-sub"> · {monthMeta.totalWeekendDays} weekend days</span>
+                )}
+              </div>
+              {monthHolidays.length === 0 ? (
+                <div className="att-muted" style={{ padding: "6px 0" }}>
+                  No public holidays this month.
+                </div>
               ) : (
-                grouped.map(([month, items]) => (
-                  <div key={month} style={styles.monthGroup}>
-                    <div style={styles.monthGroupHeader}>{MONTH_NAMES[month]}</div>
-                    {items.map((h) => (
-                      <div key={`${h.date}-${h.name}`} style={styles.holidayRow}>
-                        <div style={styles.dateBadge}>
-                          <span style={styles.dateBadgeDay}>{dayNum(h.date)}</span>
-                          <span style={styles.dateBadgeWd}>{weekdayShort(h.date)}</span>
-                        </div>
-                        <div style={h.named ? styles.holidayName : styles.holidayNameMuted}>
-                          {h.name}
-                        </div>
-                      </div>
-                    ))}
+                monthHolidays.map((h) => (
+                  <div key={`${h.date}-${h.name}`} className="att-holiday-row">
+                    <div className="att-date-badge">
+                      <span className="att-date-day">{dayNum(h.date)}</span>
+                      <span className="att-date-wd">{weekdayShort(h.date)}</span>
+                    </div>
+                    <div className="att-holiday-name">{h.name}</div>
                   </div>
                 ))
               )}
@@ -415,19 +488,22 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
   );
 }
 
+/* =====================================================================
+   Monthly summary card
+   ===================================================================== */
 function MonthCard({ month, expanded, onToggle }) {
   const employees = month.employees ?? [];
   return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <strong>{MONTH_NAMES[month.month]} {month.year}</strong>
-        <div style={styles.chips}>
-          <span style={styles.chip}>{month.totalDaysInMonth} days</span>
-          <span style={styles.chip}>{month.totalWeekendDays} weekend days</span>
-          <span style={styles.chip}>{employees.length} employees</span>
+    <div className="uidai-pmis-card att-card">
+      <div className="att-card-head">
+        <strong className="att-card-title">{MONTH_NAMES[month.month]} {month.year}</strong>
+        <div className="att-chips">
+          <Chip>{month.totalDaysInMonth} days</Chip>
+          <Chip>{month.totalWeekendDays} weekend days</Chip>
+          <Chip>{employees.length} employees</Chip>
           {month.publicHolidayCount > 0 && (
             <span
-              style={styles.chip}
+              className="att-chip"
               title={month.publicHolidays.map((h) => `${h.date} · ${h.name}`).join("\n")}
             >
               {month.publicHolidayCount} holiday{month.publicHolidayCount > 1 ? "s" : ""}
@@ -437,242 +513,312 @@ function MonthCard({ month, expanded, onToggle }) {
       </div>
 
       {employees.length === 0 ? (
-        <div style={styles.muted}>No employee data.</div>
+        <div className="att-muted">No employee data.</div>
       ) : (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}></th>
-              <th style={styles.th}>ID</th>
-              <th style={styles.th}>Name</th>
-              <th style={styles.th}>Designation</th>
-              <th style={styles.thNum}>Leave days</th>
-              <th style={styles.thNum}>Half days</th>
-              <th style={styles.thNum}>Short-hour days</th>
-              <th style={styles.thNum}>Total short hrs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employees.map((emp) => {
-              const key = `m-${month.month}-${emp.attendanceId}`;
-              const shortEntries = Object.entries(emp.shortHours ?? {});
-              const hasDetail = shortEntries.length > 0 || (emp.halfDays?.length ?? 0) > 0;
-              const isOpen = !!expanded[key];
-              const totalShort = totalShortHours(emp.shortHours);
-              return (
-                <React.Fragment key={key}>
-                  <tr>
-                    <td style={styles.td}>
-                      {hasDetail && (
-                        <button
-                          type="button"
-                          onClick={() => onToggle(key)}
-                          style={styles.expandBtn}
-                          aria-label={isOpen ? "Collapse" : "Expand"}
-                        >
-                          {isOpen ? "▾" : "▸"}
-                        </button>
-                      )}
-                    </td>
-                    <td style={styles.td}>{emp.attendanceId}</td>
-                    <td style={styles.td}>{emp.employeeName}</td>
-                    <td style={styles.td}>{emp.designation}</td>
-                    <td style={styles.tdNum}>{emp.leaveDays}</td>
-                    <td style={styles.tdNum}>{emp.halfDays?.length ?? 0}</td>
-                    <td style={styles.tdNum}>{emp.shortHourDays}</td>
-                    <td style={styles.tdNum}>{totalShort ? totalShort.toFixed(2) : "0"}</td>
-                  </tr>
-                  {isOpen && hasDetail && (
-                    <tr>
-                      <td />
-                      <td style={styles.detailCell} colSpan={7}>
-                        {(emp.halfDays?.length ?? 0) > 0 && (
-                          <div style={styles.detailBlock}>
-                            <span style={styles.detailLabel}>Half days:</span>{" "}
-                            {emp.halfDays.join(", ")}
-                          </div>
-                        )}
-                        {shortEntries.length > 0 && (
-                          <div style={styles.detailBlock}>
-                            <span style={styles.detailLabel}>Short hours:</span>{" "}
-                            {shortEntries.map(([date, hrs]) => `${date} (${hrs})`).join(", ")}
-                          </div>
+        <div className="att-table-wrap">
+          <table className="att-table">
+            <thead>
+              <tr>
+                <th className="att-th att-th-x" />
+                <th className="att-th">ID</th>
+                <th className="att-th">Name</th>
+                <th className="att-th">Designation</th>
+                <th className="att-th att-num">Leave days</th>
+                <th className="att-th att-num">Half days</th>
+                <th className="att-th att-num">Short-hour days</th>
+                <th className="att-th att-num">Total short hrs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map((emp) => {
+                const key = `m-${month.month}-${emp.attendanceId}`;
+                const shortEntries = Object.entries(emp.shortHours ?? {});
+                const hasDetail = shortEntries.length > 0 || (emp.halfDays?.length ?? 0) > 0;
+                const isOpen = !!expanded[key];
+                const totalShort = totalShortHours(emp.shortHours);
+                return (
+                  <React.Fragment key={key}>
+                    <tr className="att-row">
+                      <td className="att-td">
+                        {hasDetail && (
+                          <button className="att-expand" onClick={() => onToggle(key)}
+                            aria-label={isOpen ? "Collapse" : "Expand"}>
+                            {isOpen ? "▾" : "▸"}
+                          </button>
                         )}
                       </td>
+                      <td className="att-td">
+                        <code className="att-code">{emp.attendanceId}</code>
+                      </td>
+                      <td className="att-td att-strong">{emp.employeeName}</td>
+                      <td className="att-td">{emp.designation || "—"}</td>
+                      <td className="att-td att-num">{emp.leaveDays}</td>
+                      <td className="att-td att-num">{emp.halfDays?.length ?? 0}</td>
+                      <td className="att-td att-num">{emp.shortHourDays}</td>
+                      <td className="att-td att-num">{totalShort ? totalShort.toFixed(2) : "0"}</td>
                     </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+                    {isOpen && hasDetail && (
+                      <tr className="att-detail-row">
+                        <td />
+                        <td className="att-detail" colSpan={7}>
+                          {(emp.halfDays?.length ?? 0) > 0 && (
+                            <div className="att-detail-block">
+                              <span className="att-detail-label">Half days:</span>{" "}
+                              {emp.halfDays.join(", ")}
+                            </div>
+                          )}
+                          {shortEntries.length > 0 && (
+                            <div className="att-detail-block">
+                              <span className="att-detail-label">Short hours:</span>{" "}
+                              {shortEntries.map(([date, hrs]) => `${date} (${hrs})`).join(", ")}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
 }
 
+/* =====================================================================
+   Quarterly leave panel
+   ===================================================================== */
 function QuarterlyPanel({ data, expanded, onToggle }) {
   const resources = data.resources ?? [];
   const monthsLabel = (data.monthsWithData ?? [])
-    .map((m) => MONTH_NAMES[m] || m)
-    .join(", ");
+    .map((m) => MONTH_NAMES[m] || m).join(", ");
 
   return (
-    <div style={styles.card}>
-      <div style={styles.cardHeader}>
-        <strong>Q{data.quarter} {data.year}</strong>
-        <div style={styles.chips}>
-          <span style={styles.chip}>{data.quarterStart} → {data.quarterEnd}</span>
-          <span style={styles.chip}>{data.resourceCount} resources</span>
-          {monthsLabel && <span style={styles.chip}>Data: {monthsLabel}</span>}
+    <div className="uidai-pmis-card att-card">
+      <div className="att-card-head">
+        <strong className="att-card-title">Q{data.quarter} {data.year}</strong>
+        <div className="att-chips">
+          <Chip>{data.quarterStart} → {data.quarterEnd}</Chip>
+          <Chip>{data.resourceCount} resources</Chip>
+          {monthsLabel && <Chip>Data: {monthsLabel}</Chip>}
         </div>
       </div>
 
       {resources.length === 0 ? (
-        <div style={styles.muted}>No leave data recorded for this quarter.</div>
+        <div className="att-muted">No leave data recorded for this quarter.</div>
       ) : (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}></th>
-              <th style={styles.th}>Attendance Id</th>
-              <th style={styles.th}>Employee Name</th>
-              <th style={styles.th}>Joining Date</th>
-              <th style={styles.thNum} title="Permissible paid leave">Permissible</th>
-              <th style={styles.thNum} title="Leave days taken">Taken</th>
-              <th style={styles.thNum} title="Paid leave days">Paid</th>
-              <th style={styles.thNum} title="Unpaid leave days">Unpaid</th>
-              <th style={styles.thNum} title="Sandwich days charged">Sandwich</th>
-              <th style={styles.thNum} title="Total unpaid days">Total unpaid</th>
-            </tr>
-          </thead>
-          <tbody>
-            {resources.map((r, i) => {
-              const c = getCalc(r);
-              const key = `q-${data.quarter}-${r.attendanceId ?? i}`;
-              const unpaidDates = c.unpaidLeaveDates ?? [];
-              const sandwichDates = c.sandwichDates ?? [];
-              const hasDetail = unpaidDates.length > 0 || sandwichDates.length > 0;
-              const isOpen = !!expanded[key];
-              const totalUnpaid = c.totalUnpaidDays ?? 0;
-              return (
-                <React.Fragment key={key}>
-                  <tr>
-                    <td style={styles.td}>
-                      {hasDetail && (
-                        <button
-                          type="button"
-                          onClick={() => onToggle(key)}
-                          style={styles.expandBtn}
-                          aria-label={isOpen ? "Collapse" : "Expand"}
-                        >
-                          {isOpen ? "▾" : "▸"}
-                        </button>
-                      )}
-                    </td>
-                    <td style={styles.td}>{r.attendanceId}</td>
-                    <td style={styles.td}>{r.employeeName}</td>
-                    <td style={styles.td}>{r.joiningDate || "—"}</td>
-                    <td style={styles.tdNum}>{c.permissibleLeave ?? 0}</td>
-                    <td style={styles.tdNum}>{c.leaveDaysTaken ?? 0}</td>
-                    <td style={styles.tdNum}>{c.paidLeaveDays ?? 0}</td>
-                    <td style={styles.tdNum}>{c.unpaidLeaveDays ?? 0}</td>
-                    <td style={styles.tdNum}>{c.sandwichDays ?? 0}</td>
-                    <td style={{ ...styles.tdNum, fontWeight: totalUnpaid > 0 ? 600 : 400, color: totalUnpaid > 0 ? "#b91c1c" : "inherit" }}>
-                      {totalUnpaid}
-                    </td>
-                  </tr>
-                  {isOpen && hasDetail && (
-                    <tr>
-                      <td />
-                      <td style={styles.detailCell} colSpan={9}>
-                        {unpaidDates.length > 0 && (
-                          <div style={styles.detailBlock}>
-                            <span style={styles.detailLabel}>Unpaid leave dates:</span>{" "}
-                            {unpaidDates.join(", ")}
-                          </div>
-                        )}
-                        {sandwichDates.length > 0 && (
-                          <div style={styles.detailBlock}>
-                            <span style={styles.detailLabel}>Sandwich dates:</span>{" "}
-                            {sandwichDates.join(", ")}
-                          </div>
+        <div className="att-table-wrap">
+          <table className="att-table">
+            <thead>
+              <tr>
+                <th className="att-th att-th-x" />
+                <th className="att-th">Attendance Id</th>
+                <th className="att-th">Employee Name</th>
+                <th className="att-th">Joining Date</th>
+                <th className="att-th att-num" title="Permissible paid leave">Permissible</th>
+                <th className="att-th att-num" title="Leave days taken">Taken</th>
+                <th className="att-th att-num" title="Paid leave days">Paid</th>
+                <th className="att-th att-num" title="Unpaid leave days">Unpaid</th>
+                <th className="att-th att-num" title="Sandwich days charged">Sandwich</th>
+                <th className="att-th att-num" title="Total unpaid days">Total unpaid</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resources.map((r, i) => {
+                const c = getCalc(r);
+                const key = `q-${data.quarter}-${r.attendanceId ?? i}`;
+                const unpaidDates = c.unpaidLeaveDates ?? [];
+                const sandwichDates = c.sandwichDates ?? [];
+                const hasDetail = unpaidDates.length > 0 || sandwichDates.length > 0;
+                const isOpen = !!expanded[key];
+                const totalUnpaid = c.totalUnpaidDays ?? 0;
+                return (
+                  <React.Fragment key={key}>
+                    <tr className="att-row">
+                      <td className="att-td">
+                        {hasDetail && (
+                          <button className="att-expand" onClick={() => onToggle(key)}
+                            aria-label={isOpen ? "Collapse" : "Expand"}>
+                            {isOpen ? "▾" : "▸"}
+                          </button>
                         )}
                       </td>
+                      <td className="att-td"><code className="att-code">{r.attendanceId}</code></td>
+                      <td className="att-td att-strong">{r.employeeName}</td>
+                      <td className="att-td">{r.joiningDate || "—"}</td>
+                      <td className="att-td att-num">{c.permissibleLeave ?? 0}</td>
+                      <td className="att-td att-num">{c.leaveDaysTaken ?? 0}</td>
+                      <td className="att-td att-num">{c.paidLeaveDays ?? 0}</td>
+                      <td className="att-td att-num">{c.unpaidLeaveDays ?? 0}</td>
+                      <td className="att-td att-num">{c.sandwichDays ?? 0}</td>
+                      <td className={`att-td att-num${totalUnpaid > 0 ? " att-danger" : ""}`}>
+                        {totalUnpaid}
+                      </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+                    {isOpen && hasDetail && (
+                      <tr className="att-detail-row">
+                        <td />
+                        <td className="att-detail" colSpan={9}>
+                          {unpaidDates.length > 0 && (
+                            <div className="att-detail-block">
+                              <span className="att-detail-label">Unpaid leave dates:</span>{" "}
+                              {unpaidDates.join(", ")}
+                            </div>
+                          )}
+                          {sandwichDates.length > 0 && (
+                            <div className="att-detail-block">
+                              <span className="att-detail-label">Sandwich dates:</span>{" "}
+                              {sandwichDates.join(", ")}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
 }
 
-const styles = {
-  page: { padding: 24, maxWidth: 1100, margin: "0 auto" },
-  headerRow: { display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, marginBottom: 8 },
-  controlsRow: { display: "flex", gap: 12, alignItems: "flex-end" },
-  title: { margin: 0, fontSize: 22 },
-  subtitle: { color: "#6b7280", marginTop: 2, fontSize: 13 },
-  section: { marginTop: 28 },
-  sectionTitle: { fontSize: 16, margin: "0 0 12px" },
-  control: { display: "flex", flexDirection: "column", fontSize: 12, color: "#6b7280", gap: 4 },
-  select: { padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14, minWidth: 120 },
-  holidayBtn: {
-    display: "inline-flex", alignItems: "center", gap: 6,
-    padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db",
-    background: "#fff", color: "#374151", fontSize: 14, cursor: "pointer", height: 34,
-  },
-  card: { border: "1px solid #e5e7eb", borderRadius: 10, padding: 16, marginBottom: 16, background: "#fff" },
-  cardHeader: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" },
-  chips: { display: "flex", gap: 6, flexWrap: "wrap" },
-  chip: { fontSize: 12, background: "#f3f4f6", color: "#374151", padding: "2px 8px", borderRadius: 999, whiteSpace: "pre-line" },
-  chipAccent: { background: "#eef2ff", color: "#3730a3", fontWeight: 600 },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
-  th: { textAlign: "left", padding: "8px 10px", borderBottom: "2px solid #e5e7eb", color: "#6b7280", fontWeight: 600, whiteSpace: "nowrap" },
-  thNum: { textAlign: "right", padding: "8px 10px", borderBottom: "2px solid #e5e7eb", color: "#6b7280", fontWeight: 600, whiteSpace: "nowrap" },
-  td: { padding: "8px 10px", borderBottom: "1px solid #f3f4f6" },
-  tdNum: { padding: "8px 10px", borderBottom: "1px solid #f3f4f6", textAlign: "right" },
-  detailCell: { padding: "8px 10px", background: "#fafafa", fontSize: 13, color: "#374151" },
-  detailBlock: { marginBottom: 4 },
-  detailLabel: { fontWeight: 600, color: "#6b7280" },
-  expandBtn: { border: "none", background: "none", cursor: "pointer", fontSize: 12, color: "#6b7280", padding: 0 },
-  muted: { color: "#9ca3af", fontSize: 14, padding: "8px 0" },
-  error: { color: "#b91c1c", fontSize: 14, padding: "8px 0" },
+/* ---------- icons ---------- */
+function CalendarIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M3 9h18M8 3v3M16 3v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-  // ---- Holiday modal ----
-  backdrop: {
-    position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)",
-    display: "flex", alignItems: "flex-start", justifyContent: "center",
-    padding: "48px 16px", zIndex: 1000,
-  },
-  modal: {
-    background: "#fff", borderRadius: 12, width: "100%", maxWidth: 540,
-    maxHeight: "85vh", display: "flex", flexDirection: "column",
-    boxShadow: "0 20px 50px rgba(0,0,0,0.25)", padding: 20,
-  },
-  modalHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 14 },
-  modalTitle: { margin: 0, fontSize: 18 },
-  closeBtn: {
-    border: "none", background: "#f3f4f6", borderRadius: 8, width: 30, height: 30,
-    fontSize: 20, lineHeight: 1, cursor: "pointer", color: "#6b7280",
-  },
-  modalBody: { marginTop: 14, overflowY: "auto", paddingRight: 4 },
-  monthGroup: { marginBottom: 14 },
-  monthGroupHeader: {
-    fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5,
-    color: "#6b7280", padding: "4px 0", borderBottom: "1px solid #f3f4f6", marginBottom: 6,
-  },
-  holidayRow: { display: "flex", alignItems: "center", gap: 12, padding: "6px 2px" },
-  dateBadge: {
-    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-    minWidth: 46, padding: "4px 0", borderRadius: 8, background: "#f9fafb", border: "1px solid #eef0f3",
-  },
-  dateBadgeDay: { fontSize: 16, fontWeight: 700, color: "#111827", lineHeight: 1.1 },
-  dateBadgeWd: { fontSize: 10, color: "#9ca3af", textTransform: "uppercase" },
-  holidayName: { fontSize: 14, color: "#111827" },
-  holidayNameMuted: { fontSize: 14, color: "#9ca3af", fontStyle: "italic" },
-};
+/* ---------- scoped styles (matched to ProjectResourcePage) ---------- */
+const ATT_CSS = `
+.att-page { padding: 28px 24px 64px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 640px) { .att-page { padding: 20px 16px 48px; } }
+
+.att-eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: ${C.primary}; margin-bottom: 6px; }
+
+.att-stats { display: flex; gap: 14px; align-items: center; margin-top: 16px;
+  font-size: 13px; color: ${C.muted}; flex-wrap: wrap; }
+.att-stat b { font-size: 16px; color: ${C.ink}; font-weight: 700; margin-right: 4px; }
+.att-dot { width: 4px; height: 4px; border-radius: 50%; background: #cbd2df; }
+
+.att-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+.att-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+.att-field { display: flex; flex-direction: column; gap: 6px; }
+.att-field-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; color: ${C.muted}; }
+.att-select { padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
+  background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; min-width: 140px;
+  outline: none; cursor: pointer; transition: all .15s ease; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.att-select:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
+
+.att-btn-secondary { display: inline-flex; align-items: center; gap: 8px;
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 10px 16px; height: 40px;
+  cursor: pointer; border: 1px solid ${C.border}; background: #fff; color: ${C.ink};
+  transition: all .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.att-btn-secondary:hover { background: #f9fafb; border-color: ${C.primary}; color: ${C.primary}; }
+
+.att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; }
+.att-section-head { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+
+.att-card { padding: 18px; margin-bottom: 16px; border: 1px solid ${C.border}; }
+.att-card-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.att-card-title { font-size: 15px; color: ${C.ink}; font-weight: 700; }
+
+.att-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.att-chip { font-size: 12px; background: ${C.surface}; color: ${C.ink};
+  padding: 3px 10px; border-radius: 999px; border: 1px solid ${C.border}; white-space: pre-line; }
+.att-chip-accent { background: ${C.accentBg}; color: ${C.primary}; border-color: #d7def7; font-weight: 600; }
+
+.att-table-wrap { overflow-x: auto; }
+.att-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.att-th { background: ${C.surface}; color: ${C.muted}; text-align: left; font-size: 11.5px;
+  font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 11px 14px;
+  border-bottom: 1px solid ${C.border}; white-space: nowrap; }
+.att-th-x { width: 34px; }
+.att-num { text-align: right; }
+.att-td { padding: 12px 14px; vertical-align: middle; color: ${C.ink};
+  border-bottom: 1px solid ${C.divider}; white-space: nowrap; }
+.att-td.att-num { text-align: right; font-variant-numeric: tabular-nums; }
+.att-strong { font-weight: 600; }
+.att-danger { color: ${C.red}; font-weight: 700; }
+.att-row { transition: background-color .15s ease, box-shadow .15s ease; }
+.att-row:hover { background: ${C.surface}; box-shadow: inset 0 0 0 1px #e0e7f0; }
+.att-code { font-size: 13px; background: ${C.surface}; padding: 2px 6px; border-radius: 4px;
+  font-variant-numeric: tabular-nums; }
+.att-expand { border: none; background: none; cursor: pointer; font-size: 12px; color: ${C.muted}; padding: 0; }
+.att-detail-row td { border-bottom: 1px solid ${C.divider}; }
+.att-detail { padding: 10px 14px; background: #fafbfd; font-size: 13px; color: #45566b; white-space: normal; }
+.att-detail-block { margin-bottom: 4px; }
+.att-detail-label { font-weight: 600; color: ${C.muted}; }
+
+.att-muted { color: #9ca3af; font-size: 14px; padding: 8px 0; }
+.att-error { color: ${C.red}; font-size: 14px; padding: 8px 0; }
+.att-empty { color: ${C.muted}; font-size: 14px; padding: 20px; text-align: center;
+  border: 1px dashed ${C.border}; border-radius: 10px; background: #fbfcfe; }
+
+/* ---- modal ---- */
+.att-backdrop { position: fixed; inset: 0; background: rgba(11,42,99,.45);
+  backdrop-filter: blur(2px); display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 16px; z-index: 1000; animation: attFade .15s ease; }
+@keyframes attFade { from { opacity: 0; } to { opacity: 1; } }
+.att-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
+  max-height: 86vh; overflow-y: auto; padding: 22px; box-shadow: 0 24px 60px rgba(11,23,42,.28);
+  animation: attPop .18s cubic-bezier(.2,.8,.2,1); }
+@keyframes attPop { from { transform: translateY(8px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+.att-modal-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; }
+.att-modal-title { margin: 0; font-size: 20px; font-weight: 700; color: ${C.ink}; letter-spacing: -0.01em; }
+.att-close { border: none; background: #eef1f6; color: ${C.muted}; width: 30px; height: 30px;
+  border-radius: 8px; cursor: pointer; font-size: 15px; line-height: 1; transition: all .2s ease; }
+.att-close:hover { background: #e3e7ef; color: ${C.ink}; }
+
+.att-cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.att-cal-title { font-size: 15px; font-weight: 700; color: ${C.ink}; }
+.att-nav-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid ${C.border};
+  background: #fff; color: ${C.ink}; font-size: 18px; line-height: 1; cursor: pointer; transition: all .15s ease; }
+.att-nav-btn:hover:not(:disabled) { background: ${C.surface}; border-color: ${C.primary}; color: ${C.primary}; }
+.att-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.att-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.att-cal-weekhead { margin-bottom: 4px; }
+.att-cal-wd { text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: ${C.muted}; padding: 4px 0; }
+.att-cal-cell { position: relative; min-height: 44px; border-radius: 8px; display: flex;
+  flex-direction: column; align-items: center; justify-content: center; font-size: 14px; color: ${C.ink}; }
+.att-cal-empty { background: transparent; }
+.att-cal-weekend { background: ${C.surface}; color: ${C.muted}; }
+.att-cal-holiday { background: ${C.accentBg}; color: ${C.primary}; font-weight: 700; }
+.att-cal-today { box-shadow: inset 0 0 0 2px ${C.primary}; }
+.att-cal-day { line-height: 1; }
+.att-cal-mark { position: absolute; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: ${C.primary}; }
+
+.att-legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0; }
+.att-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: ${C.muted}; }
+.att-sw { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.att-sw-holiday { background: ${C.accentBg}; border: 1px solid #d7def7; }
+.att-sw-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
+.att-sw-today { background: #fff; box-shadow: inset 0 0 0 2px ${C.primary}; }
+
+.att-cal-list { border-top: 1px solid ${C.divider}; padding-top: 12px; }
+.att-cal-list-head { font-size: 12px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: ${C.muted}; margin-bottom: 8px; }
+.att-cal-list-sub { font-weight: 600; text-transform: none; letter-spacing: 0; }
+.att-holiday-row { display: flex; align-items: center; gap: 12px; padding: 6px 2px; }
+.att-date-badge { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-width: 46px; padding: 4px 0; border-radius: 8px; background: ${C.surface}; border: 1px solid ${C.border}; }
+.att-date-day { font-size: 16px; font-weight: 700; color: ${C.ink}; line-height: 1.1; }
+.att-date-wd { font-size: 10px; color: ${C.muted}; text-transform: uppercase; }
+.att-holiday-name { font-size: 14px; color: ${C.ink}; }
+`;
