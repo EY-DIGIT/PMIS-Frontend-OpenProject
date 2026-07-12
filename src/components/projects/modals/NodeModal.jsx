@@ -884,22 +884,27 @@ const years = [
     alert("Couldn't determine the milestone for this item.");
     return;
   }
+  if (!project?.projectId) {
+    alert("Couldn't determine the project for this item.");
+    return;
+  }
 
   const formData = new FormData();
   formData.append("file", attendanceFile);
 
   try {
     setUploading(true);
-    const token = getToken();   // ← was localStorage.getItem("token")
+    const token = getToken();
 
     const params = new URLSearchParams({
       month: String(selectedMonth),
       year: String(selectedYear),
       milestoneId: milestoneApiId,
+      projectId: project.projectId,
     });
 
     const response = await fetch(
-      `http://10.1.131.199/leaves/api/attendance/monthly?${params.toString()}`,
+      `http://10.1.131.199:8019/api/attendance/monthly?${params.toString()}`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -919,6 +924,49 @@ const years = [
     alert("Failed to upload attendance.");
   } finally {
     setUploading(false);
+  }
+};
+
+const handleHolidayUpload = async () => {
+  if (!holidayFile) {
+    alert("Please select an Excel file.");
+    return;
+  }
+  if (!holidayYear) {
+    alert("Please select a year.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", holidayFile);
+
+  try {
+    setUploadingHoliday(true);
+    const token = getToken();
+
+    const params = new URLSearchParams({ year: String(holidayYear) });
+
+    const response = await fetch(
+      `http://10.1.131.199:8019/api/holidays?${params.toString()}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      }
+    );
+
+    if (!response.ok) throw new Error("Upload failed");
+
+    const data = await response.text();
+    console.log(data);
+    alert("Holiday list uploaded successfully!");
+    setShowHolidayPopup(false);
+    setHolidayFile(null);
+  } catch (error) {
+    console.error(error);
+    alert("Failed to upload holiday list.");
+  } finally {
+    setUploadingHoliday(false);
   }
 };
 console.log("localStorage:", localStorage.getItem("token"));
@@ -967,6 +1015,10 @@ console.log("getToken():", getToken());
     ro.observe(el);
     return () => ro.disconnect();
   }, [asPage, isActivityEdit]);
+  const [showHolidayPopup, setShowHolidayPopup] = useState(false);
+const [holidayYear, setHolidayYear] = useState("");
+const [holidayFile, setHolidayFile] = useState(null);
+const [uploadingHoliday, setUploadingHoliday] = useState(false);
 
   const boxStyle = isActivityEdit
     ? {
@@ -1138,6 +1190,18 @@ console.log("getToken():", getToken());
     }}
   >
     Leave Management
+  </button>
+  <button
+    type="button"
+    onClick={() => setShowHolidayPopup(true)}
+    style={{
+      border: "none", cursor: "pointer", padding: "8px 16px",
+      fontSize: 14, lineHeight: 1, borderRadius: 4, color: "#fff",
+      background: "linear-gradient(90deg, #0b3c88, #129ab8)",
+      whiteSpace: "nowrap",
+    }}
+  >
+    Holiday List Upload
   </button>
   <button
     type="button"
@@ -1769,6 +1833,82 @@ console.log("getToken():", getToken());
           disabled={uploading}
         >
           {uploading ? "Uploading..." : "Upload"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+{/* Holiday List Upload */}
+{showHolidayPopup && (
+  <div
+    style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.4)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    }}
+  >
+    <div
+      style={{
+        width: 450,
+        background: "#fff",
+        borderRadius: 8,
+        padding: 24,
+      }}
+    >
+      <h3>Upload Holiday List</h3>
+
+      <div style={{ marginTop: 20 }}>
+        <label>Year</label>
+        <select
+          value={holidayYear}
+          onChange={(e) => setHolidayYear(e.target.value)}
+          className="uidai-select"
+        >
+          <option value="" disabled>
+            Select Year
+          </option>
+          {years.map((year) => (
+            <option key={year} value={year}>
+              {year}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ marginTop: 15 }}>
+        <label>Holiday Excel</label>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => setHolidayFile(e.target.files[0])}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 10,
+          marginTop: 25,
+        }}
+      >
+        <button
+          className="uidai-btn uidai-btn--cancel"
+          onClick={() => setShowHolidayPopup(false)}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="uidai-btn"
+          onClick={handleHolidayUpload}
+          disabled={uploadingHoliday}
+        >
+          {uploadingHoliday ? "Uploading..." : "Upload"}
         </button>
       </div>
     </div>
