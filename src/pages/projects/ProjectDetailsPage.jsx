@@ -108,6 +108,16 @@ function mapApiProject(p) {
     actualEndDate: stripTime(p.actualEndDate),
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     parentId: p.parentId || null,
+    /* Leave / attendance configuration bag — surfaced/edited via the
+       "Leave Config" action. Keep the nested shape the backend returns. */
+    config: (p.config && typeof p.config === "object") ? { ...p.config } : {
+      halfDayHours: null,
+      attendanceCaptured: null,
+      sandwichLeaveApplied: null,
+      leavesPerFrequencyCount: null,
+      leavesFrequency: null,
+      proratedLeavesApplied: null
+    },
     milestones: [],
     auditLogs: [],
     resources: [],
@@ -147,6 +157,7 @@ function mergeIntoStore(mapped) {
           actualEndDate: mapped.actualEndDate,
           vendors: mapped.vendors,
           parentId: mapped.parentId,
+          config: mapped.config,
           documents: mapped.documents
         });
         if (projectsStore.refresh) projectsStore.refresh();
@@ -1057,6 +1068,12 @@ export default function ProjectDetailsPage() {
   onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/attendance`),
   visible: true
 },
+{
+  key: "leave-config",
+  label: "Leave Policy Configure",
+  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/leave-config`),
+  visible: true
+},
     {
       key: "Severity And LD Configure",
       label: "Severity And LD Configure",
@@ -1402,6 +1419,7 @@ export default function ProjectDetailsPage() {
         onCancel={() => setDeleteOpen(false)}
         onConfirm={confirmDelete}
       />
+
 
       {documentsOpen && (
         <div className="uidai-modal">

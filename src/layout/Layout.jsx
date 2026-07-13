@@ -117,6 +117,13 @@ function resolveNavTitle(segments) {
         tooltip: "Map SLA masters to an activity, edit mappings, and evaluate SLAs."
       };
     }
+    // /projects/:id/leave-config       → leave & attendance policy
+    if (segments[2] === "leave-config") {
+      return {
+        label: "Leave Policy Configure",
+        tooltip: "Configure leave & attendance rules for this project."
+      };
+    }
 
     // /projects/:id                    → detail
     return {

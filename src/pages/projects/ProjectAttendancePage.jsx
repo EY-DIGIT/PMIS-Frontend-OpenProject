@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
+import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
+import { getToken } from "../../api/auth";
 import "../../styles/global.css";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
@@ -116,10 +118,42 @@ export default function ProjectAttendancePage() {
   const [holidayLoading, setHolidayLoading] = useState(false);
   const [holidayError, setHolidayError] = useState(null);
 
+  // Resource-based milestones + Leave Management upload modal
+  const [milestones, setMilestones] = useState([]);
+  const [milestonesLoading, setMilestonesLoading] = useState(false);
+  const [milestonesError, setMilestonesError] = useState(null);
+  // The milestone whose Leave Management modal is open (null = closed).
+  const [leaveMilestone, setLeaveMilestone] = useState(null);
+
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
     return () => clearPageContext();
   }, [project?.projectName]);
+
+  // Resource-based milestones — only milestones with isResourceBased === true
+  // are eligible for attendance / leave uploads, so that's all we list.
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    (async () => {
+      setMilestonesLoading(true);
+      setMilestonesError(null);
+      try {
+        const list = await loadMilestonesForProject(projectId);
+        if (active) setMilestones(Array.isArray(list) ? list : []);
+      } catch (err) {
+        if (active) setMilestonesError(err?.message || "Failed to load milestones");
+      } finally {
+        if (active) setMilestonesLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+
+  const resourceMilestones = useMemo(
+    () => milestones.filter((m) => m.isResourceBased === true),
+    [milestones]
+  );
 
   // Yearly summary (month=all) — fetched once per year, filtered client-side.
   useEffect(() => {
@@ -241,6 +275,61 @@ export default function ProjectAttendancePage() {
         </div>
       </div>
 
+      {/* Resource-based milestones — Leave Management */}
+      <section style={{ marginBottom: 28 }}>
+        <h2 className="att-section-title">Resource-based milestones</h2>
+        {milestonesLoading && <div className="att-muted">Loading milestones…</div>}
+        {milestonesError && <div className="att-error">{milestonesError}</div>}
+        {!milestonesLoading && !milestonesError && resourceMilestones.length === 0 && (
+          <div className="att-empty">No resource-based milestones for this project.</div>
+        )}
+        {!milestonesLoading && !milestonesError && resourceMilestones.length > 0 && (
+          <div className="uidai-pmis-card att-card">
+            <div className="att-table-wrap">
+              <table className="att-table">
+                <thead>
+                  <tr>
+                    <th className="att-th">Code</th>
+                    <th className="att-th">Milestone</th>
+                    <th className="att-th">Start</th>
+                    <th className="att-th">End</th>
+                    <th className="att-th">Status</th>
+                    <th className="att-th att-num">Leave Management</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resourceMilestones.map((m) => (
+                    <tr className="att-row" key={m.apiId || m.uid}>
+                      <td className="att-td">
+                        <code className="att-code">{m.serverDisplayCode || m.id || "—"}</code>
+                      </td>
+                      <td className="att-td att-strong">{m.name || "—"}</td>
+                      <td className="att-td">{m.startDate || "—"}</td>
+                      <td className="att-td">{m.endDate || "—"}</td>
+                      <td className="att-td">{m.status || "—"}</td>
+                      <td className="att-td att-num">
+                        <button
+                          className="att-btn-primary"
+                          onClick={() => setLeaveMilestone(m)}
+                          disabled={!m.apiId}
+                          title={
+                            m.apiId
+                              ? "Upload attendance for this milestone"
+                              : "Milestone must be saved before uploading attendance"
+                          }
+                        >
+                          Leave Management
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </section>
+
       {/* Controls */}
       <div className="att-toolbar">
         <div className="att-controls">
@@ -320,6 +409,191 @@ export default function ProjectAttendancePage() {
           onClose={() => setHolidayOpen(false)}
         />
       )}
+
+      {leaveMilestone && (
+        <LeaveUploadModal
+          projectId={projectId}
+          milestone={leaveMilestone}
+          onClose={() => setLeaveMilestone(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =====================================================================
+   Leave Management — per-milestone attendance Excel upload.
+   Mirrors the milestone-modal upload: POST /api/attendance/monthly with
+   month, year, milestoneId and projectId, plus the Excel file.
+   ===================================================================== */
+function LeaveUploadModal({ projectId, milestone, onClose }) {
+  const [month, setMonth] = useState("");
+  const [uploadYear, setUploadYear] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [rateYear, setRateYear] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  // Rate-year options (Year-1, Year-2, …) — as many as the milestone spans,
+  // falling back to 5 when the dates can't be resolved.
+  const rateYearOptions = useMemo(() => {
+    const sy = parseInt(String(milestone?.startDate || "").slice(0, 4), 10);
+    const ey = parseInt(String(milestone?.endDate || "").slice(0, 4), 10);
+    const count =
+      Number.isFinite(sy) && Number.isFinite(ey) && ey >= sy
+        ? Math.min(10, ey - sy + 1)
+        : 5;
+    return Array.from({ length: count }, (_, i) => i + 1);
+  }, [milestone]);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const upload = async () => {
+    setError(null);
+    if (!file) { setError("Please select an Excel file."); return; }
+    if (!month || !uploadYear) { setError("Please select both month and year."); return; }
+    if (!startDate || !endDate) { setError("Please select both start and end date."); return; }
+    if (endDate < startDate) { setError("End date cannot be earlier than start date."); return; }
+    if (!rateYear) { setError("Please select a rate year."); return; }
+    if (!milestone?.apiId) { setError("Couldn't determine the milestone."); return; }
+    if (!projectId) { setError("Couldn't determine the project."); return; }
+
+    const body = new FormData();
+    body.append("file", file);
+    const params = new URLSearchParams({
+      month: String(month),
+      year: String(uploadYear),
+      startDate: String(startDate),
+      endDate: String(endDate),
+      rateYear: String(rateYear),
+      milestoneId: milestone.apiId,
+      projectId,
+    });
+
+    try {
+      setUploading(true);
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/attendance/monthly?${params.toString()}`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body,
+      });
+      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+      setDone(true);
+    } catch (err) {
+      setError(err?.message || "Failed to upload attendance.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true" aria-label="Leave Management"
+        style={{ maxWidth: 540 }}>
+        <div className="att-modal-head">
+          <div>
+            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Leave Management</div>
+            <h2 className="att-modal-title">Upload Attendance</h2>
+          </div>
+          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="att-muted" style={{ paddingTop: 0, marginBottom: 12 }}>
+          {milestone.serverDisplayCode || milestone.id ? (
+            <><code className="att-code">{milestone.serverDisplayCode || milestone.id}</code>{" "}</>
+          ) : null}
+          {milestone.name}
+        </div>
+
+        {done ? (
+          <>
+            <div style={{ padding: "8px 0 16px", color: C.green, fontWeight: 600 }}>
+              Attendance uploaded successfully!
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="att-btn-primary" onClick={onClose}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="att-controls" style={{ marginBottom: 14 }}>
+              <Field label="Month">
+                <select className="att-select" value={month} onChange={(e) => setMonth(e.target.value)}>
+                  <option value="" disabled>Select month</option>
+                  {MONTH_NAMES.slice(1).map((m, i) => (
+                    <option key={m} value={i + 1}>{m}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Year">
+                <select className="att-select" value={uploadYear} onChange={(e) => setUploadYear(e.target.value)}>
+                  <option value="" disabled>Select year</option>
+                  {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </Field>
+            </div>
+
+            <div className="att-controls" style={{ marginBottom: 14 }}>
+              <Field label="Start Date">
+                <input
+                  type="date"
+                  className="att-select"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </Field>
+              <Field label="End Date">
+                <input
+                  type="date"
+                  className="att-select"
+                  value={endDate}
+                  min={startDate || undefined}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </Field>
+              <Field label="Rate Year">
+                <select className="att-select" value={rateYear} onChange={(e) => setRateYear(e.target.value)}>
+                  <option value="" disabled>Select rate year</option>
+                  {rateYearOptions.map((n) => (
+                    <option key={n} value={n}>Year-{n}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <Field label="Attendance Excel">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                style={{ fontSize: 14 }}
+              />
+            </Field>
+
+            {error && <div className="att-error">{error}</div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+              <button className="att-btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
+              <button className="att-btn-primary" onClick={upload} disabled={uploading}>
+                {uploading ? "Uploading…" : "Upload"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -726,6 +1000,14 @@ const ATT_CSS = `
   cursor: pointer; border: 1px solid ${C.border}; background: #fff; color: ${C.ink};
   transition: all .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
 .att-btn-secondary:hover { background: #f9fafb; border-color: ${C.primary}; color: ${C.primary}; }
+.att-btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+
+.att-btn-primary { display: inline-flex; align-items: center; gap: 8px; border: none;
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 9px 16px; cursor: pointer;
+  color: #fff; background: linear-gradient(90deg, ${C.primary}, #129ab8);
+  transition: filter .2s ease, opacity .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,.08); white-space: nowrap; }
+.att-btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+.att-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 
 .att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; }
 .att-section-head { display: flex; align-items: flex-end; justify-content: space-between;

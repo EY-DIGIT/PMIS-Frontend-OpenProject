@@ -94,9 +94,11 @@ async function patchAfterCreate(updatePath, ui, opts) {
 
 // ── Milestones ─────────────────────────────────────────────
 export async function createMilestone(projectUuid, ui) {
+  const body = minimalCreateBody(ui);
+  if (typeof ui.isResourceBased === 'boolean') body.isResourceBased = ui.isResourceBased;
   const created = await api.post(
     ENDPOINTS.projects.milestoneCreate(projectUuid),
-    minimalCreateBody(ui)
+    body
   );
   if (hasRichFields(ui)) {
     const id = newIdFrom(created);
@@ -106,7 +108,9 @@ export async function createMilestone(projectUuid, ui) {
 }
 
 export async function updateMilestone(id, ui) {
-  return api.patch(ENDPOINTS.milestones.update(id), nodePatchBody(ui));
+  const body = nodePatchBody(ui);
+  if (typeof ui.isResourceBased === 'boolean') body.isResourceBased = ui.isResourceBased;
+  return api.patch(ENDPOINTS.milestones.update(id), body);
 }
 
 export async function removeMilestone(id) {

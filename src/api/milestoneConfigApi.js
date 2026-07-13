@@ -198,6 +198,9 @@ function buildMilestonePayload(project, formData) {
   /* Milestone payment type from the payment-types master (partial_payment |
      complete_payment). Nullable — omitted from the body when unset. */
   if (formData.paymentType) body.paymentType = formData.paymentType;
+  /* Milestone-only flag: whether the milestone is resource-based. Mandatory
+     on the form, so it's a boolean here — sent on both create and update. */
+  if (typeof formData.isResourceBased === "boolean") body.isResourceBased = formData.isResourceBased;
   return body;
 }
 
@@ -592,7 +595,8 @@ export async function createMilestoneApi(project, formData) {
       startDate: toMilestoneIsoStart(formData.startDate),
       endDate: toMilestoneIsoEnd(formData.endDate),
       dependsOn: resolveDepDisplayIds(project, formData.dependsOn),
-      priority: formData.priority || null
+      priority: formData.priority || null,
+      isResourceBased: formData.isResourceBased
     }
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.milestones.comments, created, formData);

@@ -166,6 +166,12 @@ function makeDefaultForm(kind, node, mode, parentNode) {
        the value comes from the payment-types master (partial_payment,
        complete_payment); empty means "not set". */
     paymentType: kind === "milestone" ? (n.paymentType || "") : "",
+    /* Milestone-only: whether this milestone is resource-based. Mandatory
+       on add — stays null until the user explicitly picks Yes/No. */
+    isResourceBased:
+      kind === "milestone"
+        ? (typeof n.isResourceBased === "boolean" ? n.isResourceBased : null)
+        : null,
     type: inheritFromParent
       ? parentNode.type
       : n.type || (kind === "milestone" ? "" : "Standard Type"),
@@ -281,46 +287,12 @@ export default function NodeModal({
     }
     return null;
   }, [open, project, kind, mode, nodeUid, parentUid]);
-  /* Resolve the enclosing Milestone for this node so the attendance /
-   leave upload can be scoped to it. For a milestone modal the node IS
-   the milestone; for activity / task / subtask we walk up the tree. */
-const enclosingMilestone = useMemo(() => {
-  if (!open || !project) return null;
-  if (kind === "milestone") return node || null;
-  const targetUid =
-    (mode === "edit" || mode === "view") && nodeUid ? nodeUid : parentUid;
-  if (!targetUid) return null;
-  const loc = locateNode(project, targetUid);
-  if (!loc) return null;
-  if (loc.kind === "milestone") return loc.node;
-  for (const step of (loc.chain || [])) {
-    if (step && step.kind === "milestone") return step.node;
-  }
-  // An activity's direct parent is the milestone.
-  if (loc.parent && loc.kind === "activity") return loc.parent;
-  return null;
-}, [open, project, kind, mode, nodeUid, parentUid, node]);
-
-const milestoneApiId = enclosingMilestone?.apiId || "";
-
   /* Users assignable to this task / subtask — fetched from the vendor's
      assignable-users endpoint, scoped to the enclosing activity's vendor.
      GET /users/api/v3/vendors/{vendorId}/assignable-users */
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
   const assignableVendorId = enclosingActivity?.vendorId || "";
-  const [showPopup, setShowPopup] = useState(false);
-const [selectedMonth, setSelectedMonth] = useState("");
-const [selectedYear, setSelectedYear] = useState("");
-const [attendanceFile, setAttendanceFile] = useState(null);
-const [uploading, setUploading] = useState(false);
-const currentYear = new Date().getFullYear();
-
-const years = [
-  currentYear,
-  ...Array.from({ length: 20 }, (_, i) => currentYear + i + 1), // Future years
-  ...Array.from({ length: currentYear - 2000 }, (_, i) => currentYear - (i + 1)), // Past years
-];
   useEffect(() => {
     if (!open || (kind !== "task" && kind !== "subtask")) {
       setAssignableUsers([]);
@@ -812,6 +784,11 @@ const years = [
     // Validate Owner Division + Concerned Division "Others" fields for
     // activities — backend needs the user-supplied text whenever an
     // "Others" code is selected.
+    if (kind === "milestone" && typeof form.isResourceBased !== "boolean") {
+      setSaveError("Please select whether this milestone is resource based.");
+      return;
+    }
+
     if (kind === "activity") {
       const divList = safeArray(divisions);
 
@@ -871,106 +848,6 @@ const years = [
       setPosting(false);
     }
   }
- const handleAttendanceUpload = async () => {
-  if (!attendanceFile) {
-    alert("Please select an Excel file.");
-    return;
-  }
-  if (!selectedMonth || !selectedYear) {
-    alert("Please select both month and year.");
-    return;
-  }
-  if (!milestoneApiId) {
-    alert("Couldn't determine the milestone for this item.");
-    return;
-  }
-  if (!project?.projectId) {
-    alert("Couldn't determine the project for this item.");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("file", attendanceFile);
-
-  try {
-    setUploading(true);
-    const token = getToken();
-
-    const params = new URLSearchParams({
-      month: String(selectedMonth),
-      year: String(selectedYear),
-      milestoneId: milestoneApiId,
-      projectId: project.projectId,
-    });
-
-    const response = await fetch(
-      `http://10.1.131.199:8019/api/attendance/monthly?${params.toString()}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      }
-    );
-
-    if (!response.ok) throw new Error("Upload failed");
-
-    const data = await response.text();
-    console.log(data);
-    alert("Attendance uploaded successfully!");
-    setShowPopup(false);
-    setAttendanceFile(null);
-  } catch (error) {
-    console.error(error);
-    alert("Failed to upload attendance.");
-  } finally {
-    setUploading(false);
-  }
-};
-
-const handleHolidayUpload = async () => {
-  if (!holidayFile) {
-    alert("Please select an Excel file.");
-    return;
-  }
-  if (!holidayYear) {
-    alert("Please select a year.");
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("file", holidayFile);
-
-  try {
-    setUploadingHoliday(true);
-    const token = getToken();
-
-    const params = new URLSearchParams({ year: String(holidayYear) });
-
-    const response = await fetch(
-      `http://10.1.131.199:8019/api/holidays?${params.toString()}`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      }
-    );
-
-    if (!response.ok) throw new Error("Upload failed");
-
-    const data = await response.text();
-    console.log(data);
-    alert("Holiday list uploaded successfully!");
-    setShowHolidayPopup(false);
-    setHolidayFile(null);
-  } catch (error) {
-    console.error(error);
-    alert("Failed to upload holiday list.");
-  } finally {
-    setUploadingHoliday(false);
-  }
-};
-console.log("localStorage:", localStorage.getItem("token"));
-console.log("getToken():", getToken());
 
   const navigate = useNavigate();
 
@@ -1015,10 +892,6 @@ console.log("getToken():", getToken());
     ro.observe(el);
     return () => ro.disconnect();
   }, [asPage, isActivityEdit]);
-  const [showHolidayPopup, setShowHolidayPopup] = useState(false);
-const [holidayYear, setHolidayYear] = useState("");
-const [holidayFile, setHolidayFile] = useState(null);
-const [uploadingHoliday, setUploadingHoliday] = useState(false);
 
   const boxStyle = isActivityEdit
     ? {
@@ -1179,30 +1052,8 @@ const [uploadingHoliday, setUploadingHoliday] = useState(false);
       </button>
     );
   })()}
-  <button
-    type="button"
-    onClick={() => setShowPopup(true)}
-    style={{
-      border: "none", cursor: "pointer", padding: "8px 16px",
-      fontSize: 14, lineHeight: 1, borderRadius: 4, color: "#fff",
-      background: "linear-gradient(90deg, #0b3c88, #129ab8)",
-      whiteSpace: "nowrap",
-    }}
-  >
-    Leave Management
-  </button>
-  <button
-    type="button"
-    onClick={() => setShowHolidayPopup(true)}
-    style={{
-      border: "none", cursor: "pointer", padding: "8px 16px",
-      fontSize: 14, lineHeight: 1, borderRadius: 4, color: "#fff",
-      background: "linear-gradient(90deg, #0b3c88, #129ab8)",
-      whiteSpace: "nowrap",
-    }}
-  >
-    Holiday List Upload
-  </button>
+  {/* Leave Management moved to the Attendance page; Holiday List Upload
+      moved to Master Data › Holidays. Neither lives in this modal now. */}
   <button
     type="button"
     aria-label="Close"
@@ -1416,6 +1267,37 @@ const [uploadingHoliday, setUploadingHoliday] = useState(false);
               {paymentTypesLoading && (
                 <div className="uidai-auto-hint">Loading payment types…</div>
               )}
+            </div>
+          )}
+
+          {kind === "milestone" && (
+            <div className="uidai-field">
+              <label className="uidai-field__label">
+                Resource Based <span className="uidai-required-project">*</span>
+              </label>
+              <select
+                className="uidai-select"
+                value={
+                  form.isResourceBased === true
+                    ? "true"
+                    : form.isResourceBased === false
+                    ? "false"
+                    : ""
+                }
+                onChange={(e) =>
+                  updateField({
+                    isResourceBased:
+                      e.target.value === ""
+                        ? null
+                        : e.target.value === "true"
+                  })
+                }
+                disabled={dis}
+              >
+                <option value="">— Select —</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
             </div>
           )}
 
@@ -1726,198 +1608,10 @@ const [uploadingHoliday, setUploadingHoliday] = useState(false);
   </button>
 </div>
 
-{/* Leave Management Confirmation */}
-{showPopup && (
-  <div
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.4)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 9999,
-    }}
-  >
-    <div
-      style={{
-        width: 450,
-        background: "#fff",
-        borderRadius: 8,
-        padding: 24,
-      }}
-    >
-      <h3>Upload Attendance</h3>
-
-      <div style={{ marginTop: 20 }}>
-        <label>Month</label>
-
-        <select
-  value={selectedMonth}
-  onChange={(e) => setSelectedMonth(e.target.value)}
-  className="uidai-select"
->
-  <option value="" disabled>
-    Select Month
-  </option>
-
-  {[
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ].map((m, index) => (
-    <option key={index} value={index + 1}>
-      {m}
-    </option>
-  ))}
-</select>
-      </div>
-
-      <div style={{ marginTop: 15 }}>
-        <label>Year</label>
-
-        <select
-  value={selectedYear}
-  onChange={(e) => setSelectedYear(e.target.value)}
-  className="uidai-select"
->
-  <option value="" disabled>
-    Select Year
-  </option>
-
-  {years.map((year) => (
-    <option key={year} value={year}>
-      {year}
-    </option>
-  ))}
-</select>
-      </div>
-
-      <div style={{ marginTop: 15 }}>
-        <label>Attendance Excel</label>
-
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={(e) => setAttendanceFile(e.target.files[0])}
-        />
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 10,
-          marginTop: 25,
-        }}
-      >
-        <button
-          className="uidai-btn uidai-btn--cancel"
-          onClick={() => setShowPopup(false)}
-        >
-          Cancel
-        </button>
-
-        <button
-          className="uidai-btn"
-          onClick={handleAttendanceUpload}
-          disabled={uploading}
-        >
-          {uploading ? "Uploading..." : "Upload"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
-{/* Holiday List Upload */}
-{showHolidayPopup && (
-  <div
-    style={{
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.4)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 9999,
-    }}
-  >
-    <div
-      style={{
-        width: 450,
-        background: "#fff",
-        borderRadius: 8,
-        padding: 24,
-      }}
-    >
-      <h3>Upload Holiday List</h3>
-
-      <div style={{ marginTop: 20 }}>
-        <label>Year</label>
-        <select
-          value={holidayYear}
-          onChange={(e) => setHolidayYear(e.target.value)}
-          className="uidai-select"
-        >
-          <option value="" disabled>
-            Select Year
-          </option>
-          {years.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ marginTop: 15 }}>
-        <label>Holiday Excel</label>
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={(e) => setHolidayFile(e.target.files[0])}
-        />
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 10,
-          marginTop: 25,
-        }}
-      >
-        <button
-          className="uidai-btn uidai-btn--cancel"
-          onClick={() => setShowHolidayPopup(false)}
-        >
-          Cancel
-        </button>
-
-        <button
-          className="uidai-btn"
-          onClick={handleHolidayUpload}
-          disabled={uploadingHoliday}
-        >
-          {uploadingHoliday ? "Uploading..." : "Upload"}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
 
 </div>
 </div>
-      
+
   );
 }
 

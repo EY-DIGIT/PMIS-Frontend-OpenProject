@@ -614,6 +614,11 @@ export default function MilestoneConfigPage({ mode }) {
       return;
     }
 
+    if (kind === "milestone" && typeof formData.isResourceBased !== "boolean") {
+      uiStore.showMessage("Please select whether this milestone is resource based.");
+      return;
+    }
+
     if (kind === "activity") {
       if (!formData.ownerDivision) {
         uiStore.showMessage("Please select Owner Division.");
@@ -739,6 +744,9 @@ export default function MilestoneConfigPage({ mode }) {
       uiPayload.ccnValue = formData.category === "ccn"
         ? Math.max(0, Number(formData.ccnValue) || 0)
         : 0;
+    }
+    if (kind === "milestone") {
+      uiPayload.isResourceBased = formData.isResourceBased;
     }
     if (kind === "activity") {
       uiPayload.linkedToPayment = !!formData.linkedToPayment;
@@ -902,6 +910,7 @@ export default function MilestoneConfigPage({ mode }) {
           newNode.category = formData.category || "original";
           newNode.ccnValue = formData.category === "ccn"
             ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
+          newNode.isResourceBased = formData.isResourceBased;
         }
 
         if (kind === "milestone") {
@@ -1007,6 +1016,7 @@ export default function MilestoneConfigPage({ mode }) {
           node.category = formData.category || "original";
           node.ccnValue = formData.category === "ccn"
             ? Math.max(0, Number(formData.ccnValue) || 0) : 0;
+          node.isResourceBased = formData.isResourceBased;
         }
         node.comments = safeArray(formData.comments);
 

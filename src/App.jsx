@@ -34,6 +34,7 @@ import MasterVendors from './pages/master/MasterVendors';
 import MasterUsers from './pages/master/MasterUsers';
 import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
+import MasterHolidays from './pages/master/MasterHolidays';
 import ApprovalInboxConcernedDivision from './pages/approvals/ApprovalInboxConcernedDivision';
 import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityOwner';
 import MeetingsListPage from './pages/meetings/MeetingsListPage';
@@ -66,6 +67,7 @@ import SlaOnboardingPage from "./pages/sla/SlaOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
+import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
@@ -120,6 +122,7 @@ function Breadcrumbs() {
         finance: "Finance",
         resource: "Resource",
         attendance: "Attendance",
+        "leave-config": "Leave Policy Configure",
         "activities-started": "Activity Started List",
         vendors: "Organizations",
         users: "Users",
@@ -254,6 +257,12 @@ function Breadcrumbs() {
     // from the breadcrumb yet — the heading already lives in the navbar,
     // so the lone "Projects › <code>" trail is noise. Hide it for now.
     if (segments[0] === "projects" && segments.length === 2 && segments[1] !== "add") {
+        return null;
+    }
+
+    // Leave Policy Configure — heading + project name already live in the
+    // navbar, so the breadcrumb trail is redundant noise here. Hide it.
+    if (segments[0] === "projects" && segments[2] === "leave-config") {
         return null;
     }
 
@@ -747,6 +756,7 @@ export default function MainApp() {
                                                 <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
                                                 <Route path="/projects/:projectId/resource" element={<RequirePermission action="viewProjects"><ProjectResourcePage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/attendance" element={<RequirePermission action="viewProjects"><ProjectAttendancePage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
@@ -770,6 +780,7 @@ export default function MainApp() {
                                                 <Route path="master/divisions" element={<RequirePermission action="viewDivisions"><MasterDivisions /></RequirePermission>} />
                                                 <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
+                                                <Route path="master/holidays" element={<RequirePermission action="viewMasterData"><MasterHolidays /></RequirePermission>} />
                                                 {/* Approval Inbox — visible only to the division_approver
                                                     workflow role, matching the sidebar. project_admin,
                                                     project_member and org_admin are blocked here too. */}

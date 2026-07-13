@@ -137,6 +137,13 @@ export function mapApiProject(p) {
     actualEndDate: stripTime(p.actualEndDate),
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     parentId: p.parentId || null,
+    /* Leave / attendance configuration bag. Backend key is `leaveConfig`
+       (older payloads used `config`); surfaced/edited via the Leave Policy
+       Configure page. */
+    config: (() => {
+      const raw = p.leaveConfig ?? p.config;
+      return (raw && typeof raw === "object") ? { ...raw } : {};
+    })(),
     milestones: [],
     auditLogs: [],
     resources: []
@@ -177,6 +184,9 @@ export function mapApiMilestoneToNode(m) {
     /* Milestone payment type from the payment-types master (partial_payment |
        complete_payment; nullable) — prefilled in the edit form. */
     paymentType: m.paymentType || "",
+    /* Milestone-only flag: whether the milestone is resource-based. Drives
+       the resource-based milestone list on the Attendance page. */
+    isResourceBased: typeof m.isResourceBased === "boolean" ? m.isResourceBased : null,
     vendor: vendors.length ? vendors[0].name || "" : "",
     dependsOn: rawDeps.slice(),
     /* Snapshot of server display IDs (e.g. "M1", "M2"). The loader keeps

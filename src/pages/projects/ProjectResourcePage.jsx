@@ -66,6 +66,8 @@ export default function ProjectResourcePage() {
 
   // edit drawer
   const [editing, setEditing] = useState(null);
+  // detail view — the resId whose full record is fetched & shown on row click
+  const [viewingId, setViewingId] = useState(null);
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -582,6 +584,8 @@ export default function ProjectResourcePage() {
                 {filtered.map((r) => (
                   <tr
                     key={r.resId}
+                    onClick={() => setViewingId(r.resId)}
+                    title="View resource details"
                     style={{
                       borderBottom: "1px solid #eef1f6",
                       transition: "background-color 0.2s ease, box-shadow 0.2s ease",
@@ -643,7 +647,7 @@ export default function ProjectResourcePage() {
                     </td>
                     <td style={{ padding: "13px 16px", verticalAlign: "middle", textAlign: "center" }}>
                       <button
-                        onClick={() => setEditing(r)}
+                        onClick={(e) => { e.stopPropagation(); setEditing(r); }}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -687,6 +691,257 @@ export default function ProjectResourcePage() {
           onSave={saveResource}
         />
       )}
+
+      {/* Detail drawer — fetches GET /api/resources/{resId} on open */}
+      {viewingId && (
+        <ResourceDetailDrawer
+          resId={viewingId}
+          onClose={() => setViewingId(null)}
+          onEdit={(r) => { setViewingId(null); setEditing(r); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =====================================================================
+   Detail drawer — GET /api/resources/{resId}. Opened by clicking a row;
+   shows the resource's full record fetched fresh from the server.
+   ===================================================================== */
+function ResourceDetailDrawer({ resId, onClose, onEdit }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+          { headers: { accept: "*/*" }, signal: controller.signal }
+        );
+        if (!res.ok) throw new Error(`Couldn't load resource (${res.status})`);
+        const json = await res.json();
+        if (active) setData(json);
+      } catch (e) {
+        if (active && e.name !== "AbortError")
+          setError(e.message || "Couldn't load resource");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [resId]);
+
+  const rows = data
+    ? [
+        { label: "Resource ID", value: data.resId },
+        { label: "Full name", value: data.name || "—" },
+        { label: "Email", value: data.emailId || "—" },
+        { label: "Designation", value: data.designationType || "—" },
+        { label: "Rate card", value: formatMoney(data.rateCard) },
+        { label: "Date of joining", value: formatDate(data.dateOfJoining) },
+        { label: "Last date", value: formatDate(data.lastDate) },
+        { label: "Status", value: data.active ? "Active" : "Inactive" },
+        { label: "Project ID", value: data.projectId || "—" },
+      ]
+    : [];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(11, 42, 99, 0.45)",
+        backdropFilter: "blur(2px)",
+        display: "flex",
+        justifyContent: "flex-end",
+        zIndex: 1000,
+        animation: "fadeIn 0.15s ease",
+      }}
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+               @keyframes slideIn { from { transform: translateX(24px); opacity: 0.6; } to { transform: translateX(0); opacity: 1; } }
+               .drawer { animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }`}</style>
+      <aside
+        className="drawer"
+        style={{
+          width: "min(440px, 100%)",
+          height: "100%",
+          background: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "-16px 0 40px rgba(11, 23, 42, 0.18)",
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Resource ${resId}`}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          padding: "22px 24px",
+          borderBottom: "1px solid #dbe5f1",
+          gap: "16px",
+        }}>
+          <div>
+            <div style={{ fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0b3c88", marginBottom: "4px" }}>
+              Resource details
+            </div>
+            <h2 style={{ margin: "2px 0 0", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.01em", color: "#1e2a3a" }}>
+              {data?.name || `#${resId}`}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "#eef1f6",
+              color: "#6b7a90",
+              width: "30px",
+              height: "30px",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "18px",
+              lineHeight: "1",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#e3e7ef";
+              e.currentTarget.style.color = "#1e2a3a";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#eef1f6";
+              e.currentTarget.style.color = "#6b7a90";
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "22px 24px", overflowY: "auto", flex: 1 }}>
+          {loading ? (
+            <div style={{ color: "#6b7a90", fontSize: "14px", padding: "8px 0" }}>Loading…</div>
+          ) : error ? (
+            <div style={{
+              background: "#fde8e8",
+              border: "1px solid #f5c9c9",
+              color: "#d32f2f",
+              borderRadius: "10px",
+              padding: "12px 14px",
+              fontSize: "13.5px",
+            }}>
+              {error}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+              {rows.map((row, i) => (
+                <div
+                  key={row.label}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "16px",
+                    padding: "12px 2px",
+                    borderBottom: i === rows.length - 1 ? "none" : "1px solid #eef1f6",
+                  }}
+                >
+                  <span style={{ fontSize: "13px", color: "#6b7a90", fontWeight: 600 }}>{row.label}</span>
+                  <span style={{
+                    fontSize: "14px",
+                    color: "#1e2a3a",
+                    fontWeight: 600,
+                    textAlign: "right",
+                    wordBreak: "break-word",
+                    fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {row.label === "Status" ? (
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        padding: "4px 12px",
+                        borderRadius: "999px",
+                        background: data.active ? "#e6f6ee" : "#eef1f6",
+                        color: data.active ? "#0f9d58" : "#6b7a90",
+                      }}>
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor" }} />
+                        {row.value}
+                      </span>
+                    ) : (
+                      row.value
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: "10px",
+          padding: "16px 24px",
+          borderTop: "1px solid #dbe5f1",
+          background: "#f9fafb",
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              borderRadius: "10px",
+              fontSize: "14px",
+              fontWeight: 600,
+              padding: "9px 14px",
+              cursor: "pointer",
+              border: "1px solid #dbe5f1",
+              background: "#fff",
+              color: "#1e2a3a",
+            }}
+          >
+            Close
+          </button>
+          <button
+            onClick={() => data && onEdit(data)}
+            disabled={!data}
+            style={{
+              borderRadius: "10px",
+              fontSize: "14px",
+              fontWeight: 600,
+              padding: "9px 14px",
+              cursor: data ? "pointer" : "not-allowed",
+              border: "none",
+              background: "#0b3c88",
+              color: "#fff",
+              opacity: data ? 1 : 0.55,
+            }}
+          >
+            Edit
+          </button>
+        </div>
+      </aside>
     </div>
   );
 }

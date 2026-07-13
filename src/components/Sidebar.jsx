@@ -92,6 +92,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const userDataActive = isUnder("/master/users");
   const slaDataActive = isUnder("/sla-masters");
   const divisionDataActive = isUnder("/master/divisions");
+  const holidayDataActive = isUnder("/master/holidays");
 
   const addVendorActive = isUnder("/vendors/new");
   const searchVendorActive = isUnder("/vendors") && !addVendorActive;
@@ -295,6 +296,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                   <span className="pmis-text">Divisions</span>
                 </div>
               )}
+              <div
+                className={holidayDataActive ? "active" : ""}
+                onClick={() => navigate("/master/holidays")}
+              >
+                <FiCalendar size={ICON_SIZE} />
+                <span className="pmis-text">Holidays</span>
+              </div>
               <div
                 className={slaDataActive ? "active" : ""}
                 onClick={() => navigate("/sla-masters")}
