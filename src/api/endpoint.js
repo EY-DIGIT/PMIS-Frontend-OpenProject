@@ -318,6 +318,11 @@ export const ENDPOINTS = {
     activityCreate: (milestoneId) =>
       `/projects/api/v3/milestones/${enc(milestoneId)}/activities/create`,
   },
+   resources: {
+    rateCards: (projectId) =>
+`/api/resources/rate-cards?projectId=${enc(projectId)}`,
+    leaveReport: (employeeId) => `/api/reports/leave/${enc(employeeId)}`,
+  },
 
   activities: {
     get: (id) => `/projects/api/v3/activities/${enc(id)}`,

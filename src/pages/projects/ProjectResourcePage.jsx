@@ -9,6 +9,7 @@ import { useParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import "../../styles/global.css";
+import { getToken } from "../../api/auth";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
 
@@ -79,8 +80,9 @@ export default function ProjectResourcePage() {
     setLoading(true);
     setLoadError(null);
     try {
+      const token = getToken();
       const res = await fetch(`${API_BASE}/api/resources`, {
-        headers: { accept: "*/*" },
+        headers: { accept: "*/*" ,...(token ? { Authorization: `Bearer ${token}` } : {})},
       });
       if (!res.ok) throw new Error(`Couldn't load resources (${res.status})`);
       const data = await res.json();
@@ -128,10 +130,11 @@ export default function ProjectResourcePage() {
     setServerSearching(true);
     setServerMsg(null);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
-        { headers: { accept: "*/*" } }
-      );
+      const token = getToken();
+const res = await fetch(
+  `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+  { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+);
       if (res.status === 404) {
         setServerMsg({ type: "warn", text: `No resource found for ${resId}.` });
         return;
@@ -153,14 +156,19 @@ export default function ProjectResourcePage() {
 
   // ---------- save: PUT /api/resources/{resId} ----------
   async function saveResource(updated) {
-    const res = await fetch(
-      `${API_BASE}/api/resources/${encodeURIComponent(updated.resId)}`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", accept: "*/*" },
-        body: JSON.stringify(updated),
-      }
-    );
+    const token = getToken();
+const res = await fetch(
+  `${API_BASE}/api/resources/${encodeURIComponent(updated.resId)}`,
+  {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      accept: "*/*",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(updated),
+  }
+);
     if (!res.ok) throw new Error(`Save failed (${res.status})`);
     const text = await res.text();
     let saved = updated;
@@ -186,17 +194,15 @@ export default function ProjectResourcePage() {
     formData.append("file", file);
 
     try {
-      const res = await fetch(
-        `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(
-          projectId
-        )}`,
-        {
-          method: "POST",
-          headers: { accept: "*/*" },
-          // Don't set Content-Type — the browser adds the multipart boundary.
-          body: formData,
-        }
-      );
+      const token = getToken();
+const res = await fetch(
+  `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
+  {
+    method: "POST",
+    headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  }
+);
       if (!res.ok) throw new Error(`Upload failed (${res.status})`);
       setUploadOk(true);
       await loadResources(); // refresh the table with the newly imported rows
@@ -726,10 +732,11 @@ function ResourceDetailDrawer({ resId, onClose, onEdit }) {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
-          { headers: { accept: "*/*" }, signal: controller.signal }
-        );
+        const token = getToken();
+const res = await fetch(
+  `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+  { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: controller.signal }
+);
         if (!res.ok) throw new Error(`Couldn't load resource (${res.status})`);
         const json = await res.json();
         if (active) setData(json);
