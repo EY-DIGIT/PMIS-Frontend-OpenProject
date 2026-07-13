@@ -2915,6 +2915,15 @@ function PhasePanel({
   const cfPoolPerPeriod = Number(cf.poolPerPeriod) || 0;
   const [cfModalOpen, setCfModalOpen] = useState(false);
   const [poolOpen, setPoolOpen] = useState(false);
+
+
+  /* Recurring-cost schedule (backend-owned) — a dated per-period breakdown
+     of this phase's recurring cost, mirroring the carry-forward pool card.
+     Only phases that carry a recurring cost return a schedule. */
+  const recurringSchedule = Array.isArray(phase.recurringSchedule) ? phase.recurringSchedule : [];
+  const recurringPerPeriod = Number(phase.recurringPerPeriod) || 0;
+  const recurringTotal = Number(phase.recurringTotal) || 0;
+  const [recurringOpen, setRecurringOpen] = useState(false);
   const canApplyFrequency = typeof onApplyFrequency === "function";
   const openFreqModal = () => {
     setFreqStart(toDateInput(phase.startDate));
@@ -3128,6 +3137,74 @@ function PhasePanel({
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {cfPool.map((row, i) => (
+                      <div key={row.periodIndex ?? i} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        gap: 8, fontSize: 12, padding: "5px 8px",
+                        background: "#fff", border: "1px solid var(--uidai-pmis-border)", borderRadius: 6,
+                      }}>
+                        <span style={{ color: "#173e77", fontWeight: 600 }}>
+                          {fmtDMY(row.periodStart)} – {fmtDMY(row.periodEnd)}
+                        </span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 700, color: "#173e77", fontVariantNumeric: "tabular-nums" }}>
+                            {inr(row.amount)}
+                          </span>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999,
+                            background: row.status === "on_invoice" ? "#eef9f0" : "#fff5e9",
+                            color: row.status === "on_invoice" ? "#1b7a42" : "#b54708",
+                            border: `1px solid ${row.status === "on_invoice" ? "#c4e9d0" : "#f5d9b5"}`,
+                          }}>
+                            {row.status === "on_invoice" ? "Invoiced" : "Pending"}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {/* Recurring-cost schedule — this phase's recurring cost spread
+              across its billing periods, shown as a collapsible dated list
+              (same treatment as the carry-forward schedule above). Renders
+              only for phases that carry a recurring cost. */}
+          {recurringSchedule.length > 0 && (
+            <div style={{
+              marginBottom: 12, border: "1px solid #cfe0f5", borderRadius: 8,
+              background: "#f6faff", overflow: "hidden",
+            }}>
+              <button
+                type="button"
+                onClick={() => setRecurringOpen((o) => !o)}
+                aria-expanded={recurringOpen}
+                style={{
+                  width: "100%", border: "none", background: "transparent", cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 8, padding: "10px 12px", textAlign: "left",
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#0b3c88", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span aria-hidden="true">🔁</span>
+                  Recurring Cost Schedule
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999,
+                    background: "#e6eefb", color: "#0b3c88", border: "1px solid #cfe0f5",
+                  }}>
+                    {recurringSchedule.length} {recurringSchedule.length === 1 ? "installment" : "installments"}
+                  </span>
+                </span>
+                <span style={{ fontSize: 12, color: "var(--uidai-pmis-muted)" }}>
+                  {inr(recurringPerPeriod)} / period {recurringOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              {recurringOpen && (
+                <div style={{ padding: "0 12px 12px" }}>
+                  <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", marginBottom: 8 }}>
+                    The recurring cost of {inr(recurringTotal)} is scheduled across this phase's billing periods.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {recurringSchedule.map((row, i) => (
                       <div key={row.periodIndex ?? i} style={{
                         display: "flex", justifyContent: "space-between", alignItems: "center",
                         gap: 8, fontSize: 12, padding: "5px 8px",
