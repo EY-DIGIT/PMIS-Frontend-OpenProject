@@ -4,6 +4,7 @@ import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
 import { getToken } from "../../api/auth";
+import { ENDPOINTS } from "../../api/endpoint";
 import "../../styles/global.css";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
@@ -142,7 +143,7 @@ export default function ProjectAttendancePage() {
         const list = await loadMilestonesForProject(projectId);
         if (active) setMilestones(Array.isArray(list) ? list : []);
       } catch (err) {
-        if (active) setMilestonesError(err?.message || "Failed to load milestones");
+        if (active) setMilestonesError(err?.message || "Failed to loadmilestones");
       } finally {
         if (active) setMilestonesLoading(false);
       }
@@ -164,9 +165,11 @@ export default function ProjectAttendancePage() {
       setSummaryLoading(true);
       setSummaryError(null);
       try {
+        const token = getToken();
         const res = await fetch(
           `${API_BASE}/api/attendance/summary?year=${year}&month=all&projectId=${projectId}`,
-          { signal: controller.signal }
+          { signal: controller.signal, headers: token ? {
+Authorization: `Bearer ${token}` } : {} }
         );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
@@ -190,9 +193,11 @@ export default function ProjectAttendancePage() {
       setQuarterlyLoading(true);
       setQuarterlyError(null);
       try {
+        const token = getToken();
         const res = await fetch(
           `${API_BASE}/api/attendance/quarterly-leave?year=${year}&quarter=${quarter}&projectId=${projectId}`,
-          { signal: controller.signal }
+          { signal: controller.signal, headers: token ? {
+Authorization: `Bearer ${token}` } : {} }
         );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
@@ -207,7 +212,7 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, year, quarter]);
 
-  // Holidays + calendar — lazy fetch when modal opens (or year changes while open).
+  // Holidays + calendar — lazy fetch when modal opens (or yearchanges while open).
   useEffect(() => {
     if (!holidayOpen) return;
     let active = true;
@@ -217,10 +222,13 @@ export default function ProjectAttendancePage() {
       setHolidayError(null);
       try {
         const [hRes, cRes] = await Promise.all([
-          fetch(`${API_BASE}/api/holidays/${year}?month=all`, { signal: controller.signal }),
-          fetch(`${API_BASE}/api/calendar/${year}?month=all`, { signal: controller.signal }),
+          fetch(`${API_BASE}/api/holidays/${year}?month=all`, {
+signal: controller.signal }),
+          fetch(`${API_BASE}/api/calendar/${year}?month=all`, {
+signal: controller.signal }),
         ]);
-        if (!hRes.ok) throw new Error(`Holidays request failed (${hRes.status})`);
+        if (!hRes.ok) throw new Error(`Holidays request failed
+(${hRes.status})`);
         const hData = await hRes.json();
         const cData = cRes.ok ? await cRes.json() : null;
         if (active) {
@@ -239,6 +247,28 @@ export default function ProjectAttendancePage() {
 
   const toggleRow = (key) =>
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  const [leaveDetail, setLeaveDetail] = useState(null);
+
+  const openLeaveDetail = async (emp, monthNum, yearNum) => {
+    const quarter = Math.ceil(monthNum / 3);
+    setLeaveDetail({ employee: emp, monthNum, year: yearNum, data:
+null, loading: true, error: null });
+    try {
+      const token = getToken();
+      const params = new URLSearchParams({ year: yearNum, quarter, projectId });
+      const res = await fetch(
+        `${API_BASE}${ENDPOINTS.resources.leaveReport(emp.attendanceId)}?${params}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const data = await res.json();
+      setLeaveDetail((prev) => prev ? { ...prev, data, loading: false } : null);
+    } catch (err) {
+      setLeaveDetail((prev) => prev ? { ...prev, loading: false,
+error: err?.message || "Failed to load leave detail" } : null);
+    }
+  };
 
   const allMonths = summary?.months ?? [];
   const availableMonths = allMonths.map((m) => m.month).sort((a, b) => a - b);
@@ -259,14 +289,17 @@ export default function ProjectAttendancePage() {
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <div className="att-eyebrow">{project?.projectName || "Project"}</div>
-        <h1 className="uidai-pmis-title" style={{ marginBottom: 6 }}>Attendance</h1>
+        <h1 className="uidai-pmis-title" style={{ marginBottom: 6
+}}>Attendance</h1>
         <p className="uidai-pmis-subtitle">
-          Monthly attendance, short hours and quarterly leave for your project team
+          Monthly attendance, short hours and quarterly leave for your
+project team
         </p>
 
         <div className="att-stats">
           <span className="att-stat">
-            <b>{visibleMonths.length}</b> month{visibleMonths.length === 1 ? "" : "s"} reported
+            <b>{visibleMonths.length}</b> month{visibleMonths.length
+=== 1 ? "" : "s"} reported
           </span>
           <span className="att-dot" />
           <span className="att-stat">
@@ -278,12 +311,16 @@ export default function ProjectAttendancePage() {
       {/* Resource-based milestones — Leave Management */}
       <section style={{ marginBottom: 28 }}>
         <h2 className="att-section-title">Resource-based milestones</h2>
-        {milestonesLoading && <div className="att-muted">Loading milestones…</div>}
+        {milestonesLoading && <div className="att-muted">Loading
+milestones…</div>}
         {milestonesError && <div className="att-error">{milestonesError}</div>}
-        {!milestonesLoading && !milestonesError && resourceMilestones.length === 0 && (
-          <div className="att-empty">No resource-based milestones for this project.</div>
+        {!milestonesLoading && !milestonesError &&
+resourceMilestones.length === 0 && (
+          <div className="att-empty">No resource-based milestones for
+this project.</div>
         )}
-        {!milestonesLoading && !milestonesError && resourceMilestones.length > 0 && (
+        {!milestonesLoading && !milestonesError &&
+resourceMilestones.length > 0 && (
           <div className="uidai-pmis-card att-card">
             <div className="att-table-wrap">
               <table className="att-table">
@@ -301,7 +338,8 @@ export default function ProjectAttendancePage() {
                   {resourceMilestones.map((m) => (
                     <tr className="att-row" key={m.apiId || m.uid}>
                       <td className="att-td">
-                        <code className="att-code">{m.serverDisplayCode || m.id || "—"}</code>
+                        <code
+className="att-code">{m.serverDisplayCode || m.id || "—"}</code>
                       </td>
                       <td className="att-td att-strong">{m.name || "—"}</td>
                       <td className="att-td">{m.startDate || "—"}</td>
@@ -337,7 +375,8 @@ export default function ProjectAttendancePage() {
             <select
               className="att-select"
               value={year}
-              onChange={(e) => { setYear(Number(e.target.value)); setSelectedMonth("all"); }}
+              onChange={(e) => { setYear(Number(e.target.value));
+setSelectedMonth("all"); }}
             >
               {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
@@ -355,7 +394,8 @@ export default function ProjectAttendancePage() {
             </select>
           </Field>
         </div>
-        <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
+        <button className="att-btn-secondary" onClick={() =>
+setHolidayOpen(true)}>
           <CalendarIcon />
           Holiday list
         </button>
@@ -370,18 +410,21 @@ export default function ProjectAttendancePage() {
           <div className="att-empty">
             {selectedMonth === "all"
               ? `No attendance recorded for ${year}.`
-              : `No attendance recorded for ${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
+              : `No attendance recorded for
+${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
           </div>
         )}
         {visibleMonths.map((m) => (
-          <MonthCard key={m.month} month={m} expanded={expanded} onToggle={toggleRow} />
+          <MonthCard key={m.month} month={m} expanded={expanded}
+onToggle={toggleRow} onEmployeeClick={openLeaveDetail} />
         ))}
       </section>
 
       {/* Quarterly leave */}
       <section style={{ marginTop: 28 }}>
         <div className="att-section-head">
-          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly leave</h2>
+          <h2 className="att-section-title" style={{ margin: 0
+}}>Quarterly leave</h2>
           <Field label="Quarter">
             <select
               className="att-select"
@@ -392,10 +435,12 @@ export default function ProjectAttendancePage() {
             </select>
           </Field>
         </div>
-        {quarterlyLoading && <div className="att-muted">Loading quarterly leave…</div>}
+        {quarterlyLoading && <div className="att-muted">Loading
+quarterly leave…</div>}
         {quarterlyError && <div className="att-error">{quarterlyError}</div>}
         {!quarterlyLoading && !quarterlyError && quarterly && (
-          <QuarterlyPanel data={quarterly} expanded={expanded} onToggle={toggleRow} />
+          <QuarterlyPanel data={quarterly} expanded={expanded}
+onToggle={toggleRow} />
         )}
       </section>
 
@@ -417,6 +462,13 @@ export default function ProjectAttendancePage() {
           onClose={() => setLeaveMilestone(null)}
         />
       )}
+
+      {leaveDetail && (
+        <LeaveDetailModal
+          {...leaveDetail}
+          onClose={() => setLeaveDetail(null)}
+        />
+      )}
     </div>
   );
 }
@@ -436,18 +488,29 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  const [rateYears, setRateYears] = useState([]);
 
-  // Rate-year options (Year-1, Year-2, …) — as many as the milestone spans,
-  // falling back to 5 when the dates can't be resolved.
-  const rateYearOptions = useMemo(() => {
-    const sy = parseInt(String(milestone?.startDate || "").slice(0, 4), 10);
-    const ey = parseInt(String(milestone?.endDate || "").slice(0, 4), 10);
-    const count =
-      Number.isFinite(sy) && Number.isFinite(ey) && ey >= sy
-        ? Math.min(10, ey - sy + 1)
-        : 5;
-    return Array.from({ length: count }, (_, i) => i + 1);
-  }, [milestone]);
+  // Fetch rate-year options from the resources service.
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(
+          `${API_BASE}${ENDPOINTS.resources.rateCards(projectId)}`,
+          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (active && Array.isArray(data)) setRateYears(data);
+        }
+      } catch {
+        // non-fatal — dropdown stays empty
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -472,12 +535,15 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
 
     const body = new FormData();
     body.append("file", file);
+    // rateYear from the dropdown is "Year-1", "Year-2" etc. The API expects
+    // just the numeric part (e.g. 1, 2). Strip the "Year-" prefix here.
+    const rateYearNum = String(rateYear).replace(/^Year-/i, "");
     const params = new URLSearchParams({
       month: String(month),
       year: String(uploadYear),
       startDate: String(startDate),
       endDate: String(endDate),
-      rateYear: String(rateYear),
+      rateYear: rateYearNum,
       milestoneId: milestone.apiId,
       projectId,
     });
@@ -485,7 +551,8 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
     try {
       setUploading(true);
       const token = getToken();
-      const res = await fetch(`${API_BASE}/api/attendance/monthly?${params.toString()}`, {
+      const res = await
+fetch(`${API_BASE}/api/attendance/monthly?${params.toString()}`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body,
@@ -500,38 +567,46 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
   };
 
   return (
-    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="att-modal" role="dialog" aria-modal="true" aria-label="Leave Management"
+    <div className="att-backdrop" onMouseDown={(e) => e.target ===
+e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true"
+aria-label="Leave Management"
         style={{ maxWidth: 540 }}>
         <div className="att-modal-head">
           <div>
-            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Leave Management</div>
+            <div className="att-eyebrow" style={{ marginBottom: 4
+}}>Leave Management</div>
             <h2 className="att-modal-title">Upload Attendance</h2>
           </div>
-          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+          <button className="att-close" onClick={onClose}
+aria-label="Close">✕</button>
         </div>
 
         <div className="att-muted" style={{ paddingTop: 0, marginBottom: 12 }}>
           {milestone.serverDisplayCode || milestone.id ? (
-            <><code className="att-code">{milestone.serverDisplayCode || milestone.id}</code>{" "}</>
+            <><code className="att-code">{milestone.serverDisplayCode
+|| milestone.id}</code>{" "}</>
           ) : null}
           {milestone.name}
         </div>
 
         {done ? (
           <>
-            <div style={{ padding: "8px 0 16px", color: C.green, fontWeight: 600 }}>
+            <div style={{ padding: "8px 0 16px", color: C.green,
+fontWeight: 600 }}>
               Attendance uploaded successfully!
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="att-btn-primary" onClick={onClose}>Done</button>
+              <button className="att-btn-primary"
+onClick={onClose}>Done</button>
             </div>
           </>
         ) : (
           <>
             <div className="att-controls" style={{ marginBottom: 14 }}>
               <Field label="Month">
-                <select className="att-select" value={month} onChange={(e) => setMonth(e.target.value)}>
+                <select className="att-select" value={month}
+onChange={(e) => setMonth(e.target.value)}>
                   <option value="" disabled>Select month</option>
                   {MONTH_NAMES.slice(1).map((m, i) => (
                     <option key={m} value={i + 1}>{m}</option>
@@ -539,9 +614,11 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
                 </select>
               </Field>
               <Field label="Year">
-                <select className="att-select" value={uploadYear} onChange={(e) => setUploadYear(e.target.value)}>
+                <select className="att-select" value={uploadYear}
+onChange={(e) => setUploadYear(e.target.value)}>
                   <option value="" disabled>Select year</option>
-                  {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+                  {YEAR_OPTIONS.map((y) => <option key={y}
+value={y}>{y}</option>)}
                 </select>
               </Field>
             </div>
@@ -565,10 +642,11 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
                 />
               </Field>
               <Field label="Rate Year">
-                <select className="att-select" value={rateYear} onChange={(e) => setRateYear(e.target.value)}>
+                <select className="att-select" value={rateYear}
+onChange={(e) => setRateYear(e.target.value)}>
                   <option value="" disabled>Select rate year</option>
-                  {rateYearOptions.map((n) => (
-                    <option key={n} value={n}>Year-{n}</option>
+                  {rateYears.map((y) => (
+                    <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
               </Field>
@@ -585,9 +663,12 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
 
             {error && <div className="att-error">{error}</div>}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-              <button className="att-btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
-              <button className="att-btn-primary" onClick={upload} disabled={uploading}>
+            <div style={{ display: "flex", justifyContent: "flex-end",
+gap: 10, marginTop: 22 }}>
+              <button className="att-btn-secondary" onClick={onClose}
+disabled={uploading}>Cancel</button>
+              <button className="att-btn-primary" onClick={upload}
+disabled={uploading}>
                 {uploading ? "Uploading…" : "Upload"}
               </button>
             </div>
@@ -609,7 +690,8 @@ function Field({ label, children }) {
 }
 
 function Chip({ children, accent }) {
-  return <span className={accent ? "att-chip att-chip-accent" : "att-chip"}>{children}</span>;
+  return <span className={accent ? "att-chip att-chip-accent" :
+"att-chip"}>{children}</span>;
 }
 
 /* =====================================================================
@@ -649,17 +731,22 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
   const monthMeta = calendar?.months?.find((m) => m.month === viewMonth);
 
   const cells = buildMonthGrid(year, viewMonth);
-  const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+  const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() +
+1)}-${pad2(today.getDate())}`;
 
   return (
-    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="att-modal" role="dialog" aria-modal="true" aria-label={`Holidays ${year}`}>
+    <div className="att-backdrop" onMouseDown={(e) => e.target ===
+e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true"
+aria-label={`Holidays ${year}`}>
         <div className="att-modal-head">
           <div>
-            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Calendar</div>
+            <div className="att-eyebrow" style={{ marginBottom: 4
+}}>Calendar</div>
             <h2 className="att-modal-title">Holidays · {year}</h2>
           </div>
-          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+          <button className="att-close" onClick={onClose}
+aria-label="Close">✕</button>
         </div>
 
         {loading && <div className="att-muted">Loading holidays…</div>}
@@ -686,7 +773,8 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
                 disabled={viewMonth === 1}
                 aria-label="Previous month"
               >‹</button>
-              <div className="att-cal-title">{MONTH_NAMES[viewMonth]} {year}</div>
+              <div className="att-cal-title">{MONTH_NAMES[viewMonth]}
+{year}</div>
               <button
                 className="att-nav-btn"
                 onClick={() => setViewMonth((m) => Math.min(12, m + 1))}
@@ -703,7 +791,8 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
             </div>
             <div className="att-cal-grid">
               {cells.map((d, i) => {
-                if (d == null) return <div key={`e-${i}`} className="att-cal-cell att-cal-empty" />;
+                if (d == null) return <div key={`e-${i}`}
+className="att-cal-cell att-cal-empty" />;
                 const dateStr = `${year}-${pad2(viewMonth)}-${pad2(d)}`;
                 const dow = new Date(year, viewMonth - 1, d).getDay();
                 const isWeekend = dow === 0 || dow === 6;
@@ -716,7 +805,8 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
                   isToday ? "att-cal-today" : "",
                 ].join(" ").trim();
                 return (
-                  <div key={dateStr} className={cls} title={holiday ? holiday.name : undefined}>
+                  <div key={dateStr} className={cls} title={holiday ?
+holiday.name : undefined}>
                     <span className="att-cal-day">{d}</span>
                     {holiday && <span className="att-cal-mark" />}
                   </div>
@@ -726,9 +816,12 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
 
             {/* Legend */}
             <div className="att-legend">
-              <span className="att-legend-item"><span className="att-sw att-sw-holiday" /> Public holiday</span>
-              <span className="att-legend-item"><span className="att-sw att-sw-weekend" /> Weekend</span>
-              <span className="att-legend-item"><span className="att-sw att-sw-today" /> Today</span>
+              <span className="att-legend-item"><span
+className="att-sw att-sw-holiday" /> Public holiday</span>
+              <span className="att-legend-item"><span
+className="att-sw att-sw-weekend" /> Weekend</span>
+              <span className="att-legend-item"><span
+className="att-sw att-sw-today" /> Today</span>
             </div>
 
             {/* This month's holidays */}
@@ -736,7 +829,8 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
               <div className="att-cal-list-head">
                 Holidays in {MONTH_NAMES[viewMonth]}
                 {monthMeta && (
-                  <span className="att-cal-list-sub"> · {monthMeta.totalWeekendDays} weekend days</span>
+                  <span className="att-cal-list-sub"> ·
+{monthMeta.totalWeekendDays} weekend days</span>
                 )}
               </div>
               {monthHolidays.length === 0 ? (
@@ -748,7 +842,8 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
                   <div key={`${h.date}-${h.name}`} className="att-holiday-row">
                     <div className="att-date-badge">
                       <span className="att-date-day">{dayNum(h.date)}</span>
-                      <span className="att-date-wd">{weekdayShort(h.date)}</span>
+                      <span
+className="att-date-wd">{weekdayShort(h.date)}</span>
                     </div>
                     <div className="att-holiday-name">{h.name}</div>
                   </div>
@@ -765,12 +860,13 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
 /* =====================================================================
    Monthly summary card
    ===================================================================== */
-function MonthCard({ month, expanded, onToggle }) {
+function MonthCard({ month, expanded, onToggle, onEmployeeClick }) {
   const employees = month.employees ?? [];
   return (
     <div className="uidai-pmis-card att-card">
       <div className="att-card-head">
-        <strong className="att-card-title">{MONTH_NAMES[month.month]} {month.year}</strong>
+        <strong className="att-card-title">{MONTH_NAMES[month.month]}
+{month.year}</strong>
         <div className="att-chips">
           <Chip>{month.totalDaysInMonth} days</Chip>
           <Chip>{month.totalWeekendDays} weekend days</Chip>
@@ -778,9 +874,11 @@ function MonthCard({ month, expanded, onToggle }) {
           {month.publicHolidayCount > 0 && (
             <span
               className="att-chip"
-              title={month.publicHolidays.map((h) => `${h.date} · ${h.name}`).join("\n")}
+              title={month.publicHolidays.map((h) => `${h.date} ·
+${h.name}`).join("\n")}
             >
-              {month.publicHolidayCount} holiday{month.publicHolidayCount > 1 ? "s" : ""}
+              {month.publicHolidayCount}
+holiday{month.publicHolidayCount > 1 ? "s" : ""}
             </span>
           )}
         </div>
@@ -807,15 +905,20 @@ function MonthCard({ month, expanded, onToggle }) {
               {employees.map((emp) => {
                 const key = `m-${month.month}-${emp.attendanceId}`;
                 const shortEntries = Object.entries(emp.shortHours ?? {});
-                const hasDetail = shortEntries.length > 0 || (emp.halfDays?.length ?? 0) > 0;
+                const hasDetail = shortEntries.length > 0 ||
+(emp.halfDays?.length ?? 0) > 0;
                 const isOpen = !!expanded[key];
                 const totalShort = totalShortHours(emp.shortHours);
                 return (
                   <React.Fragment key={key}>
-                    <tr className="att-row">
+                    <tr className="att-row" style={{ cursor: "pointer" }}
+                      onClick={() => onEmployeeClick?.(emp,
+month.month, month.year)}>
                       <td className="att-td">
                         {hasDetail && (
-                          <button className="att-expand" onClick={() => onToggle(key)}
+                          <button className="att-expand"
+                            onClick={(e) => { e.stopPropagation();
+onToggle(key); }}
                             aria-label={isOpen ? "Collapse" : "Expand"}>
                             {isOpen ? "▾" : "▸"}
                           </button>
@@ -827,9 +930,11 @@ function MonthCard({ month, expanded, onToggle }) {
                       <td className="att-td att-strong">{emp.employeeName}</td>
                       <td className="att-td">{emp.designation || "—"}</td>
                       <td className="att-td att-num">{emp.leaveDays}</td>
-                      <td className="att-td att-num">{emp.halfDays?.length ?? 0}</td>
+                      <td className="att-td
+att-num">{emp.halfDays?.length ?? 0}</td>
                       <td className="att-td att-num">{emp.shortHourDays}</td>
-                      <td className="att-td att-num">{totalShort ? totalShort.toFixed(2) : "0"}</td>
+                      <td className="att-td att-num">{totalShort ?
+totalShort.toFixed(2) : "0"}</td>
                     </tr>
                     {isOpen && hasDetail && (
                       <tr className="att-detail-row">
@@ -837,14 +942,17 @@ function MonthCard({ month, expanded, onToggle }) {
                         <td className="att-detail" colSpan={7}>
                           {(emp.halfDays?.length ?? 0) > 0 && (
                             <div className="att-detail-block">
-                              <span className="att-detail-label">Half days:</span>{" "}
+                              <span className="att-detail-label">Half
+days:</span>{" "}
                               {emp.halfDays.join(", ")}
                             </div>
                           )}
                           {shortEntries.length > 0 && (
                             <div className="att-detail-block">
-                              <span className="att-detail-label">Short hours:</span>{" "}
-                              {shortEntries.map(([date, hrs]) => `${date} (${hrs})`).join(", ")}
+                              <span className="att-detail-label">Short
+hours:</span>{" "}
+                              {shortEntries.map(([date, hrs]) =>
+`${date} (${hrs})`).join(", ")}
                             </div>
                           )}
                         </td>
@@ -881,7 +989,8 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
       </div>
 
       {resources.length === 0 ? (
-        <div className="att-muted">No leave data recorded for this quarter.</div>
+        <div className="att-muted">No leave data recorded for this
+quarter.</div>
       ) : (
         <div className="att-table-wrap">
           <table className="att-table">
@@ -891,12 +1000,17 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
                 <th className="att-th">Attendance Id</th>
                 <th className="att-th">Employee Name</th>
                 <th className="att-th">Joining Date</th>
-                <th className="att-th att-num" title="Permissible paid leave">Permissible</th>
-                <th className="att-th att-num" title="Leave days taken">Taken</th>
+                <th className="att-th att-num" title="Permissible paid
+leave">Permissible</th>
+                <th className="att-th att-num" title="Leave days
+taken">Taken</th>
                 <th className="att-th att-num" title="Paid leave days">Paid</th>
-                <th className="att-th att-num" title="Unpaid leave days">Unpaid</th>
-                <th className="att-th att-num" title="Sandwich days charged">Sandwich</th>
-                <th className="att-th att-num" title="Total unpaid days">Total unpaid</th>
+                <th className="att-th att-num" title="Unpaid leave
+days">Unpaid</th>
+                <th className="att-th att-num" title="Sandwich days
+charged">Sandwich</th>
+                <th className="att-th att-num" title="Total unpaid
+days">Total unpaid</th>
               </tr>
             </thead>
             <tbody>
@@ -905,7 +1019,8 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
                 const key = `q-${data.quarter}-${r.attendanceId ?? i}`;
                 const unpaidDates = c.unpaidLeaveDates ?? [];
                 const sandwichDates = c.sandwichDates ?? [];
-                const hasDetail = unpaidDates.length > 0 || sandwichDates.length > 0;
+                const hasDetail = unpaidDates.length > 0 ||
+sandwichDates.length > 0;
                 const isOpen = !!expanded[key];
                 const totalUnpaid = c.totalUnpaidDays ?? 0;
                 return (
@@ -913,21 +1028,26 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
                     <tr className="att-row">
                       <td className="att-td">
                         {hasDetail && (
-                          <button className="att-expand" onClick={() => onToggle(key)}
+                          <button className="att-expand" onClick={()=> onToggle(key)}
                             aria-label={isOpen ? "Collapse" : "Expand"}>
                             {isOpen ? "▾" : "▸"}
                           </button>
                         )}
                       </td>
-                      <td className="att-td"><code className="att-code">{r.attendanceId}</code></td>
+                      <td className="att-td"><code
+className="att-code">{r.attendanceId}</code></td>
                       <td className="att-td att-strong">{r.employeeName}</td>
                       <td className="att-td">{r.joiningDate || "—"}</td>
-                      <td className="att-td att-num">{c.permissibleLeave ?? 0}</td>
-                      <td className="att-td att-num">{c.leaveDaysTaken ?? 0}</td>
+                      <td className="att-td
+att-num">{c.permissibleLeave ?? 0}</td>
+                      <td className="att-td att-num">{c.leaveDaysTaken
+?? 0}</td>
                       <td className="att-td att-num">{c.paidLeaveDays ?? 0}</td>
-                      <td className="att-td att-num">{c.unpaidLeaveDays ?? 0}</td>
+                      <td className="att-td
+att-num">{c.unpaidLeaveDays ?? 0}</td>
                       <td className="att-td att-num">{c.sandwichDays ?? 0}</td>
-                      <td className={`att-td att-num${totalUnpaid > 0 ? " att-danger" : ""}`}>
+                      <td className={`att-td att-num${totalUnpaid > 0
+? " att-danger" : ""}`}>
                         {totalUnpaid}
                       </td>
                     </tr>
@@ -937,13 +1057,15 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
                         <td className="att-detail" colSpan={9}>
                           {unpaidDates.length > 0 && (
                             <div className="att-detail-block">
-                              <span className="att-detail-label">Unpaid leave dates:</span>{" "}
+                              <span
+className="att-detail-label">Unpaid leave dates:</span>{" "}
                               {unpaidDates.join(", ")}
                             </div>
                           )}
                           {sandwichDates.length > 0 && (
                             <div className="att-detail-block">
-                              <span className="att-detail-label">Sandwich dates:</span>{" "}
+                              <span
+className="att-detail-label">Sandwich dates:</span>{" "}
                               {sandwichDates.join(", ")}
                             </div>
                           )}
@@ -961,12 +1083,188 @@ function QuarterlyPanel({ data, expanded, onToggle }) {
   );
 }
 
+/* =====================================================================
+   Leave Detail Modal — full leave report for one employee.
+   GET /api/reports/leave/{attendanceId}?year=&quarter=&projectId=
+   ===================================================================== */
+function LeaveDetailModal({ employee, monthNum, year, data, loading,
+error, onClose }) {
+  const quarter = Math.ceil(monthNum / 3);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const fmtKey = (k) => k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").trim();
+
+  const scalars = data
+    ? Object.entries(data).filter(([, v]) => v === null || typeof v
+!== "object")
+    : [];
+  const arrays = data
+    ? Object.entries(data).filter(([, v]) => Array.isArray(v))
+    : [];
+  const nested = data
+    ? Object.entries(data).filter(([, v]) => v && typeof v ===
+"object" && !Array.isArray(v))
+    : [];
+
+  return (
+    <div className="att-backdrop" onMouseDown={(e) => e.target ===
+e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true"
+aria-label="Leave Detail"
+        style={{ maxWidth: 640 }}>
+        <div className="att-modal-head">
+          <div>
+            <div className="att-eyebrow" style={{ marginBottom: 4
+}}>Leave Detail</div>
+            <h2 className="att-modal-title">
+              {employee?.employeeName || employee?.attendanceId || "Employee"}
+            </h2>
+          </div>
+          <button className="att-close" onClick={onClose}
+aria-label="Close">✕</button>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap",
+marginBottom: 16 }}>
+          <code className="att-code">{employee?.attendanceId}</code>
+          <span className="att-muted" style={{ padding: 0 }}>·
+{MONTH_NAMES[monthNum]} {year} · Q{quarter}</span>
+        </div>
+
+        {loading && <div className="att-muted">Loading leave detail…</div>}
+        {error && <div className="att-error">⚠️ {error}</div>}
+
+        {!loading && !error && data && (
+          <>
+            {/* Scalar key/value grid */}
+            {scalars.length > 0 && (
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                gap: "12px 20px",
+                marginBottom: 18,
+                padding: "14px 16px",
+                background: C.surface,
+                borderRadius: 10,
+                border: `1px solid ${C.border}`,
+              }}>
+                {scalars.map(([k, v]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700,
+textTransform: "uppercase",
+                      letterSpacing: ".05em", color: C.muted,
+marginBottom: 3 }}>
+                      {fmtKey(k)}
+                    </div>
+                    <div style={{ fontSize: 14, color: C.ink,
+fontWeight: 600 }}>
+                      {v == null ? "—" : String(v)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Nested objects */}
+            {nested.map(([k, obj]) => (
+              <div key={k} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700,
+textTransform: "uppercase",
+                  letterSpacing: ".05em", color: C.muted,
+marginBottom: 8 }}>{fmtKey(k)}</div>
+                <div style={{
+                  display: "grid", gridTemplateColumns:
+"repeat(auto-fill, minmax(140px, 1fr))",
+                  gap: "10px 16px", padding: "12px 14px",
+                  background: C.surface, borderRadius: 10, border:
+`1px solid ${C.border}`,
+                }}>
+                  {Object.entries(obj).map(([ck, cv]) => (
+                    <div key={ck}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700,
+textTransform: "uppercase",
+                        letterSpacing: ".05em", color: C.muted,
+marginBottom: 2 }}>{fmtKey(ck)}</div>
+                      <div style={{ fontSize: 13, color: C.ink }}>{cv
+== null ? "—" : String(cv)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Arrays */}
+            {arrays.map(([k, arr]) => (
+              <div key={k} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700,
+textTransform: "uppercase",
+                  letterSpacing: ".05em", color: C.muted, marginBottom: 8 }}>
+                  {fmtKey(k)}{" "}
+                  <span style={{ fontWeight: 400, textTransform:
+"none" }}>({arr.length})</span>
+                </div>
+                {arr.length === 0 ? (
+                  <div className="att-muted">None</div>
+                ) : typeof arr[0] === "object" && arr[0] !== null ? (
+                  <div className="att-table-wrap">
+                    <table className="att-table">
+                      <thead>
+                        <tr>
+                          {Object.keys(arr[0]).map((col) => (
+                            <th key={col} className="att-th">{fmtKey(col)}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {arr.map((row, i) => (
+                          <tr key={i} className="att-row">
+                            {Object.values(row).map((val, j) => (
+                              <td key={j} className="att-td">{val ==
+null ? "—" : String(val)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: C.ink, lineHeight: 1.8 }}>
+                    {arr.join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end",
+marginTop: 16 }}>
+          <button className="att-btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- icons ---------- */
 function CalendarIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M3 9h18M8 3v3M16 3v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+aria-hidden="true">
+      <rect x="3" y="4.5" width="18" height="16" rx="2.5"
+stroke="currentColor" strokeWidth="1.8" />
+      <path d="M3 9h18M8 3v3M16 3v3" stroke="currentColor"
+strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -981,52 +1279,71 @@ const ATT_CSS = `
 
 .att-stats { display: flex; gap: 14px; align-items: center; margin-top: 16px;
   font-size: 13px; color: ${C.muted}; flex-wrap: wrap; }
-.att-stat b { font-size: 16px; color: ${C.ink}; font-weight: 700; margin-right: 4px; }
+.att-stat b { font-size: 16px; color: ${C.ink}; font-weight: 700;
+margin-right: 4px; }
 .att-dot { width: 4px; height: 4px; border-radius: 50%; background: #cbd2df; }
 
-.att-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
+.att-toolbar { display: flex; align-items: flex-end; justify-content:
+space-between;
   gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 .att-controls { display: flex; gap: 12px; flex-wrap: wrap; }
 .att-field { display: flex; flex-direction: column; gap: 6px; }
 .att-field-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; color: ${C.muted}; }
-.att-select { padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
-  background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; min-width: 140px;
-  outline: none; cursor: pointer; transition: all .15s ease; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.att-select:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
+.att-select { padding: 9px 12px; border-radius: 10px; border: 1px
+solid ${C.border};
+  background: #fff; color: ${C.ink}; font-size: 14px; font-family:
+inherit; min-width: 140px;
+  outline: none; cursor: pointer; transition: all .15s ease;
+box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.att-select:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px
+${C.accentBg}; }
 
 .att-btn-secondary { display: inline-flex; align-items: center; gap: 8px;
-  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 10px 16px; height: 40px;
-  cursor: pointer; border: 1px solid ${C.border}; background: #fff; color: ${C.ink};
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding:
+10px 16px; height: 40px;
+  cursor: pointer; border: 1px solid ${C.border}; background: #fff;
+color: ${C.ink};
   transition: all .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.att-btn-secondary:hover { background: #f9fafb; border-color: ${C.primary}; color: ${C.primary}; }
+.att-btn-secondary:hover { background: #f9fafb; border-color:
+${C.primary}; color: ${C.primary}; }
 .att-btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
 
-.att-btn-primary { display: inline-flex; align-items: center; gap: 8px; border: none;
-  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 9px 16px; cursor: pointer;
+.att-btn-primary { display: inline-flex; align-items: center; gap:
+8px; border: none;
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 9px
+16px; cursor: pointer;
   color: #fff; background: linear-gradient(90deg, ${C.primary}, #129ab8);
-  transition: filter .2s ease, opacity .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,.08); white-space: nowrap; }
+  transition: filter .2s ease, opacity .2s ease; box-shadow: 0 1px 2px
+rgba(0,0,0,.08); white-space: nowrap; }
 .att-btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
 .att-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 
-.att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; }
-.att-section-head { display: flex; align-items: flex-end; justify-content: space-between;
+.att-section-title { font-size: 15px; font-weight: 700; color:
+${C.ink}; margin: 0 0 14px; }
+.att-section-head { display: flex; align-items: flex-end;
+justify-content: space-between;
   gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
 
 .att-card { padding: 18px; margin-bottom: 16px; border: 1px solid ${C.border}; }
-.att-card-head { display: flex; align-items: center; justify-content: space-between;
+.att-card-head { display: flex; align-items: center; justify-content:
+space-between;
   gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .att-card-title { font-size: 15px; color: ${C.ink}; font-weight: 700; }
 
 .att-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .att-chip { font-size: 12px; background: ${C.surface}; color: ${C.ink};
-  padding: 3px 10px; border-radius: 999px; border: 1px solid ${C.border}; white-space: pre-line; }
-.att-chip-accent { background: ${C.accentBg}; color: ${C.primary}; border-color: #d7def7; font-weight: 600; }
+  padding: 3px 10px; border-radius: 999px; border: 1px solid
+${C.border}; white-space: pre-line; }
+.att-chip-accent { background: ${C.accentBg}; color: ${C.primary};
+border-color: #d7def7; font-weight: 600; }
 
 .att-table-wrap { overflow-x: auto; }
 .att-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.att-th { background: ${C.surface}; color: ${C.muted}; text-align: left; font-size: 11.5px;
-  font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; padding: 11px 14px;
+.att-th { background: ${C.surface}; color: ${C.muted}; text-align:
+left; font-size: 11.5px;
+  font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+padding: 11px 14px;
   border-bottom: 1px solid ${C.border}; white-space: nowrap; }
 .att-th-x { width: 34px; }
 .att-num { text-align: right; }
@@ -1036,71 +1353,101 @@ const ATT_CSS = `
 .att-strong { font-weight: 600; }
 .att-danger { color: ${C.red}; font-weight: 700; }
 .att-row { transition: background-color .15s ease, box-shadow .15s ease; }
-.att-row:hover { background: ${C.surface}; box-shadow: inset 0 0 0 1px #e0e7f0; }
-.att-code { font-size: 13px; background: ${C.surface}; padding: 2px 6px; border-radius: 4px;
+.att-row:hover { background: ${C.surface}; box-shadow: inset 0 0 0 1px
+#e0e7f0; }
+.att-code { font-size: 13px; background: ${C.surface}; padding: 2px
+6px; border-radius: 4px;
   font-variant-numeric: tabular-nums; }
-.att-expand { border: none; background: none; cursor: pointer; font-size: 12px; color: ${C.muted}; padding: 0; }
+.att-expand { border: none; background: none; cursor: pointer;
+font-size: 12px; color: ${C.muted}; padding: 0; }
 .att-detail-row td { border-bottom: 1px solid ${C.divider}; }
-.att-detail { padding: 10px 14px; background: #fafbfd; font-size: 13px; color: #45566b; white-space: normal; }
+.att-detail { padding: 10px 14px; background: #fafbfd; font-size:
+13px; color: #45566b; white-space: normal; }
 .att-detail-block { margin-bottom: 4px; }
 .att-detail-label { font-weight: 600; color: ${C.muted}; }
 
 .att-muted { color: #9ca3af; font-size: 14px; padding: 8px 0; }
 .att-error { color: ${C.red}; font-size: 14px; padding: 8px 0; }
-.att-empty { color: ${C.muted}; font-size: 14px; padding: 20px; text-align: center;
+.att-empty { color: ${C.muted}; font-size: 14px; padding: 20px;
+text-align: center;
   border: 1px dashed ${C.border}; border-radius: 10px; background: #fbfcfe; }
 
 /* ---- modal ---- */
 .att-backdrop { position: fixed; inset: 0; background: rgba(11,42,99,.45);
-  backdrop-filter: blur(2px); display: flex; align-items: flex-start; justify-content: center;
+  backdrop-filter: blur(2px); display: flex; align-items: flex-start;
+justify-content: center;
   padding: 48px 16px; z-index: 1000; animation: attFade .15s ease; }
 @keyframes attFade { from { opacity: 0; } to { opacity: 1; } }
-.att-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
-  max-height: 86vh; overflow-y: auto; padding: 22px; box-shadow: 0 24px 60px rgba(11,23,42,.28);
+.att-modal { background: #fff; border-radius: 14px; width: 100%;
+max-width: 560px;
+  max-height: 86vh; overflow-y: auto; padding: 22px; box-shadow: 0
+24px 60px rgba(11,23,42,.28);
   animation: attPop .18s cubic-bezier(.2,.8,.2,1); }
-@keyframes attPop { from { transform: translateY(8px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
-.att-modal-head { display: flex; align-items: flex-start; justify-content: space-between;
+@keyframes attPop { from { transform: translateY(8px); opacity: .6; }
+to { transform: translateY(0); opacity: 1; } }
+.att-modal-head { display: flex; align-items: flex-start;
+justify-content: space-between;
   gap: 12px; margin-bottom: 16px; }
-.att-modal-title { margin: 0; font-size: 20px; font-weight: 700; color: ${C.ink}; letter-spacing: -0.01em; }
-.att-close { border: none; background: #eef1f6; color: ${C.muted}; width: 30px; height: 30px;
-  border-radius: 8px; cursor: pointer; font-size: 15px; line-height: 1; transition: all .2s ease; }
+.att-modal-title { margin: 0; font-size: 20px; font-weight: 700;
+color: ${C.ink}; letter-spacing: -0.01em; }
+.att-close { border: none; background: #eef1f6; color: ${C.muted};
+width: 30px; height: 30px;
+  border-radius: 8px; cursor: pointer; font-size: 15px; line-height:
+1; transition: all .2s ease; }
 .att-close:hover { background: #e3e7ef; color: ${C.ink}; }
 
-.att-cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.att-cal-nav { display: flex; align-items: center; justify-content:
+space-between; margin-bottom: 12px; }
 .att-cal-title { font-size: 15px; font-weight: 700; color: ${C.ink}; }
-.att-nav-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid ${C.border};
-  background: #fff; color: ${C.ink}; font-size: 18px; line-height: 1; cursor: pointer; transition: all .15s ease; }
-.att-nav-btn:hover:not(:disabled) { background: ${C.surface}; border-color: ${C.primary}; color: ${C.primary}; }
+.att-nav-btn { width: 32px; height: 32px; border-radius: 8px; border:
+1px solid ${C.border};
+  background: #fff; color: ${C.ink}; font-size: 18px; line-height: 1;
+cursor: pointer; transition: all .15s ease; }
+.att-nav-btn:hover:not(:disabled) { background: ${C.surface};
+border-color: ${C.primary}; color: ${C.primary}; }
 .att-nav-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-.att-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.att-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr);
+gap: 4px; }
 .att-cal-weekhead { margin-bottom: 4px; }
-.att-cal-wd { text-align: center; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+.att-cal-wd { text-align: center; font-size: 10.5px; font-weight: 700;
+letter-spacing: .04em;
   text-transform: uppercase; color: ${C.muted}; padding: 4px 0; }
-.att-cal-cell { position: relative; min-height: 44px; border-radius: 8px; display: flex;
-  flex-direction: column; align-items: center; justify-content: center; font-size: 14px; color: ${C.ink}; }
+.att-cal-cell { position: relative; min-height: 44px; border-radius:
+8px; display: flex;
+  flex-direction: column; align-items: center; justify-content:
+center; font-size: 14px; color: ${C.ink}; }
 .att-cal-empty { background: transparent; }
 .att-cal-weekend { background: ${C.surface}; color: ${C.muted}; }
-.att-cal-holiday { background: ${C.accentBg}; color: ${C.primary}; font-weight: 700; }
+.att-cal-holiday { background: ${C.accentBg}; color: ${C.primary};
+font-weight: 700; }
 .att-cal-today { box-shadow: inset 0 0 0 2px ${C.primary}; }
 .att-cal-day { line-height: 1; }
-.att-cal-mark { position: absolute; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: ${C.primary}; }
+.att-cal-mark { position: absolute; bottom: 6px; width: 5px; height:
+5px; border-radius: 50%; background: ${C.primary}; }
 
 .att-legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 14px 0; }
-.att-legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: ${C.muted}; }
-.att-sw { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.att-legend-item { display: inline-flex; align-items: center; gap:
+6px; font-size: 12px; color: ${C.muted}; }
+.att-sw { width: 12px; height: 12px; border-radius: 4px; display:
+inline-block; }
 .att-sw-holiday { background: ${C.accentBg}; border: 1px solid #d7def7; }
 .att-sw-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
 .att-sw-today { background: #fff; box-shadow: inset 0 0 0 2px ${C.primary}; }
 
 .att-cal-list { border-top: 1px solid ${C.divider}; padding-top: 12px; }
-.att-cal-list-head { font-size: 12px; font-weight: 700; text-transform: uppercase;
+.att-cal-list-head { font-size: 12px; font-weight: 700;
+text-transform: uppercase;
   letter-spacing: .05em; color: ${C.muted}; margin-bottom: 8px; }
 .att-cal-list-sub { font-weight: 600; text-transform: none; letter-spacing: 0; }
-.att-holiday-row { display: flex; align-items: center; gap: 12px; padding: 6px 2px; }
-.att-date-badge { display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-width: 46px; padding: 4px 0; border-radius: 8px; background: ${C.surface}; border: 1px solid ${C.border}; }
-.att-date-day { font-size: 16px; font-weight: 700; color: ${C.ink}; line-height: 1.1; }
+.att-holiday-row { display: flex; align-items: center; gap: 12px;
+padding: 6px 2px; }
+.att-date-badge { display: flex; flex-direction: column; align-items:
+center; justify-content: center;
+  min-width: 46px; padding: 4px 0; border-radius: 8px; background:
+${C.surface}; border: 1px solid ${C.border}; }
+.att-date-day { font-size: 16px; font-weight: 700; color: ${C.ink};
+line-height: 1.1; }
 .att-date-wd { font-size: 10px; color: ${C.muted}; text-transform: uppercase; }
 .att-holiday-name { font-size: 14px; color: ${C.ink}; }
 `;
