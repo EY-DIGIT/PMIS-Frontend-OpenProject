@@ -157,8 +157,15 @@ export default function ProjectAttendancePage() {
   );
 
   // Yearly summary (month=all) — fetched once per year, filtered client-side.
+// Monthly summary — fetched per selected month. "All months" shows a prompt instead.
   useEffect(() => {
     if (!projectId) return;
+    if (selectedMonth === "all") {
+      setSummary(null);
+      setSummaryError(null);
+      setSummaryLoading(false);
+      return;
+    }
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -167,9 +174,8 @@ export default function ProjectAttendancePage() {
       try {
         const token = getToken();
         const res = await fetch(
-          `${API_BASE}/api/attendance/summary?year=${year}&month=all&projectId=${projectId}`,
-          { signal: controller.signal, headers: token ? {
-Authorization: `Bearer ${token}` } : {} }
+          `${API_BASE}/api/attendance/report/monthly?projectId=${projectId}&year=${year}&month=${selectedMonth}`,
+          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
@@ -182,9 +188,10 @@ Authorization: `Bearer ${token}` } : {} }
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year]);
+  }, [projectId, year, selectedMonth]);
 
   // Quarterly leave policy
+// Quarterly leave policy
   useEffect(() => {
     if (!projectId) return;
     let active = true;
@@ -195,9 +202,8 @@ Authorization: `Bearer ${token}` } : {} }
       try {
         const token = getToken();
         const res = await fetch(
-          `${API_BASE}/api/attendance/quarterly-leave?year=${year}&quarter=${quarter}&projectId=${projectId}`,
-          { signal: controller.signal, headers: token ? {
-Authorization: `Bearer ${token}` } : {} }
+          `${API_BASE}/api/attendance/report/quarterly?projectId=${projectId}&year=${year}&quarter=${quarter}`,
+          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
         const data = await res.json();
@@ -270,17 +276,8 @@ error: err?.message || "Failed to load leave detail" } : null);
     }
   };
 
-  const allMonths = summary?.months ?? [];
-  const availableMonths = allMonths.map((m) => m.month).sort((a, b) => a - b);
-  const visibleMonths =
-    selectedMonth === "all"
-      ? allMonths
-      : allMonths.filter((m) => m.month === Number(selectedMonth));
-
-  const uniqueEmployees = new Set();
-  visibleMonths.forEach((m) =>
-    (m.employees ?? []).forEach((e) => uniqueEmployees.add(e.attendanceId))
-  );
+  const employees = Array.isArray(summary) ? summary : [];
+  const period = employees[0]?.period || (selectedMonth !== "all" ? `${MONTH_NAMES[Number(selectedMonth)]} ${year}` : "");
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -298,12 +295,7 @@ project team
 
         <div className="att-stats">
           <span className="att-stat">
-            <b>{visibleMonths.length}</b> month{visibleMonths.length
-=== 1 ? "" : "s"} reported
-          </span>
-          <span className="att-dot" />
-          <span className="att-stat">
-            <b style={{ color: C.green }}>{uniqueEmployees.size}</b> employees
+            <b>{employees.length}</b> employee{employees.length === 1 ? "" : "s"}{period ? ` · ${period}` : ""}
           </span>
         </div>
       </div>
@@ -388,8 +380,8 @@ setSelectedMonth("all"); }}
               onChange={(e) => setSelectedMonth(e.target.value)}
             >
               <option value="all">All months</option>
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>{MONTH_NAMES[m]}</option>
+              {MONTH_NAMES.slice(1).map((name, i) => (
+                <option key={i + 1} value={i + 1}>{name}</option>
               ))}
             </select>
           </Field>
@@ -404,27 +396,69 @@ setHolidayOpen(true)}>
       {/* Monthly summary */}
       <section style={{ marginTop: 8 }}>
         <h2 className="att-section-title">Monthly summary</h2>
-        {summaryLoading && <div className="att-muted">Loading summary…</div>}
-        {summaryError && <div className="att-error">{summaryError}</div>}
-        {!summaryLoading && !summaryError && visibleMonths.length === 0 && (
+        {selectedMonth === "all" && (
+          <div className="att-empty">Select a month to view its attendance summary.</div>
+        )}
+        {selectedMonth !== "all" && summaryLoading && <div className="att-muted">Loading summary…</div>}
+        {selectedMonth !== "all" && summaryError && <div className="att-error">{summaryError}</div>}
+        {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length === 0 && (
           <div className="att-empty">
-            {selectedMonth === "all"
-              ? `No attendance recorded for ${year}.`
-              : `No attendance recorded for
-${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
+            {`No attendance recorded for ${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
           </div>
         )}
-        {visibleMonths.map((m) => (
-          <MonthCard key={m.month} month={m} expanded={expanded}
-onToggle={toggleRow} onEmployeeClick={openLeaveDetail} />
-        ))}
+        {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length > 0 && (
+          <div className="uidai-pmis-card att-card">
+            <div className="att-card-head">
+              <strong className="att-card-title">{period}</strong>
+              <div className="att-chips">
+                <Chip>{employees.length} employees</Chip>
+              </div>
+            </div>
+            <div className="att-table-wrap">
+              <table className="att-table">
+                <thead>
+                  <tr>
+                    <th className="att-th">ID</th>
+                    <th className="att-th">Name</th>
+                    <th className="att-th att-num">Working Days</th>
+                    <th className="att-th att-num">Present</th>
+                    <th className="att-th att-num">Half Days</th>
+                    <th className="att-th att-num">Leave</th>
+                    <th className="att-th att-num">Absent</th>
+                    <th className="att-th att-num">Week Off</th>
+                    <th className="att-th att-num">Holiday</th>
+                    <th className="att-th att-num">WFH</th>
+                    <th className="att-th att-num">Attendance %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((emp) => (
+                    <tr className="att-row" key={emp.attendanceId}>
+                      <td className="att-td"><code className="att-code">{emp.attendanceId}</code></td>
+                      <td className="att-td att-strong">{emp.employeeName}</td>
+                      <td className="att-td att-num">{emp.workingDays}</td>
+                      <td className="att-td att-num">{emp.presentDays}</td>
+                      <td className="att-td att-num">{emp.halfDays}</td>
+                      <td className="att-td att-num">{emp.leaveDays}</td>
+                      <td className="att-td att-num">{emp.absentDays}</td>
+                      <td className="att-td att-num">{emp.weekOffDays}</td>
+                      <td className="att-td att-num">{emp.holidayDays}</td>
+                      <td className="att-td att-num">{emp.wfhDays}</td>
+                      <td className="att-td att-num">{emp.attendancePercentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Quarterly leave */}
+      {/* Quarterly leave */}
       <section style={{ marginTop: 28 }}>
         <div className="att-section-head">
-          <h2 className="att-section-title" style={{ margin: 0
-}}>Quarterly leave</h2>
+          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly leave</h2>
           <Field label="Quarter">
             <select
               className="att-select"
@@ -435,12 +469,10 @@ onToggle={toggleRow} onEmployeeClick={openLeaveDetail} />
             </select>
           </Field>
         </div>
-        {quarterlyLoading && <div className="att-muted">Loading
-quarterly leave…</div>}
+        {quarterlyLoading && <div className="att-muted">Loading quarterly leave…</div>}
         {quarterlyError && <div className="att-error">{quarterlyError}</div>}
-        {!quarterlyLoading && !quarterlyError && quarterly && (
-          <QuarterlyPanel data={quarterly} expanded={expanded}
-onToggle={toggleRow} />
+        {!quarterlyLoading && !quarterlyError && (
+          <QuarterlyPanel data={Array.isArray(quarterly) ? quarterly : []} quarter={quarter} year={year} />
         )}
       </section>
 
@@ -479,16 +511,14 @@ onToggle={toggleRow} />
    month, year, milestoneId and projectId, plus the Excel file.
    ===================================================================== */
 function LeaveUploadModal({ projectId, milestone, onClose }) {
-  const [month, setMonth] = useState("");
-  const [uploadYear, setUploadYear] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [rateYear, setRateYear] = useState("");
+  const [rateYears, setRateYears] = useState([]);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
-  const [rateYears, setRateYears] = useState([]);
 
   // Fetch rate-year options from the resources service.
   useEffect(() => {
@@ -526,33 +556,29 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
   const upload = async () => {
     setError(null);
     if (!file) { setError("Please select an Excel file."); return; }
-    if (!month || !uploadYear) { setError("Please select both month and year."); return; }
     if (!startDate || !endDate) { setError("Please select both start and end date."); return; }
     if (endDate < startDate) { setError("End date cannot be earlier than start date."); return; }
-    if (!rateYear) { setError("Please select a rate year."); return; }
     if (!milestone?.apiId) { setError("Couldn't determine the milestone."); return; }
     if (!projectId) { setError("Couldn't determine the project."); return; }
 
     const body = new FormData();
     body.append("file", file);
-    // rateYear from the dropdown is "Year-1", "Year-2" etc. The API expects
-    // just the numeric part (e.g. 1, 2). Strip the "Year-" prefix here.
-    const rateYearNum = String(rateYear).replace(/^Year-/i, "");
     const params = new URLSearchParams({
-      month: String(month),
-      year: String(uploadYear),
+      projectId,
+      milestoneId: milestone.apiId,
       startDate: String(startDate),
       endDate: String(endDate),
-      rateYear: rateYearNum,
-      milestoneId: milestone.apiId,
-      projectId,
     });
+    // rateYear is optional — only include it if the user picked one.
+    // The dropdown values are "Year-1", "Year-2" etc; API expects just the number.
+    if (rateYear) {
+      params.set("rateYear", String(rateYear).replace(/^Year-/i, ""));
+    }
 
     try {
       setUploading(true);
       const token = getToken();
-      const res = await
-fetch(`${API_BASE}/api/attendance/monthly?${params.toString()}`, {
+      const res = await fetch(`${API_BASE}/api/attendance/upload?${params.toString()}`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body,
@@ -567,62 +593,35 @@ fetch(`${API_BASE}/api/attendance/monthly?${params.toString()}`, {
   };
 
   return (
-    <div className="att-backdrop" onMouseDown={(e) => e.target ===
-e.currentTarget && onClose()}>
-      <div className="att-modal" role="dialog" aria-modal="true"
-aria-label="Leave Management"
+    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true" aria-label="Leave Management"
         style={{ maxWidth: 540 }}>
         <div className="att-modal-head">
           <div>
-            <div className="att-eyebrow" style={{ marginBottom: 4
-}}>Leave Management</div>
+            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Leave Management</div>
             <h2 className="att-modal-title">Upload Attendance</h2>
           </div>
-          <button className="att-close" onClick={onClose}
-aria-label="Close">✕</button>
+          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         <div className="att-muted" style={{ paddingTop: 0, marginBottom: 12 }}>
           {milestone.serverDisplayCode || milestone.id ? (
-            <><code className="att-code">{milestone.serverDisplayCode
-|| milestone.id}</code>{" "}</>
+            <><code className="att-code">{milestone.serverDisplayCode || milestone.id}</code>{" "}</>
           ) : null}
           {milestone.name}
         </div>
 
         {done ? (
           <>
-            <div style={{ padding: "8px 0 16px", color: C.green,
-fontWeight: 600 }}>
+            <div style={{ padding: "8px 0 16px", color: C.green, fontWeight: 600 }}>
               Attendance uploaded successfully!
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button className="att-btn-primary"
-onClick={onClose}>Done</button>
+              <button className="att-btn-primary" onClick={onClose}>Done</button>
             </div>
           </>
         ) : (
           <>
-            <div className="att-controls" style={{ marginBottom: 14 }}>
-              <Field label="Month">
-                <select className="att-select" value={month}
-onChange={(e) => setMonth(e.target.value)}>
-                  <option value="" disabled>Select month</option>
-                  {MONTH_NAMES.slice(1).map((m, i) => (
-                    <option key={m} value={i + 1}>{m}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Year">
-                <select className="att-select" value={uploadYear}
-onChange={(e) => setUploadYear(e.target.value)}>
-                  <option value="" disabled>Select year</option>
-                  {YEAR_OPTIONS.map((y) => <option key={y}
-value={y}>{y}</option>)}
-                </select>
-              </Field>
-            </div>
-
             <div className="att-controls" style={{ marginBottom: 14 }}>
               <Field label="Start Date">
                 <input
@@ -641,10 +640,9 @@ value={y}>{y}</option>)}
                   onChange={(e) => setEndDate(e.target.value)}
                 />
               </Field>
-              <Field label="Rate Year">
-                <select className="att-select" value={rateYear}
-onChange={(e) => setRateYear(e.target.value)}>
-                  <option value="" disabled>Select rate year</option>
+              <Field label="Rate Year (optional)">
+                <select className="att-select" value={rateYear} onChange={(e) => setRateYear(e.target.value)}>
+                  <option value="">None</option>
                   {rateYears.map((y) => (
                     <option key={y} value={y}>{y}</option>
                   ))}
@@ -663,12 +661,9 @@ onChange={(e) => setRateYear(e.target.value)}>
 
             {error && <div className="att-error">{error}</div>}
 
-            <div style={{ display: "flex", justifyContent: "flex-end",
-gap: 10, marginTop: 22 }}>
-              <button className="att-btn-secondary" onClick={onClose}
-disabled={uploading}>Cancel</button>
-              <button className="att-btn-primary" onClick={upload}
-disabled={uploading}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+              <button className="att-btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
+              <button className="att-btn-primary" onClick={upload} disabled={uploading}>
                 {uploading ? "Uploading…" : "Upload"}
               </button>
             </div>
@@ -860,221 +855,175 @@ className="att-date-wd">{weekdayShort(h.date)}</span>
 /* =====================================================================
    Monthly summary card
    ===================================================================== */
-function MonthCard({ month, expanded, onToggle, onEmployeeClick }) {
-  const employees = month.employees ?? [];
-  return (
-    <div className="uidai-pmis-card att-card">
-      <div className="att-card-head">
-        <strong className="att-card-title">{MONTH_NAMES[month.month]}
-{month.year}</strong>
-        <div className="att-chips">
-          <Chip>{month.totalDaysInMonth} days</Chip>
-          <Chip>{month.totalWeekendDays} weekend days</Chip>
-          <Chip>{employees.length} employees</Chip>
-          {month.publicHolidayCount > 0 && (
-            <span
-              className="att-chip"
-              title={month.publicHolidays.map((h) => `${h.date} ·
-${h.name}`).join("\n")}
-            >
-              {month.publicHolidayCount}
-holiday{month.publicHolidayCount > 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-      </div>
+// function MonthCard({ month, expanded, onToggle, onEmployeeClick }) {
+//   const employees = Array.isArray(summary) ? summary : [];
+//   const period = employees[0]?.period || (selectedMonth !== "all" ? `${MONTH_NAMES[Number(selectedMonth)]} ${year}` : "");
+//   return (
+//     <div className="uidai-pmis-card att-card">
+//       <div className="att-card-head">
+//         <strong className="att-card-title">{MONTH_NAMES[month.month]}
+// {month.year}</strong>
+//         <div className="att-chips">
+//           <Chip>{month.totalDaysInMonth} days</Chip>
+//           <Chip>{month.totalWeekendDays} weekend days</Chip>
+//           <Chip><div className="att-stats">
+//           <span className="att-stat">
+//             <b>{employees.length}</b> employee{employees.length === 1 ? "" : "s"}{period ? ` · ${period}` : ""}
+//           </span>
+//         </div></Chip>
+//           {month.publicHolidayCount > 0 && (
+//             <span
+//               className="att-chip"
+//               title={month.publicHolidays.map((h) => `${h.date} ·
+// ${h.name}`).join("\n")}
+//             >
+//               {month.publicHolidayCount}
+// holiday{month.publicHolidayCount > 1 ? "s" : ""}
+//             </span>
+//           )}
+//         </div>
+//       </div>
 
-      {employees.length === 0 ? (
-        <div className="att-muted">No employee data.</div>
-      ) : (
-        <div className="att-table-wrap">
-          <table className="att-table">
-            <thead>
-              <tr>
-                <th className="att-th att-th-x" />
-                <th className="att-th">ID</th>
-                <th className="att-th">Name</th>
-                <th className="att-th">Designation</th>
-                <th className="att-th att-num">Leave Taken</th>
-                <th className="att-th att-num">Half days</th>
-                <th className="att-th att-num">Short-hour days</th>
-                <th className="att-th att-num">Total short hrs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {employees.map((emp) => {
-                const key = `m-${month.month}-${emp.attendanceId}`;
-                const shortEntries = Object.entries(emp.shortHours ?? {});
-                const hasDetail = shortEntries.length > 0 ||
-(emp.halfDays?.length ?? 0) > 0;
-                const isOpen = !!expanded[key];
-                const totalShort = totalShortHours(emp.shortHours);
-                return (
-                  <React.Fragment key={key}>
-                    <tr className="att-row" style={{ cursor: "pointer" }}
-                      onClick={() => onEmployeeClick?.(emp,
-month.month, month.year)}>
-                      <td className="att-td">
-                        {hasDetail && (
-                          <button className="att-expand"
-                            onClick={(e) => { e.stopPropagation();
-onToggle(key); }}
-                            aria-label={isOpen ? "Collapse" : "Expand"}>
-                            {isOpen ? "▾" : "▸"}
-                          </button>
-                        )}
-                      </td>
-                      <td className="att-td">
-                        <code className="att-code">{emp.attendanceId}</code>
-                      </td>
-                      <td className="att-td att-strong">{emp.employeeName}</td>
-                      <td className="att-td">{emp.designation || "—"}</td>
-                      <td className="att-td att-num">{emp.leaveDays}</td>
-                      <td className="att-td
-att-num">{emp.halfDays?.length ?? 0}</td>
-                      <td className="att-td att-num">{emp.shortHourDays}</td>
-                      <td className="att-td att-num">{totalShort ?
-totalShort.toFixed(2) : "0"}</td>
-                    </tr>
-                    {isOpen && hasDetail && (
-                      <tr className="att-detail-row">
-                        <td />
-                        <td className="att-detail" colSpan={7}>
-                          {(emp.halfDays?.length ?? 0) > 0 && (
-                            <div className="att-detail-block">
-                              <span className="att-detail-label">Half
-days:</span>{" "}
-                              {emp.halfDays.join(", ")}
-                            </div>
-                          )}
-                          {shortEntries.length > 0 && (
-                            <div className="att-detail-block">
-                              <span className="att-detail-label">Short
-hours:</span>{" "}
-                              {shortEntries.map(([date, hrs]) =>
-`${date} (${hrs})`).join(", ")}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
+//       {employees.length === 0 ? (
+//         <div className="att-muted">No employee data.</div>
+//       ) : (
+//         <div className="att-table-wrap">
+//           <table className="att-table">
+//             <thead>
+//               <tr>
+//                 <th className="att-th att-th-x" />
+//                 <th className="att-th">ID</th>
+//                 <th className="att-th">Name</th>
+//                 <th className="att-th">Designation</th>
+//                 <th className="att-th att-num">Leave Taken</th>
+//                 <th className="att-th att-num">Half days</th>
+//                 <th className="att-th att-num">Short-hour days</th>
+//                 <th className="att-th att-num">Total short hrs</th>
+//               </tr>
+//             </thead>
+//             <tbody>
+//               {employees.map((emp) => {
+//                 const key = `m-${month.month}-${emp.attendanceId}`;
+//                 const shortEntries = Object.entries(emp.shortHours ?? {});
+//                 const hasDetail = shortEntries.length > 0 ||
+// (emp.halfDays?.length ?? 0) > 0;
+//                 const isOpen = !!expanded[key];
+//                 const totalShort = totalShortHours(emp.shortHours);
+//                 return (
+//                   <React.Fragment key={key}>
+//                     <tr className="att-row" style={{ cursor: "pointer" }}
+//                       onClick={() => onEmployeeClick?.(emp,
+// month.month, month.year)}>
+//                       <td className="att-td">
+//                         {hasDetail && (
+//                           <button className="att-expand"
+//                             onClick={(e) => { e.stopPropagation();
+// onToggle(key); }}
+//                             aria-label={isOpen ? "Collapse" : "Expand"}>
+//                             {isOpen ? "▾" : "▸"}
+//                           </button>
+//                         )}
+//                       </td>
+//                       <td className="att-td">
+//                         <code className="att-code">{emp.attendanceId}</code>
+//                       </td>
+//                       <td className="att-td att-strong">{emp.employeeName}</td>
+//                       <td className="att-td">{emp.designation || "—"}</td>
+//                       <td className="att-td att-num">{emp.leaveDays}</td>
+//                       <td className="att-td
+// att-num">{emp.halfDays?.length ?? 0}</td>
+//                       <td className="att-td att-num">{emp.shortHourDays}</td>
+//                       <td className="att-td att-num">{totalShort ?
+// totalShort.toFixed(2) : "0"}</td>
+//                     </tr>
+//                     {isOpen && hasDetail && (
+//                       <tr className="att-detail-row">
+//                         <td />
+//                         <td className="att-detail" colSpan={7}>
+//                           {(emp.halfDays?.length ?? 0) > 0 && (
+//                             <div className="att-detail-block">
+//                               <span className="att-detail-label">Half
+// days:</span>{" "}
+//                               {emp.halfDays.join(", ")}
+//                             </div>
+//                           )}
+//                           {shortEntries.length > 0 && (
+//                             <div className="att-detail-block">
+//                               <span className="att-detail-label">Short
+// hours:</span>{" "}
+//                               {shortEntries.map(([date, hrs]) =>
+// `${date} (${hrs})`).join(", ")}
+//                             </div>
+//                           )}
+//                         </td>
+//                       </tr>
+//                     )}
+//                   </React.Fragment>
+//                 );
+//               })}
+//             </tbody>
+//           </table>
+//         </div>
+//       )}
+//     </div>
+//   );
+// }
 
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
-function QuarterlyPanel({ data, expanded, onToggle }) {
-  const resources = data.resources ?? [];
-  const monthsLabel = (data.monthsWithData ?? [])
-    .map((m) => MONTH_NAMES[m] || m).join(", ");
+/* =====================================================================
+   Quarterly leave panel
+   ===================================================================== */
+function QuarterlyPanel({ data, quarter, year }) {
+  const employees = data ?? [];
+  const period = employees[0]?.period || `Q${quarter} ${year}`;
 
   return (
     <div className="uidai-pmis-card att-card">
       <div className="att-card-head">
-        <strong className="att-card-title">Q{data.quarter} {data.year}</strong>
+        <strong className="att-card-title">{period}</strong>
         <div className="att-chips">
-          <Chip>{data.quarterStart} → {data.quarterEnd}</Chip>
-          <Chip>{data.resourceCount} resources</Chip>
-          {monthsLabel && <Chip>Data: {monthsLabel}</Chip>}
+          <Chip>{employees.length} employees</Chip>
         </div>
       </div>
 
-      {resources.length === 0 ? (
-        <div className="att-muted">No leave data recorded for this
-quarter.</div>
+      {employees.length === 0 ? (
+        <div className="att-muted">No leave data recorded for this quarter.</div>
       ) : (
         <div className="att-table-wrap">
           <table className="att-table">
             <thead>
               <tr>
-                <th className="att-th att-th-x" />
-                <th className="att-th">Attendance Id</th>
-                <th className="att-th">Employee Name</th>
-                <th className="att-th">Joining Date</th>
-                <th className="att-th att-num" title="Permissible paid
-leave">Permissible</th>
-                <th className="att-th att-num" title="Leave days
-taken">Taken</th>
-                <th className="att-th att-num" title="Paid leave days">Paid</th>
-                <th className="att-th att-num" title="Unpaid leave
-days">Unpaid</th>
-                <th className="att-th att-num" title="Sandwich days
-charged">Sandwich</th>
-                <th className="att-th att-num" title="Total unpaid
-days">Total unpaid</th>
+                <th className="att-th">ID</th>
+                <th className="att-th">Name</th>
+                <th className="att-th att-num">Working Days</th>
+                <th className="att-th att-num">Present</th>
+                <th className="att-th att-num">Half Days</th>
+                <th className="att-th att-num">Leave</th>
+                <th className="att-th att-num">Absent</th>
+                <th className="att-th att-num">Week Off</th>
+                <th className="att-th att-num">Holiday</th>
+                <th className="att-th att-num">WFH</th>
+                <th className="att-th att-num">Attendance %</th>
               </tr>
             </thead>
             <tbody>
-              {resources.map((r, i) => {
-                const c = getCalc(r);
-                const key = `q-${data.quarter}-${r.attendanceId ?? i}`;
-                const unpaidDates = c.unpaidLeaveDates ?? [];
-                const sandwichDates = c.sandwichDates ?? [];
-                const hasDetail = unpaidDates.length > 0 ||
-sandwichDates.length > 0;
-                const isOpen = !!expanded[key];
-                const totalUnpaid = c.totalUnpaidDays ?? 0;
-                return (
-                  <React.Fragment key={key}>
-                    <tr className="att-row">
-                      <td className="att-td">
-                        {hasDetail && (
-                          <button className="att-expand" onClick={()=> onToggle(key)}
-                            aria-label={isOpen ? "Collapse" : "Expand"}>
-                            {isOpen ? "▾" : "▸"}
-                          </button>
-                        )}
-                      </td>
-                      <td className="att-td"><code
-className="att-code">{r.attendanceId}</code></td>
-                      <td className="att-td att-strong">{r.employeeName}</td>
-                      <td className="att-td">{r.joiningDate || "—"}</td>
-                      <td className="att-td
-att-num">{c.permissibleLeave ?? 0}</td>
-                      <td className="att-td att-num">{c.leaveDaysTaken
-?? 0}</td>
-                      <td className="att-td att-num">{c.paidLeaveDays ?? 0}</td>
-                      <td className="att-td
-att-num">{c.unpaidLeaveDays ?? 0}</td>
-                      <td className="att-td att-num">{c.sandwichDays ?? 0}</td>
-                      <td className={`att-td att-num${totalUnpaid > 0
-? " att-danger" : ""}`}>
-                        {totalUnpaid}
-                      </td>
-                    </tr>
-                    {isOpen && hasDetail && (
-                      <tr className="att-detail-row">
-                        <td />
-                        <td className="att-detail" colSpan={9}>
-                          {unpaidDates.length > 0 && (
-                            <div className="att-detail-block">
-                              <span
-className="att-detail-label">Unpaid leave dates:</span>{" "}
-                              {unpaidDates.join(", ")}
-                            </div>
-                          )}
-                          {sandwichDates.length > 0 && (
-                            <div className="att-detail-block">
-                              <span
-className="att-detail-label">Sandwich dates:</span>{" "}
-                              {sandwichDates.join(", ")}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
+              {employees.map((emp) => (
+                <tr className="att-row" key={emp.attendanceId}>
+                  <td className="att-td"><code className="att-code">{emp.attendanceId}</code></td>
+                  <td className="att-td att-strong">{emp.employeeName}</td>
+                  <td className="att-td att-num">{emp.workingDays}</td>
+                  <td className="att-td att-num">{emp.presentDays}</td>
+                  <td className="att-td att-num">{emp.halfDays}</td>
+                  <td className="att-td att-num">{emp.leaveDays}</td>
+                  <td className="att-td att-num">{emp.absentDays}</td>
+                  <td className="att-td att-num">{emp.weekOffDays}</td>
+                  <td className="att-td att-num">{emp.holidayDays}</td>
+                  <td className="att-td att-num">{emp.wfhDays}</td>
+                  <td className="att-td att-num">{emp.attendancePercentage}%</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
