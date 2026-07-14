@@ -285,7 +285,7 @@ function ProjectDetail({ p, navigate }) {
             </div>
           )}
         </div>
-        <div className="dash-card">
+        {/* <div className="dash-card">
           <div className="dash-card-title">Project Bar Chart<span className="dash-card-sub">{itemsFilter ? `Filtered by ${filterLabel(itemsFilter)}` : "Milestones and activities"}</span></div>
           {itemsLoading && <div className="dash-empty">Loading items…</div>}
           {!itemsLoading && itemsError && <div className="dash-empty" style={{ color: "#d4440e" }}>{itemsError}</div>}
@@ -295,7 +295,7 @@ function ProjectDetail({ p, navigate }) {
               <Legend counts={chartCounts} keys={["completed", "ontrack", "delayed"]} />
             </div>
           )}
-        </div>
+        </div> */}
         <div className="dash-card">
           <div className="dash-card-title">
             Delayed Track
