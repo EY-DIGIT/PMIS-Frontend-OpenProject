@@ -34,6 +34,53 @@ const formatDate = (v) => {
   });
 };
 
+// Initials + a stable accent colour for the avatar chip.
+const initialsOf = (name) => {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+};
+const AVATAR_COLORS = [
+  { bg: "#e6eefb", fg: "#0b3c88" },
+  { bg: "#e7f7ee", fg: "#0f7a45" },
+  { bg: "#fdeede", fg: "#b45309" },
+  { bg: "#f0e9fb", fg: "#6d3bbf" },
+  { bg: "#fde8ec", fg: "#c02757" },
+  { bg: "#e2f4f6", fg: "#0d7a86" },
+];
+const avatarColor = (name) => {
+  const s = String(name || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+};
+
+// Column comparator for header sorting.
+const makeComparator = (key, dir) => {
+  const mul = dir === "asc" ? 1 : -1;
+  return (a, b) => {
+    if (key === "rateCard") {
+      const av = a.rateCard == null || a.rateCard === "" ? -Infinity : Number(a.rateCard);
+      const bv = b.rateCard == null || b.rateCard === "" ? -Infinity : Number(b.rateCard);
+      return (av - bv) * mul;
+    }
+    if (key === "dateOfJoining" || key === "lastDate") {
+      const av = a[key] ? new Date(a[key]).getTime() : -Infinity;
+      const bv = b[key] ? new Date(b[key]).getTime() : -Infinity;
+      return (av - bv) * mul;
+    }
+    if (key === "active") {
+      return ((a.active ? 1 : 0) - (b.active ? 1 : 0)) * mul;
+    }
+    return (
+      String(a[key] ?? "").localeCompare(String(b[key] ?? ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }) * mul
+    );
+  };
+};
+
 // A resource is editable field-by-field; resId + projectId stay fixed.
 const EDITABLE_FIELDS = [
   "name",
@@ -45,6 +92,237 @@ const EDITABLE_FIELDS = [
   "active",
 ];
 
+// Table columns — drives both the header and sorting. One source of truth.
+const COLUMNS = [
+  { key: "resId", label: "ID", align: "left", sortable: true },
+  { key: "name", label: "Name", align: "left", sortable: true },
+  { key: "designationType", label: "Designation", align: "left", sortable: true },
+  { key: "rateCard", label: "Rate card", align: "right", sortable: true },
+  { key: "dateOfJoining", label: "Joined", align: "left", sortable: true },
+  { key: "lastDate", label: "Last date", align: "left", sortable: true },
+  { key: "active", label: "Status", align: "center", sortable: true },
+  { key: "_action", label: "Action", align: "center", sortable: false },
+];
+
+// All component styling lives here so the JSX stays readable and hover/focus
+// states are pure CSS. Scoped under `.rp` to avoid clashing with global.css.
+const STYLES = `
+.rp {
+  --rp-primary: #0b3c88;
+  --rp-primary-600: #0a336f;
+  --rp-primary-700: #062a63;
+  --rp-primary-50: #eef3fb;
+  --rp-ink: #0f1c33;
+  --rp-ink-2: #334155;
+  --rp-muted: #64748b;
+  --rp-faint: #94a3b8;
+  --rp-line: #e6ecf3;
+  --rp-line-2: #eef2f7;
+  --rp-surface: #ffffff;
+  --rp-surface-2: #f7f9fd;
+  --rp-success: #0f9d58;
+  --rp-success-bg: #e7f7ee;
+  --rp-warn: #b45309;
+  --rp-warn-bg: #fef3c7;
+  --rp-danger: #dc2626;
+  --rp-danger-bg: #fdecec;
+  --rp-shadow-sm: 0 1px 2px rgba(15,28,51,0.06);
+  --rp-shadow-md: 0 6px 20px rgba(15,28,51,0.08);
+  --rp-shadow-lg: -18px 0 48px rgba(11,23,42,0.18);
+  color: var(--rp-ink-2);
+}
+
+/* ---- header ---- */
+.rp-eyebrow {
+  font-size: 12px; font-weight: 700; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--rp-primary);
+}
+.rp-stats { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.rp-stat {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-radius: 999px;
+  background: var(--rp-surface); border: 1px solid var(--rp-line);
+  box-shadow: var(--rp-shadow-sm); font-size: 13px; color: var(--rp-muted);
+}
+.rp-stat b { color: var(--rp-ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.rp-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+/* ---- toolbar ---- */
+.rp-toolbar {
+  display: flex; gap: 12px; align-items: center;
+  justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap;
+}
+.rp-search {
+  position: relative; display: flex; align-items: center; flex: 1;
+  min-width: 240px; max-width: 420px; background: var(--rp-surface);
+  border: 1px solid var(--rp-line); border-radius: 11px; padding: 0 10px 0 12px;
+  box-shadow: var(--rp-shadow-sm); transition: border-color .18s, box-shadow .18s;
+}
+.rp-search:focus-within { border-color: var(--rp-primary); box-shadow: 0 0 0 3px var(--rp-primary-50); }
+.rp-search svg { color: var(--rp-faint); flex-shrink: 0; }
+.rp-search input {
+  border: none; outline: none; background: transparent; flex: 1;
+  padding: 11px 10px; font-size: 14px; color: var(--rp-ink); font-family: inherit;
+}
+.rp-iconbtn {
+  border: none; background: transparent; color: var(--rp-faint); cursor: pointer;
+  height: 30px; width: 30px; border-radius: 7px; display: flex;
+  align-items: center; justify-content: center; transition: background .15s, color .15s;
+}
+.rp-iconbtn:hover { background: var(--rp-line-2); color: var(--rp-ink); }
+
+.rp-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.rp-btn {
+  display: inline-flex; align-items: center; gap: 8px; border-radius: 10px;
+  font-size: 14px; font-weight: 600; padding: 10px 16px; cursor: pointer;
+  font-family: inherit; transition: background .18s, border-color .18s, box-shadow .18s, transform .05s;
+}
+.rp-btn:active { transform: translateY(1px); }
+.rp-btn:focus-visible { outline: 3px solid var(--rp-primary-50); outline-offset: 1px; }
+.rp-btn[disabled] { cursor: not-allowed; opacity: .55; }
+.rp-btn-ghost { border: 1px solid var(--rp-line); background: var(--rp-surface); color: var(--rp-ink); box-shadow: var(--rp-shadow-sm); }
+.rp-btn-ghost:not([disabled]):hover { background: var(--rp-surface-2); }
+.rp-btn-primary { border: none; background: var(--rp-primary); color: #fff; box-shadow: 0 2px 6px rgba(11,60,136,.22); }
+.rp-btn-primary:not([disabled]):hover { background: var(--rp-primary-700); }
+
+.rp-caption { font-size: 13px; color: var(--rp-muted); margin: 2px 0 18px; }
+.rp-caption b { color: var(--rp-ink); }
+
+/* ---- card + table ---- */
+.rp-card { overflow: hidden; border: 1px solid var(--rp-line); border-radius: 14px; background: var(--rp-surface); box-shadow: var(--rp-shadow-md); }
+.rp-scroll { overflow-x: auto; }
+.rp-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rp-th {
+  position: sticky; top: 0; background: var(--rp-surface-2); color: var(--rp-muted);
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 0; border-bottom: 1px solid var(--rp-line); white-space: nowrap; z-index: 1;
+}
+.rp-th-inner { display: flex; align-items: center; gap: 6px; padding: 13px 16px; width: 100%; }
+.rp-th[data-align="right"] .rp-th-inner { justify-content: flex-end; }
+.rp-th[data-align="center"] .rp-th-inner { justify-content: center; }
+button.rp-th-inner {
+  border: none; background: transparent; font: inherit; color: inherit;
+  letter-spacing: inherit; text-transform: inherit; cursor: pointer; transition: color .15s;
+}
+button.rp-th-inner:hover { color: var(--rp-primary); }
+.rp-th .arrow { font-size: 10px; opacity: .45; transition: opacity .15s; }
+.rp-th[aria-sort="ascending"] .arrow,
+.rp-th[aria-sort="descending"] .arrow { opacity: 1; color: var(--rp-primary); }
+
+.rp-row { border-bottom: 1px solid var(--rp-line-2); cursor: pointer; transition: background .16s, box-shadow .16s; }
+.rp-row:last-child { border-bottom: none; }
+.rp-row:hover { background: var(--rp-surface-2); box-shadow: inset 3px 0 0 var(--rp-primary); }
+.rp-td { padding: 12px 16px; vertical-align: middle; color: var(--rp-ink); }
+.rp-td[data-align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
+.rp-td[data-align="center"] { text-align: center; }
+
+.rp-id { font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--rp-line-2); padding: 3px 7px; border-radius: 5px; color: var(--rp-ink-2); }
+.rp-person { display: flex; align-items: center; gap: 11px; }
+.rp-avatar { width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700; }
+.rp-name { font-weight: 600; color: var(--rp-ink); }
+.rp-sub { color: var(--rp-muted); font-size: 12.5px; margin-top: 1px; }
+
+.rp-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px; }
+.rp-pill .rp-dot { background: currentColor; }
+.rp-pill--on { background: var(--rp-success-bg); color: var(--rp-success); }
+.rp-pill--off { background: var(--rp-line-2); color: var(--rp-muted); }
+
+.rp-edit {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+  color: var(--rp-primary); background: transparent; border: 1px solid var(--rp-line);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer; transition: background .15s, border-color .15s;
+}
+.rp-edit:hover { background: var(--rp-primary-50); border-color: var(--rp-primary); }
+
+/* ---- states ---- */
+.rp-empty { text-align: center; padding: 64px 24px; }
+.rp-empty-emoji { font-size: 44px; margin-bottom: 14px; opacity: .55; }
+.rp-empty h3 { font-size: 16px; font-weight: 700; color: var(--rp-ink); margin: 0 0 8px; }
+.rp-empty p { color: var(--rp-muted); font-size: 14px; max-width: 400px; margin: 0 auto 24px; line-height: 1.5; }
+
+.rp-skel-bar { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--rp-line-2) 25%, #e2e8f2 37%, var(--rp-line-2) 63%); background-size: 400% 100%; animation: rp-skel 1.3s ease infinite; }
+
+/* ---- drawer ---- */
+.rp-scrim {
+  position: fixed; inset: 0; background: rgba(11,42,99,.42); backdrop-filter: blur(2px);
+  display: flex; justify-content: flex-end; z-index: 1000; animation: rp-fade .15s ease;
+}
+.rp-drawer {
+  width: min(460px, 100%); height: 100%; background: var(--rp-surface);
+  display: flex; flex-direction: column; box-shadow: var(--rp-shadow-lg);
+  animation: rp-slide .24s cubic-bezier(.2,.8,.2,1);
+}
+.rp-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 24px; border-bottom: 1px solid var(--rp-line); }
+.rp-drawer-head h2 { margin: 2px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; color: var(--rp-ink); }
+.rp-close {
+  border: none; background: var(--rp-line-2); color: var(--rp-muted); width: 30px; height: 30px;
+  border-radius: 8px; cursor: pointer; font-size: 17px; line-height: 1; display: flex;
+  align-items: center; justify-content: center; transition: background .18s, color .18s; flex-shrink: 0;
+}
+.rp-close:hover { background: #e3e7ef; color: var(--rp-ink); }
+.rp-drawer-body { padding: 22px 24px; overflow-y: auto; flex: 1; }
+.rp-drawer-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--rp-line); background: var(--rp-surface-2); }
+
+.rp-detail-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 2px; border-bottom: 1px solid var(--rp-line-2); }
+.rp-detail-row:last-child { border-bottom: none; }
+.rp-detail-k { font-size: 13px; color: var(--rp-muted); font-weight: 600; }
+.rp-detail-v { font-size: 14px; color: var(--rp-ink); font-weight: 600; text-align: right; word-break: break-word; font-variant-numeric: tabular-nums; }
+
+.rp-readonly { display: flex; align-items: center; justify-content: space-between; background: var(--rp-surface-2); border: 1px solid var(--rp-line); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: var(--rp-muted); }
+.rp-readonly b { color: var(--rp-ink); font-variant-numeric: tabular-nums; }
+
+.rp-field { display: flex; flex-direction: column; gap: 6px; }
+.rp-field > span { font-size: 12.5px; font-weight: 600; color: var(--rp-muted); }
+.rp-input {
+  width: 100%; border: 1px solid var(--rp-line); border-radius: 9px; padding: 10px 12px;
+  font-size: 14px; color: var(--rp-ink); background: var(--rp-surface); outline: none;
+  font-family: inherit; transition: border-color .15s, box-shadow .15s; box-sizing: border-box;
+}
+.rp-input:focus { border-color: var(--rp-primary); box-shadow: 0 0 0 3px var(--rp-primary-50); }
+.rp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+.rp-switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; padding-top: 4px; }
+.rp-switch input { position: absolute; opacity: 0; pointer-events: none; }
+.rp-track { width: 40px; height: 22px; border-radius: 999px; background: #cbd5e1; position: relative; transition: background .2s; display: inline-block; }
+.rp-track.on { background: var(--rp-success); }
+.rp-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: left .2s; }
+.rp-track.on .rp-thumb { left: 20px; }
+
+.rp-inline-error { background: var(--rp-danger-bg); border: 1px solid #f5c9c9; color: var(--rp-danger); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; display: flex; align-items: center; gap: 10px; }
+
+/* ---- toasts ---- */
+.rp-toasts { position: fixed; right: 20px; bottom: 20px; z-index: 1100; display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+.rp-toast {
+  display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; border-radius: 11px;
+  background: var(--rp-surface); box-shadow: var(--rp-shadow-md); border: 1px solid var(--rp-line);
+  animation: rp-toast-in .22s cubic-bezier(.2,.8,.2,1);
+}
+.rp-toast-ic { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+.rp-toast--ok { border-left: 3px solid var(--rp-success); }
+.rp-toast--ok .rp-toast-ic { background: var(--rp-success-bg); color: var(--rp-success); }
+.rp-toast--error { border-left: 3px solid var(--rp-danger); }
+.rp-toast--error .rp-toast-ic { background: var(--rp-danger-bg); color: var(--rp-danger); }
+.rp-toast--warn { border-left: 3px solid var(--rp-warn); }
+.rp-toast--warn .rp-toast-ic { background: var(--rp-warn-bg); color: var(--rp-warn); }
+.rp-toast-title { font-size: 13.5px; font-weight: 700; color: var(--rp-ink); }
+.rp-toast-msg { font-size: 13px; color: var(--rp-muted); margin-top: 1px; line-height: 1.4; }
+.rp-toast-x { border: none; background: transparent; color: var(--rp-faint); cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 5px; }
+.rp-toast-x:hover { color: var(--rp-ink); }
+
+@keyframes rp-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rp-slide { from { transform: translateX(28px); opacity: .5; } to { transform: translateX(0); opacity: 1; } }
+@keyframes rp-toast-in { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes rp-spin { to { transform: rotate(360deg); } }
+@keyframes rp-skel { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+@media (max-width: 640px) {
+  .rp-toasts { left: 16px; right: 16px; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp *, .rp *::before, .rp *::after { animation: none !important; transition: none !important; }
+}
+`;
+
 export default function ProjectResourcePage() {
   const { projectId } = useParams();
   const project = useProject(projectId);
@@ -52,23 +330,33 @@ export default function ProjectResourcePage() {
 
   // upload
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-  const [uploadOk, setUploadOk] = useState(false);
 
   // table data
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
-  // search
+  // search + sort
   const [query, setQuery] = useState("");
   const [serverSearching, setServerSearching] = useState(false);
-  const [serverMsg, setServerMsg] = useState(null); // { type, text }
+  const [sort, setSort] = useState({ key: null, dir: "asc" });
 
-  // edit drawer
+  // drawers
   const [editing, setEditing] = useState(null);
-  // detail view — the resId whose full record is fetched & shown on row click
   const [viewingId, setViewingId] = useState(null);
+
+  // toasts
+  const [toasts, setToasts] = useState([]);
+  const toastSeq = useRef(0);
+  const pushToast = useCallback((t) => {
+    const id = ++toastSeq.current;
+    setToasts((xs) => [...xs, { id, type: "ok", ...t }]);
+    setTimeout(
+      () => setToasts((xs) => xs.filter((x) => x.id !== id)),
+      t.duration || 4500
+    );
+  }, []);
+  const dismissToast = (id) => setToasts((xs) => xs.filter((x) => x.id !== id));
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -82,7 +370,7 @@ export default function ProjectResourcePage() {
     try {
       const token = getToken();
       const res = await fetch(`${API_BASE}/api/resources`, {
-        headers: { accept: "*/*" ,...(token ? { Authorization: `Bearer ${token}` } : {})},
+        headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error(`Couldn't load resources (${res.status})`);
       const data = await res.json();
@@ -110,7 +398,7 @@ export default function ProjectResourcePage() {
     loadResources();
   }, [loadResources]);
 
-  // ---------- client-side filter ----------
+  // ---------- client-side filter + sort ----------
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return resources;
@@ -121,22 +409,32 @@ export default function ProjectResourcePage() {
     );
   }, [resources, query]);
 
+  const sorted = useMemo(() => {
+    if (!sort.key) return filtered;
+    return [...filtered].sort(makeComparator(sort.key, sort.dir));
+  }, [filtered, sort]);
+
+  const toggleSort = (key) =>
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+
   const looksLikeResId = /^\d{3,}$/.test(query.trim());
-  const showServerFallback =
-    filtered.length === 0 && looksLikeResId && !loading;
+  const showServerFallback = sorted.length === 0 && looksLikeResId && !loading;
 
   // ---------- server lookup: GET /api/resources/{resId} ----------
   async function fetchById(resId) {
     setServerSearching(true);
-    setServerMsg(null);
     try {
       const token = getToken();
-const res = await fetch(
-  `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
-  { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
-);
+      const res = await fetch(
+        `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+        { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+      );
       if (res.status === 404) {
-        setServerMsg({ type: "warn", text: `No resource found for ${resId}.` });
+        pushToast({ type: "warn", title: "Not found", msg: `No resource matches ${resId}.` });
         return;
       }
       if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
@@ -146,9 +444,9 @@ const res = await fetch(
           ? prev.map((r) => (r.resId === data.resId ? data : r))
           : [data, ...prev]
       );
-      setServerMsg({ type: "ok", text: `Found ${data.name} (${data.resId}).` });
+      pushToast({ type: "ok", title: "Found on server", msg: `${data.name} (${data.resId}) added to the list.` });
     } catch (e) {
-      setServerMsg({ type: "error", text: e.message || "Lookup failed" });
+      pushToast({ type: "error", title: "Lookup failed", msg: e.message || "Please try again." });
     } finally {
       setServerSearching(false);
     }
@@ -157,29 +455,30 @@ const res = await fetch(
   // ---------- save: PUT /api/resources/{resId} ----------
   async function saveResource(updated) {
     const token = getToken();
-const res = await fetch(
-  `${API_BASE}/api/resources/${encodeURIComponent(updated.resId)}`,
-  {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      accept: "*/*",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(updated),
-  }
-);
+    const res = await fetch(
+      `${API_BASE}/api/resources/${encodeURIComponent(updated.resId)}`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          accept: "*/*",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(updated),
+      }
+    );
     if (!res.ok) throw new Error(`Save failed (${res.status})`);
     const text = await res.text();
     let saved = updated;
     try {
       saved = text ? JSON.parse(text) : updated;
     } catch {
-      /* server returned no/So invalid body — keep our optimistic copy */
+      /* server returned no/invalid body — keep our optimistic copy */
     }
     setResources((prev) =>
       prev.map((r) => (r.resId === saved.resId ? { ...r, ...saved } : r))
     );
+    pushToast({ type: "ok", title: "Changes saved", msg: `${saved.name || "Resource"} updated.` });
     return saved;
   }
 
@@ -187,27 +486,25 @@ const res = await fetch(
   async function uploadFile(file) {
     if (!file || !projectId) return;
     setUploading(true);
-    setUploadError(null);
-    setUploadOk(false);
 
     const formData = new FormData();
     formData.append("file", file);
 
     try {
       const token = getToken();
-const res = await fetch(
-  `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
-  {
-    method: "POST",
-    headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: formData,
-  }
-);
+      const res = await fetch(
+        `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
+        {
+          method: "POST",
+          headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: formData,
+        }
+      );
       if (!res.ok) throw new Error(`Upload failed (${res.status})`);
-      setUploadOk(true);
-      await loadResources(); // refresh the table with the newly imported rows
+      pushToast({ type: "ok", title: "Import complete", msg: "Resources imported and the table refreshed." });
+      await loadResources();
     } catch (err) {
-      setUploadError(err.message || "Upload failed");
+      pushToast({ type: "error", title: "Import failed", msg: err.message || "Check the file and try again." });
     } finally {
       setUploading(false);
     }
@@ -219,19 +516,16 @@ const res = await fetch(
     e.target.value = ""; // allow re-selecting the same file
   }
 
+  const total = resources.length;
   const activeCount = resources.filter((r) => r.active).length;
+  const inactiveCount = total - activeCount;
 
   return (
-    <div className="uidai-pmis-content" style={{ padding: "28px 24px 64px", maxWidth: "1280px", margin: "0 auto" }}>
-      <style>{`
-        @media (max-width: 640px) {
-          .uidai-pmis-content { padding: 20px 16px 48px; }
-        }
-        .search-container:focus-within {
-          border-color: #0b3c88;
-          box-shadow: 0 0 0 3px #eef2ff;
-        }
-      `}</style>
+    <div
+      className="uidai-pmis-content rp"
+      style={{ padding: "28px 24px 64px", maxWidth: "1280px", margin: "0 auto" }}
+    >
+      <style>{STYLES}</style>
       <input
         ref={fileInputRef}
         type="file"
@@ -240,449 +534,198 @@ const res = await fetch(
         style={{ display: "none" }}
       />
 
-      {/* Header section */}
-      <div style={{ marginBottom: "32px" }}>
-        <div style={{ marginBottom: "6px", fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0b3c88" }}>
-          {project?.projectName ? project.projectName : "Project"}
+      {/* Header */}
+      <div style={{ marginBottom: "28px" }}>
+        <div className="rp-eyebrow" style={{ marginBottom: "6px" }}>
+          {project?.projectName || "Project"}
         </div>
         <h1 className="uidai-pmis-title" style={{ marginBottom: "6px" }}>Resources</h1>
-        <p className="uidai-pmis-subtitle">Manage team members and resource allocation for your project</p>
-        <div style={{ display: "flex", gap: "18px", fontSize: "13px", color: "#6b7a90", marginTop: "18px", flexWrap: "wrap" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontWeight: 700, color: "#1e2a3a", fontSize: "16px" }}>{resources.length}</span> 
-            <span>total resources</span>
+        <p className="uidai-pmis-subtitle">
+          Manage team members and resource allocation for this project.
+        </p>
+        <div className="rp-stats">
+          <span className="rp-stat">
+            <b>{total}</b> total
           </span>
-          <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#cbd2df", alignSelf: "center" }} />
-          <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{ fontWeight: 700, color: "#0f9d58", fontSize: "16px" }}>{activeCount}</span> 
-            <span>active now</span>
+          <span className="rp-stat">
+            <span className="rp-dot" style={{ background: "var(--rp-success)" }} />
+            <b>{activeCount}</b> active
+          </span>
+          <span className="rp-stat">
+            <span className="rp-dot" style={{ background: "#cbd5e1" }} />
+            <b>{inactiveCount}</b> inactive
           </span>
         </div>
       </div>
 
-      {/* Toolbar section */}
-      <div style={{ display: "flex", gap: "12px", alignItems: "center", justifyContent: "space-between", marginBottom: "24px", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", display: "flex", alignItems: "center", flex: "1", minWidth: "240px", maxWidth: "400px", background: "#fff", border: "1px solid #dbe5f1", borderRadius: "10px", padding: "0 12px", transition: "all 0.2s ease", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }} className="search-container">
+      {/* Toolbar */}
+      <div className="rp-toolbar">
+        <div className="rp-search">
           <SearchIcon />
           <input
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setServerMsg(null);
-            }}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, email, ID or role…"
             aria-label="Search resources"
-            style={{ border: "none", outline: "none", background: "transparent", flex: 1, padding: "11px 10px", fontSize: "14px", color: "#1e2a3a", fontFamily: "inherit" }}
           />
           {query && (
-            <button
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              style={{ border: "none", background: "transparent", color: "#6b7a90", cursor: "pointer", fontSize: "16px", padding: "6px 8px", borderRadius: "6px", transition: "all 0.2s ease", display: "flex", alignItems: "center", justifyContent: "center", height: "32px", width: "32px" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#f1f5f9";
-                e.currentTarget.style.color = "#1e2a3a";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "#6b7a90";
-              }}
-              title="Clear search"
-            >
+            <button className="rp-iconbtn" onClick={() => setQuery("")} aria-label="Clear search" title="Clear search">
               ✕
             </button>
           )}
         </div>
 
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <div className="rp-actions">
           <button
+            className="rp-btn rp-btn-ghost"
             onClick={loadResources}
             disabled={loading}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "10px 16px",
-              cursor: loading ? "not-allowed" : "pointer",
-              border: "1px solid #dbe5f1",
-              background: "#fff",
-              color: "#1e2a3a",
-              transition: "all 0.2s ease",
-              opacity: loading ? 0.55 : 1,
-              boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-            }}
-            onMouseEnter={(e) => !loading && (e.currentTarget.style.background = "#f9fafb")}
-            onMouseLeave={(e) => !loading && (e.currentTarget.style.background = "#fff")}
             title="Reload resources"
           >
             <RefreshIcon spinning={loading} />
             Refresh
           </button>
           <button
+            className="rp-btn rp-btn-primary"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading || !projectId}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "10px 16px",
-              cursor: uploading || !projectId ? "not-allowed" : "pointer",
-              border: "none",
-              background: "#0b3c88",
-              color: "#fff",
-              transition: "all 0.2s ease",
-              opacity: uploading || !projectId ? 0.55 : 1,
-              boxShadow: "0 2px 4px rgba(11, 60, 136, 0.15)",
-            }}
-            onMouseEnter={(e) => !uploading && projectId && (e.currentTarget.style.background = "#051f4a")}
-            onMouseLeave={(e) => !uploading && projectId && (e.currentTarget.style.background = "#0b3c88")}
-            title={projectId ? "Upload resources from Excel file" : "Select a project first"}
+            title={projectId ? "Import resources from an Excel file" : "Open a project first"}
           >
             <UploadIcon />
-            {uploading ? "Uploading…" : "Upload"}
+            {uploading ? "Importing…" : "Import Excel"}
           </button>
         </div>
       </div>
 
-      {/* Feedback banners */}
-      {uploadError && (
-        <div style={{ background: "#fde8e8", border: "1px solid #f5c9c9", color: "#d32f2f", borderRadius: "10px", padding: "14px 16px", fontSize: "14px", marginBottom: "16px", display: "flex", alignItems: "flex-start", gap: "12px", animation: "slideDown 0.3s ease-out" }}>
-          <span style={{ fontSize: "20px", flexShrink: 0, marginTop: "2px" }}>⚠️</span>
-          <div>
-            <div style={{ fontWeight: 600, marginBottom: "2px" }}>Upload failed</div>
-            <div style={{ fontSize: "13px", opacity: 0.9 }}>{uploadError}</div>
-          </div>
-        </div>
+      {/* Result caption */}
+      {query ? (
+        <p className="rp-caption">
+          Showing <b>{sorted.length}</b> of <b>{total}</b> resources for “{query.trim()}”.
+        </p>
+      ) : (
+        <div style={{ height: "18px" }} />
       )}
-      {uploadOk && (
-        <div style={{ background: "#e6f6ee", border: "1px solid #c7ead6", color: "#0f9d58", borderRadius: "10px", padding: "14px 16px", fontSize: "14px", marginBottom: "16px", display: "flex", alignItems: "flex-start", gap: "12px", animation: "slideDown 0.3s ease-out" }}>
-          <span style={{ fontSize: "20px", flexShrink: 0, marginTop: "2px" }}>✓</span>
-          <div>
-            <div style={{ fontWeight: 600, marginBottom: "2px" }}>Upload successful</div>
-            <div style={{ fontSize: "13px", opacity: 0.9 }}>Resources imported successfully. The table has been refreshed.</div>
-          </div>
-        </div>
-      )}
-      {serverMsg && (
-        <div style={{
-          background: serverMsg.type === "error" ? "#fde8e8" : serverMsg.type === "ok" ? "#e6f6ee" : "#fef3c7",
-          border: serverMsg.type === "error" ? "1px solid #f5c9c9" : serverMsg.type === "ok" ? "1px solid #c7ead6" : "1px solid #fadf9a",
-          color: serverMsg.type === "error" ? "#d32f2f" : serverMsg.type === "ok" ? "#0f9d58" : "#b45309",
-          borderRadius: "10px",
-          padding: "14px 16px",
-          fontSize: "14px",
-          marginBottom: "16px",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "12px",
-          animation: "slideDown 0.3s ease-out"
-        }}>
-          <span style={{ fontSize: "20px", flexShrink: 0, marginTop: "2px" }}>{serverMsg.type === "error" ? "❌" : serverMsg.type === "ok" ? "✓" : "ℹ️"}</span>
-          <div style={{ fontSize: "13px" }}>{serverMsg.text}</div>
-        </div>
-      )}
-      <style>{`@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }`}</style>
 
-      {/* Main content card */}
-      <div className="uidai-pmis-card" style={{ overflow: "hidden", border: "1px solid #dbe5f1" }}>
+      {/* Main card */}
+      <div className="rp-card">
         {loading ? (
           <TableSkeleton />
         ) : loadError ? (
-          <div style={{ textAlign: "center", padding: "64px 24px" }}>
-            <div style={{ fontSize: "52px", marginBottom: "16px", opacity: "0.5" }}>⚠️</div>
-            <div style={{ fontSize: "16px", fontWeight: 600, marginBottom: "8px", color: "#1e2a3a" }}>
-              {loadError}
-            </div>
-            <p style={{ color: "#6b7a90", fontSize: "14px", marginBottom: "24px" }}>
-              There was a problem loading the resources. Please try again.
-            </p>
-            <button
-              onClick={loadResources}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                borderRadius: "10px",
-                fontSize: "14px",
-                fontWeight: 600,
-                padding: "10px 18px",
-                cursor: "pointer",
-                border: "none",
-                background: "#0b3c88",
-                color: "#fff",
-                transition: "all 0.2s ease",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#051f4a")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "#0b3c88")}
-            >
-              🔄 Try again
+          <div className="rp-empty">
+            <div className="rp-empty-emoji">⚠️</div>
+            <h3>{loadError}</h3>
+            <p>Something went wrong while loading resources. Check your connection and try again.</p>
+            <button className="rp-btn rp-btn-primary" onClick={loadResources}>
+              <RefreshIcon /> Try again
             </button>
           </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "64px 24px" }}>
-            <div style={{ fontSize: "52px", marginBottom: "16px", opacity: "0.5" }}>👥</div>
-            <div style={{ fontSize: "16px", fontWeight: 600, marginBottom: "8px", color: "#1e2a3a" }}>
-              {query ? "No resources match your search." : "No resources yet."}
-            </div>
-            <p style={{ color: "#6b7a90", fontSize: "14px", marginBottom: "24px", maxWidth: "380px", margin: "0 auto" }}>
+        ) : sorted.length === 0 ? (
+          <div className="rp-empty">
+            <div className="rp-empty-emoji">{query ? "🔍" : "👥"}</div>
+            <h3>{query ? "No matching resources" : "No resources yet"}</h3>
+            <p>
               {query
                 ? showServerFallback
-                  ? "This resource might not be loaded on this page. Try searching the server."
-                  : "Try searching with a different name, email, ID, or designation."
-                : "Upload a spreadsheet to import team members for this project. Resources help track team capacity and planning."}
+                  ? "This ID isn't loaded on this page. Search the server to pull it in."
+                  : "Try a different name, email, ID, or designation."
+                : "Import a spreadsheet to add team members for this project and start tracking capacity."}
             </p>
-            {showServerFallback && (
+            {showServerFallback ? (
               <button
+                className="rp-btn rp-btn-primary"
                 onClick={() => fetchById(query.trim())}
                 disabled={serverSearching}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  borderRadius: "10px",
-                  fontSize: "14px",
-                  fontWeight: 600,
-                  padding: "10px 18px",
-                  cursor: serverSearching ? "not-allowed" : "pointer",
-                  border: "none",
-                  background: "#0b3c88",
-                  color: "#fff",
-                  transition: "all 0.2s ease",
-                  opacity: serverSearching ? 0.55 : 1,
-                }}
-                onMouseEnter={(e) => !serverSearching && (e.currentTarget.style.background = "#051f4a")}
-                onMouseLeave={(e) => !serverSearching && (e.currentTarget.style.background = "#0b3c88")}
               >
-                {serverSearching ? "Searching…" : `🔍 Search server for "${query.trim()}"`}
+                {serverSearching ? "Searching…" : `Search server for “${query.trim()}”`}
               </button>
-            )}
+            ) : !query ? (
+              <button
+                className="rp-btn rp-btn-primary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!projectId}
+              >
+                <UploadIcon /> Import Excel
+              </button>
+            ) : null}
           </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: "14px",
-            }}>
+          <div className="rp-scroll">
+            <table className="rp-table">
               <thead>
-                <tr style={{ background: "#f4f7fb" }}>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>ID</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Name</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Designation</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "right",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Rate card</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Joined</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Last date</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "center",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Status</th>
-                  <th style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "center",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}>Action</th>
+                <tr>
+                  {COLUMNS.map((col) => {
+                    const isSorted = sort.key === col.key;
+                    const ariaSort = !col.sortable
+                      ? undefined
+                      : isSorted
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none";
+                    return (
+                      <th key={col.key} className="rp-th" data-align={col.align} aria-sort={ariaSort}>
+                        {col.sortable ? (
+                          <button
+                            className="rp-th-inner"
+                            onClick={() => toggleSort(col.key)}
+                            title={`Sort by ${col.label}`}
+                          >
+                            {col.label}
+                            <span className="arrow">{isSorted ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                          </button>
+                        ) : (
+                          <span className="rp-th-inner">{col.label}</span>
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
-                  <tr
-                    key={r.resId}
-                    onClick={() => setViewingId(r.resId)}
-                    title="View resource details"
-                    style={{
-                      borderBottom: "1px solid #eef1f6",
-                      transition: "background-color 0.2s ease, box-shadow 0.2s ease",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "#f4f7fb";
-                      e.currentTarget.style.boxShadow = "inset 0 0 0 1px #e0e7f0";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
-                  >
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", color: "#1e2a3a", fontVariantNumeric: "tabular-nums" }}>
-                      <code style={{ fontSize: "13px", background: "#f4f7fb", padding: "2px 6px", borderRadius: "4px" }}>
-                        {r.resId}
-                      </code>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle" }}>
-                      <div style={{ fontWeight: 600, color: "#1e2a3a" }}>{r.name}</div>
-                      <div style={{ color: "#6b7a90", fontSize: "12.5px", marginTop: "2px" }}>{r.emailId}</div>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", color: "#1e2a3a" }}>
-                      {r.designationType || "—"}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", textAlign: "right", color: "#1e2a3a", fontVariantNumeric: "tabular-nums" }}>
-                      {formatMoney(r.rateCard)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", color: "#1e2a3a" }}>
-                      {formatDate(r.dateOfJoining)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", color: "#1e2a3a" }}>
-                      {formatDate(r.lastDate)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", textAlign: "center" }}>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          padding: "4px 12px",
-                          borderRadius: "999px",
-                          background: r.active ? "#e6f6ee" : "#eef1f6",
-                          color: r.active ? "#0f9d58" : "#6b7a90",
-                        }}
-                      >
-                        <span style={{
-                          width: "6px",
-                          height: "6px",
-                          borderRadius: "50%",
-                          background: "currentColor",
-                          display: "inline-block",
-                        }} />
-                        {r.active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "middle", textAlign: "center" }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditing(r); }}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          fontSize: "13px",
-                          fontWeight: 600,
-                          color: "#0b3c88",
-                          background: "transparent",
-                          border: "1px solid #dbe5f1",
-                          borderRadius: "8px",
-                          padding: "6px 12px",
-                          cursor: "pointer",
-                          transition: "all 0.15s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = "#eef2ff";
-                          e.currentTarget.style.borderColor = "#0b3c88";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = "transparent";
-                          e.currentTarget.style.borderColor = "#dbe5f1";
-                        }}
-                      >
-                        <EditIcon />
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {sorted.map((r) => {
+                  const ac = avatarColor(r.name);
+                  return (
+                    <tr
+                      key={r.resId}
+                      className="rp-row"
+                      onClick={() => setViewingId(r.resId)}
+                      title="View resource details"
+                    >
+                      <td className="rp-td" data-align="left">
+                        <code className="rp-id">{r.resId}</code>
+                      </td>
+                      <td className="rp-td" data-align="left">
+                        <div className="rp-person">
+                          <span className="rp-avatar" style={{ background: ac.bg, color: ac.fg }}>
+                            {initialsOf(r.name)}
+                          </span>
+                          <div>
+                            <div className="rp-name">{r.name || "—"}</div>
+                            {r.emailId ? <div className="rp-sub">{r.emailId}</div> : null}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="rp-td" data-align="left">{r.designationType || "—"}</td>
+                      <td className="rp-td" data-align="right">{formatMoney(r.rateCard)}</td>
+                      <td className="rp-td" data-align="left">{formatDate(r.dateOfJoining)}</td>
+                      <td className="rp-td" data-align="left">{formatDate(r.lastDate)}</td>
+                      <td className="rp-td" data-align="center">
+                        <span className={`rp-pill ${r.active ? "rp-pill--on" : "rp-pill--off"}`}>
+                          <span className="rp-dot" />
+                          {r.active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td className="rp-td" data-align="center">
+                        <button
+                          className="rp-edit"
+                          onClick={(e) => { e.stopPropagation(); setEditing(r); }}
+                        >
+                          <EditIcon /> Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -698,7 +741,7 @@ const res = await fetch(
         />
       )}
 
-      {/* Detail drawer — fetches GET /api/resources/{resId} on open */}
+      {/* Detail drawer — GET /api/resources/{resId} on open */}
       {viewingId && (
         <ResourceDetailDrawer
           resId={viewingId}
@@ -706,13 +749,26 @@ const res = await fetch(
           onEdit={(r) => { setViewingId(null); setEditing(r); }}
         />
       )}
+
+      {/* Toasts */}
+      <div className="rp-toasts" role="status" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`rp-toast rp-toast--${t.type}`}>
+            <span className="rp-toast-ic">{t.type === "ok" ? "✓" : t.type === "error" ? "✕" : "!"}</span>
+            <div style={{ flex: 1 }}>
+              {t.title ? <div className="rp-toast-title">{t.title}</div> : null}
+              <div className="rp-toast-msg">{t.msg}</div>
+            </div>
+            <button className="rp-toast-x" onClick={() => dismissToast(t.id)} aria-label="Dismiss">✕</button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 /* =====================================================================
-   Detail drawer — GET /api/resources/{resId}. Opened by clicking a row;
-   shows the resource's full record fetched fresh from the server.
+   Detail drawer — GET /api/resources/{resId}. Opened by clicking a row.
    ===================================================================== */
 function ResourceDetailDrawer({ resId, onClose, onEdit }) {
   const [data, setData] = useState(null);
@@ -733,10 +789,10 @@ function ResourceDetailDrawer({ resId, onClose, onEdit }) {
       setError(null);
       try {
         const token = getToken();
-const res = await fetch(
-  `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
-  { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: controller.signal }
-);
+        const res = await fetch(
+          `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+          { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: controller.signal }
+        );
         if (!res.ok) throw new Error(`Couldn't load resource (${res.status})`);
         const json = await res.json();
         if (active) setData(json);
@@ -765,135 +821,30 @@ const res = await fetch(
     : [];
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(11, 42, 99, 0.45)",
-        backdropFilter: "blur(2px)",
-        display: "flex",
-        justifyContent: "flex-end",
-        zIndex: 1000,
-        animation: "fadeIn 0.15s ease",
-      }}
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-               @keyframes slideIn { from { transform: translateX(24px); opacity: 0.6; } to { transform: translateX(0); opacity: 1; } }
-               .drawer { animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }`}</style>
-      <aside
-        className="drawer"
-        style={{
-          width: "min(440px, 100%)",
-          height: "100%",
-          background: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "-16px 0 40px rgba(11, 23, 42, 0.18)",
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Resource ${resId}`}
-      >
-        {/* Header */}
-        <div style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          padding: "22px 24px",
-          borderBottom: "1px solid #dbe5f1",
-          gap: "16px",
-        }}>
+    <div className="rp rp-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <aside className="rp-drawer" role="dialog" aria-modal="true" aria-label={`Resource ${resId}`}>
+        <div className="rp-drawer-head">
           <div>
-            <div style={{ fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0b3c88", marginBottom: "4px" }}>
-              Resource details
-            </div>
-            <h2 style={{ margin: "2px 0 0", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.01em", color: "#1e2a3a" }}>
-              {data?.name || `#${resId}`}
-            </h2>
+            <div className="rp-eyebrow" style={{ marginBottom: "4px" }}>Resource details</div>
+            <h2>{data?.name || `#${resId}`}</h2>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              border: "none",
-              background: "#eef1f6",
-              color: "#6b7a90",
-              width: "30px",
-              height: "30px",
-              borderRadius: "8px",
-              cursor: "pointer",
-              fontSize: "18px",
-              lineHeight: "1",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#e3e7ef";
-              e.currentTarget.style.color = "#1e2a3a";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#eef1f6";
-              e.currentTarget.style.color = "#6b7a90";
-            }}
-          >
-            ✕
-          </button>
+          <button className="rp-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {/* Body */}
-        <div style={{ padding: "22px 24px", overflowY: "auto", flex: 1 }}>
+        <div className="rp-drawer-body">
           {loading ? (
-            <div style={{ color: "#6b7a90", fontSize: "14px", padding: "8px 0" }}>Loading…</div>
+            <div style={{ color: "var(--rp-muted)", fontSize: "14px", padding: "8px 0" }}>Loading…</div>
           ) : error ? (
-            <div style={{
-              background: "#fde8e8",
-              border: "1px solid #f5c9c9",
-              color: "#d32f2f",
-              borderRadius: "10px",
-              padding: "12px 14px",
-              fontSize: "13.5px",
-            }}>
-              {error}
-            </div>
+            <div className="rp-inline-error">{error}</div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-              {rows.map((row, i) => (
-                <div
-                  key={row.label}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "16px",
-                    padding: "12px 2px",
-                    borderBottom: i === rows.length - 1 ? "none" : "1px solid #eef1f6",
-                  }}
-                >
-                  <span style={{ fontSize: "13px", color: "#6b7a90", fontWeight: 600 }}>{row.label}</span>
-                  <span style={{
-                    fontSize: "14px",
-                    color: "#1e2a3a",
-                    fontWeight: 600,
-                    textAlign: "right",
-                    wordBreak: "break-word",
-                    fontVariantNumeric: "tabular-nums",
-                  }}>
+            <div>
+              {rows.map((row) => (
+                <div className="rp-detail-row" key={row.label}>
+                  <span className="rp-detail-k">{row.label}</span>
+                  <span className="rp-detail-v">
                     {row.label === "Status" ? (
-                      <span style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        padding: "4px 12px",
-                        borderRadius: "999px",
-                        background: data.active ? "#e6f6ee" : "#eef1f6",
-                        color: data.active ? "#0f9d58" : "#6b7a90",
-                      }}>
-                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "currentColor" }} />
+                      <span className={`rp-pill ${data.active ? "rp-pill--on" : "rp-pill--off"}`}>
+                        <span className="rp-dot" />
                         {row.value}
                       </span>
                     ) : (
@@ -906,46 +857,10 @@ const res = await fetch(
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: "10px",
-          padding: "16px 24px",
-          borderTop: "1px solid #dbe5f1",
-          background: "#f9fafb",
-        }}>
-          <button
-            onClick={onClose}
-            style={{
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "9px 14px",
-              cursor: "pointer",
-              border: "1px solid #dbe5f1",
-              background: "#fff",
-              color: "#1e2a3a",
-            }}
-          >
-            Close
-          </button>
-          <button
-            onClick={() => data && onEdit(data)}
-            disabled={!data}
-            style={{
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "9px 14px",
-              cursor: data ? "pointer" : "not-allowed",
-              border: "none",
-              background: "#0b3c88",
-              color: "#fff",
-              opacity: data ? 1 : 0.55,
-            }}
-          >
-            Edit
+        <div className="rp-drawer-foot">
+          <button className="rp-btn rp-btn-ghost" onClick={onClose}>Close</button>
+          <button className="rp-btn rp-btn-primary" onClick={() => data && onEdit(data)} disabled={!data}>
+            <EditIcon /> Edit
           </button>
         </div>
       </aside>
@@ -965,7 +880,6 @@ function EditDrawer({ resource, onClose, onSave }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // Close on Escape.
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && !saving && onClose();
     window.addEventListener("keydown", onKey);
@@ -973,12 +887,7 @@ function EditDrawer({ resource, onClose, onSave }) {
   }, [onClose, saving]);
 
   const set = (key) => (e) => {
-    const value =
-      key === "active"
-        ? e.target.checked
-        : key === "rateCard"
-        ? e.target.value
-        : e.target.value;
+    const value = key === "active" ? e.target.checked : e.target.value;
     setForm((f) => ({ ...f, [key]: value }));
   };
 
@@ -986,15 +895,12 @@ function EditDrawer({ resource, onClose, onSave }) {
     setSaving(true);
     setError(null);
     try {
-      // Build a clean payload matching the API shape.
       const payload = {
         ...resource,
         ...Object.fromEntries(EDITABLE_FIELDS.map((k) => [k, form[k]])),
         lastDate: form.lastDate ? form.lastDate : null,
         rateCard:
-          form.rateCard === "" || form.rateCard == null
-            ? null
-            : Number(form.rateCard),
+          form.rateCard === "" || form.rateCard == null ? null : Number(form.rateCard),
       };
       await onSave(payload);
       onClose();
@@ -1007,323 +913,62 @@ function EditDrawer({ resource, onClose, onSave }) {
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(11, 42, 99, 0.45)",
-        backdropFilter: "blur(2px)",
-        display: "flex",
-        justifyContent: "flex-end",
-        zIndex: 1000,
-        animation: "fadeIn 0.15s ease",
-      }}
+      className="rp rp-scrim"
       onMouseDown={(e) => e.target === e.currentTarget && !saving && onClose()}
     >
-      <style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-               @keyframes slideIn { from { transform: translateX(24px); opacity: 0.6; } to { transform: translateX(0); opacity: 1; } }
-               .drawer { animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }`}</style>
-      <aside
-        className="drawer"
-        style={{
-          width: "min(440px, 100%)",
-          height: "100%",
-          background: "#fff",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "-16px 0 40px rgba(11, 23, 42, 0.18)",
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Edit ${resource.name}`}
-      >
-        {/* Drawer header */}
-        <div style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          padding: "22px 24px",
-          borderBottom: "1px solid #dbe5f1",
-          gap: "16px",
-        }}>
+      <aside className="rp-drawer" role="dialog" aria-modal="true" aria-label={`Edit ${resource.name}`}>
+        <div className="rp-drawer-head">
           <div>
-            <div style={{ fontSize: "12px", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#0b3c88", marginBottom: "4px" }}>
-              Edit resource
-            </div>
-            <h2 style={{ margin: "2px 0 0", fontSize: "20px", fontWeight: 700, letterSpacing: "-0.01em", color: "#1e2a3a" }}>
-              {resource.name}
-            </h2>
+            <div className="rp-eyebrow" style={{ marginBottom: "4px" }}>Edit resource</div>
+            <h2>{resource.name}</h2>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              border: "none",
-              background: "#eef1f6",
-              color: "#6b7a90",
-              width: "30px",
-              height: "30px",
-              borderRadius: "8px",
-              cursor: "pointer",
-              fontSize: "18px",
-              lineHeight: "1",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#e3e7ef";
-              e.currentTarget.style.color = "#1e2a3a";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#eef1f6";
-              e.currentTarget.style.color = "#6b7a90";
-            }}
-          >
-            ✕
-          </button>
+          <button className="rp-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
-        {/* Drawer body */}
-        <div style={{
-          padding: "22px 24px",
-          overflowY: "auto",
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-        }}>
-          {/* Readonly field */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: "#f4f7fb",
-            border: "1px solid #dbe5f1",
-            borderRadius: "10px",
-            padding: "12px 14px",
-            fontSize: "13px",
-            color: "#6b7a90",
-          }}>
+        <div className="rp-drawer-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="rp-readonly">
             <span>Resource ID</span>
-            <b style={{ color: "#1e2a3a", fontVariantNumeric: "tabular-nums" }}>{resource.resId}</b>
+            <b>{resource.resId}</b>
           </div>
 
-          {/* Full name field */}
           <EditField label="Full name">
-            <input
-              value={form.name || ""}
-              onChange={set("name")}
-              style={{
-                width: "100%",
-                border: "1px solid #dbe5f1",
-                borderRadius: "9px",
-                padding: "10px 12px",
-                fontSize: "14px",
-                color: "#1e2a3a",
-                background: "#fff",
-                outline: "none",
-                transition: "all 0.15s ease",
-                fontFamily: "inherit",
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#0b3c88";
-                e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#dbe5f1";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
+            <input className="rp-input" value={form.name || ""} onChange={set("name")} />
           </EditField>
 
-          {/* Email field */}
           <EditField label="Email">
-            <input
-              type="email"
-              value={form.emailId || ""}
-              onChange={set("emailId")}
-              style={{
-                width: "100%",
-                border: "1px solid #dbe5f1",
-                borderRadius: "9px",
-                padding: "10px 12px",
-                fontSize: "14px",
-                color: "#1e2a3a",
-                background: "#fff",
-                outline: "none",
-                transition: "all 0.15s ease",
-                fontFamily: "inherit",
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#0b3c88";
-                e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#dbe5f1";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
+            <input className="rp-input" type="email" value={form.emailId || ""} onChange={set("emailId")} />
           </EditField>
 
-          {/* Designation field */}
           <EditField label="Designation">
-            <input
-              value={form.designationType || ""}
-              onChange={set("designationType")}
-              style={{
-                width: "100%",
-                border: "1px solid #dbe5f1",
-                borderRadius: "9px",
-                padding: "10px 12px",
-                fontSize: "14px",
-                color: "#1e2a3a",
-                background: "#fff",
-                outline: "none",
-                transition: "all 0.15s ease",
-                fontFamily: "inherit",
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = "#0b3c88";
-                e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = "#dbe5f1";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            />
+            <input className="rp-input" value={form.designationType || ""} onChange={set("designationType")} />
           </EditField>
 
-          {/* Rate card and joining date */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+          <div className="rp-grid-2">
             <EditField label="Rate card (₹)">
               <input
+                className="rp-input"
                 type="number"
                 inputMode="numeric"
                 value={form.rateCard}
                 onChange={set("rateCard")}
-                style={{
-                  width: "100%",
-                  border: "1px solid #dbe5f1",
-                  borderRadius: "9px",
-                  padding: "10px 12px",
-                  fontSize: "14px",
-                  color: "#1e2a3a",
-                  background: "#fff",
-                  outline: "none",
-                  transition: "all 0.15s ease",
-                  fontFamily: "inherit",
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#0b3c88";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#dbe5f1";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
               />
             </EditField>
             <EditField label="Date of joining">
-              <input
-                type="date"
-                value={form.dateOfJoining || ""}
-                onChange={set("dateOfJoining")}
-                style={{
-                  width: "100%",
-                  border: "1px solid #dbe5f1",
-                  borderRadius: "9px",
-                  padding: "10px 12px",
-                  fontSize: "14px",
-                  color: "#1e2a3a",
-                  background: "#fff",
-                  outline: "none",
-                  transition: "all 0.15s ease",
-                  fontFamily: "inherit",
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#0b3c88";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#dbe5f1";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
+              <input className="rp-input" type="date" value={form.dateOfJoining || ""} onChange={set("dateOfJoining")} />
             </EditField>
           </div>
 
-          {/* Last date and status */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+          <div className="rp-grid-2">
             <EditField label="Last date">
-              <input
-                type="date"
-                value={form.lastDate || ""}
-                onChange={set("lastDate")}
-                style={{
-                  width: "100%",
-                  border: "1px solid #dbe5f1",
-                  borderRadius: "9px",
-                  padding: "10px 12px",
-                  fontSize: "14px",
-                  color: "#1e2a3a",
-                  background: "#fff",
-                  outline: "none",
-                  transition: "all 0.15s ease",
-                  fontFamily: "inherit",
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#0b3c88";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px #eef2ff";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#dbe5f1";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
+              <input className="rp-input" type="date" value={form.lastDate || ""} onChange={set("lastDate")} />
             </EditField>
             <EditField label="Status">
-              <label style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "10px",
-                cursor: "pointer",
-                userSelect: "none",
-                paddingTop: "4px",
-              }}>
-                <input
-                  type="checkbox"
-                  checked={!!form.active}
-                  onChange={set("active")}
-                  style={{
-                    position: "absolute",
-                    opacity: 0,
-                    pointerEvents: "none",
-                  }}
-                />
-                <span style={{
-                  width: "40px",
-                  height: "22px",
-                  borderRadius: "999px",
-                  background: form.active ? "#0f9d58" : "#cbd2df",
-                  position: "relative",
-                  transition: "background 0.2s ease",
-                  display: "inline-block",
-                }} className="switch-track">
-                  <span style={{
-                    content: "''",
-                    position: "absolute",
-                    top: "2px",
-                    left: form.active ? "20px" : "2px",
-                    width: "18px",
-                    height: "18px",
-                    borderRadius: "50%",
-                    background: "#fff",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                    transition: "transform 0.2s ease",
-                  }} />
+              <label className="rp-switch">
+                <input type="checkbox" checked={!!form.active} onChange={set("active")} />
+                <span className={`rp-track ${form.active ? "on" : ""}`}>
+                  <span className="rp-thumb" />
                 </span>
-                <span style={{ fontSize: "14px", fontWeight: 600, color: "#1e2a3a" }}>
+                <span style={{ fontSize: "14px", fontWeight: 600, color: "var(--rp-ink)" }}>
                   {form.active ? "Active" : "Inactive"}
                 </span>
               </label>
@@ -1331,76 +976,16 @@ function EditDrawer({ resource, onClose, onSave }) {
           </div>
 
           {error && (
-            <div style={{
-              background: "#fde8e8",
-              border: "1px solid #f5c9c9",
-              color: "#d32f2f",
-              borderRadius: "10px",
-              padding: "12px 14px",
-              fontSize: "13.5px",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}>
-              <span style={{ fontSize: "18px" }}>!</span>
+            <div className="rp-inline-error">
+              <span style={{ fontSize: "16px" }}>!</span>
               {error}
             </div>
           )}
         </div>
 
-        {/* Drawer footer */}
-        <div style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: "10px",
-          padding: "16px 24px",
-          borderTop: "1px solid #dbe5f1",
-          background: "#f9fafb",
-        }}>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "9px 14px",
-              cursor: saving ? "not-allowed" : "pointer",
-              border: "1px solid #dbe5f1",
-              background: "#fff",
-              color: "#1e2a3a",
-              transition: "all 0.2s ease",
-              opacity: saving ? 0.55 : 1,
-            }}
-            onMouseEnter={(e) => !saving && (e.currentTarget.style.background = "#f1f5f9")}
-            onMouseLeave={(e) => !saving && (e.currentTarget.style.background = "#fff")}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={saving}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              borderRadius: "10px",
-              fontSize: "14px",
-              fontWeight: 600,
-              padding: "9px 14px",
-              cursor: saving ? "not-allowed" : "pointer",
-              border: "none",
-              background: "#0b3c88",
-              color: "#fff",
-              transition: "all 0.2s ease",
-              opacity: saving ? 0.55 : 1,
-            }}
-            onMouseEnter={(e) => !saving && (e.currentTarget.style.background = "#051f4a")}
-            onMouseLeave={(e) => !saving && (e.currentTarget.style.background = "#0b3c88")}
-          >
+        <div className="rp-drawer-foot">
+          <button className="rp-btn rp-btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="rp-btn rp-btn-primary" onClick={submit} disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
@@ -1411,10 +996,8 @@ function EditDrawer({ resource, onClose, onSave }) {
 
 function EditField({ label, children }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-      <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#6b7a90" }}>
-        {label}
-      </span>
+    <label className="rp-field">
+      <span>{label}</span>
       {children}
     </label>
   );
@@ -1422,66 +1005,29 @@ function EditField({ label, children }) {
 
 function TableSkeleton() {
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "14px" }}>
+    <div className="rp-scroll">
+      <table className="rp-table">
         <thead>
-          <tr style={{ background: "#f4f7fb" }}>
-            {["ID", "Name", "Designation", "Rate card", "Joined", "Last date", "Status", ""].map(
-              (h, i) => (
-                <th
-                  key={i}
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    background: "#f4f7fb",
-                    color: "#6b7a90",
-                    textAlign: "left",
-                    fontSize: "11.5px",
-                    fontWeight: 700,
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    padding: "12px 16px",
-                    borderBottom: "1px solid #dbe5f1",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h}
-                </th>
-              )
-            )}
+          <tr>
+            {COLUMNS.map((col) => (
+              <th key={col.key} className="rp-th" data-align={col.align}>
+                <span className="rp-th-inner">{col.label}</span>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {Array.from({ length: 6 }).map((_, i) => (
-            <tr key={i} style={{ borderBottom: "1px solid #eef1f6" }}>
-              {Array.from({ length: 8 }).map((__, j) => (
-                <td
-                  key={j}
-                  style={{
-                    padding: "13px 16px",
-                    verticalAlign: "middle",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "12px",
-                      width: "70%",
-                      borderRadius: "6px",
-                      background: "linear-gradient(90deg, #eef1f6 25%, #e3e7ef 37%, #eef1f6 63%)",
-                      backgroundSize: "400% 100%",
-                      animation: "skeleton-loading 1.3s ease infinite",
-                    }}
-                  />
+            <tr key={i} style={{ borderBottom: "1px solid var(--rp-line-2)" }}>
+              {COLUMNS.map((col) => (
+                <td key={col.key} className="rp-td">
+                  <div className="rp-skel-bar" style={{ width: col.key === "name" ? "80%" : "60%" }} />
                 </td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
-      <style>{`@keyframes skeleton-loading {
-        0% { background-position: 100% 0; }
-        100% { background-position: -100% 0; }
-      }`}</style>
     </div>
   );
 }
@@ -1495,15 +1041,9 @@ const SearchIcon = () => (
 );
 const RefreshIcon = ({ spinning }) => (
   <svg
-    style={spinning ? { animation: "spin 1s linear infinite" } : {}}
-    width="15"
-    height="15"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
+    style={spinning ? { animation: "rp-spin 1s linear infinite" } : {}}
+    width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
   >
-    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     <path d="M21 12a9 9 0 1 1-2.64-6.36" />
     <path d="M21 3v6h-6" />
   </svg>
