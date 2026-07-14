@@ -237,6 +237,7 @@ export const ENDPOINTS = {
     tree: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/tree`,
     create: '/projects/api/v3/projects/create',
     update: (uuid) => `/projects/api/v3/projects/${enc(uuid)}`,
+    config: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/leave-policies`,
     remove: (uuid) => `/projects/api/v3/projects/${enc(uuid)}`,
     save: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/save`,
     publish: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/publish`,

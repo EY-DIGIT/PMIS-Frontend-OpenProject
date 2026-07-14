@@ -118,31 +118,56 @@ export default function ProjectLeaveConfigPage() {
     sundayWorking: weekendOn ? (form.sunday || null) : null,
   });
 
-  async function submit() {
+   async function submit() {
+
     setMsg(null);
+
     setSaving(true);
+
     try {
+
       const token = getToken();
+
       if (!token) throw new Error("Your session has expired. Please sign in again.");
+
       const res = await authorizedFetch(
-        `${API_BASE}${ENDPOINTS.projects.update(projectId)}`,
+
+        `${API_BASE}${ENDPOINTS.projects.config(projectId)}`,
+
         {
-          method: "PATCH",
+
+          method: "PUT",
+
           headers: { accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify({ leaveConfig: buildConfig() }),
+
+          body: JSON.stringify(buildConfig()),
+
         }
+
       );
+
       if (res.status === 401) { logout(); navigate("/login"); return; }
+
       if (!res.ok && res.status !== 204) {
+
         const body = await res.text().catch(() => "");
+
         throw new Error(body || `Request failed (${res.status})`);
+
       }
+
       setMsg({ type: "ok", text: "Leave policy saved successfully." });
+
     } catch (e) {
+
       setMsg({ type: "error", text: e?.message || "Failed to save leave policy" });
+
     } finally {
+
       setSaving(false);
+
     }
+
   }
 
   return (

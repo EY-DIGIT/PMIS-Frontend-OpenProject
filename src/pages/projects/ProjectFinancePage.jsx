@@ -346,7 +346,7 @@ function SummaryPanel({ totals }) {
           background: "#fff", border: "1px solid var(--uidai-pmis-border)",
           borderRadius: 8, padding: "8px 12px",
         }}>
-          <span style={muted}>One-Time Cost</span>
+          <span style={muted}>Out of Pocket Expense</span>
           <strong style={{ color: "#173e77" }} title={wordsHint(oneTime)}>
             {inr(oneTime)}
           </strong>
@@ -1423,7 +1423,7 @@ export default function ProjectFinancePage() {
   async function submitNewCostItem(draft, hasOneTimeNow) {
     if (!projectId) return;
     if (draft.costTypeCode === "one_time" && hasOneTimeNow) {
-      uiStore.showError("Only one One-Time cost row is allowed per project.");
+      uiStore.showError("Only one Out of Pocket Expense row is allowed per project.");
       return;
     }
     const { error, body } = buildCostItemBody(draft);
@@ -1620,10 +1620,10 @@ export default function ProjectFinancePage() {
       });
       await readJson(res);
       await loadPaymentPage({ silent: true });
-      uiStore.showMessage(body?.enabled ? "One-time cost updated." : "One-time cost cleared for this phase.");
+      uiStore.showMessage(body?.enabled ? "Out of Pocket Expense updated." : "Out of Pocket Expense cleared for this phase.");
     } catch (err) {
       if (handleAuthError(err)) return;
-      uiStore.showError(err?.message || "Failed to update one-time cost");
+      uiStore.showError(err?.message || "Failed to update Out of Pocket Expense");
     } finally {
       setOneTimeSaving(false);
     }
@@ -2273,7 +2273,7 @@ export default function ProjectFinancePage() {
         rowLabel={
           structureWarn?.row
             ? (structureWarn.row.costTypeCode === "one_time"
-                ? "the One-Time cost row"
+                ? "the Out of Pocket Expense row"
                 : `the ${costTypeLabel(structureWarn.row.costTypeCode)} cost row`)
             : ""
         }
@@ -2478,14 +2478,14 @@ function OneTimeCostModal({
         >
           ×
         </button>
-        <h3 className="uidai-modal__title">One-Time Cost — Phase {phaseLabel}</h3>
+        <h3 className="uidai-modal__title">Out of Pocket Expense — Phase {phaseLabel}</h3>
         <div className="uidai-pmis-subtitle" style={{ margin: "4px 0 16px" }}>
-          Add a share of the project's one-time cost to this phase.
+          Add a share of the project's Out of Pocket Expense to this phase.
         </div>
 
         <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
           <div style={{ flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, padding: "8px 12px", background: "#f7f9fc" }}>
-            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>Total one-time cost</div>
+            <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", fontWeight: 600 }}>Total Out of Pocket Expense</div>
             <strong style={{ color: "#173e77", fontSize: 15 }}>{inr(total)}</strong>
           </div>
           <div style={{ flex: 1, border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, padding: "8px 12px", background: "#f7f9fc" }}>
@@ -2496,7 +2496,7 @@ function OneTimeCostModal({
 
         {/* Enable / Disable */}
         <div className="uidai-pmis-field" style={{ marginBottom: 14 }}>
-          <label>Add one-time cost to this phase?</label>
+          <label>Add Out of Pocket Expense to this phase?</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <button type="button" style={seg(enabled)} onClick={() => setEnabled(true)}>Yes</button>
             <button type="button" style={seg(!enabled)} onClick={() => setEnabled(false)}>No</button>
@@ -2547,7 +2547,7 @@ function OneTimeCostModal({
             marginTop: 12, border: "1px solid #cfe0f5", background: "#eef5ff",
             borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#0b3c88",
           }}>
-            This is the last phase — it auto-absorbs the unallocated one-time cost
+            This is the last phase — it auto-absorbs the unallocated Out of Pocket Expense
             of <strong>{inr(autoRemainder)}</strong>.
           </div>
         )}
@@ -3071,8 +3071,8 @@ function PhasePanel({
                 disabled={isLastPhase || oneTimeBusy}
                 onClick={() => { if (!isLastPhase) setOtModalOpen(true); }}
                 title={isLastPhase
-                  ? "Last phase auto-absorbs the remaining one-time cost"
-                  : "Distribute one-time cost to this phase"}
+                  ? "Last phase auto-absorbs the remaining Out of Pocket Expense"
+                  : "Distribute Out of Pocket Expense to this phase"}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
                   border: otAmount > 0 ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
@@ -3086,7 +3086,7 @@ function PhasePanel({
                 }}
               >
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: otAmount > 0 ? "#0b6b8f" : "#c2cdda" }} />
-                One-Time: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
+                Out of Pocket Expense: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
                 {isLastPhase
                   ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(auto)</span>
                   : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
@@ -3239,7 +3239,7 @@ function PhasePanel({
                 <tr style={{ verticalAlign: "middle" }}>
                   <th style={{ minWidth: 240 }}>Milestone</th>
                   <th style={{ width: 150 }}>Activity</th>
-                  <th style={{ width: 80, textAlign: "center" }}>Quarter</th>
+                  <th style={{ width: 80, textAlign: "center" }}>INTERVAL</th>
                   <th style={{ width: 110, textAlign: "right" }}>
                     % of Payment
                     <span style={{
@@ -3680,10 +3680,10 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {stat("Scheduled", `${totalPercent}%`,
                   { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
-                {stat("Delivery Cost", inr(phaseFixed))}
+                {stat("Total Cost", inr(phaseFixed))}
                 
                 {oneTimeAllocated > 0 && stat(
-                  isLast ? "One-Time Cost (auto)" : "One-Time Cost",
+                  isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
                   inr(oneTimeAllocated),
                   { color: "#0b6b8f" }
                 )}
