@@ -227,8 +227,8 @@ function SummaryContent({
             foot="open project list" onClick={() => onOpenProjectList("active")} />
           <Kpi cls="completed" label="Completed Projects" value={counts.completed}
             foot="delivered projects" onClick={() => onOpenProjectList("completed")} />
-          <Kpi cls="pendingApproval" label="Pending for Approval" value={counts.pendingApprovalCount}
-            foot="Pending for Approval" onClick={() => onOpenProjectList("pendingApproval")} />
+          {/* <Kpi cls="pendingApproval" label="Pending for Approval" value={counts.pendingApprovalCount}
+            foot="Pending for Approval" onClick={() => onOpenProjectList("pendingApproval")} /> */}
         </div>
         <div className="dash-grid-2">
 
@@ -239,13 +239,13 @@ function SummaryContent({
               <Legend counts={counts} keys={["completed", "ontrack", "delayed"]} />
             </div>
           </div>
-          <div className="dash-card">
+          {/* <div className="dash-card">
             <div className="dash-card-title">Bar Chart<span className="dash-card-sub">Project status</span></div>
             <div className="dash-donut-wrap">
               <BarChart counts={counts} keys={["completed", "ontrack", "delayed"]} />
               <Legend counts={counts} keys={["completed", "ontrack", "delayed"]} />
             </div>
-          </div>
+          </div> */}
           <div className="dash-card">
             <div className="dash-card-title">
               Delayed Track
