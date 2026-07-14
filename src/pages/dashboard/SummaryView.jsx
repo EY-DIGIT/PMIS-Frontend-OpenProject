@@ -439,7 +439,7 @@ function ProjectListView({ mode, searchText, onSearch, onBack, onOpenProject }) 
             <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
           </div>
         </div>
-        <div className="dash-card">
+        {/* <div className="dash-card">
 
 
           <div className="dash-card-title">Bar Chart<span className="dash-card-sub">{title} status distribution</span></div>
@@ -447,7 +447,7 @@ function ProjectListView({ mode, searchText, onSearch, onBack, onOpenProject }) 
             <BarChart counts={c} keys={["completed", "ontrack", "delayed"]} />
             <Legend counts={c} keys={["completed", "ontrack", "delayed"]} />
           </div>
-        </div>
+        </div> */}
       </div>
       <div className="dash-card">
         <div className="dash-card-title">{title}<span className="dash-card-sub">{rows.length} project{rows.length === 1 ? "" : "s"}</span></div>

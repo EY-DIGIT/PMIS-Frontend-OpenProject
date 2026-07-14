@@ -895,7 +895,7 @@ holiday{month.publicHolidayCount > 1 ? "s" : ""}
                 <th className="att-th">ID</th>
                 <th className="att-th">Name</th>
                 <th className="att-th">Designation</th>
-                <th className="att-th att-num">Leave days</th>
+                <th className="att-th att-num">Leave Taken</th>
                 <th className="att-th att-num">Half days</th>
                 <th className="att-th att-num">Short-hour days</th>
                 <th className="att-th att-num">Total short hrs</th>
