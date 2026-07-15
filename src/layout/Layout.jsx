@@ -2,10 +2,13 @@
 // Layout.jsx  –  Shell: Header, Navbar, Sidebar, Footer
 //                Routes ke liye children prop use hoga
 // ============================================================
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FiMenu, FiHome, FiUser } from "react-icons/fi";
+import { FiMenu, FiHome } from "react-icons/fi";
 import { usePageContext } from "../utils/pageContext";
+import { tokenStore } from "../api/client";
+import Aadhar from "../assets/Aadhaar.png";
+import HeaderProjectPicker from "../pages/dashboard/HeaderProjectPicker";
 
 /* Map of simple route prefix → { label, tooltip } for the navbar centre
    slot. Routes whose first segment is unambiguous (one page only) can
@@ -45,8 +48,14 @@ function resolveNavTitle(segments) {
   const first = segments[0];
   if (!first) return null;
 
-  /* Profile page renders its own avatar/header block — opt out. */
-  if (first === "profile") return null;
+  /* Profile page heading now lives in the global navbar (the in-page
+     header block was removed). */
+  if (first === "profile") {
+    return {
+      label: "My Profile",
+      tooltip: "View and manage your account information, role-based access, and administrative actions."
+    };
+  }
 
   /* Dashboard now uses the global navbar title instead of an in-page
      heading. Sub-routes (summary / project / org) get their own
@@ -117,11 +126,18 @@ function resolveNavTitle(segments) {
         tooltip: "Map SLA masters to an activity, edit mappings, and evaluate SLAs."
       };
     }
-    // /projects/:id/leave-config       → leave & attendance policy
+    // /projects/:id/leave-config       → leave & attendance policy.
+    // The page renders its own in-page header block, so suppress the
+    // navbar title to avoid a duplicate heading.
     if (segments[2] === "leave-config") {
+      return null;
+    }
+
+    // /projects/:id/attendance/leave/:attendanceId → single-employee leave detail
+    if (segments[2] === "attendance" && segments[3] === "leave") {
       return {
-        label: "Leave Policy Configure",
-        tooltip: "Configure leave & attendance rules for this project."
+        label: "Leave Detail",
+        tooltip: "Quarterly leave detail for one employee."
       };
     }
 
@@ -233,7 +249,6 @@ import Sidebar from "../components/Sidebar";
 // import LoaderModal from "../components/LoaderModal";
 // import MessageModal from "../components/MessageModal";
 
-import Aadhar from "../assets/Aadhaar.png";
 
 const ICON_SIZE = 18;
 
@@ -241,7 +256,23 @@ const FONT_SIZES = { decrease: "14px", reset: "", increase: "18px" };
 
 export default function Layout({ children }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loader, msg, clearMsg } = useProjects();
+
+  /* Dashboard view switcher lives in the global header now (moved out of
+     the in-page ViewBar). Shown only on /dashboard/* routes. */
+  const onDashboard = location.pathname.startsWith("/dashboard");
+  const dashView = location.pathname.startsWith("/dashboard/project")
+    ? "/dashboard/project"
+    : location.pathname.startsWith("/dashboard/org")
+      ? "/dashboard/org"
+      : "/dashboard/summary";
+  const switchDashView = (to) => navigate(to, { state: { tick: Date.now() } });
+  const refreshDashboard = () => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pmis:dashboard-refresh"));
+    }
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [fontMode, setFontMode] = useState("reset");
@@ -252,6 +283,17 @@ export default function Layout({ children }) {
      suppressed so the now-empty menu icon doesn't sit there idle. */
   const currentRole = useCurrentRole();
   const isDashboardOnly = currentRole === "director_admin";
+
+  /* Header user chip (visual) — real name/role from the stored user. */
+  const currentUser = tokenStore.getUser() || {};
+  const displayName =
+    currentUser.userName || currentUser.name || currentUser.fullName ||
+    currentUser.email || "User";
+  const roleLabel = (currentRole || "")
+    .replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "UIDAI";
+  const initials = displayName
+    .split(/[\s@.]+/).filter(Boolean).slice(0, 2)
+    .map((s) => s[0]?.toUpperCase()).join("") || "U";
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -271,87 +313,12 @@ export default function Layout({ children }) {
     document.documentElement.style.fontSize = FONT_SIZES[mode] || "";
   };
 
-  // Floating header: collapse the a11y (text-size) strip once the user
-  // scrolls past a small threshold so only the brand bar stays pinned
-  // at the top. Same hide-on-scroll pattern as the PMIS Project
-  // Management reference. Hysteresis: hide above 28px, reveal below
-  // 4px — avoids jitter when scroll oscillates near the boundary.
-  const [a11yCollapsed, setA11yCollapsed] = useState(false);
-  useEffect(() => {
-    const HIDE_AT = 28;
-    const SHOW_AT = 4;
-    const content = document.querySelector('.pmis-content');
-    let ticking = false;
-    let hidden = false;
-    const update = () => {
-      const top = Math.max(content?.scrollTop || 0, window.scrollY || 0);
-      // Collapsing the (sticky) strip shrinks the page by its height. If the
-      // page only barely overflows, that shrink removes the very scroll
-      // distance that triggered the collapse: the position snaps back toward
-      // the top, the strip re-expands, the page grows again — a constant
-      // collapse↔️expand shake. So only hide when there's MORE scrollable
-      // distance than the strip would reclaim, leaving the user comfortably
-      // past HIDE_AT afterwards. Revealing only depends on nearing the top.
-      const strip = document.querySelector('.header-accessibility-strip');
-      const reclaim = (strip && !hidden) ? strip.offsetHeight : 0;
-      const maxScroll = Math.max(
-        document.documentElement.scrollHeight - window.innerHeight,
-        content ? content.scrollHeight - content.clientHeight : 0
-      );
-      if (!hidden && top > HIDE_AT && maxScroll > reclaim + HIDE_AT) {
-        hidden = true;
-        setA11yCollapsed(true);
-      } else if (hidden && top < SHOW_AT) {
-        hidden = false;
-        setA11yCollapsed(false);
-      }
-      ticking = false;
-    };
-    const onScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(update);
-        ticking = true;
-      }
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    if (content) content.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      window.removeEventListener('scroll', onScroll);
-      if (content) content.removeEventListener('scroll', onScroll);
-    };
-  }, []);
-
   return (
     <div className="pmis-wrap" onClick={() => setProfileOpen(false)}>
 
-      {/* ── Header ── */}
+      {/* ── Government banner — full width across the very top (touches the
+           left edge, sits above both the sidebar and the right column) ── */}
       <header className="site-header" role="banner">
-        <div className={`header-accessibility-strip${a11yCollapsed ? ' collapsed' : ''}`}>
-          <span className="a11y-label" aria-hidden="true">Text Size:</span>
-          <div className="font-resizer" role="group" aria-label="Adjust text size">
-            <button
-              type="button"
-              className="fr-plus"
-              aria-label="Increase text size"
-              aria-pressed={fontMode === "increase"}
-              onClick={() => setFont("increase")}
-            >+A</button>
-            <button
-              type="button"
-              className="fr-reset"
-              aria-label="Reset text size to default"
-              aria-pressed={fontMode === "reset"}
-              onClick={() => setFont("reset")}
-            >A</button>
-            <button
-              type="button"
-              className="fr-minus"
-              aria-label="Decrease text size"
-              aria-pressed={fontMode === "decrease"}
-              onClick={() => setFont("decrease")}
-            >-A</button>
-          </div>
-        </div>
         <div className="header-main">
           <div className="header-brand">
             <img src={Aadhar} alt="Aadhaar logo" />
@@ -367,66 +334,91 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      {/* ── Navbar ── */}
-      <div className="pmis-navbar">
-        {!isDashboardOnly && (
-          <div className="pmis-menu-home-block">
-            <span
-              onClick={() => setCollapsed((c) => !c)}
-              style={{ display: "flex", alignItems: "center", gap: "10px" }}
-            >
-              <FiMenu size={ICON_SIZE} aria-hidden="true" /> Menu
+      {/* ── Shell row: sidebar + right column, below the banner ── */}
+      <div className="pmis-shell-row">
+
+      {/* ── Sidebar — sits below the banner, on the left ── */}
+      {!isDashboardOnly && (
+        <Sidebar
+          collapsed={collapsed}
+          onAddProject={(type) => navigate(`/onboard/${encodeURIComponent(type)}`)}
+          onSearchProject={() => navigate("/projects")}
+        />
+      )}
+
+      {/* ── Right column: app-controls header + content + footer ── */}
+      <div className="pmis-main">
+
+        {/* ── App-controls header ── */}
+        <header className="pmis-header" role="banner">
+          <div className="pmis-header-left">
+            {!isDashboardOnly && (
+              <button type="button" className="pmis-header-menu" aria-label="Toggle menu"
+                onClick={() => setCollapsed((c) => !c)}>
+                <FiMenu size={ICON_SIZE} aria-hidden="true" />
+              </button>
+            )}
+            <span className="pmis-header-home" title="Home" onClick={() => navigate("/")}>
+              <FiHome size={ICON_SIZE} aria-hidden="true" />
             </span>
-            <span
-              onClick={() => navigate("/")}
-              style={{ display: "flex", alignItems: "center", gap: "10px" }}
-            >
-              <FiHome size={ICON_SIZE} aria-hidden="true" /> Home
-            </span>
+            {!onDashboard && (
+              <div className="pmis-header-titles">
+                <NavCenterTitle />
+              </div>
+            )}
+            {onDashboard && (
+              <span className="pmis-viewswitch">
+                <select value={dashView} onChange={(e) => switchDashView(e.target.value)} aria-label="Dashboard view">
+                  <option value="/dashboard/summary">Summary View</option>
+                  <option value="/dashboard/project">Project View</option>
+                  <option value="/dashboard/org">Organization View</option>
+                </select>
+              </span>
+            )}
+            {dashView === "/dashboard/project" && onDashboard && <HeaderProjectPicker />}
+            <NavProjectName />
           </div>
-        )}
-        <NavCenterTitle />
-        <NavProjectName />
-        <div
-          className="pmis-profile"
-          onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            /* When the left menu/home block is hidden (director_admin)
-               there's no flex sibling to push the profile to the
-               far right via space-between — pin it explicitly. */
-            marginLeft: isDashboardOnly ? "auto" : undefined
-          }}
-        >
-          <FiUser size={ICON_SIZE} aria-hidden="true" />
-          <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
-            <div onClick={() => { setProfileOpen(false); navigate("/profile"); }}>Profile</div>
-            <div onClick={handleSignOut} style={{ pointerEvents: signingOut ? "none" : "auto", opacity: signingOut ? 0.6 : 1 }}>
-              {signingOut ? "Signing Out…" : "Sign Out"}
+
+          <div className="pmis-header-right">
+            {onDashboard && (
+              <button type="button" className="pmis-header-refresh" title="Refresh dashboard"
+                onClick={refreshDashboard}>↻ Refresh</button>
+            )}
+            <div className="font-resizer" role="group" aria-label="Adjust text size">
+              <button type="button" className="fr-plus" aria-label="Increase text size"
+                aria-pressed={fontMode === "increase"} onClick={() => setFont("increase")}>+A</button>
+              <button type="button" className="fr-reset" aria-label="Reset text size"
+                aria-pressed={fontMode === "reset"} onClick={() => setFont("reset")}>A</button>
+              <button type="button" className="fr-minus" aria-label="Decrease text size"
+                aria-pressed={fontMode === "decrease"} onClick={() => setFont("decrease")}>-A</button>
+            </div>
+            <div className="pmis-nav-user"
+              onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}>
+              <span className="pmis-nav-user-av">{initials}</span>
+              <span className="pmis-nav-user-meta">
+                <span className="pmis-nav-user-name">{displayName}</span>
+                <span className="pmis-nav-user-role">{roleLabel}</span>
+              </span>
+              <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
+                <div onClick={() => { setProfileOpen(false); navigate("/profile"); }}>Profile</div>
+                <div onClick={handleSignOut} style={{ pointerEvents: signingOut ? "none" : "auto", opacity: signingOut ? 0.6 : 1 }}>
+                  {signingOut ? "Signing Out…" : "Sign Out"}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </header>
 
-      {/* ── Body ── */}
-      <div className="pmis-layout">
-        {!isDashboardOnly && (
-          <Sidebar
-            collapsed={collapsed}
-            onAddProject={(type) => navigate(`/onboard/${encodeURIComponent(type)}`)}
-            onSearchProject={() => navigate("/projects")}
-          />
-        )}
+        {/* ── Content ── */}
         <div className="pmis-content">
           {children}
         </div>
-      </div>
 
-      {/* ── Footer ── */}
-      <div className="pmis-footer">
-        © 2026 UIDAI · PMIS Automation Tool · Internal Use Only
+        {/* ── Footer — right side only, not fixed ── */}
+        <div className="pmis-footer">
+          © 2026 UIDAI · PMIS Automation Tool · Internal Use Only
+        </div>
+      </div>
       </div>
 
       {/* ── Global modals ── */}

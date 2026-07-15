@@ -369,16 +369,20 @@ export default function ProjectResourcePage() {
     setLoadError(null);
     try {
       const token = getToken();
-      const res = await fetch(`${API_BASE}/api/resources`, {
+      // The API is project-aware — pass projectId so the server returns only
+      // this project's resources instead of the whole list.
+      const url = projectId
+        ? `${API_BASE}/api/resources?projectId=${encodeURIComponent(projectId)}`
+        : `${API_BASE}/api/resources`;
+      const res = await fetch(url, {
         headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) throw new Error(`Couldn't load resources (${res.status})`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : data ? [data] : [];
 
-      // The GET has no projectId param, so scope client-side.
-      // If nothing matches (API isn't project-aware), show the full list
-      // instead of an empty table.
+      // Safety net: if the server ever returns unscoped data, still filter
+      // client-side. Falls back to the full list when nothing matches.
       let scoped = list;
       if (projectId) {
         const byProject = list.filter(

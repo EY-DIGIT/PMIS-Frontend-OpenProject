@@ -17,6 +17,7 @@ import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/ResetPassword";
 import ForgotPassword from "./pages/ForgotPassword";
+import PenaltyReportPage from "./pages/projects/Penaltyreportpage";
 
 
 import { useSessionManager } from "./api/sessionManager";
@@ -68,6 +69,7 @@ import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
 import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
+import LeaveDetailPage from "./pages/projects/LeaveDetailPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
 import { useProjects as useProjectsList, useProject } from "./store/project/projectsStore";
 import * as usersApi from './api/users';
@@ -82,6 +84,7 @@ import "./styles/project/pages.css"
 import MessageModal from "./components/projects/modals/MessageModal";
 import LoaderModal from "./components/projects/modals/LoaderModal";
 import "./styles/project/layout.css"
+import "./styles/shell-pro.css"
 import ManageTeam from "./pages/users/ManageUsers";
 import CriticalPathAnalysis from "./pages/CriticlePath/CriticalPathAnalysis";
 import AssistantPage from "./pages/AssistantPage";
@@ -230,6 +233,9 @@ function Breadcrumbs() {
     const criticalPathProjectCode = criticalPathProject?.projectCode || "";
 
     if (segments.length === 0) return null; // hide on Dashboard
+    if (segments[0] === "dashboard") return null; // hide on all dashboard views
+    if (segments[0] === "profile") return null; // heading now lives in the navbar
+    if (segments[0] === "assistant") return null; // Aadhaar Genius has its own branded bar
 
     /* SLA Masters — clean trail:
          /sla-masters              → Home › SLA Masters
@@ -756,10 +762,12 @@ export default function MainApp() {
                                                 <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
                                                 <Route path="/projects/:projectId/resource" element={<RequirePermission action="viewProjects"><ProjectResourcePage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/attendance" element={<RequirePermission action="viewProjects"><ProjectAttendancePage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/attendance/leave/:attendanceId" element={<RequirePermission action="viewProjects"><LeaveDetailPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
 
 
                                                 {/* Vendors */}

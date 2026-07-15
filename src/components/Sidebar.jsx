@@ -143,6 +143,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {canViewDashboard && (
           <>
             <a
+              title="Dashboard"
               className={dashActive ? "active" : ""}
               onClick={() => {
                 const next = !dashOpen;
@@ -160,6 +161,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </a>
             <div className={`pmis-submenu${dashOpen ? " open" : ""}`}>
               <div
+                title="Summary"
                 className={summaryActive ? "active" : ""}
                 onClick={() => navigate("/dashboard/summary", { state: { tick: Date.now() } })}
               >
@@ -167,6 +169,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <span className="pmis-text">Summary</span>
               </div>
               <div
+                title="Project View"
                 className={projectViewActive ? "active" : ""}
                 onClick={() => navigate("/dashboard/project", { state: { tick: Date.now() } })}
               >
@@ -174,6 +177,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <span className="pmis-text">Project View</span>
               </div>
               <div
+                title="Organization View"
                 className={orgViewActive ? "active" : ""}
                 onClick={() => navigate("/dashboard/org", { state: { tick: Date.now() } })}
               >
@@ -188,6 +192,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {showProjectMgmt && (
           <>
             <a
+              title="Project Management"
               className={pmActive ? "active" : ""}
               onClick={() => setPmOpen(!pmOpen)}
             >
@@ -200,6 +205,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             <div className={`pmis-submenu${pmOpen ? " open" : ""}`}>
               {canCreateProject && (
                 <div
+                  title="Add Project"
                   className={addProjectActive ? "active" : ""}
                   onClick={() => navigate("/projects/add")}
                 >
@@ -209,6 +215,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               )}
               {canViewProjects && (
                 <div
+                  title="Search Project"
                   className={searchProjectActive ? "active" : ""}
                   onClick={() => navigate("/projects")}
                 >
@@ -220,13 +227,12 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </>
         )}
 
-        {/* Meeting Management — ported from the Meeting_Management.html
-            reference. Sub-items: Create Meeting / All Meetings. Hidden
-            from project_admin, project_member and org_admin via the
-            viewMeetings permission. */}
+        {/* Meeting Management — hidden from the sidebar per request. The
+            routes/pages still exist; only the sidebar entry is commented out.
         {canViewMeetings && (
           <>
             <a
+              title="Meeting Management"
               className={mmActive ? "active" : ""}
               onClick={() => setMmOpen(!mmOpen)}
             >
@@ -238,6 +244,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </a>
             <div className={`pmis-submenu${mmOpen ? " open" : ""}`}>
               <div
+                title="Create Meeting"
                 className={createMeetingActive ? "active" : ""}
                 onClick={() => navigate("/meetings/new")}
               >
@@ -245,6 +252,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <span className="pmis-text">Create Meeting</span>
               </div>
               <div
+                title="All Meetings"
                 className={allMeetingsActive ? "active" : ""}
                 onClick={() => navigate("/meetings")}
               >
@@ -254,11 +262,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </div>
           </>
         )}
+        */}
 
         {/* Master Data */}
         {canViewMasterData && (
           <>
             <a
+              title="Master Data Management"
               className={masterActive ? "active" : ""}
               onClick={() => {
                 const next = !mdOpen;
@@ -274,6 +284,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             </a>
             <div className={`pmis-submenu${mdOpen ? " open" : ""}`}>
               <div
+                title="Organization Data"
                 className={vendorDataActive ? "active" : ""}
                 onClick={() => navigate("/master/vendors")}
               >
@@ -281,6 +292,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <span className="pmis-text">Organization Data</span>
               </div>
               <div
+                title="User Data"
                 className={userDataActive ? "active" : ""}
                 onClick={() => navigate("/master/users")}
               >
@@ -289,6 +301,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               </div>
               {canViewDivisions && (
                 <div
+                  title="Divisions"
                   className={divisionDataActive ? "active" : ""}
                   onClick={() => navigate("/master/divisions")}
                 >
@@ -297,6 +310,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 </div>
               )}
               <div
+                title="Holidays"
                 className={holidayDataActive ? "active" : ""}
                 onClick={() => navigate("/master/holidays")}
               >
@@ -304,6 +318,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
                 <span className="pmis-text">Holidays</span>
               </div>
               <div
+                title="SLA Masters"
                 className={slaDataActive ? "active" : ""}
                 onClick={() => navigate("/sla-masters")}
               >
@@ -318,6 +333,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {showVendorMgmt && (
           <>
             <a
+              title="Organization Management"
               className={vmActive ? "active" : ""}
               onClick={() => setVmOpen(!vmOpen)}
             >
@@ -330,6 +346,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             <div className={`pmis-submenu${vmOpen ? " open" : ""}`}>
               {canCreateVendor && (
                 <div
+                  title="Add Organization"
                   className={addVendorActive ? "active" : ""}
                   onClick={() => navigate("/vendors/new")}
                 >
@@ -339,6 +356,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               )}
               {canViewVendors && (
                 <div
+                  title="Search Organization"
                   className={searchVendorActive ? "active" : ""}
                   onClick={() => navigate("/vendors")}
                 >
@@ -354,6 +372,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {showUserMgmt && (
           <>
             <a
+              title="User Management"
               className={umActive ? "active" : ""}
               onClick={() => setUmOpen(!umOpen)}
             >
@@ -366,6 +385,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             <div className={`pmis-submenu${umOpen ? " open" : ""}`}>
               {canCreateUser && (
                 <div
+                  title="Add User"
                   className={addUserActive ? "active" : ""}
                   onClick={() => navigate("/users/new")}
                 >
@@ -375,6 +395,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               )}
               {canViewUsers && (
                 <div
+                  title="Search User"
                   className={searchUserActive ? "active" : ""}
                   onClick={() => navigate("/users")}
                 >
@@ -390,6 +411,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {showApprovalInbox && (
           <>
             <a
+              title="Approval Inbox"
               className={inboxActive ? "active" : ""}
               onClick={() => setInboxOpen(!inboxOpen)}
             >
@@ -402,6 +424,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             <div className={`pmis-submenu${inboxOpen ? " open" : ""}`}>
               {showCdInbox && (
                 <div
+                  title="Concerned Division"
                   className={inboxCdActive ? "active" : ""}
                   onClick={() => navigate("/approvals/concerned-division")}
                 >
@@ -411,6 +434,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
               )}
               {showAoInbox && (
                 <div
+                  title="Activity Owner"
                   className={inboxAoActive ? "active" : ""}
                   onClick={() => navigate("/approvals/activity-owner")}
                 >
@@ -425,6 +449,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {/* Ticket & SLA Management — Create Ticket / All Tickets, mirroring
             Meeting Management. Create is its own page route, not a popup. */}
         <a
+          title="Ticket Management"
           className={ticketsActive ? "active" : ""}
           onClick={() => setTmOpen(!tmOpen)}
         >
@@ -436,6 +461,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         </a>
         <div className={`pmis-submenu${tmOpen ? " open" : ""}`}>
           <div
+            title="Create Ticket"
             className={createTicketActive ? "active" : ""}
             onClick={() => navigate("/tickets/new")}
           >
@@ -443,6 +469,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
             <span className="pmis-text">Create Ticket</span>
           </div>
           <div
+            title="All Tickets"
             className={allTicketsActive ? "active" : ""}
             onClick={() => navigate("/tickets")}
           >
@@ -454,6 +481,7 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}
         <a
+          title="Aadhar Genius"
           className={assistantActive ? "active" : ""}
           onClick={() => navigate("/assistant")}
         >
@@ -461,6 +489,24 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           <span className="pmis-text">Aadhar Genius</span>
         </a>
       </div>
+
+      {/* Quick Links — commented out per request.
+      <div className="pmis-quicklinks">
+        <div className="pmis-quicklinks-head">Quick Links</div>
+        <div className="pmis-ql-item" onClick={() => navigate("/approvals/concerned-division")}>
+          <FiInbox size={ICON_SIZE} /><span>Approval Inbox</span><span className="pmis-ql-badge">23</span>
+        </div>
+        <div className="pmis-ql-item" onClick={() => navigate("/tickets")}>
+          <FiCheckCircle size={ICON_SIZE} /><span>My Tasks</span><span className="pmis-ql-badge blue">14</span>
+        </div>
+        <div className="pmis-ql-item" onClick={() => navigate("/tickets")}>
+          <FiTag size={ICON_SIZE} /><span>Escalations</span><span className="pmis-ql-badge amber">07</span>
+        </div>
+        <div className="pmis-ql-item" onClick={() => navigate("/meetings")}>
+          <FiCalendar size={ICON_SIZE} /><span>My Meetings</span><span className="pmis-ql-badge green">05</span>
+        </div>
+      </div>
+      */}
     </div>
   );
 }

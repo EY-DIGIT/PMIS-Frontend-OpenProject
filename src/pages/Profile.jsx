@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as auth from "../api/auth";
 import * as usersApi from "../api/users";
@@ -85,11 +85,6 @@ export default function Profile() {
   // collapses all of them to a single role key.
   const orgRoleKey = readRoleFromUser(user) || "";
   const role = getRoleMeta(orgRoleKey)?.label || orgRoleKey || "—";
-  const heroDivision = useMemo(() => {
-    const d = (user?.division || "").toLowerCase();
-    const m = DIVISION_OPTIONS.find((x) => x.code === d);
-    return m ? m.label : (user?.division || "—");
-  }, [user]);
   const status = user?.status === "active" ? "Active" : user?.status || "—";
   // Last login timestamp — the backend sends snake_case `last_login_at`;
   // tolerate a camelCase shape too in case /me normalises it.
@@ -166,38 +161,16 @@ export default function Profile() {
 
   return (
     <>
-      <div className="uidai-prof-page-header">
-        <div>
-          <div className="uidai-prof-page-title">My Profile</div>
-          <p className="uidai-prof-page-subtitle">
-            View and manage your account information, role-based access, and
-            administrative actions
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {editing && (
-            <button className="uidai-prof-btn uidai-prof-btn-ghost" type="button" onClick={cancelEdit} disabled={saving}>
-              Cancel
-            </button>
-          )}
-          <button className="uidai-prof-btn" type="button" onClick={toggleEdit} disabled={saving}>
-            {editing ? (saving ? "Saving…" : "Save") : "Edit Profile"}
+      <div className="uidai-prof-actions-bar" style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
+        {editing && (
+          <button className="uidai-prof-btn uidai-prof-btn-ghost" type="button" onClick={cancelEdit} disabled={saving}>
+            Cancel
           </button>
-        </div>
+        )}
+        <button className="uidai-prof-btn" type="button" onClick={toggleEdit} disabled={saving}>
+          {editing ? (saving ? "Saving…" : "Save") : "Edit Profile"}
+        </button>
       </div>
-
-      {/* Hero */}
-      <section className="uidai-prof-hero">
-        <div className="uidai-prof-hero-banner" aria-hidden="true" />
-        <div className="uidai-prof-hero-body">
-          <div className="uidai-prof-name">{form.fullName || "—"}</div>
-          <div className="uidai-prof-tagline">
-            <span className="uidai-prof-role-chip">{role}</span>
-            <span className="uidai-prof-dot">·</span>
-            <span>{heroDivision}</span>
-          </div>
-        </div>
-      </section>
 
       <div className="uidai-prof-grid">
         {/* LEFT: Account Summary */}

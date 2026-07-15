@@ -13,12 +13,17 @@
 // ============================================================
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiSend, FiX, FiUser } from "react-icons/fi";
+import { FiSend, FiX, FiUser, FiPaperclip, FiFile } from "react-icons/fi";
 import Aadhaar from "../assets/Aadhaar.png";
 import { getToken } from "../api/auth";
 
-const WEBHOOK_URL =
-  "http://10.1.131.199:5678/webhook/aadhaar";
+// Two n8n chat webhooks power Aadhaar Genius:
+//   • project    → project-related information
+//   • documents  → document / deliverable lookups
+const PROJECT_WEBHOOK_URL =
+  "http://10.1.131.199:5678/webhook/testFlow";
+const DOCUMENTS_WEBHOOK_URL =
+  "http://10.1.131.199:5678/webhook/rag-chat";
 
 // n8n instance id sent with each chat request (matches the working curl).
 const N8N_INSTANCE_ID =
@@ -26,17 +31,49 @@ const N8N_INSTANCE_ID =
 
 const BRAND_GRADIENT = "linear-gradient(135deg, #173e77 0%, #1a8f99 100%)";
 
-const GREETING = {
-  role: "bot",
-  text: "Hello! I'm Aadhaar Genius, your AI assistant. How can I help you today?",
+// Per-mode request config. Each mode builds its own fetch request:
+//   • project   → JSON body ({ action, sessionId, chatInput } → { output })
+//   • documents → RAG chat, multipart/form-data with an optional file upload
+const MODES = {
+  project: {
+    key: "project",
+    label: "Project Info",
+    url: PROJECT_WEBHOOK_URL,
+    placeholder: "Ask about UIDAI, SLAs, projects, vendors…",
+    greeting: "Hello! I'm Aadhaar Genius. Ask me anything about projects, SLAs and vendors.",
+    allowFile: false,
+    // The project workflow authenticates as the logged-in user: it reads the
+    // app session token both as the Bearer header and as the sessionId.
+    buildRequest: (text, ids) => ({
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "*/*",
+        "X-Instance-Id": N8N_INSTANCE_ID,
+        Authorization: `Bearer ${ids.token}`,
+      },
+      body: JSON.stringify({ action: "sendMessage", sessionId: ids.token, chatInput: text }),
+    }),
+  },
+  documents: {
+    key: "documents",
+    label: "Documents",
+    url: DOCUMENTS_WEBHOOK_URL,
+    placeholder: "Ask about a document, or attach a PDF to chat with it…",
+    greeting: "Hi! Attach a document (PDF) and ask me anything about it — or just ask a question.",
+    allowFile: true,
+    // RAG chat — multipart/form-data with chatInput, sessionId (the app token)
+    // and an optional file. Don't set Content-Type: the browser adds the
+    // multipart boundary. Headers stay minimal to avoid a CORS preflight.
+    buildRequest: (text, ids, file) => {
+      const fd = new FormData();
+      fd.append("chatInput", text);
+      fd.append("sessionId", ids.token);
+      if (file) fd.append("file", file);
+      return { headers: { Accept: "*/*" }, body: fd };
+    },
+  },
 };
-
-function newSessionId() {
-  return (
-    (window.crypto && window.crypto.randomUUID && window.crypto.randomUUID()) ||
-    `s-${Date.now()}-${Math.floor(Math.random() * 1e9)}`
-  );
-}
+const MODE_ORDER = ["project", "documents"];
 
 function nowTime() {
   return new Date().toLocaleTimeString("en-US", {
@@ -48,15 +85,25 @@ function nowTime() {
 export default function AssistantPage() {
   const navigate = useNavigate();
 
-  const [messages, setMessages] = useState(() => [
-    { ...GREETING, time: nowTime() },
-  ]);
+  // Which knowledge base the chat is talking to.
+  const [mode, setMode] = useState("project");
+  // One message thread per mode so switching preserves each conversation.
+  const [threads, setThreads] = useState(() => ({
+    project: [{ role: "bot", text: MODES.project.greeting, time: nowTime() }],
+    documents: [{ role: "bot", text: MODES.documents.greeting, time: nowTime() }],
+  }));
+  const messages = threads[mode];
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
-  const sessionId = useRef(newSessionId());
+  // Documents (RAG) mode lets the user attach a file to chat with.
+  const [pendingFile, setPendingFile] = useState(null);
+  const fileInputRef = useRef(null);
   const threadRef = useRef(null);
   const inputRef = useRef(null);
+
+  const allowFile = MODES[mode].allowFile;
+  const canSend = (input.trim() || (allowFile && pendingFile)) && !sending;
 
   /* Keep the thread pinned to the newest message. */
   useEffect(() => {
@@ -68,56 +115,45 @@ export default function AssistantPage() {
     if (inputRef.current) inputRef.current.focus();
   }, []);
 
+  // Append a message to a specific mode's thread (captured at send time so a
+  // reply lands in the right conversation even if the user switches modes).
+  const appendTo = (m, msg) =>
+    setThreads((t) => ({ ...t, [m]: [...t[m], msg] }));
+
   const send = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    const activeMode = mode;
+    const cfg = MODES[activeMode];
+    const file = cfg.allowFile ? pendingFile : null;
+    if ((!text && !file) || sending) return;
 
-    setMessages((m) => [...m, { role: "user", text, time: nowTime() }]);
+    appendTo(activeMode, { role: "user", text, file: file?.name, time: nowTime() });
     setInput("");
+    if (cfg.allowFile) setPendingFile(null);
     setSending(true);
 
     try {
-      // Use the app's current session token (same one every other
-      // authorized request carries) so the webhook authenticates as the
-      // logged-in user instead of a stale hardcoded token.
-      const token = getToken();
-      const res = await fetch(WEBHOOK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "*/*",
-          "X-Instance-Id": N8N_INSTANCE_ID,
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          action: "sendMessage",
-          // Forward the session token in the body too so the workflow can
-          // read it there (the browser can't forward it as a cookie
-          // cross-origin).
-          sessionId: token,
-          chatInput: text,
-        }),
-      });
+      const ids = { token: getToken() };
+      const { headers, body } = cfg.buildRequest(text, ids, file);
+      const res = await fetch(cfg.url, { method: "POST", headers, body });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({}));
-      const reply =
-        (data && (data.output || data.text || data.message)) ||
-        "Sorry, I didn't get a response.";
-      setMessages((m) => [
-        ...m,
-        { role: "bot", text: String(reply), time: nowTime() },
-      ]);
+      const rawText = await res.text();
+      let reply;
+      try {
+        const data = JSON.parse(rawText);
+        reply = (data && (data.output || data.text || data.message)) || rawText;
+      } catch {
+        reply = rawText;
+      }
+      reply = reply?.trim() || "Sorry, I didn't get a response.";
+      appendTo(activeMode, { role: "bot", text: String(reply), time: nowTime() });
     } catch {
-      setMessages((m) => [
-        ...m,
-        {
-          role: "bot",
-          text:
-            "Couldn't reach the assistant. Please check your connection and try again.",
-          time: nowTime(),
-          error: true,
-        },
-      ]);
+      appendTo(activeMode, {
+        role: "bot",
+        text: "Couldn't reach the assistant. Please check your connection and try again.",
+        time: nowTime(),
+        error: true,
+      });
     } finally {
       setSending(false);
     }
@@ -202,6 +238,47 @@ export default function AssistantPage() {
             <span style={{ fontSize: 18, fontWeight: 700, color: "#173e77" }}>
               Aadhaar Genius
             </span>
+          </div>
+
+          {/* Mode toggle — pick which knowledge base the chat talks to. */}
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              background: "#eef1f5",
+              padding: 4,
+              borderRadius: 10,
+              marginLeft: 18,
+            }}
+          >
+            {MODE_ORDER.map((k) => {
+              const on = mode === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setMode(k);
+                    setPendingFile(null);
+                    if (inputRef.current) inputRef.current.focus();
+                  }}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 8,
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    background: on ? "#fff" : "transparent",
+                    color: on ? "#173e77" : "#6b7890",
+                    boxShadow: on ? "0 1px 3px rgba(0,0,0,.12)" : "none",
+                    transition: "all .15s ease",
+                  }}
+                >
+                  {MODES[k].label}
+                </button>
+              );
+            })}
           </div>
 
           <button
@@ -297,7 +374,25 @@ export default function AssistantPage() {
                       boxShadow: isUser ? "0 4px 14px rgba(23,62,119,0.2)" : "none",
                     }}
                   >
-                    {m.text}
+                    {m.file && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          marginBottom: m.text ? 6 : 0,
+                          padding: "5px 10px",
+                          borderRadius: 8,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          background: isUser ? "rgba(255,255,255,0.18)" : "#eef2f8",
+                          color: isUser ? "#fff" : "#3a4a63",
+                        }}
+                      >
+                        <FiFile size={14} /> {m.file}
+                      </div>
+                    )}
+                    {m.text && <div>{m.text}</div>}
                   </div>
                 </div>
               </div>
@@ -326,6 +421,42 @@ export default function AssistantPage() {
 
         {/* Composer */}
         <div style={{ padding: "14px 22px 18px", borderTop: "1px solid #eef1f5" }}>
+          {/* Attached-file chip (documents mode) */}
+          {allowFile && pendingFile && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 8,
+                padding: "6px 10px",
+                borderRadius: 10,
+                background: "#eef2f8",
+                border: "1px solid #dbe3ee",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#3a4a63",
+                maxWidth: "100%",
+              }}
+            >
+              <FiFile size={14} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 320 }}>
+                {pendingFile.name}
+              </span>
+              <button
+                type="button"
+                aria-label="Remove file"
+                onClick={() => {
+                  setPendingFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = "";
+                }}
+                style={{ border: "none", background: "transparent", cursor: "pointer", color: "#6b7890", display: "flex" }}
+              >
+                <FiX size={15} />
+              </button>
+            </div>
+          )}
+
           <div
             style={{
               display: "flex",
@@ -334,15 +465,50 @@ export default function AssistantPage() {
               background: "#f3f5f9",
               border: "1px solid #e1e7ef",
               borderRadius: 16,
-              padding: "8px 10px 8px 18px",
+              padding: "8px 10px 8px 12px",
             }}
           >
+            {/* Attach file — documents (RAG) mode only */}
+            {allowFile && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls"
+                  style={{ display: "none" }}
+                  onChange={(e) => setPendingFile(e.target.files?.[0] || null)}
+                />
+                <button
+                  type="button"
+                  aria-label="Attach file"
+                  title="Attach a document"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending}
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: "50%",
+                    border: "none",
+                    flexShrink: 0,
+                    cursor: sending ? "not-allowed" : "pointer",
+                    color: pendingFile ? "#173e77" : "#6b7890",
+                    background: pendingFile ? "#e4ecf7" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <FiPaperclip size={18} />
+                </button>
+              </>
+            )}
+
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Ask Aadhaar Genius anything about UIDAI, SLAs, projects, vendors…"
+              placeholder={MODES[mode].placeholder}
               rows={1}
               style={{
                 flex: 1,
@@ -361,16 +527,16 @@ export default function AssistantPage() {
               type="button"
               aria-label="Send message"
               onClick={send}
-              disabled={!input.trim() || sending}
+              disabled={!canSend}
               style={{
                 width: 42,
                 height: 42,
                 borderRadius: "50%",
                 border: "none",
                 flexShrink: 0,
-                cursor: !input.trim() || sending ? "not-allowed" : "pointer",
+                cursor: !canSend ? "not-allowed" : "pointer",
                 color: "#fff",
-                background: !input.trim() || sending ? "#9bb0cf" : BRAND_GRADIENT,
+                background: !canSend ? "#9bb0cf" : BRAND_GRADIENT,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",

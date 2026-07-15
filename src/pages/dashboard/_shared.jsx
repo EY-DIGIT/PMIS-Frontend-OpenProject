@@ -70,12 +70,24 @@ export const LABELS = {
   active: "Active", not_started: "Not Started",
   completed: "Completed", ontrack: "In Progress", delayed: "Delayed",
   milestone: "Milestones", activity: "Activities", task: "Tasks", subtask: "Sub Tasks",
+  // Approval workflow states (dashboard donuts / pills)
+  idle: "Idle", pending_division: "Pending Division", pending_owner: "Pending Owner",
+  division_approved: "Division Approved", rejected: "Rejected",
+  // Finance cost types
+  fixed: "Fixed", one_time: "One-time", recurring: "Recurring",
+  Scheduled: "Scheduled", Remaining: "Remaining",
 };
 
 export const COLORS = {
   active: "#0b3c88", not_started: "#9aa6bd",
   completed: "#1a8a3d", ontrack: "#0aa1c0", delayed: "#d4440e",
   milestone: "#0b3c88", activity: "#0aa1c0", task: "#5e3fb1", subtask: "#b25900",
+  // Approval workflow states
+  idle: "#9aa6bd", pending_division: "#b25900", pending_owner: "#5e3fb1",
+  division_approved: "#0aa1c0", rejected: "#e11d48",
+  // Finance cost types
+  fixed: "#0b3c88", one_time: "#b25900", recurring: "#0f9d8f",
+  Scheduled: "#1a8a3d", Remaining: "#dbe5f1",
 };
 
 // Buckets the BE supports on /api/v3/dashboard/projects?bucket=…

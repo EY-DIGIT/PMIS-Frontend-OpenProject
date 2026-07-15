@@ -330,8 +330,8 @@ body {
 }
 
 .pmis-sidebar {
-  width: 240px;
-  background: linear-gradient(119.54deg,#000046 0,#1cb5e0 100%);
+  width: 228px;
+  background: #020348;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -440,7 +440,7 @@ body {
 }
 
 .pmis-footer {
-  background: linear-gradient(119.54deg,rgba(0,0,70,.8));
+  background: #020348;
   border-top: 3px solid var(--navy);
   text-align: center;
   padding: 10px;

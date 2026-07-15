@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
@@ -119,6 +119,7 @@ function buildMonthGrid(year, month) {
 
 export default function ProjectAttendancePage() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
   const project = useProject(projectId);
 
   const [year, setYear] = useState(CURRENT_YEAR);
@@ -146,9 +147,6 @@ export default function ProjectAttendancePage() {
   const [milestonesError, setMilestonesError] = useState(null);
   // The milestone whose Leave Management modal is open (null = closed).
   const [leaveMilestone, setLeaveMilestone] = useState(null);
-
-  // Per-employee leave detail modal.
-  const [leaveDetail, setLeaveDetail] = useState(null);
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -271,25 +269,11 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [holidayOpen, year]);
 
-  const openLeaveDetail = async (emp, monthNum, yearNum) => {
-    const q = Math.ceil(monthNum / 3);
-    setLeaveDetail({ employee: emp, monthNum, year: yearNum, data: null, loading: true, error: null });
-    try {
-      const token = getToken();
-      const params = new URLSearchParams({ year: yearNum, quarter: q, projectId });
-      const res = await fetch(
-        `${API_BASE}${ENDPOINTS.resources.leaveReport(emp.attendanceId)}?${params}`,
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      const data = await res.json();
-      setLeaveDetail((prev) => (prev ? { ...prev, data, loading: false } : null));
-    } catch (err) {
-      setLeaveDetail((prev) =>
-        prev ? { ...prev, loading: false, error: err?.message || "Couldn't load leave detail." } : null
-      );
-    }
-  };
+  // Row click → open the full-page leave detail (year + quarter in the URL).
+  const goLeaveDetail = (emp, quarterNum) =>
+    navigate(
+      `/projects/${encodeURIComponent(projectId)}/attendance/leave/${encodeURIComponent(emp.attendanceId)}?year=${year}&quarter=${quarterNum}`
+    );
 
   const employees = Array.isArray(summary) ? summary : [];
   const period =
@@ -455,7 +439,7 @@ export default function ProjectAttendancePage() {
             <AttendanceTable
               period={period}
               employees={employees}
-              onRowClick={(emp) => openLeaveDetail(emp, Number(selectedMonth), year)}
+              onRowClick={(emp) => goLeaveDetail(emp, Math.ceil(Number(selectedMonth) / 3))}
             />
           </>
         )}
@@ -478,7 +462,12 @@ export default function ProjectAttendancePage() {
         {quarterlyLoading && <SkeletonTable rows={5} cols={7} />}
         {quarterlyError && <div className="att-error">{quarterlyError}</div>}
         {!quarterlyLoading && !quarterlyError && (
-          <QuarterlyPanel data={Array.isArray(quarterly) ? quarterly : []} quarter={quarter} year={year} />
+          <QuarterlyPanel
+            data={Array.isArray(quarterly) ? quarterly : []}
+            quarter={quarter}
+            year={year}
+            onRowClick={(emp) => goLeaveDetail(emp, quarter)}
+          />
         )}
       </section>
 
@@ -499,10 +488,6 @@ export default function ProjectAttendancePage() {
           milestone={leaveMilestone}
           onClose={() => setLeaveMilestone(null)}
         />
-      )}
-
-      {leaveDetail && (
-        <LeaveDetailModal {...leaveDetail} onClose={() => setLeaveDetail(null)} />
       )}
     </div>
   );
@@ -574,7 +559,7 @@ function AttendanceTable({ period, employees, onRowClick }) {
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
-function QuarterlyPanel({ data, quarter, year }) {
+function QuarterlyPanel({ data, quarter, year, onRowClick }) {
   const employees = data ?? [];
   const period = employees[0]?.period || `Q${quarter} ${year}`;
 
@@ -587,7 +572,7 @@ function QuarterlyPanel({ data, quarter, year }) {
       />
     );
   }
-  return <AttendanceTable period={period} employees={employees} />;
+  return <AttendanceTable period={period} employees={employees} onRowClick={onRowClick} />;
 }
 
 /* =====================================================================
@@ -890,118 +875,6 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
   );
 }
 
-/* =====================================================================
-   Leave Detail Modal — full leave report for one employee.
-   GET /api/reports/leave/{attendanceId}?year=&quarter=&projectId=
-   ===================================================================== */
-function LeaveDetailModal({ employee, monthNum, year, data, loading, error, onClose }) {
-  const quarter = Math.ceil(monthNum / 3);
-  useModalChrome(onClose);
-
-  const fmtKey = (k) => k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").trim();
-
-  const scalars = data ? Object.entries(data).filter(([, v]) => v === null || typeof v !== "object") : [];
-  const arrays = data ? Object.entries(data).filter(([, v]) => Array.isArray(v)) : [];
-  const nested = data
-    ? Object.entries(data).filter(([, v]) => v && typeof v === "object" && !Array.isArray(v))
-    : [];
-
-  return (
-    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="att-modal" role="dialog" aria-modal="true" aria-label="Leave Detail" style={{ maxWidth: 640 }}>
-        <div className="att-modal-head">
-          <div>
-            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Leave Detail</div>
-            <h2 className="att-modal-title">
-              {employee?.employeeName || employee?.attendanceId || "Employee"}
-            </h2>
-          </div>
-          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-
-        <div className="att-modal-sub" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <code className="att-code">{employee?.attendanceId}</code>
-          <span className="att-muted" style={{ padding: 0 }}>
-            {MONTH_NAMES[monthNum]} {year} · Q{quarter}
-          </span>
-        </div>
-
-        {loading && <div className="att-muted">Loading leave detail…</div>}
-        {error && <div className="att-error">{error}</div>}
-
-        {!loading && !error && data && (
-          <>
-            {/* Scalar key/value grid */}
-            {scalars.length > 0 && (
-              <div className="att-kv-grid">
-                {scalars.map(([k, v]) => (
-                  <div key={k}>
-                    <div className="att-kv-label">{fmtKey(k)}</div>
-                    <div className="att-kv-value">{v == null ? "—" : String(v)}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Nested objects */}
-            {nested.map(([k, obj]) => (
-              <div key={k} className="att-detail-section">
-                <div className="att-detail-heading">{fmtKey(k)}</div>
-                <div className="att-kv-grid att-kv-grid-sm">
-                  {Object.entries(obj).map(([ck, cv]) => (
-                    <div key={ck}>
-                      <div className="att-kv-label">{fmtKey(ck)}</div>
-                      <div className="att-kv-value att-kv-value-sm">{cv == null ? "—" : String(cv)}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            {/* Arrays */}
-            {arrays.map(([k, arr]) => (
-              <div key={k} className="att-detail-section">
-                <div className="att-detail-heading">
-                  {fmtKey(k)} <span className="att-detail-count">({arr.length})</span>
-                </div>
-                {arr.length === 0 ? (
-                  <div className="att-muted">None</div>
-                ) : typeof arr[0] === "object" && arr[0] !== null ? (
-                  <div className="att-table-wrap">
-                    <table className="att-table">
-                      <thead>
-                        <tr>
-                          {Object.keys(arr[0]).map((col) => (
-                            <th key={col} className="att-th">{fmtKey(col)}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {arr.map((row, i) => (
-                          <tr key={i} className="att-row">
-                            {Object.values(row).map((val, j) => (
-                              <td key={j} className="att-td">{val == null ? "—" : String(val)}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="att-detail-inline">{arr.join(", ")}</div>
-                )}
-              </div>
-            ))}
-          </>
-        )}
-
-        <div className="att-modal-actions">
-          <button className="att-btn-secondary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ---------- small building blocks ---------- */
 function Field({ label, children }) {

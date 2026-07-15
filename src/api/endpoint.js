@@ -363,6 +363,17 @@ export const ENDPOINTS = {
     projectItems: (uuid) => `/projects/api/v3/dashboard/projects/${enc(uuid)}/items`,
     organisations: '/projects/api/v3/dashboard/organisations',
     organisation: (vendorId) => `/projects/api/v3/dashboard/organisations/${enc(vendorId)}`,
+    /* Consolidated single-call dashboard endpoints (2026-07). Each returns
+       the WHOLE view in one response so the FE stops firing the per-project
+       payment-page loop + tickets/meetings/approval-inbox fan-out.
+         summaryView       -> Summary view
+         projectFull        -> Project view (single-project deep dive)
+         organisationView   -> Organization view, All-Orgs mode
+         organisationViewById -> Organization view, Single-Org mode (by org id) */
+    summaryView: '/projects/api/v3/dashboard/summary-view',
+    projectFull: (uuid) => `/projects/api/v3/dashboard/projects/${enc(uuid)}/full`,
+    organisationView: '/projects/api/v3/dashboard/organisation-view',
+    organisationViewById: (organisationId) => `/projects/api/v3/dashboard/organisations/${enc(organisationId)}/view`,
   },
 
   /* ──────────────────────────────────────────────────────────────────

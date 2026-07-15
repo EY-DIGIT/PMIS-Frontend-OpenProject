@@ -488,7 +488,11 @@ export async function loadProjectTree(projectId) {
         if (Array.isArray(src.dependsOn)) node.dependsOn = src.dependsOn.slice();
         if (Array.isArray(src.dependsOnDisplay) && src.dependsOnDisplay.length) {
           node.dependsOnDisplay = src.dependsOnDisplay.slice();
+          
         }
+        node.paymentType = src.paymentType ?? null;
+  node.isResourceBased =
+    typeof src.isResourceBased === "boolean" ? src.isResourceBased : null;
       }
     }
   } catch {
