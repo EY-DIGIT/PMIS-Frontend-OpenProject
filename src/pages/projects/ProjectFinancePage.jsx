@@ -2091,6 +2091,7 @@ export default function ProjectFinancePage() {
                     onEditActivities={(t) => setEditingActivitiesTerm(t)}
                     onGenerateInvoice={generateInvoice}
                     onApplyFrequency={applyPhaseFrequency}
+                    costItems={costItems}   
                     isLocked={isLocked}
                     isLastPhase={activePhaseIdx === phases.length - 1}
                     carryLocked={isLocked || carrySaving}
@@ -2860,8 +2861,13 @@ const recipients =
    columns now; the row-level pencil button opens the EditTermModal
    which holds both. The carry-forward on/off toggle opens a config popup;
    the read-only roll-up is in the summary section below. */
+/* Each phase renders as its own collapsible panel — header is always
+   visible, body collapses. Frequency + % of Payment are first-class
+   columns now; the row-level pencil button opens the EditTermModal
+   which holds both. The carry-forward on/off toggle opens a config popup;
+   the read-only roll-up is in the summary section below. */
 function PhasePanel({
-  phase, allPhases = [],
+  phase, allPhases = [], costItems = [],
   milestoneName = () => "Not Completed",
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onApplyFrequency,
@@ -2885,7 +2891,33 @@ function PhasePanel({
   const [freqEnd, setFreqEnd] = useState("");
   const [freqCode, setFreqCode] = useState("");
   const [applyingFreq, setApplyingFreq] = useState(false);
-  const terms = phase.paymentTerms || [];
+
+  /* Recurring costs don't generate milestone-linked payment terms (they book
+     as a dated schedule with paymentTerms: []), so their milestone never shows
+     in this table the way a fixed/resource phase's does. Synthesize read-only
+     rows from the recurring cost items so the milestone renders here just like
+     the other cost types. If the backend ever emits real payment terms for
+     recurring costs, realTerms wins and this synthesis is skipped. */
+  const realTerms = phase.paymentTerms || [];
+  const recurringItems = (costItems || []).filter(
+    (c) => c.costTypeCode === "recurring_cost" && c.phase === phase.phase
+  );
+  const terms = realTerms.length
+    ? realTerms
+    : recurringItems.flatMap((c) =>
+        (Array.isArray(c.milestoneIds) ? c.milestoneIds : []).map((mid) => ({
+          id: `recurring-${c.id}-${mid}`,
+          milestoneId: mid,
+          percentOfPayment: null,
+          value: Number(c.total) || 0,
+          cycleCount: phase.cycleCount,
+          activities: [],
+          __recurring: true,
+        }))
+      );
+  /* A phase showing only synthetic recurring rows has no % of payment, so the
+     % total row and the Scheduled/Remaining chips are hidden for it. */
+  const isSyntheticOnly = realTerms.length === 0 && terms.length > 0;
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
   /* Base (100%) the term percentages are taken from = scheduled value
@@ -2925,6 +2957,14 @@ function PhasePanel({
   const recurringTotal = Number(phase.recurringTotal) || 0;
   const [recurringOpen, setRecurringOpen] = useState(false);
   const canApplyFrequency = typeof onApplyFrequency === "function";
+
+   const recurringMilestoneNames = Array.from(new Set(
+    (costItems || [])
+      .filter((c) => c.costTypeCode === "recurring_cost" && c.phase === phase.phase)
+      .flatMap((c) => (Array.isArray(c.milestoneIds) ? c.milestoneIds : []))
+      .filter(Boolean)
+      .map((id) => milestoneName(id))
+  ));
   const openFreqModal = () => {
     setFreqStart(toDateInput(phase.startDate));
     setFreqEnd(toDateInput(phase.endDate));
@@ -3198,6 +3238,23 @@ function PhasePanel({
                   {inr(recurringPerPeriod)} / period {recurringOpen ? "▲" : "▼"}
                 </span>
               </button>
+
+              {recurringMilestoneNames.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 12px 10px" }}>
+                  {recurringMilestoneNames.map((name, i) => (
+                    <span key={i} style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      fontSize: 11.5, fontWeight: 700, color: "#0b3c88",
+                      background: "#fff", border: "1px solid #cfe0f5",
+                      borderRadius: 999, padding: "3px 10px",
+                    }}>
+                      <span aria-hidden="true">🏁</span>
+                      {name}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {recurringOpen && (
                 <div style={{ padding: "0 12px 12px" }}>
                   <div style={{ fontSize: 11, color: "var(--uidai-pmis-muted)", marginBottom: 8 }}>
@@ -3262,6 +3319,32 @@ function PhasePanel({
                     </td>
                   </tr>
                 ) : terms.map((t, idx) => {
+                  if (t.__recurring) {
+                    return (
+                      <tr key={t.id}>
+                        <td>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                            <span aria-hidden="true" style={{ fontSize: 13 }}>🏁</span>
+                            <strong style={{ color: "#173e77" }}>{milestoneName(t.milestoneId)}</strong>
+                          </span>
+                        </td>
+                        <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                        <td style={{ textAlign: "center" }}>
+                          {t.cycleCount != null
+                            ? <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600, border: "1px solid #c4e9d0" }}>{t.cycleCount}</span>
+                            : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
+                        </td>
+                        <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                        <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(t.value)}>
+                          ₹ {Number(t.value).toLocaleString("en-IN")}
+                        </td>
+                        <td>
+                          <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, background: "#eef3fb", color: "#0b3c88", fontSize: 10.5, fontWeight: 700, border: "1px solid #cfe0f5" }}>Recurring cost</span>
+                        </td>
+                        <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                      </tr>
+                    );
+                  }
                   const value = Number(t.value) || 0;
                   const pct = Number(t.percentOfPayment) || 0;
                   /* Running balance: each row's remaining = base minus every
@@ -3427,7 +3510,7 @@ function PhasePanel({
                     </React.Fragment>
                   );
                 })}
-                {terms.length > 0 && (
+                {terms.length > 0 && !isSyntheticOnly && (
                   <tr style={{ background: "#f1f6fd" }}>
                     <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
@@ -3447,6 +3530,7 @@ function PhasePanel({
             </table>
           </div>
 
+          {!isSyntheticOnly && (
           <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "right", flexWrap: "wrap", gap: 10 }}>
             {/* The final phase must schedule the full contract — i.e. its
                 payment terms have to total exactly 100%. Flag any shortfall
@@ -3471,11 +3555,11 @@ function PhasePanel({
               className={`uidai-pmis-chip${
                 totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
               }`}
-              
             >
               Remaining: {totalPercent < 100 && ` · ${100 - totalPercent}% remaining`}
             </span>
           </div>
+          )}
         </div>
 
       {showFreqModal && (
@@ -3663,25 +3747,14 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
               }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   Phase {p.phase}
-                  {/* {yes && (
-                    <span style={{
-                      fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
-                      padding: "1px 6px", borderRadius: 999,
-                      background: "#1b7a42", color: "#fff",
-                    }}
-                    >
-                      Carry Forward Cost
-                    </span>
-                  )} */}
                 </span>
-                {/* <span style={{ fontWeight: 800, color: "#173e77" }} title={wordsHint(phaseTotal)}>{inr(phaseTotal)}</span> */}
               </div>
 
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {stat("Scheduled", `${totalPercent}%`,
                   { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
                 {stat("Total Cost", inr(phaseFixed))}
-                
+
                 {oneTimeAllocated > 0 && stat(
                   isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
                   inr(oneTimeAllocated),
@@ -3718,3 +3791,154 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
     </div>
   );
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   CarryForwardSummarySection — read-only per-phase roll-up in the right
+   column below the Summary card. The on/off toggle + mode picker live in
+   each phase's collapsible header on the left; this panel reports, for
+   every phase: scheduled %, delivery cost, and (from phase.carryForward)
+   the leftover carried out and the amount received from earlier phases.
+   ────────────────────────────────────────────────────────────────── */
+// function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
+//   if (!phases || phases.length === 0) return null;
+
+//   /* Remaining balance = Total Contract Cost minus everything already
+//      scheduled through the payment terms (sum of each term's ₹ value
+//      across all phases). It's the portion of the contract not yet
+//      committed to a payment term. */
+//   const totalContractCost = Number(totals?.totalContractCost) || 0;
+//   const totalScheduled = phases.reduce(
+//     (s, p) => s + (p.paymentTerms || []).reduce((a, t) => a + (Number(t.value) || 0), 0),
+//     0
+//   );
+//   const totalRemaining = totalContractCost - totalScheduled;
+
+//   const stat = (label, value, opts = {}) => (
+//     <div style={{
+//       display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
+//       fontSize: 12, padding: "5px 0",
+//       borderTop: opts.first ? "none" : "1px solid #eef1f6",
+//     }}>
+//       <span style={muted}>{label}</span>
+//       <strong style={{ color: opts.color || "#173e77", fontVariantNumeric: "tabular-nums" }}>{value}</strong>
+//     </div>
+//   );
+
+//   return (
+//     <div style={{ padding: 18 }}>
+//       <div style={{
+//         display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+//         fontSize: 14, fontWeight: 800, color: "#173e77",
+//         letterSpacing: 0.5, textTransform: "uppercase",
+//         paddingBottom: 12, marginBottom: 14,
+//         borderBottom: "1px solid var(--uidai-pmis-border)",
+//       }}>
+//         Phase Summary
+//       </div>
+
+//       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+//         {phases.map((p, i) => {
+//           const isLast = i === phases.length - 1;
+//           const realTerms = phase.paymentTerms || [];
+// const recurringItems = (costItems || []).filter(
+//   (c) => c.costTypeCode === "recurring_cost" && c.phase === phase.phase
+// );
+// const terms = realTerms.length
+//   ? realTerms
+//   : recurringItems.flatMap((c) =>
+//       (Array.isArray(c.milestoneIds) ? c.milestoneIds : []).map((mid) => ({
+//         id: `recurring-${c.id}-${mid}`,
+//         milestoneId: mid,
+//         percentOfPayment: null,
+//         value: Number(c.total) || 0,
+//         cycleCount: phase.cycleCount,
+//         activities: [],
+//         __recurring: true,
+//       }))
+//     );
+//           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
+//           const phaseTotal = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
+//           const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
+//           const oneTimeAllocated = Number(p.oneTimeAllocated) || 0;
+//           const cf = p.carryForward || {};
+//           const yes = !!cf.enabled;
+//           const cfMethodName =
+//             carryMethods.find((m) => m.code === cf.methodCode)?.name || cf.methodCode || "";
+//           const carriedOut = Number(cf.carriedOut) || 0;
+//           const received = (Number(cf.received) || 0) + (Number(cf.receivedMilestone) || 0);
+//           return (
+//             <div
+//               key={p.phase}
+//               style={{
+//                 border: yes ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
+//                 background: yes ? "#f1faf4" : "#fff",
+//                 borderRadius: 10,
+//                 padding: "12px 14px",
+//                 boxShadow: yes
+//                   ? "0 2px 6px rgba(27, 122, 66, 0.10)"
+//                   : "0 1px 2px rgba(20, 50, 110, 0.04)",
+//               }}
+//             >
+//               <div style={{
+//                 display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+//                 fontWeight: 800, color: "#173e77", fontSize: 13,
+//                 paddingBottom: 8, marginBottom: 8,
+//                 borderBottom: "1px solid var(--uidai-pmis-border)",
+//               }}>
+//                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+//                   Phase {p.phase}
+//                   {/* {yes && (
+//                     <span style={{
+//                       fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+//                       padding: "1px 6px", borderRadius: 999,
+//                       background: "#1b7a42", color: "#fff",
+//                     }}
+//                     >
+//                       Carry Forward Cost
+//                     </span>
+//                   )} */}
+//                 </span>
+//                 {/* <span style={{ fontWeight: 800, color: "#173e77" }} title={wordsHint(phaseTotal)}>{inr(phaseTotal)}</span> */}
+//               </div>
+
+//               <div style={{ display: "flex", flexDirection: "column" }}>
+//                 {stat("Scheduled", `${totalPercent}%`,
+//                   { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
+//                 {stat("Total Cost", inr(phaseFixed))}
+                
+//                 {oneTimeAllocated > 0 && stat(
+//                   isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
+//                   inr(oneTimeAllocated),
+//                   { color: "#0b6b8f" }
+//                 )}
+//                 {stat("Carried Forward",
+//                   yes ? inr(carriedOut) : "—",
+//                   { color: yes ? "#1b7a42" : "#a3afc1" })}
+//                 {cfMethodName && yes ? stat("Type", cfMethodName, { color: "#0b6b8f" }) : null}
+//                 {stat("Carry Forward Received",
+//                   received > 0 ? inr(received) : "—",
+//                   { color: received > 0 ? "#173e77" : "#a3afc1" })}
+//               </div>
+//             </div>
+//           );
+//         })}
+//       </div>
+
+//       {/* Total remaining balance — contract cost not yet committed to terms. */}
+//       <div style={{
+//         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+//         marginTop: 14, padding: "12px 14px",
+//         background: "linear-gradient(135deg, var(--uidai-pmis-navy), var(--uidai-pmis-cyan))",
+//         color: "#fff", borderRadius: 10,
+//         boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
+//       }}>
+//         <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>
+//           Carry Forward Remaining Balance
+//         </span>
+//         <strong style={{ fontSize: 16, color: "#fff" }} title={wordsHint(totalRemaining)}>
+//           {inr(totalRemaining)}
+//         </strong>
+//       </div>
+//     </div>
+//   );
+// }
