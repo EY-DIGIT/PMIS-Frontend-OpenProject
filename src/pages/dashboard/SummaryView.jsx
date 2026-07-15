@@ -163,10 +163,10 @@ function SummaryContent({ data, onOpenProjectList, onOpenProjectItems, onOpenOrg
           delta={kContract.delta} spark={kContract.spark}
           onClick={() => navigate("/dashboard/org")} />
         <KpiCard tone="amber" icon="✅" label="SLA Compliance"
-          value={kSla.value != null ? `${kSla.value}%` : "N/A"}
+          value={kSla.met != null ? kSla.met : (kSla.value != null ? kSla.value : "N/A")}
+          foot={kSla.evaluated != null ? `${kSla.met ?? 0} of ${kSla.evaluated} met` : undefined}
           gauge={kSla.value != null ? kSla.value : undefined}
-          delta={kSla.delta}
-          onClick={() => onOpenProjectList("total")} />
+          delta={kSla.delta} />
       </div>
 
       {/* ── Widgets — 3 per row ── */}

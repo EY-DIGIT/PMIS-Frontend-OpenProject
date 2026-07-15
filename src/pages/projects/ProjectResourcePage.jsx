@@ -321,6 +321,24 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
 @media (prefers-reduced-motion: reduce) {
   .rp *, .rp *::before, .rp *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---- rate card popover ---- */
+.rp-rate-wrap { position: relative; display: inline-flex; align-items: center; gap: 4px; cursor: default; }
+.rp-rate-popover {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 200;
+  background: #fff; border: 1px solid var(--rp-line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(11,28,51,.13); padding: 6px 0; min-width: 200px;
+  animation: rp-fade .12s ease;
+}
+.rp-rate-popover-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 14px; font-size: 13px; gap: 16px;
+}
+.rp-rate-popover-row.active { background: var(--rp-primary-50); }
+.rp-rate-popover-row .yr { color: var(--rp-muted); font-weight: 600; }
+.rp-rate-popover-row.active .yr { color: var(--rp-primary); font-weight: 700; }
+.rp-rate-popover-row .amt { font-weight: 700; color: var(--rp-ink); font-variant-numeric: tabular-nums; }
+.rp-rate-popover-row.active .amt { color: var(--rp-primary); }
 `;
 
 export default function ProjectResourcePage() {
@@ -710,7 +728,9 @@ export default function ProjectResourcePage() {
                         </div>
                       </td>
                       <td className="rp-td" data-align="left">{r.designationType || "—"}</td>
-                      <td className="rp-td" data-align="right">{formatMoney(r.rateCard)}</td>
+                      <td className="rp-td" data-align="right" style={{ whiteSpace: "nowrap" }}>
+                        <RateCardCell resource={r} />
+                      </td>
                       <td className="rp-td" data-align="left">{formatDate(r.dateOfJoining)}</td>
                       <td className="rp-td" data-align="left">{formatDate(r.lastDate)}</td>
                       <td className="rp-td" data-align="center">
@@ -749,6 +769,7 @@ export default function ProjectResourcePage() {
       {viewingId && (
         <ResourceDetailDrawer
           resId={viewingId}
+          projectName={project?.projectName || null}
           onClose={() => setViewingId(null)}
           onEdit={(r) => { setViewingId(null); setEditing(r); }}
         />
@@ -774,7 +795,7 @@ export default function ProjectResourcePage() {
 /* =====================================================================
    Detail drawer — GET /api/resources/{resId}. Opened by clicking a row.
    ===================================================================== */
-function ResourceDetailDrawer({ resId, onClose, onEdit }) {
+function ResourceDetailDrawer({ resId, projectName, onClose, onEdit }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -810,17 +831,27 @@ function ResourceDetailDrawer({ resId, onClose, onEdit }) {
     return () => { active = false; controller.abort(); };
   }, [resId]);
 
+  const currentRate = data?.rateCardByYear && data?.rateYear
+    ? data.rateCardByYear[`Year-${data.rateYear}`]
+    : data?.rateCard;
+
   const rows = data
     ? [
         { label: "Resource ID", value: data.resId },
         { label: "Full name", value: data.name || "—" },
         { label: "Email", value: data.emailId || "—" },
+        { label: "Location", value: data.location || "—" },
         { label: "Designation", value: data.designationType || "—" },
-        { label: "Rate card", value: formatMoney(data.rateCard) },
-        { label: "Date of joining", value: formatDate(data.dateOfJoining) },
-        { label: "Last date", value: formatDate(data.lastDate) },
+        { label: "Category", value: data.category || "—" },
+        { label: "Category Details", value: data.categoryDetails || "—" },
+        { label: "Rate Year", value: data.rateYear ? `Year-${data.rateYear}` : "—" },
+        { label: "Rate (Current Year)", value: formatMoney(currentRate) },
+        { label: "Date of Joining", value: formatDate(data.dateOfJoining) },
+        { label: "Assignment Start", value: formatDate(data.assignmentStartDate) },
+        { label: "Assignment End", value: data.assignmentEndDate ? formatDate(data.assignmentEndDate) : "Ongoing" },
+        { label: "Last Date", value: formatDate(data.lastDate) },
         { label: "Status", value: data.active ? "Active" : "Inactive" },
-        { label: "Project ID", value: data.projectId || "—" },
+        { label: "Project", value: projectName || data.projectId || "—" },
       ]
     : [];
 
@@ -857,6 +888,19 @@ function ResourceDetailDrawer({ resId, onClose, onEdit }) {
                   </span>
                 </div>
               ))}
+              {data.rateCardByYear && Object.keys(data.rateCardByYear).length > 0 && (
+                <div style={{ marginTop: "16px" }}>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--rp-muted)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: "8px" }}>Rate Card by Year</div>
+                  <div style={{ border: "1px solid var(--rp-line)", borderRadius: "10px", overflow: "hidden" }}>
+                    {Object.entries(data.rateCardByYear).map(([yr, rate], i) => (
+                      <div key={yr} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderBottom: i < Object.keys(data.rateCardByYear).length - 1 ? "1px solid var(--rp-line-2)" : "none", background: yr === `Year-${data.rateYear}` ? "var(--rp-primary-50)" : "transparent" }}>
+                        <span style={{ fontSize: "13px", fontWeight: yr === `Year-${data.rateYear}` ? 700 : 500, color: yr === `Year-${data.rateYear}` ? "var(--rp-primary)" : "var(--rp-ink-2)" }}>{yr}{yr === `Year-${data.rateYear}` ? " ★" : ""}</span>
+                        <span style={{ fontSize: "13px", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--rp-ink)" }}>{formatMoney(rate)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1032,6 +1076,50 @@ function TableSkeleton() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ---------- RateCardCell — shows current year rate; hover reveals all years ---------- */
+function RateCardCell({ resource: r }) {
+  const [open, setOpen] = useState(false);
+  const hasYears = r.rateCardByYear && Object.keys(r.rateCardByYear).length > 0;
+  const currentRate = hasYears && r.rateYear
+    ? r.rateCardByYear[`Year-${r.rateYear}`]
+    : r.rateCard;
+
+  return (
+    <div
+      className="rp-rate-wrap"
+      onMouseEnter={() => hasYears && setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onClick={(e) => { e.stopPropagation(); hasYears && setOpen((v) => !v); }}
+    >
+      <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+        {formatMoney(currentRate)}
+      </span>
+      {r.rateYear && (
+        <span style={{ fontSize: "11px", color: "var(--rp-primary)", background: "var(--rp-primary-50)", borderRadius: 5, padding: "1px 5px", fontWeight: 700 }}>
+          Yr {r.rateYear}
+        </span>
+      )}
+      {hasYears && <span style={{ fontSize: "10px", color: "var(--rp-faint)" }}>▾</span>}
+      {open && hasYears && (
+        <div className="rp-rate-popover">
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--rp-muted)", padding: "4px 14px 6px", textTransform: "uppercase", letterSpacing: ".06em", borderBottom: "1px solid var(--rp-line-2)" }}>
+            Rate Card by Year
+          </div>
+          {Object.entries(r.rateCardByYear).map(([yr, rate]) => {
+            const isActive = yr === `Year-${r.rateYear}`;
+            return (
+              <div key={yr} className={`rp-rate-popover-row${isActive ? " active" : ""}`}>
+                <span className="yr">{yr}{isActive ? " ★" : ""}</span>
+                <span className="amt">{formatMoney(rate)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
