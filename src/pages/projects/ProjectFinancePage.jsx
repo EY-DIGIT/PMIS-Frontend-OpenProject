@@ -978,7 +978,7 @@ function EditTermModal({
             />
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Cycle</label>
+            <label>Interval</label>
             <input
               type="text"
               value={term.cycleCount == null ? "" : String(term.cycleCount)}
@@ -2745,8 +2745,8 @@ const recipients =
             color: timeBlocked ? "#a3261f" : "#0b3c88", lineHeight: 1.5,
           }}>
             {timeBlocked
-              ? "Set a project frequency first — time-based carry-forward weights the split by each later phase's cycle count."
-              : `Leftover is split across later phases, weighted by each phase's cycle count at the project frequency (${projectFrequencyCode}).`}
+              ? "Set a project frequency first — time-based carry-forward weights the split by each later phase's interval count."
+              : `Leftover is split across later phases, weighted by each phase's interval count at the project frequency (${projectFrequencyCode}).`}
           </div>
         )}
 
@@ -3030,7 +3030,7 @@ function PhasePanel({
               padding: "2px 7px", borderRadius: 999,
               background: "#eef4fc", color: "#173e77", border: "1px solid #cfe0f5",
             }}>
-              {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Cycle" : "Cycles"}
+              {phase.cycleCount} {Number(phase.cycleCount) === 1 ? "Interval" : "Intervals"}
             </span>
           )}
           {phase.pendingCycles != null && (
@@ -3042,7 +3042,7 @@ function PhasePanel({
                 background: "#fff5e9", color: "#b54708", border: "1px solid #f5d9b5",
               }}
             >
-              {phase.pendingCycles} {Number(phase.pendingCycles) === 1 ? "Cycle" : "Cycles"} left
+              {phase.pendingCycles} {Number(phase.pendingCycles) === 1 ? "Interval" : "Intervals"} left
             </span>
           )}
         </div>
