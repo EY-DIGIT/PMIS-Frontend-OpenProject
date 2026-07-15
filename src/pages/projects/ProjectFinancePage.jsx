@@ -3454,7 +3454,12 @@ function PhasePanel({
                           <td style={{ paddingLeft: 14 }}>
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#0aa1c0", display: "inline-block" }} />
-                              <span style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}>{code}</span>
+                              <span
+                                style={{ color: "#0b3c88", fontSize: 12.5, fontWeight: 600 }}
+                                title={a.activityName || a.name || a.activityDescription || code}
+                              >
+                                {code}
+                              </span>
                             </span>
                           </td>
                           <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
