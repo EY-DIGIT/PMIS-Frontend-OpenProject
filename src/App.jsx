@@ -17,6 +17,7 @@ import "./App.css";
 import UIDAILogin from "./pages/Uidailogin";
 import ResetPassword from "./pages/ResetPassword";
 import ForgotPassword from "./pages/ForgotPassword";
+import PenaltyReportPage from "./pages/projects/Penaltyreportpage";
 
 
 import { useSessionManager } from "./api/sessionManager";
@@ -760,6 +761,7 @@ export default function MainApp() {
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
 
 
                                                 {/* Vendors */}
