@@ -631,8 +631,8 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
     });
     // rateYear is optional — the dropdown values are "Year-1" etc; API wants the number.
     if (rateYear) {
-      params.set("rateYear", String(rateYear).replace(/^Year-/i, ""));
-    }
+  params.set("rateYear", rateYear);
+}
 
     try {
       setUploading(true);
