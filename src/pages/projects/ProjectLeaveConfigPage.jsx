@@ -305,8 +305,8 @@ export default function ProjectLeaveConfigPage() {
               <span className="lc-section-ico"><FiCalendar /></span> Attendance &amp; Leave Rules
             </div>
             <div className="lc-toggle-grid">
-              <Toggle icon={<FiCheckSquare />} label="Attendance Captured"
-                value={form.attendanceCaptured} onChange={(v) => set({ attendanceCaptured: v })} />
+              {/* <Toggle icon={<FiCheckSquare />} label="Attendance Captured"
+                value={form.attendanceCaptured} onChange={(v) => set({ attendanceCaptured: v })} /> */}
               <Toggle icon={<FiCalendar />} label="Prorated Leaves Applied"
                 value={form.proratedLeavesApplied} onChange={(v) => set({ proratedLeavesApplied: v })} />
               <Toggle icon={<FiRefreshCw />} label="Carry Forward Allowed"
