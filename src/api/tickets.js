@@ -77,26 +77,47 @@ function buildRequestInfo(roleOverride) {
    the browser's CORS preflight isn't rejected by extra headers. */
 export async function createTicket(ticket) {
   const url = TICKET_BASE + ENDPOINTS.tickets.create;
+  const token = tokenStore.get();
+
   const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestInfo: buildRequestInfo(), ticket }),
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      requestInfo: buildRequestInfo(),
+      ticket,
+    }),
   });
 
   const text = await res.text();
   let payload = null;
+
   if (text) {
-    try { payload = JSON.parse(text); } catch { payload = text; }
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
   }
 
   if (!res.ok) {
     const msg =
-      (payload && typeof payload === 'object' &&
-        (payload.error?.message || payload.message || payload.errorMessage)) ||
-      (typeof payload === 'string' && payload) ||
+      (payload &&
+        typeof payload === "object" &&
+        (payload.error?.message ||
+          payload.message ||
+          payload.errorMessage)) ||
+      (typeof payload === "string" && payload) ||
       `Create ticket failed (${res.status})`;
-    throw new ApiError(msg, { status: res.status, body: payload });
+
+    throw new ApiError(msg, {
+      status: res.status,
+      body: payload,
+    });
   }
+
   return payload;
 }
 
