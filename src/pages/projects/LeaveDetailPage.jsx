@@ -4,6 +4,7 @@
 // monthly / quarterly tables (no longer a modal).
 //
 //   GET /api/reports/leave/{attendanceId}?year=&quarter=&projectId=
+//   GET /api/attendance/cost/quarterly?resourceId=&year=&quarter=
 //
 // When the employee has unpaid leave, a "Relaxation" action opens a
 // small form that POSTs to /api/attendance/quarterly-relaxation.
@@ -13,7 +14,7 @@ import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
   FiX, FiUser, FiBriefcase, FiHash, FiFileText, FiCalendar,
   FiPlay, FiFlag, FiShield, FiChevronsRight, FiCreditCard,
-  FiUmbrella, FiLayers, FiPieChart, FiClock,
+  FiUmbrella, FiLayers, FiPieChart, FiClock, FiDollarSign,
 } from "react-icons/fi";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -69,6 +70,18 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// Turns "billableCostUsd" -> "Billable Cost Usd" for fields we don't
+// have an explicit label for.
+const formatLabel = (key) =>
+  key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase());
+
+const money = (v) =>
+  `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const pct = (v) => `${num(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+
 export default function LeaveDetailPage() {
   const { projectId, attendanceId } = useParams();
   const [params] = useSearchParams();
@@ -84,6 +97,11 @@ export default function LeaveDetailPage() {
   const [relaxOpen, setRelaxOpen] = useState(false);
   // Bumped after a successful relaxation submit to re-fetch the leave detail.
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Quarterly cost report — shown at the bottom of the page.
+  const [costReport, setCostReport] = useState(null);
+  const [costLoading, setCostLoading] = useState(false);
+  const [costError, setCostError] = useState(null);
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -117,6 +135,37 @@ export default function LeaveDetailPage() {
   }, [attendanceId, year, quarter, projectId, refreshKey]);
 
   const d = data || {};
+  const resourceId = d.resourceId || d.attendanceId || attendanceId;
+
+  // Fetch the quarterly cost report once we know the resourceId (comes back
+  // from the leave-detail payload) and have a year/quarter to query with.
+  useEffect(() => {
+    if (!resourceId || !year || !quarter) return;
+    let active = true;
+    (async () => {
+      setCostLoading(true);
+      setCostError(null);
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({ resourceId, year, quarter });
+        const res = await fetch(`${API_BASE}/api/attendance/cost/quarterly?${qs}`, {
+          headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
+        if (!res.ok) throw new Error(`Couldn't load quarterly cost report (${res.status})`);
+        const json = await res.json();
+        let payload = json && json.data && typeof json.data === "object" ? json.data : json;
+        // Some endpoints wrap the single report object in an array — unwrap it.
+        if (Array.isArray(payload)) payload = payload[0] || {};
+        if (active) setCostReport(payload || {});
+      } catch (e) {
+        if (active) setCostError(e?.message || "Couldn't load quarterly cost report");
+      } finally {
+        if (active) setCostLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [resourceId, year, quarter, refreshKey]);
+
   const employeeName = d.employeeName || attendanceId || "Employee";
   const unpaidLeave = num(d.unpaidLeave);
   const paidDates = Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [];
@@ -183,13 +232,19 @@ export default function LeaveDetailPage() {
               <DateList tone="green" title="Paid Leave Dates" dates={paidDates} />
               <DateList tone="red" title="Unpaid Leave Dates" dates={unpaidDates} />
             </div>
+
+            {/* Quarterly cost report */}
+            <div className="ld-section-head" style={{ marginTop: 22 }}>
+              <span className="ld-section-ico"><FiDollarSign /></span> Quarterly Cost Report
+            </div>
+            <CostReportSection loading={costLoading} error={costError} report={costReport} />
           </>
         )}
       </div>
 
       {relaxOpen && (
         <RelaxationModal
-          resourceId={d.resourceId || d.attendanceId || attendanceId}
+          resourceId={resourceId}
           projectId={d.projectId || projectId}
           year={d.year || year}
           quarter={d.quarter || quarter}
@@ -249,6 +304,102 @@ function DateList({ tone, title, dates }) {
 }
 
 /* =====================================================================
+   Quarterly Cost Report
+   GET /api/attendance/cost/quarterly?resourceId=&year=&quarter=
+   Shape: { attendanceId, employeeName, projectId, period, totalCost,
+            monthlyBreakdown: [{ period, workingDays, presentDays,
+              relaxationDaysApplied, attendancePercentage, monthlyRate,
+              cost, rateYear, ... }] }
+   Falls back to a generic key/value + JSON dump for any extra top-level
+   fields the API adds later, so nothing is silently dropped.
+   ===================================================================== */
+const COST_KNOWN_KEYS = new Set([
+  "attendanceId", "employeeName", "projectId", "period", "totalCost", "monthlyBreakdown",
+]);
+
+function CostReportSection({ loading, error, report }) {
+  if (loading) return <div className="ld-muted">Loading cost report…</div>;
+  if (error) return <div className="ld-error">⚠️ {error}</div>;
+  if (!report || typeof report !== "object" || Object.keys(report).length === 0) {
+    return <div className="ld-muted">No cost data available.</div>;
+  }
+
+  const months = Array.isArray(report.monthlyBreakdown) ? report.monthlyBreakdown : [];
+  const extraEntries = Object.entries(report).filter(([k]) => !COST_KNOWN_KEYS.has(k));
+
+  return (
+    <>
+      {/* Summary cards */}
+      <div className="ld-grid" style={{ marginBottom: 18 }}>
+        <StatCard tone="blue" icon={<FiCalendar />} label="Period" value={show(report.period)} />
+        <StatCard tone="green" icon={<FiDollarSign />} label="Total Cost" value={money(report.totalCost)} />
+        <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)} />
+      </div>
+
+      {/* Monthly breakdown table */}
+      {months.length > 0 && (
+        <div className="ld-costtable-wrap">
+          <table className="ld-costtable">
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Rate Year</th>
+                <th className="ld-num">Working Days</th>
+                <th className="ld-num">Present Days</th>
+                <th className="ld-num">Relaxation Applied</th>
+                <th className="ld-num">Attendance %</th>
+                <th className="ld-num">Monthly Rate</th>
+                <th className="ld-num">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {months.map((m, i) => (
+                <tr key={i}>
+                  <td className="ld-costtable-period">{show(m.period)}</td>
+                  <td>{show(m.rateYear)}</td>
+                  <td className="ld-num">{show(m.workingDays)}</td>
+                  <td className="ld-num">{show(m.presentDays)}</td>
+                  <td className="ld-num">{show(m.relaxationDaysApplied)}</td>
+                  <td className="ld-num">
+                    <span
+                      className="ld-attpill"
+                      style={{
+                        background: num(m.attendancePercentage) === 0 ? TONES.red.bg : TONES.green.bg,
+                        color: num(m.attendancePercentage) === 0 ? TONES.red.fg : TONES.green.fg,
+                      }}
+                    >
+                      {pct(m.attendancePercentage)}
+                    </span>
+                  </td>
+                  <td className="ld-num">{money(m.monthlyRate)}</td>
+                  <td className="ld-num ld-costtable-cost">{money(m.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={7} className="ld-costtable-totallbl">Total Cost</td>
+                <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {extraEntries.length > 0 && (
+        <div className="ld-grid">
+          {extraEntries
+            .filter(([, v]) => v === null || typeof v !== "object")
+            .map(([key, value]) => (
+              <StatCard key={key} tone="amber" icon={<FiFileText />} label={formatLabel(key)} value={show(value)} />
+            ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* =====================================================================
    Quarterly Relaxation — grants relaxation days against unpaid leave.
    POST /api/attendance/quarterly-relaxation
    ===================================================================== */
@@ -300,7 +451,7 @@ function RelaxationModal({ resourceId, projectId, year, quarter, onSuccess, onCl
       });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       setDone(true);
-      onSuccess?.(); // refresh the parent's leave detail with the new figures
+      onSuccess?.(); // refresh the parent's leave detail (and cost report) with the new figures
     } catch (err) {
       setError(err?.message || "Couldn't submit the relaxation. Try again.");
     } finally {
@@ -424,6 +575,21 @@ const LD_CSS = `
 .ld-datehead { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; letter-spacing: .04em; margin-bottom: 12px; }
 .ld-datechips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ld-datechip { font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; }
+
+/* cost report */
+
+.ld-costtable-wrap { background: #fff; border: 1px solid ${C.border}; border-radius: 14px; overflow: auto; margin-bottom: 14px; }
+.ld-costtable { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 720px; }
+.ld-costtable thead th { text-align: left; font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: ${C.muted}; background: ${C.surface}; padding: 12px 14px; border-bottom: 1px solid ${C.border}; white-space: nowrap; }
+.ld-costtable tbody td { padding: 12px 14px; border-bottom: 1px solid ${C.border}; color: ${C.ink}; white-space: nowrap; }
+.ld-costtable tbody tr:last-child td { border-bottom: none; }
+.ld-costtable tbody tr:hover { background: ${C.surface}; }
+.ld-costtable .ld-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ld-costtable-period { font-weight: 700; }
+.ld-costtable-cost { font-weight: 800; color: ${C.primary}; }
+.ld-costtable tfoot td { padding: 12px 14px; border-top: 2px solid ${C.border}; }
+.ld-costtable-totallbl { text-align: right; font-weight: 800; color: ${C.ink}; text-transform: uppercase; font-size: 11.5px; letter-spacing: .04em; }
+.ld-attpill { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
 
 .ld-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }
 .ld-error { display: flex; align-items: center; gap: 8px; background: #fdecec; border: 1px solid #f5c9c9; color: ${C.red}; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; margin: 8px 0; }
