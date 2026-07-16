@@ -448,7 +448,7 @@ export default function ProjectAttendancePage() {
       {/* Quarterly leave */}
       <section className="att-section">
         <div className="att-section-head">
-          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly leave</h2>
+          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly Attendance</h2>
           <Field label="Quarter">
             <select
               className="att-select"

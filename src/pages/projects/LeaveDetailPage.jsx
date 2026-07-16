@@ -51,8 +51,8 @@ const TONES = {
 // text, tone/icon drive the styling. Order matches the reference design.
 const SUMMARY_CARDS = [
   { key: "quarter", label: "Quarter", tone: "blue", icon: <FiCalendar /> },
-  { key: "quarterStart", label: "Quarter Start", tone: "purple", icon: <FiPlay /> },
-  { key: "quarterEnd", label: "Quarter End", tone: "orange", icon: <FiFlag /> },
+  { key: "quarterStart", label: "Start Date", tone: "purple", icon: <FiPlay /> },
+  { key: "quarterEnd", label: "End Date", tone: "orange", icon: <FiFlag /> },
   { key: "permissibleLeave", label: "Permissible Leave", tone: "green", icon: <FiShield /> },
   { key: "carriedForwardLeave", label: "Carried Forward Leave", tone: "blue", icon: <FiChevronsRight /> },
   { key: "leaveTaken", label: "Leave Taken", tone: "blue", icon: <FiBriefcase /> },
