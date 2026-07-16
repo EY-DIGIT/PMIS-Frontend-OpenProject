@@ -1074,6 +1074,12 @@ export default function ProjectDetailsPage() {
   onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/leave-config`),
   visible: true
 },
+{
+  key: "leave-config",
+  label: "Penalty Report",
+  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/penalty-report`),
+  visible: true
+},
     {
       key: "Severity And LD Configure",
       label: "Severity And LD Configure",

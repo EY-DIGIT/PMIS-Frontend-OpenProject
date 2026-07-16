@@ -126,6 +126,7 @@ function Breadcrumbs() {
         resource: "Resource",
         attendance: "Attendance",
         "leave-config": "Leave Policy Configure",
+        PenaltyReportPage: "Penalty Report",
         "activities-started": "Activity Started List",
         vendors: "Organizations",
         users: "Users",
