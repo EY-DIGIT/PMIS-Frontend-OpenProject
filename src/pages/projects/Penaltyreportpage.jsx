@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { API_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import { uiStore } from "../../store/project/uiStore";
+import { projectItems } from "../../api/dashboard";
 import "../../styles/global.css";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -80,19 +81,24 @@ function isCompleted(m) {
 }
 
 /* Delay for a milestone as of `asOf` (YYYY-MM-DD).
+   The day-count comes from the backend's per-milestone `daysDelayed`
+   (single source of truth — it already handles overdue-in-progress) when
+   available; otherwise it falls back to a local date subtraction:
    - completed → measured to actualEndDate
    - not completed → measured to `asOf` (a live, growing figure)
-   Returns { days, state, refYmd }. */
-function computeDelay(m, asOf) {
+   Returns { days, state, refYmd, source }. */
+function computeDelay(m, asOf, backendDays) {
   const deadline = toYmd(m?.endDate);
-  if (!deadline) return { days: 0, state: "no-deadline", refYmd: null };
   const completed = isCompleted(m);
-  const refYmd = completed ? toYmd(m.actualEndDate) || deadline : asOf;
-  const days = Math.max(0, diffDays(refYmd, deadline));
+  const refYmd = completed ? toYmd(m?.actualEndDate) || deadline : asOf;
+  const localDays = deadline ? Math.max(0, diffDays(refYmd, deadline)) : 0;
+  const hasBackend = Number.isFinite(backendDays);
+  const days = hasBackend ? Math.max(0, Math.round(backendDays)) : localDays;
+  if (!deadline && !hasBackend) return { days: 0, state: "no-deadline", refYmd: null, source: "none" };
   let state;
   if (completed) state = days > 0 ? "completed_late" : "completed_on_time";
   else state = days > 0 ? "overdue" : "pending";
-  return { days, state, refYmd };
+  return { days, state, refYmd, source: hasBackend ? "backend" : "local" };
 }
 
 /* ── unit conversion (dynamic, off the SLA's declared input unit) ── */
@@ -155,6 +161,19 @@ function extractElements(payload) {
     [];
   return Array.isArray(el) ? el : [];
 }
+// Dashboard project-items come back (already unwrapped by projectItems)
+// under `rows` (the shape this API uses), or occasionally `items` / an
+// _embedded collection / a bare array. Accept all.
+function normalizeItems(data) {
+  const rows =
+    data?.rows ||
+    data?.data?.rows ||
+    data?.items ||
+    data?._embedded?.elements ||
+    data?.data?._embedded?.elements ||
+    (Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : []);
+  return Array.isArray(rows) ? rows : [];
+}
 // Read a metric from an evaluate result regardless of envelope shape.
 function pick(result, key) {
   if (result == null) return undefined;
@@ -176,6 +195,7 @@ export default function PenaltyReportPage() {
 
   const [milestones, setMilestones] = useState([]);
   const [page, setPage] = useState(null);
+  const [items, setItems] = useState([]); // dashboard project items (backend delay + activity links)
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
 
@@ -207,6 +227,16 @@ export default function PenaltyReportPage() {
       const pPayload = await readJson(pRes);
       setMilestones(extractElements(mPayload));
       setPage(pPayload?.data ?? pPayload ?? null);
+
+      // Backend-computed per-milestone delay + activity→milestone links.
+      // Optional: if it's unavailable the page degrades to local date math
+      // and the payment-derived activity fallback.
+      try {
+        const itemsData = await projectItems(projectId);
+        setItems(normalizeItems(itemsData));
+      } catch {
+        setItems([]);
+      }
     } catch (err) {
       setLoadError(err?.message || "Could not load milestones or payment data.");
     } finally {
@@ -217,6 +247,70 @@ export default function PenaltyReportPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  /* Activities from the dashboard items — each carries its OWN daysDelayed
+     and the milestoneId it rolls up to. This is what the SLAs get scored
+     against (a milestone can read "on track" while a child activity is
+     late). `activityId` is the item id the SLA endpoints key on. */
+  const itemsActivities = useMemo(
+    () =>
+      items
+        .filter((it) => String(it?.kind).toLowerCase() === "activity")
+        .map((it) => ({
+          activityId: it.id,
+          code: it.wbs || it.name || it.id,
+          name: it.name,
+          milestoneId: it.milestoneId,
+          milestoneName: it.milestoneName,
+          daysDelayed: num(it.daysDelayed),
+          plannedEnd: it.plannedEnd,
+          actualEnd: it.actualEnd,
+          status: it.status,
+          bucket: it.bucket,
+        })),
+    [items]
+  );
+
+  // Milestone rows from items, indexed by id (for code/name fallback joins).
+  const itemsMilestones = useMemo(() => {
+    const map = new Map();
+    for (const it of items) {
+      if (String(it?.kind).toLowerCase() === "milestone" && it?.id != null) {
+        map.set(it.id, { id: it.id, wbs: it.wbs, name: it.name, daysDelayed: num(it.daysDelayed) });
+      }
+    }
+    return map;
+  }, [items]);
+
+  /* Resolve a milestone (from the milestones API) to its activity rows.
+     Primary join is by uuid (activity.milestoneId === milestone.id); if the
+     id spaces differ we fall back to matching the milestone's code (M1==M1)
+     and finally its name, so the link survives id-space mismatches. */
+  const activitiesForMilestone = useCallback(
+    (m) => {
+      if (!m) return [];
+      let list = itemsActivities.filter((a) => a.milestoneId && a.milestoneId === m.id);
+      if (list.length) return list;
+
+      const code = m.displayCode || m.wbs;
+      if (code) {
+        const ids = new Set(
+          [...itemsMilestones.values()].filter((im) => im.wbs === code).map((im) => im.id)
+        );
+        if (ids.size) {
+          list = itemsActivities.filter((a) => ids.has(a.milestoneId));
+          if (list.length) return list;
+        }
+      }
+      if (m.name) {
+        const nm = String(m.name).trim();
+        list = itemsActivities.filter((a) => String(a.milestoneName || "").trim() === nm);
+        if (list.length) return list;
+      }
+      return [];
+    },
+    [itemsActivities, itemsMilestones]
+  );
 
   /* Milestone → total scheduled payment (sum of every phase's term value
      for that milestone). This is the base the penalty is taken from. */
@@ -243,25 +337,6 @@ export default function PenaltyReportPage() {
          GET /projects/api/v3/projects/{projectId}/activities
          → [{ id / activityId, displayCode, milestoneId }]
      Return the same shape and the rest of the page works unchanged. */
-  const activitiesByMilestone = useMemo(() => {
-    const map = new Map(); // milestoneId → [{ activityId, code }]
-    const phases = page?.phases || [];
-    for (const ph of phases) {
-      for (const t of ph.paymentTerms || []) {
-        if (!t.milestoneId || !Array.isArray(t.activities)) continue;
-        const bucket = map.get(t.milestoneId) || [];
-        for (const a of t.activities) {
-          if (!a?.activityId) continue;
-          if (!bucket.some((x) => x.activityId === a.activityId)) {
-            bucket.push({ activityId: a.activityId, code: a.activityDisplayCode || a.activityId });
-          }
-        }
-        map.set(t.milestoneId, bucket);
-      }
-    }
-    return map;
-  }, [page]);
-
   async function loadMappings(activityId) {
     const res = await authorizedFetch(
       `${baseContracts()}/api/v3/activities/${encodeURIComponent(activityId)}/sla-mappings?active_only=true`,
@@ -301,32 +376,29 @@ export default function PenaltyReportPage() {
     try {
       const rows = [];
       for (const m of milestones) {
-        const delay = computeDelay(m, asOf);
-
-        // Only milestones that have actually slipped carry a penalty.
-        // Overdue-but-open ones are included only when the user asks for a
-        // provisional view.
-        const applies =
-          delay.days > 0 &&
-          (delay.state === "completed_late" ||
-            (delay.state === "overdue" && includeProvisional));
-        if (!applies) continue;
+        const acts = activitiesForMilestone(m);
+        if (!acts.length) continue; // no activities → nothing to score
 
         const value = num(paymentByMilestone.get(m.id));
-        const acts = activitiesByMilestone.get(m.id) || [];
-
-        const periodStart = toYmd(m.endDate);
-        const periodEndRaw = delay.refYmd || asOf;
-        const qEnd = quarterEndYmd(periodStart);
-        const periodEnd = qEnd && periodEndRaw > qEnd ? qEnd : periodEndRaw;
 
         const activityRows = [];
         for (const a of acts) {
+          const aDelay = num(a.daysDelayed);
+          const completed = String(a.status || "").toLowerCase() === "completed" || !!a.actualEnd;
+          // Score an activity only if it slipped. Overdue-but-open ones are
+          // included as provisional when the user asks for that view.
+          const applies = aDelay > 0 && (completed || includeProvisional);
+          if (!applies) continue;
+
+          const periodStart = toYmd(a.plannedEnd) || toYmd(m.endDate);
+          const qEnd = quarterEndYmd(periodStart);
+          const periodEnd = qEnd && asOf > qEnd ? qEnd : asOf;
+
           let mappings = [];
           try {
             mappings = await loadMappings(a.activityId);
           } catch (err) {
-            activityRows.push({ activity: a, error: err?.message || "Could not load SLAs.", slaRows: [], activityLdPercent: 0 });
+            activityRows.push({ activity: a, delay: aDelay, completed, error: err?.message || "Could not load SLAs.", slaRows: [], activityLdPercent: 0, activityLdPercentRaw: 0 });
             continue;
           }
 
@@ -352,7 +424,10 @@ export default function PenaltyReportPage() {
               continue;
             }
 
-            const count = convertDelay(delay.days, di.unit);
+            // The activity's OWN delay, converted into the SLA's unit, is
+            // dropped straight into the observation input the form used to
+            // collect manually — then the backend scores it as usual.
+            const count = convertDelay(aDelay, di.unit);
             const body = { period_start: periodStart, period_end: periodEnd, [di.name]: count };
             try {
               const result = await evaluateSla(a.activityId, map.sla_ref, body);
@@ -375,38 +450,47 @@ export default function PenaltyReportPage() {
           const rawLd = slaRows.reduce((s, r) => s + num(r.ldPercent), 0);
           activityRows.push({
             activity: a,
+            delay: aDelay,
+            completed,
             slaRows,
             activityLdPercentRaw: rawLd,
             activityLdPercent: Math.min(ACTIVITY_LD_CAP, rawLd),
           });
         }
 
+        if (!activityRows.length) continue; // no delayed activities on this milestone
+
         const summedActivityLd = activityRows.reduce((s, r) => s + num(r.activityLdPercent), 0);
         const milestoneLdPercent = Math.min(MILESTONE_LD_CAP, summedActivityLd);
         const penalty = (value * milestoneLdPercent) / 100;
+        const maxDelay = activityRows.reduce((mx, r) => Math.max(mx, num(r.delay)), 0);
 
         rows.push({
           milestone: m,
-          delay,
+          maxDelay,
           value,
           activities: activityRows,
           milestoneLdPercentRaw: summedActivityLd,
           milestoneLdPercent,
           penalty,
           net: value - penalty,
-          noActivities: acts.length === 0,
+          provisional: activityRows.every((r) => !r.completed),
         });
       }
       setReport(rows);
       if (rows.length === 0) {
-        uiStore.showMessage("No delayed milestones to report for the selected date.");
+        uiStore.showMessage(
+          items.length === 0
+            ? "No activity delay data was returned for this project."
+            : "No delayed activities to report for the selected date."
+        );
       }
     } catch (err) {
       uiStore.showError(err?.message || "Could not generate the penalty report.");
     } finally {
       setGenerating(false);
     }
-  }, [projectId, milestones, asOf, includeProvisional, paymentByMilestone, activitiesByMilestone]);
+  }, [projectId, milestones, items, asOf, includeProvisional, paymentByMilestone, activitiesForMilestone]);
 
   /* ── totals ── */
   const totals = useMemo(() => {
@@ -519,11 +603,12 @@ export default function PenaltyReportPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#173e77" }}>{m.displayCode || "—"}</span>
                       <span style={{ fontSize: 15, fontWeight: 800, color: "#173e77" }}>{m.name}</span>
-                      <StateBadge state={row.delay.state} />
+                      <StateBadge state={row.provisional ? "overdue" : "completed_late"} />
                     </div>
                     <div style={{ fontSize: 12, ...muted, marginTop: 4 }}>
-                      Deadline {fmtDMY(m.endDate)} · {row.delay.state === "completed_late" ? `Completed ${fmtDMY(m.actualEndDate)}` : `Measured to ${fmtDMY(row.delay.refYmd)}`} ·{" "}
-                      <strong style={{ color: "#b54708" }}>{row.delay.days} day{row.delay.days === 1 ? "" : "s"} late</strong>
+                      Deadline {fmtDMY(m.endDate)} · Worst activity delay{" "}
+                      <strong style={{ color: "#b54708" }}>{row.maxDelay} day{row.maxDelay === 1 ? "" : "s"}</strong>
+                      {row.provisional && <span style={{ ...muted, fontStyle: "italic" }}> · provisional (in progress)</span>}
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
@@ -549,12 +634,6 @@ export default function PenaltyReportPage() {
                     Raw LD was {row.milestoneLdPercentRaw}% — capped to {MILESTONE_LD_CAP}% per the quarterly LD ceiling.
                   </div>
                 )}
-                {row.noActivities && (
-                  <div style={{ fontSize: 12.5, color: "#b54708", marginTop: 10, lineHeight: 1.5 }}>
-                    No activities are linked to this milestone in the current data source, so no SLAs could be evaluated.
-                    Wire the activities endpoint (see the note at the top of this file) to include it.
-                  </div>
-                )}
 
                 {/* Expand: per-SLA detail */}
                 {row.activities.length > 0 && (
@@ -578,6 +657,9 @@ export default function PenaltyReportPage() {
                           <div key={a.activity.activityId} style={{ marginBottom: 14 }}>
                             <div style={{ fontSize: 12.5, fontWeight: 700, color: "#173e77", marginBottom: 6 }}>
                               Activity <span style={{ fontFamily: "monospace" }}>{a.activity.code}</span>
+                              <span style={{ color: "#b54708", fontWeight: 700, marginLeft: 10 }}>
+                                {a.delay} day{a.delay === 1 ? "" : "s"} late
+                              </span>
                               <span style={{ ...muted, fontWeight: 600, marginLeft: 10 }}>
                                 Activity LD {a.activityLdPercent}%
                                 {a.activityLdPercentRaw > ACTIVITY_LD_CAP ? ` (raw ${a.activityLdPercentRaw}%, capped)` : ""}
