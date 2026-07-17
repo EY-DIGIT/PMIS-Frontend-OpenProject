@@ -588,6 +588,9 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  // Holds the actual message returned by the API so the popup reflects
+  // what the backend reported, rather than a hardcoded string.
+  const [responseMessage, setResponseMessage] = useState("");
 
   // Fetch rate-year options from the resources service.
   useEffect(() => {
@@ -613,6 +616,34 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
 
   useModalChrome(onClose);
 
+  // Reads the response body once, tolerating JSON or plain text.
+  // Returns { raw, data } — data is the parsed JSON, or null if it wasn't JSON.
+  const parseResponseBody = async (res) => {
+    const raw = await res.text();
+    if (!raw) return { raw: "", data: null };
+    try {
+      return { raw, data: JSON.parse(raw) };
+    } catch {
+      return { raw, data: null };
+    }
+  };
+
+  // The API's validation errors array sometimes lists resource IDs that
+  // simply belong to a different project ("Resource X does not exist.").
+  // Surface that as one clear, actionable line instead of a raw ID dump.
+  // Any other error shape falls through to the API's own message/error text.
+  const buildErrorMessage = (data, raw, status) => {
+    const validationErrors = Array.isArray(data?.errors) ? data.errors : null;
+    const isResourceMismatch =
+      validationErrors?.length > 0 &&
+      validationErrors.every((e) => /does not exist/i.test(String(e)));
+
+    if (isResourceMismatch) {
+      return "These resources belong to another project. Please upload the correct attendance file.";
+    }
+    return data?.message || data?.error || raw || `Upload failed (${status})`;
+  };
+
   const upload = async () => {
     setError(null);
     if (!file) { setError("Choose an Excel file to upload."); return; }
@@ -631,8 +662,8 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
     });
     // rateYear is optional — the dropdown values are "Year-1" etc; API wants the number.
     if (rateYear) {
-  params.set("rateYear", rateYear);
-}
+      params.set("rateYear", rateYear);
+    }
 
     try {
       setUploading(true);
@@ -642,7 +673,14 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body,
       });
-      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+
+      const { raw, data } = await parseResponseBody(res);
+
+      if (!res.ok) {
+        throw new Error(buildErrorMessage(data, raw, res.status));
+      }
+
+      setResponseMessage(data?.message || raw || "Attendance uploaded successfully.");
       setDone(true);
     } catch (err) {
       setError(err?.message || "The upload didn't go through. Try again.");
@@ -673,7 +711,7 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
           <>
             <div className="att-success">
               <CheckIcon />
-              Attendance uploaded successfully.
+              {responseMessage}
             </div>
             <div className="att-modal-actions">
               <button className="att-btn-primary" onClick={onClose}>Done</button>
@@ -1000,7 +1038,7 @@ function CheckIcon() {
 
 /* ---------- scoped styles ---------- */
 const ATT_CSS = `
-.att-page { padding: 30px 26px 72px; max-width: 1320px; margin: 0 auto; color: ${C.ink}; }
+.att-page { padding: 30px 10px 72px; max-width: 1320px; margin: 0 auto; color: ${C.ink}; }
 @media (max-width: 640px) { .att-page { padding: 20px 16px 48px; } }
 
 .att-page :focus-visible { outline: 2px solid ${C.primary}; outline-offset: 2px; border-radius: 6px; }

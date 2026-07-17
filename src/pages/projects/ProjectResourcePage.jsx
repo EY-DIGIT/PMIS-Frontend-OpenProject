@@ -55,6 +55,7 @@ const avatarColor = (name) => {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 };
 
+
 // Column comparator for header sorting.
 const makeComparator = (key, dir) => {
   const mul = dir === "asc" ? 1 : -1;
@@ -339,6 +340,27 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
 .rp-rate-popover-row.active .yr { color: var(--rp-primary); font-weight: 700; }
 .rp-rate-popover-row .amt { font-weight: 700; color: var(--rp-ink); font-variant-numeric: tabular-nums; }
 .rp-rate-popover-row.active .amt { color: var(--rp-primary); }
+/* ---- centered popup modal ---- */
+.rp-modal-scrim {
+  position: fixed; inset: 0; background: rgba(11,42,99,.42); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+  animation: rp-fade .15s ease; padding: 20px;
+}
+.rp-modal {
+  width: min(480px, 100%); max-height: 85vh; background: var(--rp-surface);
+  border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(11,23,42,.28);
+  animation: rp-modal-in .18s cubic-bezier(.2,.8,.2,1);
+}
+.rp-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 22px 24px 16px; }
+.rp-modal-head h2 { margin: 2px 0 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; color: var(--rp-ink); }
+.rp-modal-body { padding: 0 24px 22px; overflow-y: auto; flex: 1; }
+.rp-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--rp-line); background: var(--rp-surface-2); }
+
+@keyframes rp-modal-in {
+  from { transform: scale(.96) translateY(6px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
 `;
 
 export default function ProjectResourcePage() {
@@ -362,6 +384,15 @@ export default function ProjectResourcePage() {
   // drawers
   const [editing, setEditing] = useState(null);
   const [viewingId, setViewingId] = useState(null);
+
+  
+// add near your other state
+const [apiResponse, setApiResponse] = useState(null);
+// shape: { title, ok, status, data }
+
+function closeApiResponse() {
+  setApiResponse(null);
+}
 
   // toasts
   const [toasts, setToasts] = useState([]);
@@ -476,8 +507,10 @@ export default function ProjectResourcePage() {
 
   // ---------- save: PUT /api/resources/{resId} ----------
   async function saveResource(updated) {
-    const token = getToken();
-    const res = await fetch(
+  const token = getToken();
+  let res;
+  try {
+    res = await fetch(
       `${API_BASE}/api/resources/${encodeURIComponent(updated.resId)}`,
       {
         method: "PUT",
@@ -489,48 +522,83 @@ export default function ProjectResourcePage() {
         body: JSON.stringify(updated),
       }
     );
-    if (!res.ok) throw new Error(`Save failed (${res.status})`);
-    const text = await res.text();
-    let saved = updated;
-    try {
-      saved = text ? JSON.parse(text) : updated;
-    } catch {
-      /* server returned no/invalid body — keep our optimistic copy */
-    }
-    setResources((prev) =>
-      prev.map((r) => (r.resId === saved.resId ? { ...r, ...saved } : r))
-    );
-    pushToast({ type: "ok", title: "Changes saved", msg: `${saved.name || "Resource"} updated.` });
-    return saved;
+  } catch (err) {
+    setApiResponse({
+      title: "Save failed",
+      ok: false,
+      status: null,
+      data: { message: err.message },
+    });
+    throw err; // let EditDrawer still show its inline error + stay open
   }
+
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = text; // non-JSON body — show raw text
+  }
+
+  if (!res.ok) {
+    setApiResponse({ title: "Save failed", ok: false, status: res.status, data: body });
+    throw new Error(`Save failed (${res.status})`);
+  }
+
+  const saved = body || updated;
+  setResources((prev) =>
+    prev.map((r) => (r.resId === saved.resId ? { ...r, ...saved } : r))
+  );
+
+  setApiResponse({ title: "Changes saved", ok: true, status: res.status, data: saved });
+  pushToast({ type: "ok", title: "Changes saved", msg: `${saved.name || "Resource"} updated.` });
+  return saved;
+}
 
   // ---------- upload: POST /api/resources/upload ----------
   async function uploadFile(file) {
-    if (!file || !projectId) return;
-    setUploading(true);
+  if (!file || !projectId) return;
+  setUploading(true);
 
-    const formData = new FormData();
-    formData.append("file", file);
+  const formData = new FormData();
+  formData.append("file", file);
 
+  try {
+    const token = getToken();
+    const res = await fetch(
+      `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
+      {
+        method: "POST",
+        headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: formData,
+      }
+    );
+
+    // read body regardless of status, so we can show it either way
+    const text = await res.text();
+    let data;
     try {
-      const token = getToken();
-      const res = await fetch(
-        `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
-        {
-          method: "POST",
-          headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-          body: formData,
-        }
-      );
-      if (!res.ok) throw new Error(`Upload failed (${res.status})`);
-      pushToast({ type: "ok", title: "Import complete", msg: "Resources imported and the table refreshed." });
-      await loadResources();
-    } catch (err) {
-      pushToast({ type: "error", title: "Import failed", msg: err.message || "Check the file and try again." });
-    } finally {
-      setUploading(false);
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text; // not JSON — show raw text
     }
+
+    if (!res.ok) {
+      setApiResponse({ title: "Import failed", ok: false, status: res.status, data });
+      pushToast({ type: "error", title: "Import failed", msg: `Server responded ${res.status}.` });
+      return;
+    }
+
+    setApiResponse({ title: "Import complete", ok: true, status: res.status, data });
+    pushToast({ type: "ok", title: "Import complete", msg: "Resources imported and the table refreshed." });
+    await loadResources();
+  } catch (err) {
+    setApiResponse({ title: "Import failed", ok: false, status: null, data: { message: err.message } });
+    pushToast({ type: "error", title: "Import failed", msg: err.message || "Check the file and try again." });
+  } finally {
+    setUploading(false);
   }
+}
 
   function handleFileChange(e) {
     const file = e.target.files?.[0];
@@ -544,9 +612,13 @@ export default function ProjectResourcePage() {
 
   return (
     <div
-      className="uidai-pmis-content rp"
-      style={{ padding: "28px 24px 64px", maxWidth: "1280px", margin: "0 auto" }}
-    >
+  className="uidai-pmis-content rp"
+  style={{
+    padding: "10px clamp(12px, 3vw, 18px) 24px",
+    maxWidth: "min(1600px, 96vw)",
+    margin: "0 auto",
+  }}
+>
       <style>{STYLES}</style>
       <input
         ref={fileInputRef}
@@ -774,6 +846,10 @@ export default function ProjectResourcePage() {
           onEdit={(r) => { setViewingId(null); setEditing(r); }}
         />
       )}
+
+{apiResponse && (
+  <ApiResponseModal response={apiResponse} onClose={closeApiResponse} />
+)}
 
       {/* Toasts */}
       <div className="rp-toasts" role="status" aria-live="polite">
@@ -1038,6 +1114,89 @@ function EditDrawer({ resource, onClose, onSave }) {
           </button>
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ApiResponseModal({ response, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (!response) return null;
+  const { title, ok, status, data } = response;
+
+  function extractErrorMessage(d) {
+    if (d == null) return "Something went wrong. Please try again.";
+    if (typeof d === "string") return d.trim() || "Something went wrong. Please try again.";
+    if (typeof d === "object") {
+      return (
+        d.message ||
+        d.error ||
+        d.detail ||
+        d.errorMessage ||
+        d.msg ||
+        (Array.isArray(d.errors) && d.errors.length
+          ? d.errors.map((e) => (typeof e === "string" ? e : e.message || JSON.stringify(e))).join("\n")
+          : null) ||
+        "Something went wrong. Please try again."
+      );
+    }
+    return String(d);
+  }
+
+  const pretty = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+
+  return (
+    <div className="rp rp-modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="rp-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="rp-modal-head">
+          <div>
+            <div className="rp-eyebrow" style={{ marginBottom: "4px", color: ok ? "var(--rp-success)" : "var(--rp-danger)" }}>
+              {ok ? "Success" : "Error"} {status != null ? `· ${status}` : ""}
+            </div>
+            <h2>{title}</h2>
+          </div>
+          <button className="rp-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="rp-modal-body">
+          {ok ? (
+            data == null ? (
+              <div style={{ color: "var(--rp-muted)", fontSize: "14px" }}>No response body.</div>
+            ) : (
+              <pre
+                style={{
+                  margin: 0,
+                  fontSize: "12.5px",
+                  lineHeight: 1.5,
+                  background: "var(--rp-surface-2)",
+                  border: "1px solid var(--rp-line)",
+                  borderRadius: "10px",
+                  padding: "14px",
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  color: "var(--rp-ink)",
+                }}
+              >
+                {pretty}
+              </pre>
+            )
+          ) : (
+            <div className="rp-inline-error">
+              <span style={{ fontSize: "16px" }}>!</span>
+              {extractErrorMessage(data)}
+            </div>
+          )}
+        </div>
+
+        <div className="rp-modal-foot">
+          <button className="rp-btn rp-btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
     </div>
   );
 }

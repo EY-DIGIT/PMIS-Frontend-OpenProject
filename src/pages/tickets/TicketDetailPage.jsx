@@ -20,7 +20,7 @@ import "../../styles/tickets.css";
 
 /* Dummy assignee sent with the ASSIGN / REASSIGN action for now
    (frontend-only placeholder — swap for a real user pick when available). */
-const DUMMY_ASSIGNEE = { uuid: "support-001", name: "Amit Sharma", email: "amit@pmis.com" };
+const DUMMY_ASSIGNEE = { uuid: "support-001", name: "", email: "amit@pmis.com" };
 
 /* Workflow actions that the backend rejects without a reason/comment. */
 const REASON_REQUIRED = new Set(["SEND_BACK"]);
@@ -279,7 +279,7 @@ export default function TicketDetailPage() {
                 {actions.map((a) => {
                   const isAssign = a.action === "ASSIGN" || a.action === "REASSIGN";
                   const label = isAssign
-                    ? `${humanize(a.action)} (${DUMMY_ASSIGNEE.name}) → ${stageLabel(a.nextState)}`
+                    ? `${humanize(a.action)}  → ${stageLabel(a.nextState)}`
                     : `${humanize(a.action)} → ${stageLabel(a.nextState)}`;
                   return (
                     <button

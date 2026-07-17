@@ -232,6 +232,7 @@ export async function updateEscalationMatrix(uuid, { triggerHours, emails, isAct
        ticket: { action, comment, assigneeUuid, assigneeName, assigneeEmail } } */
 export async function transitionTicket(uuid, { action, role, comment, assignee } = {}) {
   const ticket = { action };
+  // const token = tokenStore.get();
   if (comment) ticket.comment = comment;
   if (assignee) {
     ticket.assigneeUuid = assignee.uuid || '';
@@ -240,9 +241,16 @@ export async function transitionTicket(uuid, { action, role, comment, assignee }
   }
   const url = `${TICKET_BASE}${ENDPOINTS.tickets.update(uuid)}`;
   const res = await fetch(url, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestInfo: buildRequestInfo(role), ticket }),
-  });
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json',
+    Accept: '*/*',
+    ...authHeaders(),
+  },
+  body: JSON.stringify({
+    requestInfo: buildRequestInfo(role),
+    ticket,
+  }),
+});
   return parseTicketResponse(res, 'Update ticket failed');
 }
