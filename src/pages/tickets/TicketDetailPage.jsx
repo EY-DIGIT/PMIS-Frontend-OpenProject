@@ -222,7 +222,7 @@ export default function TicketDetailPage() {
           </Card>
 
           <Card title="Escalations">
-            {escalations.length === 0 ? (
+            {/* {escalations.length === 0 ? (
               <div className="tkt-sub">No escalations logged.</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -233,7 +233,10 @@ export default function TicketDetailPage() {
                   </div>
                 ))}
               </div>
-            )}
+            )} */}
+            <div style={{color:"gray"}}>
+              Work In-Progress
+            </div>
           </Card>
         </div>
 
