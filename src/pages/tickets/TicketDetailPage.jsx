@@ -201,8 +201,8 @@ export default function TicketDetailPage() {
           <Card title="Details">
             <Row label="Category">{catLabel(ticket.category)}{ticket.subCategory ? ` · ${ticket.subCategory}` : ""}</Row>
             <Row label="Project">{ticket.projectName}</Row>
-            <Row label="Activity">{ticket.activityName}</Row>
-            <Row label="Task">{ticket.taskName}</Row>
+            {/* <Row label="Activity">{ticket.activityName}</Row> */}
+            {/* <Row label="Task">{ticket.taskName}</Row> */}
             <Row label="Reporter">
               {ticket.reporter?.name
                 ? <>{ticket.reporter.name}{ticket.reporter.email ? <span className="tkt-dmuted"> · {ticket.reporter.email}</span> : null}</>
