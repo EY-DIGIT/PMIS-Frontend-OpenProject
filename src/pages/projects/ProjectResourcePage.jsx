@@ -589,7 +589,13 @@ function closeApiResponse() {
       return;
     }
 
-    setApiResponse({ title: "Import complete", ok: true, status: res.status, data });
+    // Show a clean success message instead of dumping the raw response body.
+    setApiResponse({
+      title: "Import complete",
+      ok: true,
+      status: res.status,
+      data: "Resources uploaded successfully.",
+    });
     pushToast({ type: "ok", title: "Import complete", msg: "Resources imported and the table refreshed." });
     await loadResources();
   } catch (err) {

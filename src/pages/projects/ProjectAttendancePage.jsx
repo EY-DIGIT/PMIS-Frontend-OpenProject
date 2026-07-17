@@ -680,7 +680,9 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
         throw new Error(buildErrorMessage(data, raw, res.status));
       }
 
-      setResponseMessage(data?.message || raw || "Attendance uploaded successfully.");
+      // Always show a clean, fixed message — never surface the raw API
+      // response body here (that belongs to the error path only).
+      setResponseMessage("Attendance uploaded successfully.");
       setDone(true);
     } catch (err) {
       setError(err?.message || "The upload didn't go through. Try again.");
@@ -737,7 +739,7 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
                   onChange={(e) => setEndDate(e.target.value)}
                 />
               </Field>
-              <Field label="Rate year (optional)">
+              <Field label="Rate year">
                 <select className="att-select" value={rateYear} onChange={(e) => setRateYear(e.target.value)}>
                   <option value="">None</option>
                   {rateYears.map((y) => <option key={y} value={y}>{y}</option>)}
