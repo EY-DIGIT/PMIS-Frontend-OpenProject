@@ -349,6 +349,9 @@ function CostReportSection({ loading, error, report }) {
                 <th className="ld-num">Relaxation Applied</th>
                 <th className="ld-num">Attendance %</th>
                 <th className="ld-num">Monthly Rate</th>
+                <th className="ld-num">Per Day Rate</th>
+                {/* <th className="ld-num">HalfDay Amount</th> */}
+                <th className="ld-num">Deducted Amount</th>
                 <th className="ld-num">Cost</th>
               </tr>
             </thead>
@@ -372,13 +375,17 @@ function CostReportSection({ loading, error, report }) {
                     </span>
                   </td>
                   <td className="ld-num">{money(m.monthlyRate)}</td>
-                  <td className="ld-num ld-costtable-cost">{money(m.cost)}</td>
+
+                  <td className="ld-num">{money(m.perDayRate)}</td>
+                  {/* <td className="ld-num ld-costtable-cost">{money(m.halfDayAmount)}</td> */}
+                  <td className="ld-num ld-costtable-cost">{money(m.deductedAmount)}</td>
+                                    <td className="ld-num">{money(m.cost)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={7} className="ld-costtable-totallbl">Total Cost</td>
+                <td colSpan={9} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
               </tr>
             </tfoot>
