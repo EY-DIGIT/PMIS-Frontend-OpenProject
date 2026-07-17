@@ -50,9 +50,13 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   // the user object. Subscribing to useCurrentRole() keeps the sidebar
   // re-rendering on login / logout / role refresh.
   useCurrentRole();
-  const showApprovalInbox = userHasRole(tokenStore.getUser(), "division_approver");
-  const showCdInbox = true;
-  const showAoInbox = true;
+const showApprovalInbox = userHasRole(tokenStore.getUser(), "division_approver");
+const showCdInbox = true;
+const showAoInbox = true;
+
+// "All Tickets" is visible only to PMIS_support; everyone else keeps
+// Create Ticket but loses the All Tickets link.
+const showAllTickets = userHasRole(tokenStore.getUser(), "PMIS_support");
 
   // A whole "Management" section is visible only when the user can
   // either view the list or create an item under it. Otherwise the
@@ -460,23 +464,25 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
           </span>
         </a>
         <div className={`pmis-submenu${tmOpen ? " open" : ""}`}>
-          <div
-            title="Create Ticket"
-            className={createTicketActive ? "active" : ""}
-            onClick={() => navigate("/tickets/new")}
-          >
-            <FiPlus size={ICON_SIZE} />
-            <span className="pmis-text">Create Ticket</span>
-          </div>
-          <div
-            title="All Tickets"
-            className={allTicketsActive ? "active" : ""}
-            onClick={() => navigate("/tickets")}
-          >
-            <FiSearch size={ICON_SIZE} />
-            <span className="pmis-text">All Tickets</span>
-          </div>
-        </div>
+  <div
+    title="Create Ticket"
+    className={createTicketActive ? "active" : ""}
+    onClick={() => navigate("/tickets/new")}
+  >
+    <FiPlus size={ICON_SIZE} />
+    <span className="pmis-text">Create Ticket</span>
+  </div>
+  {showAllTickets && (
+    <div
+      title="All Tickets"
+      className={allTicketsActive ? "active" : ""}
+      onClick={() => navigate("/tickets")}
+    >
+      <FiSearch size={ICON_SIZE} />
+      <span className="pmis-text">All Tickets</span>
+    </div>
+  )}
+</div>
 
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}
