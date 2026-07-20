@@ -580,6 +580,9 @@ function QuarterlyPanel({ data, quarter, year, onRowClick }) {
    POST /api/attendance/upload with projectId, milestoneId, dates + file.
    ===================================================================== */
 function LeaveUploadModal({ projectId, milestone, onClose }) {
+  // Monthly is the only type the API supports today; quarterly is wired up in
+  // the UI and blocked at submit until the backend endpoint exists.
+  const [uploadType, setUploadType] = useState("monthly");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [rateYear, setRateYear] = useState("");
@@ -587,6 +590,7 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [done, setDone] = useState(false);
   // Holds the actual message returned by the API so the popup reflects
   // what the backend reported, rather than a hardcoded string.
@@ -646,6 +650,11 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
 
   const upload = async () => {
     setError(null);
+    setNotice(null);
+    if (uploadType === "quarterly") {
+      setNotice("Quarterly upload isn't available yet — it'll be enabled once the API is ready.");
+      return;
+    }
     if (!file) { setError("Choose an Excel file to upload."); return; }
     if (!startDate || !endDate) { setError("Set both a start and end date."); return; }
     if (endDate < startDate) { setError("End date can't be earlier than the start date."); return; }
@@ -722,6 +731,16 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
         ) : (
           <>
             <div className="att-controls" style={{ marginBottom: 14 }}>
+              <Field label="Upload type">
+                <select
+                  className="att-select"
+                  value={uploadType}
+                  onChange={(e) => { setUploadType(e.target.value); setError(null); setNotice(null); }}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                </select>
+              </Field>
               <Field label="Start date">
                 <input
                   type="date"
@@ -759,6 +778,7 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
               </label>
             </Field>
 
+            {notice && <div className="att-note">{notice}</div>}
             {error && <div className="att-error">{error}</div>}
 
             <div className="att-modal-actions">
@@ -1147,6 +1167,8 @@ const ATT_CSS = `
 .att-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }
 .att-error { color: ${C.red}; font-size: 14px; padding: 12px 14px; background: ${C.redBg};
   border: 1px solid #f4cccc; border-radius: 10px; margin: 4px 0; }
+.att-note { color: ${C.muted}; font-size: 14px; padding: 12px 14px; background: #f6f8fb;
+  border: 1px solid ${C.border}; border-radius: 10px; margin: 4px 0; }
 .att-empty { display: flex; flex-direction: column; align-items: center; text-align: center;
   padding: 34px 20px; border: 1px dashed ${C.borderStrong}; border-radius: 14px; background: #fbfcfe; }
 .att-empty-icon { display: inline-flex; align-items: center; justify-content: center;

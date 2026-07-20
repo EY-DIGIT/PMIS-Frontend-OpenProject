@@ -86,12 +86,18 @@ const makeComparator = (key, dir) => {
 const EDITABLE_FIELDS = [
   "name",
   "emailId",
-  "rateCard",
+  "location",
   "dateOfJoining",
   "lastDate",
   "designationType",
   "active",
 ];
+
+// rateCardByYear keys look like "Year-1", "Year-2", "Year-10" — sort by the
+// trailing number so 10 doesn't land between 1 and 2.
+const yearKeyOrder = (a, b) =>
+  (parseInt(String(a).replace(/\D+/g, ""), 10) || 0) -
+  (parseInt(String(b).replace(/\D+/g, ""), 10) || 0);
 
 // Table columns — drives both the header and sorting. One source of truth.
 const COLUMNS = [
@@ -290,6 +296,16 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
 .rp-track.on .rp-thumb { left: 20px; }
 
 .rp-inline-error { background: var(--rp-danger-bg); border: 1px solid #f5c9c9; color: var(--rp-danger); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; display: flex; align-items: center; gap: 10px; }
+.rp-inline-success { background: var(--rp-success-bg); border: 1px solid #bfe6cf; color: var(--rp-success); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+
+/* ---- rate card by year (edit drawer) ---- */
+.rp-rate-list { display: flex; flex-direction: column; gap: 8px; }
+.rp-rate-row { display: grid; grid-template-columns: 1fr 1.4fr; align-items: center; gap: 12px; }
+.rp-rate-year { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--rp-ink); }
+.rp-rate-current { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--rp-primary); background: var(--rp-primary-50); border-radius: 999px; padding: 2px 7px; }
+.rp-rate-empty { font-size: 13.5px; color: var(--rp-muted); background: #f6f8fb;
+  border: 1px solid var(--rp-line-2); border-radius: 10px; padding: 11px 13px; }
 
 /* ---- toasts ---- */
 .rp-toasts { position: fixed; right: 20px; bottom: 20px; z-index: 1100; display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
@@ -550,7 +566,13 @@ function closeApiResponse() {
     prev.map((r) => (r.resId === saved.resId ? { ...r, ...saved } : r))
   );
 
-  setApiResponse({ title: "Changes saved", ok: true, status: res.status, data: saved });
+  // Show a clean confirmation — never the raw response body.
+  setApiResponse({
+    title: "Changes saved",
+    ok: true,
+    status: res.status,
+    data: `${saved.name || "Resource"} details updated successfully.`,
+  });
   pushToast({ type: "ok", title: "Changes saved", msg: `${saved.name || "Resource"} updated.` });
   return saved;
 }
@@ -1005,7 +1027,15 @@ function EditDrawer({ resource, onClose, onSave }) {
   const [form, setForm] = useState(() => ({
     ...resource,
     lastDate: resource.lastDate || "",
-    rateCard: resource.rateCard ?? "",
+    location: resource.location || "",
+    // Held as strings while editing so the inputs stay controlled and the user
+    // can clear a field mid-typing; coerced back to numbers on submit.
+    rateCardByYear: Object.fromEntries(
+      Object.entries(resource.rateCardByYear || {}).map(([yr, rate]) => [
+        yr,
+        rate == null ? "" : String(rate),
+      ])
+    ),
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -1021,17 +1051,37 @@ function EditDrawer({ resource, onClose, onSave }) {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
+  // Rates are edited in place — the set of years comes from the backend and
+  // isn't added to or removed from here.
+  const setRate = (year) => (e) => {
+    const value = e.target.value;
+    setForm((f) => ({ ...f, rateCardByYear: { ...f.rateCardByYear, [year]: value } }));
+  };
+
+  const rateYears = Object.keys(form.rateCardByYear || {}).sort(yearKeyOrder);
+
   async function submit() {
     setSaving(true);
     setError(null);
     try {
+      const badRate = rateYears.find(
+        (yr) => form.rateCardByYear[yr] !== "" && !Number.isFinite(Number(form.rateCardByYear[yr]))
+      );
+      if (badRate) throw new Error(`${badRate} needs a valid number.`);
+
       const payload = {
         ...resource,
         ...Object.fromEntries(EDITABLE_FIELDS.map((k) => [k, form[k]])),
         lastDate: form.lastDate ? form.lastDate : null,
-        rateCard:
-          form.rateCard === "" || form.rateCard == null ? null : Number(form.rateCard),
+        rateCardByYear: Object.fromEntries(
+          rateYears.map((yr) => [
+            yr,
+            form.rateCardByYear[yr] === "" ? 0 : Number(form.rateCardByYear[yr]),
+          ])
+        ),
       };
+      // rateCard isn't part of the PUT schema — the per-year map replaces it.
+      delete payload.rateCard;
       await onSave(payload);
       onClose();
     } catch (e) {
@@ -1074,14 +1124,8 @@ function EditDrawer({ resource, onClose, onSave }) {
           </EditField>
 
           <div className="rp-grid-2">
-            <EditField label="Rate card (₹)">
-              <input
-                className="rp-input"
-                type="number"
-                inputMode="numeric"
-                value={form.rateCard}
-                onChange={set("rateCard")}
-              />
+            <EditField label="Location">
+              <input className="rp-input" value={form.location || ""} onChange={set("location")} />
             </EditField>
             <EditField label="Date of joining">
               <input className="rp-input" type="date" value={form.dateOfJoining || ""} onChange={set("dateOfJoining")} />
@@ -1104,6 +1148,33 @@ function EditDrawer({ resource, onClose, onSave }) {
               </label>
             </EditField>
           </div>
+
+          <EditField label="Rate card by year (₹)">
+            {rateYears.length === 0 ? (
+              <div className="rp-rate-empty">No rate card years set for this resource.</div>
+            ) : (
+              <div className="rp-rate-list">
+                {rateYears.map((yr) => (
+                  <div className="rp-rate-row" key={yr}>
+                    <span className="rp-rate-year">
+                      {yr}
+                      {yr === `Year-${resource.rateYear}` && (
+                        <span className="rp-rate-current">current</span>
+                      )}
+                    </span>
+                    <input
+                      className="rp-input"
+                      type="number"
+                      inputMode="decimal"
+                      value={form.rateCardByYear[yr]}
+                      onChange={setRate(yr)}
+                      aria-label={`Rate for ${yr}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </EditField>
 
           {error && (
             <div className="rp-inline-error">
@@ -1153,7 +1224,12 @@ function ApiResponseModal({ response, onClose }) {
     return String(d);
   }
 
-  const pretty = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  // Success is always a human-readable line. If a caller ever hands us an
+  // object, fall back to a generic confirmation rather than dumping JSON.
+  const successMessage =
+    typeof data === "string" && data.trim()
+      ? data.trim()
+      : "Details updated successfully.";
 
   return (
     <div className="rp rp-modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -1170,27 +1246,10 @@ function ApiResponseModal({ response, onClose }) {
 
         <div className="rp-modal-body">
           {ok ? (
-            data == null ? (
-              <div style={{ color: "var(--rp-muted)", fontSize: "14px" }}>No response body.</div>
-            ) : (
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: "12.5px",
-                  lineHeight: 1.5,
-                  background: "var(--rp-surface-2)",
-                  border: "1px solid var(--rp-line)",
-                  borderRadius: "10px",
-                  padding: "14px",
-                  overflowX: "auto",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  color: "var(--rp-ink)",
-                }}
-              >
-                {pretty}
-              </pre>
-            )
+            <div className="rp-inline-success">
+              <span style={{ fontSize: "16px" }}>✓</span>
+              {successMessage}
+            </div>
           ) : (
             <div className="rp-inline-error">
               <span style={{ fontSize: "16px" }}>!</span>

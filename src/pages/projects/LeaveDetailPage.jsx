@@ -14,7 +14,7 @@ import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
   FiX, FiUser, FiBriefcase, FiHash, FiFileText, FiCalendar,
   FiPlay, FiFlag, FiShield, FiChevronsRight, FiCreditCard,
-  FiUmbrella, FiLayers, FiPieChart, FiClock, FiDollarSign,
+  FiUmbrella, FiLayers, FiPieChart, FiClock, FiDollarSign, FiInfo,
 } from "react-icons/fi";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -63,6 +63,26 @@ const SUMMARY_CARDS = [
   { key: "totalUnpaidDays", label: "Total Unpaid Days", tone: "red", icon: <FiPieChart /> },
   { key: "lapsedLeave", label: "Lapsed Leave", tone: "teal", icon: <FiClock /> },
 ];
+
+// Plain-language explanations for each figure. These names are easy to mix up
+// (an allowance vs. what was used vs. what's left over), so every card carries
+// its meaning rather than leaving the reader to infer it.
+const HINTS = {
+  quarter: "The quarter this report covers.",
+  quarterStart: "First day of the quarter.",
+  quarterEnd: "Last day of the quarter.",
+  permissibleLeave: "Paid leave allowed for this quarter. Leave within this limit costs the employee nothing.",
+  leaveTaken: "Total days of leave taken in the quarter, before any of it is classified as paid or unpaid.",
+  paidLeave: "Days covered by the permissible allowance. No salary is deducted for these.",
+  unpaidLeave: "Days left over after the paid allowance and any relaxation are applied. Salary is deducted for these.",
+  relaxationLeave: "Extra days granted as an exception, on top of the paid allowance. Each quarter has a fixed limit.",
+  sandwichDays: "Weekends or holidays falling between leave days, counted as leave.",
+  totalUnpaidDays: "Every day being deducted this quarter — unpaid leave plus sandwich days.",
+  lapsedLeave: "Allowance that went unused and has expired. It does not carry into the next quarter.",
+};
+
+const SECTION_HINT =
+  "Leave taken is settled in order: first against the paid allowance, then against any relaxation granted. Whatever remains is unpaid and gets deducted.";
 
 const show = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
 const num = (v) => {
@@ -171,6 +191,27 @@ export default function LeaveDetailPage() {
   const paidDates = Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [];
   const unpaidDates = Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [];
 
+  // Relaxation is capped per quarter. The cost report carries that cap as
+  // relaxationDaysApplied, stamped on the month it was computed for and 0 on
+  // the rest — so the quarter's cap is the highest value across the months,
+  // not their sum. d.relaxationLeave is how many of those days are used.
+  const relaxCap = Math.max(
+    0,
+    ...(costReport?.monthlyBreakdown || []).map((m) => num(m.relaxationDaysApplied))
+  );
+  const relaxUsed = num(d.relaxationLeave);
+  const relaxLeft = relaxCap - relaxUsed;
+
+  const leaveTaken = num(d.leaveTaken);
+  const paidLeave = num(d.paidLeave);
+  // Only claim the quarter "adds up" when it genuinely does — otherwise the
+  // strip is hidden rather than showing an equation that doesn't balance.
+  const breakdownBalances =
+    leaveTaken > 0 && paidLeave + relaxUsed + unpaidLeave === leaveTaken;
+  // While the cost report is still loading (or failed), fall back to the
+  // unpaid balance so the action doesn't disappear on a slow request.
+  const canRelax = relaxCap > 0 ? relaxLeft > 0 : unpaidLeave > 0;
+
   return (
     <div className="uidai-pmis-content ld-page">
       <style>{LD_CSS}</style>
@@ -192,9 +233,9 @@ export default function LeaveDetailPage() {
             </div>
           </div>
           <div className="ld-head-actions">
-            {unpaidLeave > 0 && !loading && !error && (
+            {canRelax && !loading && !error && (
               <button className="ld-btn ld-btn--primary" onClick={() => setRelaxOpen(true)}>
-                Relaxation
+                Relaxation{relaxCap > 0 ? ` (${relaxLeft} left)` : ""}
               </button>
             )}
             <button className="ld-close" onClick={() => navigate(-1)} aria-label="Close">
@@ -220,17 +261,66 @@ export default function LeaveDetailPage() {
             {/* Leave summary */}
             <div className="ld-section-head">
               <span className="ld-section-ico"><FiCalendar /></span> Leave Summary
+              <Hint text={SECTION_HINT} />
             </div>
+
+            {/* How the quarter settles, in one line. Only rendered when the
+                parts actually add up, so a mismatched payload never shows a
+                broken-looking equation. */}
+            {breakdownBalances && (
+              <div className="ld-breakdown">
+                <span className="ld-breakdown-lbl">How this quarter adds up</span>
+                <span className="ld-breakdown-eq">
+                  <b>{leaveTaken}</b> taken
+                  <span className="ld-breakdown-op">=</span>
+                  <span className="ld-breakdown-part ld-breakdown-part--paid">{paidLeave} paid</span>
+                  <span className="ld-breakdown-op">+</span>
+                  <span className="ld-breakdown-part ld-breakdown-part--relax">{relaxUsed} relaxation</span>
+                  <span className="ld-breakdown-op">+</span>
+                  <span className="ld-breakdown-part ld-breakdown-part--unpaid">{unpaidLeave} unpaid</span>
+                </span>
+              </div>
+            )}
+
             <div className="ld-grid">
               {SUMMARY_CARDS.map((c) => (
-                <StatCard key={c.key} tone={c.tone} icon={c.icon} label={c.label} value={show(d[c.key])} />
+                <StatCard
+                  key={c.key}
+                  tone={c.tone}
+                  icon={c.icon}
+                  label={c.label}
+                  value={show(d[c.key])}
+                  hint={HINTS[c.key]}
+                  sub={
+                    c.key === "relaxationLeave" && relaxCap > 0
+                      ? `${relaxUsed} of ${relaxCap} used · ${relaxLeft} left`
+                      : null
+                  }
+                />
               ))}
             </div>
 
             {/* Leave dates */}
             <div className="ld-dates">
-              <DateList tone="green" title="Paid Leave Dates" dates={paidDates} />
-              <DateList tone="red" title="Unpaid Leave Dates" dates={unpaidDates} />
+              <DateList
+                tone="green"
+                title="Paid Leave Dates"
+                dates={paidDates}
+                hint="Leave days covered by the paid allowance — no deduction for these."
+              />
+              <DateList
+                tone="red"
+                title="Unpaid Leave Dates"
+                dates={unpaidDates}
+                hint="Leave days that fell outside the paid allowance. Any relaxation granted is applied against these."
+                note={
+                  unpaidDates.length > 0 && unpaidLeave === 0
+                    ? relaxUsed > 0
+                      ? `Covered by ${relaxUsed} relaxation ${relaxUsed === 1 ? "day" : "days"} — nothing deducted.`
+                      : "No unpaid balance remaining — nothing deducted."
+                    : null
+                }
+              />
             </div>
 
             {/* Quarterly cost report */}
@@ -248,6 +338,7 @@ export default function LeaveDetailPage() {
           projectId={d.projectId || projectId}
           year={d.year || year}
           quarter={d.quarter || quarter}
+          maxDays={relaxCap > 0 ? relaxLeft : null}
           onSuccess={() => setRefreshKey((k) => k + 1)}
           onClose={() => setRelaxOpen(false)}
         />
@@ -257,6 +348,19 @@ export default function LeaveDetailPage() {
 }
 
 /* ---------- building blocks ---------- */
+
+// Hover/focus tooltip. Keyboard reachable via tabIndex, and the text is also
+// exposed as title/aria-label so it survives touch and screen readers.
+function Hint({ text }) {
+  if (!text) return null;
+  return (
+    <span className="ld-hint" tabIndex={0} role="note" aria-label={text} title={text}>
+      <FiInfo />
+      <span className="ld-hint-bub">{text}</span>
+    </span>
+  );
+}
+
 function InfoItem({ tone, icon, label, value }) {
   const t = TONES[tone] || TONES.blue;
   return (
@@ -270,26 +374,32 @@ function InfoItem({ tone, icon, label, value }) {
   );
 }
 
-function StatCard({ tone, icon, label, value }) {
+function StatCard({ tone, icon, label, value, hint, sub }) {
   const t = TONES[tone] || TONES.blue;
   return (
     <div className="ld-stat" style={{ background: t.bg + "80" }}>
       <span className="ld-stat-ico" style={{ background: t.bg, color: t.fg }}>{icon}</span>
       <div className="ld-stat-text">
-        <div className="ld-stat-lbl">{label}</div>
+        <div className="ld-stat-lbl">
+          {label}
+          <Hint text={hint} />
+        </div>
         <div className="ld-stat-val">{value}</div>
+        {sub && <div className="ld-stat-sub">{sub}</div>}
       </div>
     </div>
   );
 }
 
-function DateList({ tone, title, dates }) {
+function DateList({ tone, title, dates, hint, note }) {
   const t = TONES[tone] || TONES.green;
   return (
     <div className="ld-datecol">
       <div className="ld-datehead" style={{ color: t.fg }}>
         <FiCalendar /> {title.toUpperCase()} ({dates.length})
+        <Hint text={hint} />
       </div>
+      {note && <div className="ld-datenote">{note}</div>}
       {dates.length ? (
         <div className="ld-datechips">
           {dates.map((dt, i) => (
@@ -331,9 +441,12 @@ function CostReportSection({ loading, error, report }) {
     <>
       {/* Summary cards */}
       <div className="ld-grid" style={{ marginBottom: 18 }}>
-        <StatCard tone="blue" icon={<FiCalendar />} label="Period" value={show(report.period)} />
-        <StatCard tone="green" icon={<FiDollarSign />} label="Total Cost" value={money(report.totalCost)} />
-        <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)} />
+        <StatCard tone="blue" icon={<FiCalendar />} label="Period" value={show(report.period)}
+          hint="The quarter this cost report covers." />
+        <StatCard tone="green" icon={<FiDollarSign />} label="Total Cost" value={money(report.totalCost)}
+          hint="Billable cost for the quarter — the sum of each month's cost after deductions." />
+        <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
+          hint="How many months of the quarter are included in the breakdown below." />
       </div>
 
       {/* Monthly breakdown table */}
@@ -342,17 +455,17 @@ function CostReportSection({ loading, error, report }) {
           <table className="ld-costtable">
             <thead>
               <tr>
-                <th>Period</th>
-                <th>Rate Year</th>
-                <th className="ld-num">Working Days</th>
-                <th className="ld-num">Present Days</th>
-                <th className="ld-num">Relaxation Applied</th>
-                <th className="ld-num">Attendance %</th>
-                <th className="ld-num">Monthly Rate</th>
-                <th className="ld-num">Per Day Rate</th>
+                <th title="Calendar month this row covers.">Period</th>
+                <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
+                <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
+                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
+                <th className="ld-num" title="Relaxation days allowed for the quarter.">Relaxation Allowed</th>
+                <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th>
+                <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
+                <th className="ld-num" title="Monthly rate divided by the working days in the month.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
-                <th className="ld-num">Deducted Amount</th>
-                <th className="ld-num">Cost</th>
+                <th className="ld-num" title="Amount withheld for absent and unpaid days.">Deducted Amount</th>
+                <th className="ld-num" title="Monthly rate minus the deducted amount — what is billable for the month.">Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -410,7 +523,57 @@ function CostReportSection({ loading, error, report }) {
    Quarterly Relaxation — grants relaxation days against unpaid leave.
    POST /api/attendance/quarterly-relaxation
    ===================================================================== */
-function RelaxationModal({ resourceId, projectId, year, quarter, onSuccess, onClose }) {
+
+// A backend string is only worth showing if it reads like a sentence. JSON
+// dumps, stack traces and Java exception names get swapped for a plain line.
+function isReadableMessage(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text.length > 300) return false;
+  if (/^[[{]/.test(text)) return false;              // a serialised body
+  if (/\sat\s[\w.$]+\(/.test(text)) return false;    // a stack trace
+  if (/\b\w+(\.\w+)+(Exception|Error)\b/.test(text)) return false;
+  return true;
+}
+
+// Error bodies from this API vary: {message}, {error}, {errors:[…]} holding
+// either strings or objects, or plain text. Reduce all of that to one line.
+async function readErrorMessage(res) {
+  const fallback = `Couldn't submit the relaxation (${res.status}). Please try again.`;
+
+  let raw = "";
+  try {
+    raw = await res.text();
+  } catch {
+    return fallback;
+  }
+  if (!raw.trim()) return fallback;
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return isReadableMessage(raw) ? raw.trim() : fallback;   // plain-text body
+  }
+
+  if (typeof data === "string") {
+    return isReadableMessage(data) ? data.trim() : fallback;
+  }
+
+  const fromList = Array.isArray(data?.errors)
+    ? data.errors
+        .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
+  const candidate = [data?.message, data?.error, data?.detail, fromList].find(
+    (v) => typeof v === "string" && v.trim()
+  );
+
+  return candidate && isReadableMessage(candidate) ? candidate.trim() : fallback;
+}
+
+function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSuccess, onClose }) {
   const [form, setForm] = useState({
     resourceId: resourceId || "",
     projectId: projectId || "",
@@ -437,6 +600,10 @@ function RelaxationModal({ resourceId, projectId, year, quarter, onSuccess, onCl
     if (!form.projectId) { setError("Project ID is missing."); return; }
     const days = Number(form.relaxationDays);
     if (!Number.isFinite(days) || days <= 0) { setError("Enter relaxation days greater than 0."); return; }
+    if (maxDays != null && days > maxDays) {
+      setError(`Only ${maxDays} relaxation ${maxDays === 1 ? "day is" : "days are"} left this quarter.`);
+      return;
+    }
     try {
       setSaving(true);
       const token = getToken();
@@ -456,7 +623,7 @@ function RelaxationModal({ resourceId, projectId, year, quarter, onSuccess, onCl
           remarks: form.remarks || "",
         }),
       });
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      if (!res.ok) throw new Error(await readErrorMessage(res));
       setDone(true);
       onSuccess?.(); // refresh the parent's leave detail (and cost report) with the new figures
     } catch (err) {
@@ -502,8 +669,12 @@ function RelaxationModal({ resourceId, projectId, year, quarter, onSuccess, onCl
                 </select>
               </label>
               <label className="ld-field">
-                <span className="ld-field-lbl">Relaxation Days</span>
-                <input type="number" min="0" step="1" className="ld-input" value={form.relaxationDays}
+                <span className="ld-field-lbl">
+                  Relaxation Days{maxDays != null ? ` (${maxDays} left)` : ""}
+                  <Hint text="Extra days waived on top of the paid allowance, up to the quarter's limit. Each day granted removes one unpaid day." />
+                </span>
+                <input type="number" min="0" step="1" max={maxDays ?? undefined} className="ld-input"
+                  value={form.relaxationDays}
                   onChange={(e) => set({ relaxationDays: e.target.value })} placeholder="e.g. 2" />
               </label>
               <label className="ld-field ld-field--full">
@@ -573,13 +744,44 @@ const LD_CSS = `
 .ld-stat { display: flex; align-items: center; gap: 12px; border: 1px solid ${C.border}; border-radius: 12px; padding: 14px 16px; }
 .ld-stat-ico { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; font-size: 16px; flex: 0 0 38px; }
 .ld-stat-text { min-width: 0; }
-.ld-stat-lbl { font-size: 12.5px; color: ${C.muted}; font-weight: 500; margin-bottom: 2px; }
+.ld-stat-lbl { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: ${C.muted}; font-weight: 500; margin-bottom: 2px; }
 .ld-stat-val { font-size: 18px; font-weight: 800; color: ${C.ink}; word-break: break-word; }
+.ld-stat-sub { font-size: 11.5px; font-weight: 600; color: ${C.faint}; margin-top: 3px; }
+
+/* hint tooltip */
+.ld-hint { position: relative; display: inline-grid; place-items: center; width: 15px; height: 15px;
+  flex: 0 0 15px; color: ${C.faint}; font-size: 13px; cursor: help; outline: none; }
+.ld-hint:hover, .ld-hint:focus-visible { color: ${C.primary}; }
+.ld-hint-bub { position: absolute; bottom: calc(100% + 9px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 250px; background: ${C.ink}; color: #fff; text-align: left;
+  font-size: 12px; font-weight: 500; line-height: 1.5; letter-spacing: 0; text-transform: none;
+  padding: 9px 11px; border-radius: 9px; box-shadow: 0 6px 18px rgba(11,23,42,.22);
+  opacity: 0; visibility: hidden; transition: opacity .14s ease, visibility .14s ease;
+  pointer-events: none; z-index: 60; white-space: normal; }
+.ld-hint-bub::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: ${C.ink}; }
+.ld-hint:hover .ld-hint-bub, .ld-hint:focus-visible .ld-hint-bub { opacity: 1; visibility: visible; }
+@media (max-width: 520px) { .ld-hint-bub { max-width: 190px; } }
+
+/* leave breakdown strip */
+.ld-breakdown { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: #fff; border: 1px solid ${C.border}; border-left: 3px solid ${C.primary};
+  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
+.ld-breakdown-lbl { font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; }
+.ld-breakdown-eq { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: ${C.ink}; }
+.ld-breakdown-eq b { font-size: 15px; font-weight: 800; }
+.ld-breakdown-op { color: ${C.faint}; font-weight: 700; }
+.ld-breakdown-part { font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.ld-breakdown-part--paid { background: ${TONES.green.bg}; color: ${TONES.green.fg}; }
+.ld-breakdown-part--relax { background: ${TONES.purple.bg}; color: ${TONES.purple.fg}; }
+.ld-breakdown-part--unpaid { background: ${TONES.red.bg}; color: ${TONES.red.fg}; }
 
 /* leave dates */
 .ld-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; background: #fff; border: 1px solid ${C.border}; border-radius: 14px; padding: 18px 20px; }
 @media (max-width: 640px) { .ld-dates { grid-template-columns: 1fr; } }
 .ld-datehead { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; letter-spacing: .04em; margin-bottom: 12px; }
+.ld-datenote { font-size: 12.5px; color: ${C.muted}; background: ${C.surface}; border: 1px solid ${C.border};
+  border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; line-height: 1.45; }
 .ld-datechips { display: flex; flex-wrap: wrap; gap: 8px; }
 .ld-datechip { font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; }
 
@@ -618,7 +820,7 @@ const LD_CSS = `
 @media (max-width: 480px) { .ld-form { grid-template-columns: 1fr; } }
 .ld-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ld-field--full { grid-column: 1 / -1; }
-.ld-field-lbl { font-size: 12px; font-weight: 700; color: ${C.ink}; }
+.ld-field-lbl { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: ${C.ink}; }
 .ld-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border}; background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; outline: none; }
 .ld-input:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
 .ld-input:disabled { background: ${C.surface}; color: ${C.muted}; }

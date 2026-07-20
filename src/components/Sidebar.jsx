@@ -54,9 +54,11 @@ const showApprovalInbox = userHasRole(tokenStore.getUser(), "division_approver")
 const showCdInbox = true;
 const showAoInbox = true;
 
-// "All Tickets" is visible only to PMIS_support; everyone else keeps
-// Create Ticket but loses the All Tickets link.
-const showAllTickets = userHasRole(tokenStore.getUser(), "PMIS_support");
+// "All Tickets" is visible only to PMIS_support / super_admin; everyone
+// else keeps Create Ticket but loses the All Tickets link.
+const showAllTickets =
+  userHasRole(tokenStore.getUser(), "PMIS_support") ||
+  userHasRole(tokenStore.getUser(), "super_admin");
 
   // A whole "Management" section is visible only when the user can
   // either view the list or create an item under it. Otherwise the
