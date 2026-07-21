@@ -99,6 +99,7 @@ const showAllTickets =
   const slaDataActive = isUnder("/sla-masters");
   const divisionDataActive = isUnder("/master/divisions");
   const holidayDataActive = isUnder("/master/holidays");
+  const resourceDataActive = isUnder("/master/resources");
 
   const addVendorActive = isUnder("/vendors/new");
   const searchVendorActive = isUnder("/vendors") && !addVendorActive;
@@ -315,6 +316,14 @@ const showAllTickets =
                   <span className="pmis-text">Divisions</span>
                 </div>
               )}
+              <div
+                title="Resource Data"
+                className={resourceDataActive ? "active" : ""}
+                onClick={() => navigate("/master/resources")}
+              >
+                <FiUsers size={ICON_SIZE} />
+                <span className="pmis-text">Resource Data</span>
+              </div>
               <div
                 title="Holidays"
                 className={holidayDataActive ? "active" : ""}

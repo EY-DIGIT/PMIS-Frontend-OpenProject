@@ -105,7 +105,9 @@ const COLUMNS = [
   { key: "resId", label: "ID", align: "left", sortable: true },
   { key: "name", label: "Name", align: "left", sortable: true },
   { key: "designationType", label: "Designation", align: "left", sortable: true },
-  { key: "rateCard", label: "Rate card", align: "right", sortable: true },
+  // Rate card hidden for now — restore this entry (and the matching <td>
+  // in the table body) to bring the column back.
+  // { key: "rateCard", label: "Rate card", align: "right", sortable: true },
   { key: "dateOfJoining", label: "Joined", align: "left", sortable: true },
   { key: "lastDate", label: "Last date", align: "left", sortable: true },
   { key: "active", label: "Status", align: "center", sortable: true },
@@ -631,16 +633,16 @@ function closeApiResponse() {
   }
 }
 
-  // ---------- template: GET /api/export/resources ----------
-  // The response is a binary .xlsx, so it's read as a blob and handed to a
-  // temporary <a download> rather than parsed like the JSON endpoints.
+  // ---------- template: GET /api/export/template/resources ----------
+  // A blank upload template, identical for every project. The response is a
+  // binary .xlsx, so it's read as a blob and handed to a temporary
+  // <a download> rather than parsed like the JSON endpoints.
   async function downloadTemplate() {
-    if (!projectId) return;
     setDownloading(true);
     try {
       const token = getToken();
       const res = await fetch(
-        `${API_BASE}${ENDPOINTS.resources.exportTemplate(projectId)}`,
+        `${API_BASE}${ENDPOINTS.resources.exportTemplate()}`,
         { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
       );
 
@@ -665,14 +667,10 @@ function closeApiResponse() {
       // backend adds `Access-Control-Expose-Headers: Content-Disposition`.
       const disposition = res.headers.get("content-disposition") || "";
       const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-      const slug =
-        (project?.projectName || "project")
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "") || "project";
+      // Falls back to the name the API itself uses, so the two agree.
       const filename = match
         ? decodeURIComponent(match[1].trim())
-        : `resources-template-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        : "resource_master_template.xlsx";
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -777,8 +775,8 @@ function closeApiResponse() {
           <button
             className="rp-btn rp-btn-ghost"
             onClick={downloadTemplate}
-            disabled={downloading || !projectId}
-            title={projectId ? "Download the blank resource upload template" : "Open a project first"}
+            disabled={downloading}
+            title="Download the blank resource upload template"
           >
             <DownloadIcon />
             {downloading ? "Preparing…" : "Download Template"}
@@ -904,9 +902,11 @@ function closeApiResponse() {
                         </div>
                       </td>
                       <td className="rp-td" data-align="left">{r.designationType || "—"}</td>
+                      {/* Rate card column hidden for now — see COLUMNS above.
                       <td className="rp-td" data-align="right" style={{ whiteSpace: "nowrap" }}>
                         <RateCardCell resource={r} />
                       </td>
+                      */}
                       <td className="rp-td" data-align="left">{formatDate(r.dateOfJoining)}</td>
                       <td className="rp-td" data-align="left">{formatDate(r.lastDate)}</td>
                       <td className="rp-td" data-align="center">
@@ -1068,6 +1068,7 @@ function ResourceDetailDrawer({ resId, projectName, onClose, onEdit }) {
                   </span>
                 </div>
               ))}
+              {/* Rate Card by Year hidden for now — uncomment to restore.
               {data.rateCardByYear && Object.keys(data.rateCardByYear).length > 0 && (
                 <div style={{ marginTop: "16px" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--rp-muted)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: "8px" }}>Rate Card by Year</div>
@@ -1081,6 +1082,7 @@ function ResourceDetailDrawer({ resId, projectName, onClose, onEdit }) {
                   </div>
                 </div>
               )}
+              */}
             </div>
           )}
         </div>
@@ -1380,7 +1382,10 @@ function TableSkeleton() {
   );
 }
 
-/* ---------- RateCardCell — shows current year rate; hover reveals all years ---------- */
+/* ---------- RateCardCell — shows current year rate; hover reveals all years ----------
+   Currently unreferenced: the Rate card column is commented out of COLUMNS
+   and the table body. Kept intact so restoring the column is a one-line
+   change rather than a rewrite. */
 function RateCardCell({ resource: r }) {
   const [open, setOpen] = useState(false);
   const hasYears = r.rateCardByYear && Object.keys(r.rateCardByYear).length > 0;

@@ -201,6 +201,9 @@ function resolveNavTitle(segments) {
     if (segments[1] === "divisions") {
       return { label: "Division Data", tooltip: "Reference data — divisions and their attributes." };
     }
+    if (segments[1] === "resources") {
+      return { label: "Resource Data", tooltip: "Reference data — resources, their rates and employment history." };
+    }
     return { label: "Master Data", tooltip: "Reference data used across the platform." };
   }
 

@@ -36,6 +36,7 @@ import MasterUsers from './pages/master/MasterUsers';
 import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
 import MasterHolidays from './pages/master/MasterHolidays';
+import MasterResources from './pages/master/MasterResources';
 import ApprovalInboxConcernedDivision from './pages/approvals/ApprovalInboxConcernedDivision';
 import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityOwner';
 import MeetingsListPage from './pages/meetings/MeetingsListPage';
@@ -68,6 +69,7 @@ import SlaOnboardingPage from "./pages/sla/SlaOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
+import DesignationRatePage from "./pages/projects/DesignationRatePage";
 import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
 import LeaveDetailPage from "./pages/projects/LeaveDetailPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
@@ -125,6 +127,7 @@ function Breadcrumbs() {
         finance: "Finance",
         resource: "Resource",
         attendance: "Attendance",
+        "designation-rate": "Upload Designation Rate",
         "leave-config": "Leave Policy Configure",
         PenaltyReportPage: "Penalty Report",
         "activities-started": "Activity Started List",
@@ -132,6 +135,7 @@ function Breadcrumbs() {
         users: "Users",
         divisions: "Divisions",
         master: "Master Data",
+        resources: "Resource Data",
         new: "New",
         dashboard: "Dashboard",
         "manage-users": "Manage Team",
@@ -769,6 +773,7 @@ export default function MainApp() {
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/designation-rate" element={<RequirePermission action="viewProjects"><DesignationRatePage /></RequirePermission>} />
 
 
                                                 {/* Vendors */}
@@ -790,6 +795,7 @@ export default function MainApp() {
                                                 <Route path="master/divisions/new" element={<RequirePermission action="createDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/holidays" element={<RequirePermission action="viewMasterData"><MasterHolidays /></RequirePermission>} />
+                                                <Route path="master/resources" element={<RequirePermission action="viewMasterData"><MasterResources /></RequirePermission>} />
                                                 {/* Approval Inbox — visible only to the division_approver
                                                     workflow role, matching the sidebar. project_admin,
                                                     project_member and org_admin are blocked here too. */}

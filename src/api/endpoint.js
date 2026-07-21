@@ -320,11 +320,57 @@ export const ENDPOINTS = {
       `/projects/api/v3/milestones/${enc(milestoneId)}/activities/create`,
   },
    resources: {
+    /* Master resource registry (resource service, port 8019 — NOT the
+       gateway). `list` takes any subset of { resId, name, emailId,
+       designationType, projectId, active, joinedFrom, joinedTo } and
+       ANDs them server-side; name/emailId are case-insensitive contains,
+       the rest are exact. Omit projectId to get every resource. */
+    list: (filters = {}) => {
+      const qs = Object.entries(filters)
+        .filter(([, v]) => v !== undefined && v !== null && v !== "")
+        .map(([k, v]) => `${enc(k)}=${enc(v)}`)
+        .join("&");
+      return `/api/resources${qs ? `?${qs}` : ""}`;
+    },
+    /* The resource's currently-active stint, or its most recent one when
+       none is active. 404 when the res_id has no stints at all. */
+    get: (resId) => `/api/resources/${enc(resId)}`,
+    /* Every stint for a res_id, oldest first — one entry per designation
+       change or resignation/rejoin. Empty list for an unknown res_id. */
+    history: (resId) => `/api/resources/${enc(resId)}/history`,
+    /* PUT — edit the resource's own attributes. The body is a fixed subset:
+       { name, emailId, designationType, location, rateCardByYear, category,
+         categoryDetails, dateOfJoining, lastDate, active }.
+       resId / projectId / rateYear / assignment dates are NOT accepted —
+       those are set by the upload and the stint machinery. */
+    update: (resId) => `/api/resources/${enc(resId)}`,
+    /* Bulk import (.xlsx, multipart `file`). Both query params required.
+       Responds { totalRows, resourcesStored }. */
+    upload: (projectId, organisationId) =>
+      `/api/resources/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}`,
     rateCards: (projectId) =>
 `/api/resources/rate-cards?projectId=${enc(projectId)}`,
     leaveReport: (employeeId) => `/api/reports/leave/${enc(employeeId)}`,
-    // Blank upload template (.xlsx) for the current project.
-    exportTemplate: (projectId) => `/api/export/resources?projectId=${enc(projectId)}`,
+    // Blank resource-upload template (.xlsx) — same for every project.
+    exportTemplate: () => `/api/export/template/resources`,
+    // Attendance-upload template (.xlsx) — built for a specific date range.
+    attendanceTemplate: (startDate, endDate) =>
+      `/api/export/template/attendance?startDate=${enc(startDate)}&endDate=${enc(endDate)}`,
+  },
+
+  /* Designation rate cards — the per-role, per-year rate table for a
+     project + organisation pair. Served by the same resource service as
+     `resources` above (port 8019), NOT the gateway. Both routes need
+     BOTH query params; the upload is multipart with a single `file`
+     field holding the .xlsx. */
+  designationRates: {
+    list: (projectId, organisationId) =>
+      `/api/designation-rates?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}`,
+    upload: (projectId, organisationId) =>
+      `/api/designation-rates/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}`,
+    // Blank rate-card upload template (.xlsx) — same for every project, so
+    // it takes no query params (unlike the attendance template).
+    exportTemplate: () => `/api/export/template/designation-rates`,
   },
 
   activities: {

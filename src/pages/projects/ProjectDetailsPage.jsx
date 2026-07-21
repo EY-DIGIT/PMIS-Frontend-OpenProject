@@ -1069,6 +1069,12 @@ export default function ProjectDetailsPage() {
   visible: true
 },
 {
+  key: "designation-rate",
+  label: "Upload Designation Rate",
+  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/designation-rate`),
+  visible: true
+},
+{
   key: "leave-config",
   label: "Leave Policy Configure",
   onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/leave-config`),

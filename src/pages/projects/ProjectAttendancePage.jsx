@@ -549,6 +549,7 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
   const [rateYears, setRateYears] = useState([]);
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [done, setDone] = useState(false);
@@ -606,6 +607,54 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
       return "These resources belong to another project. Please upload the correct attendance file.";
     }
     return data?.message || data?.error || raw || `Upload failed (${status})`;
+  };
+
+  // GET /api/export/template/attendance — a blank sheet covering the chosen
+  // range. Binary .xlsx, so it's read as a blob and saved via <a download>.
+  const downloadTemplate = async () => {
+    setError(null);
+    setNotice(null);
+    if (!startDate || !endDate) { setError("Set both dates to download a matching template."); return; }
+    if (endDate < startDate) { setError("End date can't be earlier than the start date."); return; }
+
+    try {
+      setDownloading(true);
+      const token = getToken();
+      const res = await fetch(
+        `${API_BASE}${ENDPOINTS.resources.attendanceTemplate(startDate, endDate)}`,
+        { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+      );
+
+      if (!res.ok) {
+        // An error body is text/JSON, not a spreadsheet.
+        const { raw, data } = await parseResponseBody(res);
+        throw new Error(data?.message || data?.error || raw || `Download failed (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+      // Cross-origin JS can't read Content-Disposition unless the backend
+      // exposes it, so this usually falls back to the API's own naming.
+      const filename = match
+        ? decodeURIComponent(match[1].trim())
+        : `attendance_template_${startDate}_${endDate}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setNotice(`Template downloaded — ${filename}`);
+    } catch (err) {
+      setError(err?.message || "Couldn't download the template. Try again.");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const upload = async () => {
@@ -737,6 +786,27 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                   {rateYears.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </Field>
+            </div>
+
+            {/* Template is built for the range above, so it sits between the
+                dates and the file picker — download, fill, then upload. */}
+            <div className="att-template-row">
+              <button
+                className="att-btn-secondary"
+                onClick={downloadTemplate}
+                disabled={downloading || uploading || !startDate || !endDate}
+                title={
+                  startDate && endDate
+                    ? "Download a blank template for this date range"
+                    : "Set both dates first"
+                }
+              >
+                <DownloadIcon />
+                {downloading ? "Preparing…" : "Download template"}
+              </button>
+              <span className="att-template-hint">
+                Blank sheet covering the selected dates — fill it in, then upload it below.
+              </span>
             </div>
 
             <Field label="Attendance file">
@@ -1016,6 +1086,15 @@ function UploadIcon() {
     </svg>
   );
 }
+// Mirror of UploadIcon with the arrow reversed.
+function DownloadIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 4v11m0 0 4-4m-4 4-4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 function CheckIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1040,6 +1119,12 @@ const ATT_CSS = `
 .att-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
 /* milestone names are long — let that one select take the full modal row */
 .att-select--wide { min-width: 100%; }
+
+/* template download row inside the upload modal */
+.att-template-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 14px; background: ${C.surface};
+  border: 1px solid ${C.border}; border-radius: 10px; }
+.att-template-hint { font-size: 12.5px; color: ${C.muted}; line-height: 1.45; flex: 1 1 200px; }
 
 .att-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
   text-transform: uppercase; color: ${C.primary}; margin-bottom: 8px; }
