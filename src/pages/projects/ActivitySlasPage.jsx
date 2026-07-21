@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
+import ActivityCompliancePanel from "../../components/projects/sla/ActivityCompliancePanel";
+import SlaSettlementPanel from "../../components/projects/sla/SlaSettlementPanel";
 import "../../styles/global.css";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
@@ -669,7 +671,6 @@ export default function ActivitySlasPage() {
     // ?project_id= query override too, in case the page is opened standalone.
     const { projectId: routeProjectId } = useParams();
     const projectId = routeProjectId || searchParams.get("project_id") || "";
-    const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
 
     // The project's contract type (e.g. "PMU", "MSAP") — when present, only SLAs
     // of this contract type are shown, so the user never sees irrelevant SLAs.
@@ -714,6 +715,9 @@ export default function ActivitySlasPage() {
 
     // ---- Step 3: create mapping ----
     const [activityIdInput, setActivityIdInput] = useState(() => searchParams.get("activityId") || "");
+    // Human-friendly name for the activity in headings — falls back to the raw
+    // id. Declared after activityIdInput because it reads it.
+    const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
     const [effFrom, setEffFrom] = useState(today());
     const [effUntil, setEffUntil] = useState("");
     const [createLoading, setCreateLoading] = useState(false);
@@ -1794,6 +1798,16 @@ export default function ActivitySlasPage() {
                             </div>
                         )}
                     </div>
+                    {/* Recorded compliance results for this activity + the
+                        on-completion evaluation trigger. */}
+                    {activityIdInput.trim() && (
+                        <ActivityCompliancePanel activityId={activityIdInput.trim()} activityLabel={activityLabel} />
+                    )}
+
+                    {/* Project-scoped quarterly settlement (aggregate → NPQP →
+                        capped LD → invoice lock). Lives here for now; it is
+                        prop-driven so it can move to a project-level page. */}
+                    {projectId && <SlaSettlementPanel projectId={projectId} />}
                 </div>
             )}
 

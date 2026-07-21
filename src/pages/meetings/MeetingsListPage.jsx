@@ -310,7 +310,7 @@ export default function MeetingsListPage() {
                           <button
                             type="button"
                             className="btn small-btn"
-                            onClick={() => saveStatus(m),cancelStatusEdit}
+                            onClick={() => saveStatus(m)}
                             disabled={savingId === m.id}
                           >
                             {savingId === m.id ? "Saving…" : "Save"}

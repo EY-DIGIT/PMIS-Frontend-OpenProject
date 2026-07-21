@@ -323,6 +323,8 @@ export const ENDPOINTS = {
     rateCards: (projectId) =>
 `/api/resources/rate-cards?projectId=${enc(projectId)}`,
     leaveReport: (employeeId) => `/api/reports/leave/${enc(employeeId)}`,
+    // Blank upload template (.xlsx) for the current project.
+    exportTemplate: (projectId) => `/api/export/resources?projectId=${enc(projectId)}`,
   },
 
   activities: {

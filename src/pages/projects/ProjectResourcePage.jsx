@@ -10,6 +10,7 @@ import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import "../../styles/global.css";
 import { getToken } from "../../api/auth";
+import { ENDPOINTS } from "../../api/endpoint";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
 
@@ -386,6 +387,8 @@ export default function ProjectResourcePage() {
 
   // upload
   const [uploading, setUploading] = useState(false);
+  // template download
+  const [downloading, setDownloading] = useState(false);
 
   // table data
   const [resources, setResources] = useState([]);
@@ -628,6 +631,70 @@ function closeApiResponse() {
   }
 }
 
+  // ---------- template: GET /api/export/resources ----------
+  // The response is a binary .xlsx, so it's read as a blob and handed to a
+  // temporary <a download> rather than parsed like the JSON endpoints.
+  async function downloadTemplate() {
+    if (!projectId) return;
+    setDownloading(true);
+    try {
+      const token = getToken();
+      const res = await fetch(
+        `${API_BASE}${ENDPOINTS.resources.exportTemplate(projectId)}`,
+        { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+      );
+
+      if (!res.ok) {
+        // An error body is text/JSON, not a spreadsheet — surface it properly.
+        let detail = `Server responded ${res.status}.`;
+        try {
+          const text = await res.text();
+          if (text) {
+            const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
+            detail = parsed?.message || parsed?.error || text.slice(0, 200) || detail;
+          }
+        } catch { /* keep the status-based message */ }
+        pushToast({ type: "error", title: "Download failed", msg: detail });
+        return;
+      }
+
+      const blob = await res.blob();
+      // The API does send a Content-Disposition filename, but it isn't listed
+      // in Access-Control-Expose-Headers, so cross-origin JS can't read it and
+      // this returns null. Kept anyway: it starts working the moment the
+      // backend adds `Access-Control-Expose-Headers: Content-Disposition`.
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+      const slug =
+        (project?.projectName || "project")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") || "project";
+      const filename = match
+        ? decodeURIComponent(match[1].trim())
+        : `resources-template-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      pushToast({ type: "ok", title: "Template downloaded", msg: filename });
+    } catch (err) {
+      pushToast({
+        type: "error",
+        title: "Download failed",
+        msg: err.message || "Check your connection and try again.",
+      });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   function handleFileChange(e) {
     const file = e.target.files?.[0];
     uploadFile(file);
@@ -706,6 +773,15 @@ function closeApiResponse() {
           >
             <RefreshIcon spinning={loading} />
             Refresh
+          </button>
+          <button
+            className="rp-btn rp-btn-ghost"
+            onClick={downloadTemplate}
+            disabled={downloading || !projectId}
+            title={projectId ? "Download the blank resource upload template" : "Open a project first"}
+          >
+            <DownloadIcon />
+            {downloading ? "Preparing…" : "Download Template"}
           </button>
           <button
             className="rp-btn rp-btn-primary"
@@ -1367,6 +1443,13 @@ const RefreshIcon = ({ spinning }) => (
 const UploadIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
+    <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </svg>
+);
+// Mirror of UploadIcon with the arrow reversed.
+const DownloadIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M12 4v12m0 0 4-4m-4 4-4-4" />
     <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
   </svg>
 );

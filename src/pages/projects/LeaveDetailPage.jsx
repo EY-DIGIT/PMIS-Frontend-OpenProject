@@ -47,12 +47,17 @@ const TONES = {
   teal: { bg: "#e6f7f6", fg: "#0d9488" },
 };
 
+// Quarter context — dates and the quarter number aren't counts, so they sit
+// with the employee details rather than in the metric grid.
+const CONTEXT_CARDS = [
+  { key: "quarterStart", label: "Quarter Start", tone: "purple", icon: <FiPlay /> },
+  { key: "quarterEnd", label: "Quarter End", tone: "orange", icon: <FiFlag /> },
+];
+
 // Leave-summary cards — key maps to the report payload, label is the display
-// text, tone/icon drive the styling. Order matches the reference design.
+// text, tone/icon drive the styling. Order follows how the quarter settles:
+// allowance, then what was taken, then how it was absorbed.
 const SUMMARY_CARDS = [
-  { key: "quarter", label: "Quarter", tone: "blue", icon: <FiCalendar /> },
-  { key: "quarterStart", label: "Start Date", tone: "purple", icon: <FiPlay /> },
-  { key: "quarterEnd", label: "End Date", tone: "orange", icon: <FiFlag /> },
   { key: "permissibleLeave", label: "Permissible Leave", tone: "green", icon: <FiShield /> },
   // { key: "carriedForwardLeave", label: "Carried Forward Leave", tone: "blue", icon: <FiChevronsRight /> },
   { key: "leaveTaken", label: "Leave Taken", tone: "blue", icon: <FiBriefcase /> },
@@ -216,72 +221,56 @@ export default function LeaveDetailPage() {
     <div className="uidai-pmis-content ld-page">
       <style>{LD_CSS}</style>
 
-      <div className="ld-card">
-        {/* Header */}
-        <div className="ld-head">
-          <div className="ld-head-main">
-            <h1 className="ld-title">{loading ? "Loading…" : employeeName}</h1>
-            <div className="ld-chips">
-              <div className="ld-chip ld-chip--blue">
-                <div className="ld-chip-val">{show(d.attendanceId || attendanceId)}</div>
-                <div className="ld-chip-lbl">Attendance ID</div>
-              </div>
-              <div className="ld-chip ld-chip--green">
-                <div className="ld-chip-val">Q{show(d.quarter || quarter)} {show(d.year || year)}</div>
-                <div className="ld-chip-lbl">Quarter</div>
-              </div>
-            </div>
-          </div>
-          <div className="ld-head-actions">
-            {canRelax && !loading && !error && (
-              <button className="ld-btn ld-btn--primary" onClick={() => setRelaxOpen(true)}>
-                Relaxation{relaxCap > 0 ? ` (${relaxLeft} left)` : ""}
-              </button>
-            )}
-            <button className="ld-close" onClick={() => navigate(-1)} aria-label="Close">
-              <FiX size={20} />
-            </button>
-          </div>
+      {/* Header — eyebrow carries the project, the title the employee, matching
+          the Attendance and Resources pages. */}
+      <header className="ld-head">
+        <div className="ld-head-main">
+          <div className="ld-eyebrow">{project?.projectName || "Project"}</div>
+          <h1 className="uidai-pmis-title ld-title">{loading ? "Loading…" : employeeName}</h1>
+          <p className="uidai-pmis-subtitle ld-subtitle">
+            Quarterly leave detail · Attendance ID {show(d.attendanceId || attendanceId)}
+            {" · "}Q{show(d.quarter || quarter)} {show(d.year || year)}
+          </p>
         </div>
+        <div className="ld-head-actions">
+          {canRelax && !loading && !error && (
+            <button className="ld-btn ld-btn--primary" onClick={() => setRelaxOpen(true)}>
+              Relaxation{relaxCap > 0 ? ` (${relaxLeft} left)` : ""}
+            </button>
+          )}
+          <button className="ld-close" onClick={() => navigate(-1)} aria-label="Close">
+            <FiX size={20} />
+          </button>
+        </div>
+      </header>
 
-        {loading && <div className="ld-muted">Loading leave detail…</div>}
-        {error && <div className="ld-error">⚠️ {error}</div>}
+      {loading && <div className="ld-muted">Loading leave detail…</div>}
+      {error && <div className="ld-error">⚠️ {error}</div>}
 
-        {!loading && !error && (
-          <>
-            {/* Employee info */}
-            <div className="ld-info">
-              <InfoItem tone="blue" icon={<FiUser />} label="Employee Name" value={show(d.employeeName)} />
-              <InfoItem tone="purple" icon={<FiHash />} label="Attendance ID" value={show(d.attendanceId || attendanceId)} />
-              <InfoItem tone="blue" icon={<FiBriefcase />} label="Project Name" value={show(d.projectName || project?.projectName)} />
-              <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={show(d.joiningDate)} />
-              <InfoItem tone="amber" icon={<FiCalendar />} label="Year" value={show(d.year || year)} />
-            </div>
-
-            {/* Leave summary */}
-            <div className="ld-section-head">
-              <span className="ld-section-ico"><FiCalendar /></span> Leave Summary
-              <Hint text={SECTION_HINT} />
-            </div>
-
-            {/* How the quarter settles, in one line. Only rendered when the
-                parts actually add up, so a mismatched payload never shows a
-                broken-looking equation. */}
-            {breakdownBalances && (
-              <div className="ld-breakdown">
-                <span className="ld-breakdown-lbl">How this quarter adds up</span>
-                <span className="ld-breakdown-eq">
-                  <b>{leaveTaken}</b> taken
-                  <span className="ld-breakdown-op">=</span>
-                  <span className="ld-breakdown-part ld-breakdown-part--paid">{paidLeave} paid</span>
-                  <span className="ld-breakdown-op">+</span>
-                  <span className="ld-breakdown-part ld-breakdown-part--relax">{relaxUsed} relaxation</span>
-                  <span className="ld-breakdown-op">+</span>
-                  <span className="ld-breakdown-part ld-breakdown-part--unpaid">{unpaidLeave} unpaid</span>
-                </span>
+      {!loading && !error && (
+        <>
+          {/* Employee + quarter context */}
+          <section className="ld-section">
+            <h2 className="ld-section-title">Employee</h2>
+            <div className="uidai-pmis-card ld-card">
+              <div className="ld-info">
+                <InfoItem tone="blue" icon={<FiUser />} label="Employee Name" value={show(d.employeeName)} />
+                <InfoItem tone="purple" icon={<FiHash />} label="Attendance ID" value={show(d.attendanceId || attendanceId)} />
+                <InfoItem tone="blue" icon={<FiBriefcase />} label="Project Name" value={show(d.projectName || project?.projectName)} />
+                <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={show(d.joiningDate)} />
+                {CONTEXT_CARDS.map((c) => (
+                  <InfoItem key={c.key} tone={c.tone} icon={c.icon} label={c.label} value={show(d[c.key])} />
+                ))}
               </div>
-            )}
+            </div>
+          </section>
 
+          {/* Leave summary */}
+          <section className="ld-section">
+            <h2 className="ld-section-title">
+              Leave summary
+              <Hint text={SECTION_HINT} />
+            </h2>
             <div className="ld-grid">
               {SUMMARY_CARDS.map((c) => (
                 <StatCard
@@ -299,38 +288,61 @@ export default function LeaveDetailPage() {
                 />
               ))}
             </div>
+          </section>
 
-            {/* Leave dates */}
-            <div className="ld-dates">
-              <DateList
-                tone="green"
-                title="Paid Leave Dates"
-                dates={paidDates}
-                hint="Leave days covered by the paid allowance — no deduction for these."
-              />
-              <DateList
-                tone="red"
-                title="Unpaid Leave Dates"
-                dates={unpaidDates}
-                hint="Leave days that fell outside the paid allowance. Any relaxation granted is applied against these."
-                note={
-                  unpaidDates.length > 0 && unpaidLeave === 0
-                    ? relaxUsed > 0
-                      ? `Covered by ${relaxUsed} relaxation ${relaxUsed === 1 ? "day" : "days"} — nothing deducted.`
-                      : "No unpaid balance remaining — nothing deducted."
-                    : null
-                }
-              />
-            </div>
+          {/* Leave dates — the breakdown sits here, where the paid vs unpaid
+              split is what the reader is actually trying to reconcile. */}
+          <section className="ld-section">
+            <h2 className="ld-section-title">Leave dates</h2>
+            <div className="uidai-pmis-card ld-card">
+              {/* Only rendered when the parts actually add up, so a mismatched
+                  payload never shows a broken-looking equation. */}
+              {breakdownBalances && (
+                <div className="ld-breakdown">
+                  <span className="ld-breakdown-lbl">How this quarter adds up</span>
+                  <span className="ld-breakdown-eq">
+                    <b>{leaveTaken}</b> taken
+                    <span className="ld-breakdown-op">=</span>
+                    <span className="uidai-pmis-badge uidai-pmis-badge-green">{paidLeave} paid</span>
+                    <span className="ld-breakdown-op">+</span>
+                    <span className="uidai-pmis-badge">{relaxUsed} relaxation</span>
+                    <span className="ld-breakdown-op">+</span>
+                    <span className="uidai-pmis-badge uidai-pmis-badge-red">{unpaidLeave} unpaid</span>
+                  </span>
+                </div>
+              )}
 
-            {/* Quarterly cost report */}
-            <div className="ld-section-head" style={{ marginTop: 22 }}>
-              <span className="ld-section-ico"><FiDollarSign /></span> Quarterly Cost Report
+              <div className="ld-dates">
+                <DateList
+                  tone="green"
+                  title="Paid Leave Dates"
+                  dates={paidDates}
+                  hint="Leave days covered by the paid allowance — no deduction for these."
+                />
+                <DateList
+                  tone="red"
+                  title="Unpaid Leave Dates"
+                  dates={unpaidDates}
+                  hint="Leave days that fell outside the paid allowance. Any relaxation granted is applied against these."
+                  note={
+                    unpaidDates.length > 0 && unpaidLeave === 0
+                      ? relaxUsed > 0
+                        ? `Covered by ${relaxUsed} relaxation ${relaxUsed === 1 ? "day" : "days"} — nothing deducted.`
+                        : "No unpaid balance remaining — nothing deducted."
+                      : null
+                  }
+                />
+              </div>
             </div>
+          </section>
+
+          {/* Quarterly cost report */}
+          <section className="ld-section">
+            <h2 className="ld-section-title">Quarterly cost report</h2>
             <CostReportSection loading={costLoading} error={costError} report={costReport} />
-          </>
-        )}
-      </div>
+          </section>
+        </>
+      )}
 
       {relaxOpen && (
         <RelaxationModal
@@ -377,7 +389,7 @@ function InfoItem({ tone, icon, label, value }) {
 function StatCard({ tone, icon, label, value, hint, sub }) {
   const t = TONES[tone] || TONES.blue;
   return (
-    <div className="ld-stat" style={{ background: t.bg + "80" }}>
+    <div className="ld-stat">
       <span className="ld-stat-ico" style={{ background: t.bg, color: t.fg }}>{icon}</span>
       <div className="ld-stat-text">
         <div className="ld-stat-lbl">
@@ -451,7 +463,8 @@ function CostReportSection({ loading, error, report }) {
 
       {/* Monthly breakdown table */}
       {months.length > 0 && (
-        <div className="ld-costtable-wrap">
+        <div className="uidai-pmis-card ld-costtable-card">
+          <div className="ld-costtable-wrap">
           <table className="ld-costtable">
             <thead>
               <tr>
@@ -503,6 +516,7 @@ function CostReportSection({ loading, error, report }) {
               </tr>
             </tfoot>
           </table>
+          </div>
         </div>
       )}
 
@@ -702,51 +716,52 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
 
 /* ---------- scoped styles ---------- */
 const LD_CSS = `
-.ld-page { max-width: 1200px; width: 100%; min-width: 0; margin: 0 auto; box-sizing: border-box; }
+.ld-page { padding: 30px 10px 72px; max-width: 1320px; width: 100%; min-width: 0; margin: 0 auto; color: ${C.ink}; box-sizing: border-box; overflow-x: clip; }
 .ld-page * { box-sizing: border-box; }
-@media (max-width: 640px) { .ld-page { padding: 12px 12px 24px; } }
+@media (max-width: 640px) { .ld-page { padding: 18px 14px 40px; } }
+.ld-page :focus-visible { outline: 2px solid ${C.primary}; outline-offset: 2px; border-radius: 6px; }
 
-.ld-card { background: #fbfcfe; border: 1px solid ${C.border}; border-radius: 16px; padding: 22px 24px; box-shadow: 0 1px 2px rgba(11,23,42,.04); }
+/* Section card — pairs with .uidai-pmis-card so it inherits the house
+   navy→cyan top stripe, the same way .att-card does. */
+.ld-card { padding: 16px 18px; margin-bottom: 0; border: 1px solid ${C.border}; }
 
 /* header */
 .ld-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
-.ld-eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: ${C.primary}; margin-bottom: 4px; }
-.ld-title { font-size: 32px; font-weight: 800; letter-spacing: -.02em; color: ${C.ink}; margin: 0 0 12px; }
-.ld-chips { display: flex; gap: 12px; flex-wrap: wrap; }
-.ld-chip { border-radius: 10px; padding: 8px 16px; }
-.ld-chip--blue { background: #eef4ff; }
-.ld-chip--green { background: #e9f9ef; }
-.ld-chip-val { font-size: 16px; font-weight: 800; }
-.ld-chip--blue .ld-chip-val { color: #2563eb; }
-.ld-chip--green .ld-chip-val { color: #16a34a; }
-.ld-chip-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: ${C.faint}; }
+.ld-head-main { min-width: 0; }
+.ld-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${C.primary}; margin-bottom: 6px; }
+.ld-title { margin: 0 0 4px; letter-spacing: -.02em; }
+.ld-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
 .ld-head-actions { display: flex; align-items: center; gap: 10px; }
-.ld-close { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid ${C.border}; background: #eef1f5; color: ${C.muted}; cursor: pointer; transition: all .15s ease; }
-.ld-close:hover { background: #e2e6ec; color: ${C.ink}; }
+.ld-close { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid ${C.border}; background: #fff; color: ${C.muted}; cursor: pointer; transition: all .15s ease; }
+.ld-close:hover { background: ${C.surface}; color: ${C.ink}; }
+
+/* sections */
+.ld-section { margin-bottom: 22px; }
+.ld-section-title { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 10px; letter-spacing: -.01em; }
 
 /* employee info */
-.ld-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 24px; background: #fff; border: 1px solid ${C.border}; border-radius: 14px; padding: 18px 20px; margin-bottom: 22px; }
-@media (max-width: 760px) { .ld-info { grid-template-columns: 1fr; } }
-.ld-info-item { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.ld-info-ico { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; font-size: 17px; flex: 0 0 40px; }
+/* six fields — 3×2 keeps both rows full rather than orphaning the last one */
+.ld-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 20px; }
+@media (max-width: 860px) { .ld-info { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .ld-info { grid-template-columns: 1fr; } }
+.ld-info-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ld-info-ico { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font-size: 14px; flex: 0 0 30px; }
 .ld-info-text { min-width: 0; }
-.ld-info-lbl { font-size: 12.5px; color: ${C.muted}; font-weight: 500; margin-bottom: 2px; }
-.ld-info-val { font-size: 15px; font-weight: 700; color: ${C.ink}; word-break: break-word; }
+.ld-info-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 1px; }
+.ld-info-val { font-size: 13.5px; font-weight: 700; color: ${C.ink}; word-break: break-word; }
 
-/* section head */
-.ld-section-head { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: ${C.primary}; margin: 0 0 14px; }
-.ld-section-ico { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: ${C.accentBg}; color: ${C.primary}; font-size: 14px; }
-
-/* leave summary grid */
-.ld-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
-@media (max-width: 860px) { .ld-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 520px) { .ld-grid { grid-template-columns: 1fr; } }
-.ld-stat { display: flex; align-items: center; gap: 12px; border: 1px solid ${C.border}; border-radius: 12px; padding: 14px 16px; }
-.ld-stat-ico { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; font-size: 16px; flex: 0 0 38px; }
+/* leave summary grid — eight tiles, so they run denser than the four-up
+   metric row on Attendance while keeping the same card treatment. */
+.ld-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 980px) { .ld-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px) { .ld-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 460px) { .ld-grid { grid-template-columns: 1fr; } }
+.ld-stat { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid ${C.border}; border-radius: 10px; padding: 11px 13px; box-shadow: 0 1px 2px rgba(16,32,60,.04); }
+.ld-stat-ico { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font-size: 14px; flex: 0 0 30px; }
 .ld-stat-text { min-width: 0; }
-.ld-stat-lbl { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: ${C.muted}; font-weight: 500; margin-bottom: 2px; }
-.ld-stat-val { font-size: 18px; font-weight: 800; color: ${C.ink}; word-break: break-word; }
-.ld-stat-sub { font-size: 11.5px; font-weight: 600; color: ${C.faint}; margin-top: 3px; }
+.ld-stat-lbl { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; line-height: 1.3; }
+.ld-stat-val { font-size: 20px; font-weight: 800; color: ${C.ink}; line-height: 1.1; margin-top: 3px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; word-break: break-word; }
+.ld-stat-sub { font-size: 11px; color: ${C.faint}; margin-top: 2px; }
 
 /* hint tooltip */
 .ld-hint { position: relative; display: inline-grid; place-items: center; width: 15px; height: 15px;
@@ -763,23 +778,19 @@ const LD_CSS = `
 .ld-hint:hover .ld-hint-bub, .ld-hint:focus-visible .ld-hint-bub { opacity: 1; visibility: visible; }
 @media (max-width: 520px) { .ld-hint-bub { max-width: 190px; } }
 
-/* leave breakdown strip */
-.ld-breakdown { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  background: #fff; border: 1px solid ${C.border}; border-left: 3px solid ${C.primary};
-  border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; }
-.ld-breakdown-lbl { font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; }
-.ld-breakdown-eq { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: ${C.ink}; }
+/* leave breakdown strip — sits inside the leave-dates card */
+.ld-breakdown { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 10px;
+  padding: 11px 14px; margin-bottom: 16px; }
+.ld-breakdown-lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; }
+.ld-breakdown-eq { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: ${C.ink}; }
 .ld-breakdown-eq b { font-size: 15px; font-weight: 800; }
 .ld-breakdown-op { color: ${C.faint}; font-weight: 700; }
-.ld-breakdown-part { font-weight: 700; padding: 4px 10px; border-radius: 999px; }
-.ld-breakdown-part--paid { background: ${TONES.green.bg}; color: ${TONES.green.fg}; }
-.ld-breakdown-part--relax { background: ${TONES.purple.bg}; color: ${TONES.purple.fg}; }
-.ld-breakdown-part--unpaid { background: ${TONES.red.bg}; color: ${TONES.red.fg}; }
 
 /* leave dates */
-.ld-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; background: #fff; border: 1px solid ${C.border}; border-radius: 14px; padding: 18px 20px; }
+.ld-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 640px) { .ld-dates { grid-template-columns: 1fr; } }
-.ld-datehead { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; letter-spacing: .04em; margin-bottom: 12px; }
+.ld-datehead { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: .05em; margin-bottom: 9px; }
 .ld-datenote { font-size: 12.5px; color: ${C.muted}; background: ${C.surface}; border: 1px solid ${C.border};
   border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; line-height: 1.45; }
 .ld-datechips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -787,7 +798,10 @@ const LD_CSS = `
 
 /* cost report */
 
-.ld-costtable-wrap { background: #fff; border: 1px solid ${C.border}; border-radius: 14px; overflow: auto; margin-bottom: 14px; }
+/* Outer card carries the house top stripe; the inner div does the scrolling,
+   so the stripe stays put when the table is scrolled sideways. */
+.ld-costtable-card { border: 1px solid ${C.border}; padding: 0; margin-bottom: 0; overflow: hidden; }
+.ld-costtable-wrap { overflow: auto; border-radius: 0 0 12px 12px; }
 .ld-costtable { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 720px; }
 .ld-costtable thead th { text-align: left; font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: ${C.muted}; background: ${C.surface}; padding: 12px 14px; border-bottom: 1px solid ${C.border}; white-space: nowrap; }
 .ld-costtable tbody td { padding: 12px 14px; border-bottom: 1px solid ${C.border}; color: ${C.ink}; white-space: nowrap; }
