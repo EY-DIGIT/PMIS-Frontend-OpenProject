@@ -12,7 +12,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CATEGORIES, stageLabel, priorityLabel } from "../../data/ticketsMock";
+import { CATEGORIES, STAGES, stageLabel, priorityLabel } from "../../data/ticketsMock";
 import {
   getTicket, getWorkflow, transitionTicket, getEscalationLogs,
 } from "../../api/tickets";
@@ -25,11 +25,42 @@ const DUMMY_ASSIGNEE = { uuid: "support-001", name: "", email: "amit@pmis.com" }
 /* Workflow actions that the backend rejects without a reason/comment. */
 const REASON_REQUIRED = new Set(["SEND_BACK"]);
 
+/* The "happy path" a ticket walks through. SENT_BACK / PENDING / CANCELLED
+   are detours off this rail and are surfaced separately in the stepper. */
+const FLOW = ["OPEN", "ASSIGNED", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+
+/* Visual weight per workflow action so the panel reads like a real ticket
+   queue: one obvious next step, supporting moves quieter, exits in red. */
+const ACTION_INTENT = {
+  ASSIGN: "primary", REASSIGN: "primary", START: "primary", START_PROGRESS: "primary",
+  RESOLVE: "success", CLOSE: "success", APPROVE: "success",
+  SEND_BACK: "warn", HOLD: "warn", ON_HOLD: "warn", PENDING: "warn",
+  CANCEL: "danger", REJECT: "danger",
+};
+
 const catLabel = (code) => CATEGORIES.find((c) => c.code === code)?.label || code || "—";
 const slaLabel = (code) => (code ? code.replace(/_/g, " ") : "—");
 const humanize = (s) =>
   String(s || "").split(/[_\s-]+/).filter(Boolean)
     .map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(" ");
+
+/* Initials for the assignee / reporter avatar chips. */
+const initials = (name) =>
+  String(name || "").trim().split(/\s+/).slice(0, 2)
+    .map((w) => w.charAt(0).toUpperCase()).join("") || "?";
+
+const Person = ({ person, empty = "Unassigned" }) => {
+  if (!person?.name) return <span className="tkt-dmuted">{empty}</span>;
+  return (
+    <span className="tkt-assignee">
+      <span className="tkt-avatar">{initials(person.name)}</span>
+      <span>
+        {person.name}
+        {person.email && <span className="tkt-dmuted"> · {person.email}</span>}
+      </span>
+    </span>
+  );
+};
 
 function fmtDateTime(ms) {
   const n = Number(ms);
@@ -166,9 +197,11 @@ export default function TicketDetailPage() {
   if (error && !ticket) {
     return (
       <div className="uidai-pmis-content tkt-page">
-        <div className="tkt-header tkt-header-actions">
-          <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")}>← Back to tickets</button>
-        </div>
+        <nav className="tkt-crumbbar">
+          <button type="button" className="tkt-crumb-back" onClick={() => navigate("/tickets")}>
+            <span aria-hidden="true">←</span> Tickets
+          </button>
+        </nav>
         <div className="tkt-err-msg">{error}</div>
       </div>
     );
@@ -176,21 +209,29 @@ export default function TicketDetailPage() {
 
   return (
     <div className="uidai-pmis-content tkt-page">
-      <div className="tkt-header tkt-header-actions">
-        <button type="button" className="tkt-btn ghost" onClick={() => navigate("/tickets")}>
-          ← Back to tickets
+      <nav className="tkt-crumbbar">
+        <button type="button" className="tkt-crumb-back" onClick={() => navigate("/tickets")}>
+          <span aria-hidden="true">←</span> Tickets
         </button>
-      </div>
+        <span className="tkt-crumb-sep" aria-hidden="true">/</span>
+        <span className="tkt-crumb-cur">{ticket.id}</span>
+      </nav>
 
       {/* Title bar */}
       <div className="tkt-detail-head">
         <div className="tkt-detail-idrow">
           <span className="tkt-id" style={{ fontSize: 16 }}>{ticket.id}</span>
-          <Badge cls={`prio-${ticket.priority}`}>{priorityLabel(ticket.priority)}</Badge>
           <Badge cls={`stg-${ticket.status}`}>{stageLabel(ticket.status)}</Badge>
+          <Badge cls={`prio-${ticket.priority}`}>{priorityLabel(ticket.priority)}</Badge>
           <Badge cls={`cat-${ticket.category}`}>{catLabel(ticket.category)}</Badge>
+          {ticket.slaBreached && <Badge cls="sla-BREACHED">SLA Breached</Badge>}
         </div>
         <div className="tkt-detail-title">{ticket.title}</div>
+        <div className="tkt-detail-meta">
+          <span><b>Project</b>{ticket.projectName || "—"}</span>
+          <span><b>Assignee</b>{ticket.assignee?.name || "Unassigned"}</span>
+          <span><b>Updated</b>{fmtDateTime(ticket.updatedAt)}</span>
+        </div>
       </div>
 
       {error && <div className="tkt-err-msg" style={{ marginBottom: 12 }}>{error}</div>}
@@ -203,16 +244,8 @@ export default function TicketDetailPage() {
             <Row label="Project">{ticket.projectName}</Row>
             {/* <Row label="Activity">{ticket.activityName}</Row> */}
             {/* <Row label="Task">{ticket.taskName}</Row> */}
-            <Row label="Reporter">
-              {ticket.reporter?.name
-                ? <>{ticket.reporter.name}{ticket.reporter.email ? <span className="tkt-dmuted"> · {ticket.reporter.email}</span> : null}</>
-                : "—"}
-            </Row>
-            <Row label="Assignee">
-              {ticket.assignee?.name
-                ? <>{ticket.assignee.name}{ticket.assignee.email ? <span className="tkt-dmuted"> · {ticket.assignee.email}</span> : null}</>
-                : <span className="tkt-dmuted">Unassigned</span>}
-            </Row>
+            <Row label="Reporter"><Person person={ticket.reporter} empty="—" /></Row>
+            <Row label="Assignee"><Person person={ticket.assignee} /></Row>
             <Row label="Created">{fmtDateTime(ticket.createdAt)}</Row>
             <Row label="Updated">{fmtDateTime(ticket.updatedAt)}</Row>
           </Card>
@@ -243,26 +276,46 @@ export default function TicketDetailPage() {
         {/* Right — SLA + assignment + workflow */}
         <div>
           <Card title="SLA">
-            <Row label="SLA Health">
-              {ticket.slaStatus
-                ? <Badge cls={`sla-${ticket.slaStatus}`}>{slaLabel(ticket.slaStatus)}</Badge>
-                : "—"}
+            <div className={`tkt-sla-banner ${ticket.slaBreached ? "breached" : (ticket.slaStatus || "").toLowerCase()}`}>
+              <div className="tkt-sla-banner-lbl">Resolution deadline</div>
+              <div className="tkt-sla-banner-val">{fmtDateTime(ticket.slaDeadline)}</div>
+              {ticket.slaStatus && (
+                <Badge cls={`sla-${ticket.slaStatus}`}>{slaLabel(ticket.slaStatus)}</Badge>
+              )}
+            </div>
+            <Row label="Breached">
+              {ticket.slaBreached
+                ? <span style={{ color: "#c0392b" }}>Yes</span>
+                : <span className="tkt-dmuted">No</span>}
             </Row>
-            <Row label="Deadline">{fmtDateTime(ticket.slaDeadline)}</Row>
-            <Row label="Breached">{ticket.slaBreached ? "Yes" : "No"}</Row>
           </Card>
 
           <Card title="Workflow">
-            <div style={{ marginBottom: 10 }}>
-              <span className="tkt-sub">Current stage</span>
-              <div style={{ marginTop: 4 }}>
+            {/* Stage rail — where the ticket sits on the happy path. */}
+            <ol className="tkt-stepper">
+              {FLOW.map((code) => {
+                const at = FLOW.indexOf(ticket.status);
+                const i = FLOW.indexOf(code);
+                const state = at < 0 ? "todo" : i < at ? "done" : i === at ? "current" : "todo";
+                return (
+                  <li key={code} className={`tkt-step ${state}`}>
+                    <span className="tkt-step-dot" aria-hidden="true" />
+                    <span className="tkt-step-lbl">{stageLabel(code)}</span>
+                  </li>
+                );
+              })}
+            </ol>
+            {!FLOW.includes(ticket.status) && (
+              <div className="tkt-step-off">
+                Off the main path — currently{" "}
                 <Badge cls={`stg-${ticket.status}`}>{stageLabel(ticket.status)}</Badge>
               </div>
-            </div>
+            )}
 
-            <div className="tkt-field">
+            <div className="tkt-field" style={{ marginTop: 14 }}>
               <label htmlFor="tkt-comment">
-                {reasonNeeded ? "Reason / comment (required for Send Back)" : "Comment (optional)"}
+                {reasonNeeded ? "Reason / comment" : "Comment"}
+                <span className="tkt-lbl-hint">{reasonNeeded ? "required for Send Back" : "optional"}</span>
               </label>
               <textarea
                 id="tkt-comment"
@@ -274,26 +327,26 @@ export default function TicketDetailPage() {
 
             {error && <div className="tkt-err-msg" style={{ marginBottom: 6 }}>{error}</div>}
 
-            <div className="tkt-sub" style={{ margin: "6px 0" }}>Available actions</div>
+            <div className="tkt-actions-head">Move this ticket</div>
             {actions.length === 0 ? (
               <div className="tkt-sub">No further actions — this stage is terminal.</div>
             ) : (
-              <div className="tkt-actions">
-                {actions.map((a) => {
-                  const isAssign = a.action === "ASSIGN" || a.action === "REASSIGN";
-                  const label = isAssign
-                    ? `${humanize(a.action)}  → ${stageLabel(a.nextState)}`
-                    : `${humanize(a.action)} → ${stageLabel(a.nextState)}`;
+              <div className="tkt-actionlist">
+                {actions.map((a, i) => {
+                  const intent = ACTION_INTENT[a.action] || (i === 0 ? "primary" : "neutral");
+                  const busy = busyAction === a.action;
+                  const roles = Array.isArray(a.roles) ? a.roles.filter(Boolean) : [];
                   return (
                     <button
                       key={a.action}
                       type="button"
-                      className="tkt-btn small"
+                      className={`tkt-action ${intent}${busy ? " busy" : ""}`}
                       disabled={!!busyAction}
-                      title={Array.isArray(a.roles) && a.roles.length ? `Role: ${a.roles.join(", ")}` : undefined}
+                      title={`Moves this ticket to ${stageLabel(a.nextState)}${roles.length ? ` · Role: ${roles.join(", ")}` : ""}`}
                       onClick={() => doAction(a)}
                     >
-                      {busyAction === a.action ? "Working…" : label}
+                      <span className="tkt-action-lbl">{busy ? "Working…" : humanize(a.action)}</span>
+                      <span className="tkt-action-next">{stageLabel(a.nextState)}</span>
                     </button>
                   );
                 })}

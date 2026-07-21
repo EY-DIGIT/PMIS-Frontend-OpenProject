@@ -74,16 +74,6 @@ function attTone(pct) {
   return { color: C.red, bg: C.redBg, label: "At risk" };
 }
 
-// Maps a free-text status to a badge tone without assuming exact values.
-function statusTone(status) {
-  const s = String(status ?? "").toLowerCase();
-  if (/(complete|closed|done|finished)/.test(s)) return { color: C.primary, bg: C.primarySoft };
-  if (/(active|progress|ongoing|open|running|live)/.test(s)) return { color: C.green, bg: C.greenBg };
-  if (/(hold|pending|await|delay|block|paused)/.test(s)) return { color: C.amber, bg: C.amberBg };
-  if (/(cancel|reject|fail|closed lost)/.test(s)) return { color: C.red, bg: C.redBg };
-  return { color: C.muted, bg: C.surfaceAlt };
-}
-
 // Collapse the raw [{date,name}] list: dedupe by date, prefer real holiday
 // names over weekday-only artifacts. `named` = a real title exists.
 function normalizeHolidays(raw) {
@@ -145,8 +135,8 @@ export default function ProjectAttendancePage() {
   const [milestones, setMilestones] = useState([]);
   const [milestonesLoading, setMilestonesLoading] = useState(false);
   const [milestonesError, setMilestonesError] = useState(null);
-  // The milestone whose Leave Management modal is open (null = closed).
-  const [leaveMilestone, setLeaveMilestone] = useState(null);
+  // Attendance upload modal — the milestone is picked inside it.
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -176,6 +166,12 @@ export default function ProjectAttendancePage() {
   const resourceMilestones = useMemo(
     () => milestones.filter((m) => m.isResourceBased === true),
     [milestones]
+  );
+
+  // Only milestones saved on the server (apiId present) can receive an upload.
+  const uploadableMilestones = useMemo(
+    () => resourceMilestones.filter((m) => m.apiId),
+    [resourceMilestones]
   );
 
   // Monthly summary — fetched per selected month. "All months" shows a prompt instead.
@@ -295,74 +291,34 @@ export default function ProjectAttendancePage() {
     <div className="uidai-pmis-content att-page">
       <style>{ATT_CSS}</style>
 
-      {/* Header */}
+      {/* Header — upload is the page's primary action, so it sits up here
+          rather than in a table of its own. */}
       <header className="att-head">
-        <div className="att-eyebrow">{project?.projectName || "Project"}</div>
-        <h1 className="uidai-pmis-title att-title">Attendance</h1>
-        <p className="uidai-pmis-subtitle att-subtitle">
-          Monthly attendance, quarterly leave and the holiday calendar for your project team.
-        </p>
+        <div className="att-head-main">
+          <div className="att-eyebrow">{project?.projectName || "Project"}</div>
+          <h1 className="uidai-pmis-title att-title">Attendance</h1>
+          <p className="uidai-pmis-subtitle att-subtitle">
+            Monthly attendance, quarterly leave and the holiday calendar for your project team.
+          </p>
+        </div>
+        <button
+          className="att-btn-primary"
+          onClick={() => setUploadOpen(true)}
+          disabled={milestonesLoading || uploadableMilestones.length === 0}
+          title={
+            milestonesLoading
+              ? "Loading milestones…"
+              : uploadableMilestones.length === 0
+                ? "No resource-based milestones are ready for upload"
+                : "Upload attendance for a resource-based milestone"
+          }
+        >
+          <UploadIcon />
+          Upload attendance
+        </button>
       </header>
 
-      {/* Resource-based milestones — Leave Management */}
-      <section className="att-section">
-        <h2 className="att-section-title">Resource-based milestones</h2>
-
-        {milestonesLoading && <SkeletonTable rows={3} cols={6} />}
-        {milestonesError && <div className="att-error">{milestonesError}</div>}
-        {!milestonesLoading && !milestonesError && resourceMilestones.length === 0 && (
-          <EmptyState
-            title="No resource-based milestones"
-            hint="Milestones marked as resource-based will appear here, ready for attendance uploads."
-          />
-        )}
-        {!milestonesLoading && !milestonesError && resourceMilestones.length > 0 && (
-          <div className="uidai-pmis-card att-card">
-            <div className="att-table-wrap">
-              <table className="att-table">
-                <thead>
-                  <tr>
-                    <th className="att-th">Code</th>
-                    <th className="att-th">Milestone</th>
-                    <th className="att-th">Start</th>
-                    <th className="att-th">End</th>
-                    <th className="att-th">Status</th>
-                    <th className="att-th att-num">Leave Management</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resourceMilestones.map((m) => (
-                    <tr className="att-row" key={m.apiId || m.uid}>
-                      <td className="att-td">
-                        <code className="att-code">{m.serverDisplayCode || m.id || "—"}</code>
-                      </td>
-                      <td className="att-td att-strong">{m.name || "—"}</td>
-                      <td className="att-td att-dim">{m.startDate || "—"}</td>
-                      <td className="att-td att-dim">{m.endDate || "—"}</td>
-                      <td className="att-td"><StatusBadge status={m.status} /></td>
-                      <td className="att-td att-num">
-                        <button
-                          className="att-btn-primary"
-                          onClick={() => setLeaveMilestone(m)}
-                          disabled={!m.apiId}
-                          title={
-                            m.apiId
-                              ? "Upload attendance for this milestone"
-                              : "Save the milestone before uploading attendance"
-                          }
-                        >
-                          <UploadIcon />
-                          Upload Attendence
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </section>
+      {milestonesError && <div className="att-error">{milestonesError}</div>}
 
       {/* Controls */}
       <div className="att-toolbar">
@@ -482,11 +438,11 @@ export default function ProjectAttendancePage() {
         />
       )}
 
-      {leaveMilestone && (
+      {uploadOpen && (
         <LeaveUploadModal
           projectId={projectId}
-          milestone={leaveMilestone}
-          onClose={() => setLeaveMilestone(null)}
+          milestones={uploadableMilestones}
+          onClose={() => setUploadOpen(false)}
         />
       )}
     </div>
@@ -520,7 +476,6 @@ function AttendanceTable({ period, employees, onRowClick }) {
               <th className="att-th att-num">Absent</th>
               <th className="att-th att-num">Week off</th>
               <th className="att-th att-num">Holiday</th>
-              <th className="att-th att-num">WFH</th>
               <th className="att-th att-num att-th-att">Attendance</th>
             </tr>
           </thead>
@@ -543,7 +498,6 @@ function AttendanceTable({ period, employees, onRowClick }) {
                 </td>
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 <td className="att-td att-num att-dim">{emp.holidayDays}</td>
-                <td className="att-td att-num att-dim">{emp.wfhDays}</td>
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
@@ -579,7 +533,13 @@ function QuarterlyPanel({ data, quarter, year, onRowClick }) {
    Leave Management — per-milestone attendance Excel upload.
    POST /api/attendance/upload with projectId, milestoneId, dates + file.
    ===================================================================== */
-function LeaveUploadModal({ projectId, milestone, onClose }) {
+function LeaveUploadModal({ projectId, milestones = [], onClose }) {
+  // Milestone is picked here rather than on the page. Preselect when there's
+  // only one, so the common case is a single choice fewer.
+  const [milestoneId, setMilestoneId] = useState(
+    milestones.length === 1 ? String(milestones[0].apiId) : ""
+  );
+  const milestone = milestones.find((m) => String(m.apiId) === String(milestoneId)) || null;
   // Monthly is the only type the API supports today; quarterly is wired up in
   // the UI and blocked at submit until the backend endpoint exists.
   const [uploadType, setUploadType] = useState("monthly");
@@ -655,10 +615,10 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
       setNotice("Quarterly upload isn't available yet — it'll be enabled once the API is ready.");
       return;
     }
+    if (!milestone?.apiId) { setError("Choose a milestone to upload against."); return; }
     if (!file) { setError("Choose an Excel file to upload."); return; }
     if (!startDate || !endDate) { setError("Set both a start and end date."); return; }
     if (endDate < startDate) { setError("End date can't be earlier than the start date."); return; }
-    if (!milestone?.apiId) { setError("This milestone couldn't be identified."); return; }
     if (!projectId) { setError("This project couldn't be identified."); return; }
 
     const body = new FormData();
@@ -712,10 +672,9 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
         </div>
 
         <div className="att-modal-sub">
-          {milestone.serverDisplayCode || milestone.id ? (
-            <><code className="att-code">{milestone.serverDisplayCode || milestone.id}</code>{" "}</>
-          ) : null}
-          {milestone.name}
+          {milestone
+            ? `${milestone.startDate || "—"} → ${milestone.endDate || "—"}`
+            : "Choose the milestone this attendance belongs to."}
         </div>
 
         {done ? (
@@ -731,6 +690,20 @@ function LeaveUploadModal({ projectId, milestone, onClose }) {
         ) : (
           <>
             <div className="att-controls" style={{ marginBottom: 14 }}>
+              <Field label="Milestone">
+                <select
+                  className="att-select att-select--wide"
+                  value={milestoneId}
+                  onChange={(e) => { setMilestoneId(e.target.value); setError(null); }}
+                >
+                  <option value="">Select a milestone…</option>
+                  {milestones.map((m) => (
+                    <option key={m.apiId} value={m.apiId}>
+                      {[m.serverDisplayCode || m.id, m.name].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Upload type">
                 <select
                   className="att-select"
@@ -975,12 +948,6 @@ function AttendanceBar({ value }) {
   );
 }
 
-function StatusBadge({ status }) {
-  if (!status) return <span className="att-muted" style={{ padding: 0 }}>—</span>;
-  const t = statusTone(status);
-  return <span className="att-badge" style={{ color: t.color, background: t.bg }}>{status}</span>;
-}
-
 function EmptyState({ icon, title, hint }) {
   return (
     <div className="att-empty">
@@ -1066,8 +1033,13 @@ const ATT_CSS = `
 .att-page :focus-visible { outline: 2px solid ${C.primary}; outline-offset: 2px; border-radius: 6px; }
 
 .att-head { margin-bottom: 26px; }
+.att-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
+.att-head-main { min-width: 0; }
 .att-title { margin: 0 0 6px; letter-spacing: -0.02em; }
 .att-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
+/* milestone names are long — let that one select take the full modal row */
+.att-select--wide { min-width: 100%; }
 
 .att-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
   text-transform: uppercase; color: ${C.primary}; margin-bottom: 8px; }
@@ -1159,9 +1131,6 @@ const ATT_CSS = `
 .att-bar-fill { display: block; height: 100%; border-radius: 999px; transition: width .45s cubic-bezier(.2,.8,.2,1); }
 .att-bar-val { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; min-width: 40px; text-align: right; }
 
-/* status badge */
-.att-badge { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600;
-  padding: 3px 11px; border-radius: 999px; white-space: nowrap; text-transform: capitalize; }
 
 /* states */
 .att-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }
