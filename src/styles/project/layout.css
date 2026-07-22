@@ -275,6 +275,33 @@
   z-index: 30;
   display: flex;
   flex-direction: column;
+  /* The action list grows as features are added, so cap the panel and let
+     it scroll rather than running off the bottom of the viewport. The vh
+     term keeps it usable on short windows; the px term stops it becoming a
+     full-height wall on tall ones. */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  /* Don't hand the scroll off to the page once the list bottoms out. */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #c7cfdb transparent;
+}
+/* WebKit equivalent of the scrollbar-* pair above — a slim, neutral bar so
+   it reads as part of the menu instead of an OS-chrome scrollbar. */
+.uidai-actions-menu__panel::-webkit-scrollbar {
+  width: 8px;
+}
+.uidai-actions-menu__panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.uidai-actions-menu__panel::-webkit-scrollbar-thumb {
+  background: #c7cfdb;
+  border-radius: 999px;
+  /* Inset the thumb from the panel edge without shrinking the track. */
+  border: 2px solid #ffffff;
+}
+.uidai-actions-menu__panel::-webkit-scrollbar-thumb:hover {
+  background: #aab4c4;
 }
 .uidai-actions-menu__item {
   appearance: none;
@@ -288,6 +315,9 @@
   color: #1f2937;
   cursor: pointer;
   white-space: nowrap;
+  /* In a column flex container with a max-height, items would otherwise be
+     squashed to fit instead of overflowing into the scroll area. */
+  flex: 0 0 auto;
 }
 .uidai-actions-menu__item:hover:not(:disabled) {
   background: #f3f4f6;

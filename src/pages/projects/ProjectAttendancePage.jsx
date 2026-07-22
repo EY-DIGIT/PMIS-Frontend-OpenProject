@@ -383,7 +383,9 @@ export default function ProjectAttendancePage() {
                   tone={attTone(metrics.avg).color}
                 />
                 <StatCard label="Present" value={metrics.present} sub="days across team" />
+                {/* On leave stat hidden for now — uncomment to restore.
                 <StatCard label="On leave" value={metrics.leave} sub="days taken" />
+                */}
                 <StatCard
                   label="Absent"
                   value={metrics.absent}
@@ -474,7 +476,9 @@ function AttendanceTable({ period, employees, onRowClick }) {
               <th className="att-th att-num">Half</th>
               <th className="att-th att-num">Leave Taken</th>
               <th className="att-th att-num">Absent</th>
+              {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
+              */}
               <th className="att-th att-num">Holiday</th>
               <th className="att-th att-num att-th-att">Attendance</th>
             </tr>
@@ -496,7 +500,9 @@ function AttendanceTable({ period, employees, onRowClick }) {
                 <td className={`att-td att-num${num(emp.absentDays) > 0 ? " att-danger" : " att-dim"}`}>
                   {emp.absentDays}
                 </td>
+                {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
+                */}
                 <td className="att-td att-num att-dim">{emp.holidayDays}</td>
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />

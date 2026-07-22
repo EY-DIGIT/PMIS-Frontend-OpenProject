@@ -8,6 +8,96 @@ import { ENDPOINTS } from "../../api/endpoint";
 // Resource service — same host/port as Holidays, Resource and Attendance.
 const API_BASE = "http://10.1.131.199:8019";
 
+/* ─────────────────────────────────────────────────────────────────────
+   API response handling
+
+   Every call on this page funnels through these so the user sees a
+   sentence they can act on instead of "Failed to fetch" or a bare 500.
+   A failure is always described as { title, detail, issues[] }:
+     title   what went wrong, in one short phrase
+     detail  why, and what to do about it
+     issues  per-row / per-field messages the service listed, if any
+   ───────────────────────────────────────────────────────────────────── */
+
+// Read a response body once, as JSON when possible and raw text otherwise.
+// Callers need the body on both the success and failure paths, and a body
+// can only be consumed once, so this always runs before any branching.
+async function readBody(res) {
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+// Dig the service's own explanation out of an error body. Backends here
+// have shipped `message`, `error`, `detail` and `errors[]` at various
+// times, so accept all of them rather than betting on one.
+function messageFromBody(body) {
+  if (!body) return "";
+  if (typeof body === "string") return body.trim().slice(0, 300);
+  if (typeof body !== "object") return String(body);
+  const direct = body.message || body.error || body.detail || body.errorMessage || body.msg;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  return "";
+}
+
+// Row/field-level problems, when the service itemizes them.
+function issuesFromBody(body) {
+  if (!body || typeof body !== "object") return [];
+  const raw = body.errors || body.issues || body.failures || body.rejectedRows;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((e) => {
+      if (typeof e === "string") return e;
+      if (!e || typeof e !== "object") return "";
+      const where = e.row != null ? `Row ${e.row}` : e.field || e.resId || "";
+      const what = e.message || e.error || e.reason || "";
+      return [where, what].filter(Boolean).join(": ");
+    })
+    .filter(Boolean)
+    .slice(0, 25);
+}
+
+// What a status code means in this app's terms. The service's own message
+// wins when it sent one — this is the fallback that keeps a bare 403 or
+// 500 from reaching the user as a number.
+function reasonForStatus(status) {
+  if (status === 400) return "The request was rejected as invalid. Check the values and try again.";
+  if (status === 401) return "Your session has expired. Sign in again to continue.";
+  if (status === 403) return "You don't have permission to do this.";
+  if (status === 404) return "The record no longer exists — it may have been removed.";
+  if (status === 409) return "This conflicts with a record that already exists.";
+  if (status === 413) return "The file is too large for the server to accept.";
+  if (status === 415) return "That file type isn't supported. Upload an .xlsx workbook.";
+  if (status === 422) return "The file was read but its contents were rejected. Check the column headers and values.";
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  if (status >= 500) return "The resource service hit an error. Try again shortly, and contact support if it persists.";
+  return `The server responded with status ${status}.`;
+}
+
+// A non-2xx response → something displayable.
+function describeHttpFailure(title, status, body) {
+  return {
+    title,
+    detail: messageFromBody(body) || reasonForStatus(status),
+    status,
+    issues: issuesFromBody(body),
+  };
+}
+
+// A thrown fetch (DNS, CORS, offline, connection reset) has no status and
+// a message — "Failed to fetch" — that tells the user nothing.
+function describeNetworkFailure(title, err) {
+  const isOffline = typeof navigator !== "undefined" && navigator.onLine === false;
+  return {
+    title,
+    detail: isOffline
+      ? "You appear to be offline. Reconnect and try again."
+      : "Couldn't reach the resource service. It may be down, or your network may be blocking it.",
+    status: null,
+    issues: err?.message ? [err.message] : [],
+  };
+}
+
 // ---------- formatting helpers ----------
 const money = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -107,6 +197,20 @@ const STYLES = `
   text-overflow: ellipsis;
 }
 .mr-field select:hover:not(:disabled) { border-color: #c8d6ee; }
+/* A picker still waiting on its data reads as "busy", not as "broken" —
+   keep the white background so it stays distinct from a genuinely
+   unavailable field, and swap the chevron for a wait cursor. */
+.mr-field select.is-loading {
+  background-color: #fff; color: #64748b; cursor: progress;
+  background-image: none;
+}
+/* Inline spinner sitting next to a field label while its options load. */
+.mr-spinner {
+  display: inline-block; width: 11px; height: 11px; vertical-align: -1px;
+  margin-left: 6px; border-radius: 50%;
+  border: 2px solid #c8d6ee; border-top-color: #0b3c88;
+  animation: mr-spin .7s linear infinite;
+}
 .mr-field select:focus, .mr-field input:focus { border-color: #0b3c88; box-shadow: 0 0 0 3px #eef3fb; }
 .mr-field select:disabled {
   background-color: #f7f9fd; color: #94a3b8; cursor: not-allowed;
@@ -137,10 +241,50 @@ const STYLES = `
 }
 .mr-btn-upload:hover:not(:disabled) { background: #062a63; }
 .mr-btn-upload:disabled { opacity: .55; cursor: not-allowed; }
-.mr-msg { display: flex; align-items: center; gap: 10px; border-radius: 10px; padding: 12px 16px; font-size: 14px; margin-bottom: 14px; font-weight: 500; }
-.mr-msg.ok { background: #e6f6ee; border: 1px solid #c7ead6; color: #0f7a45; }
-.mr-msg.err { background: #fde8e8; border: 1px solid #f5c9c9; color: #d32f2f; }
-.mr-msg b { font-variant-numeric: tabular-nums; }
+/* ── result banner ──
+   One structure for every API outcome on this page: an icon, a one-line
+   title, a sentence of detail, optional stat tiles and an itemized list. */
+.mr-banner {
+  display: flex; gap: 12px; align-items: flex-start;
+  border: 1px solid; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
+}
+.mr-banner--ok { background: #e6f6ee; border-color: #c7ead6; }
+.mr-banner--warn { background: #fef6e7; border-color: #f2ddab; }
+.mr-banner--err { background: #fdecec; border-color: #f5c9c9; }
+.mr-banner-ic {
+  width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff;
+}
+.mr-banner--ok .mr-banner-ic { background: #0f9d58; }
+.mr-banner--warn .mr-banner-ic { background: #b45309; }
+.mr-banner--err .mr-banner-ic { background: #dc2626; }
+.mr-banner-body { flex: 1; min-width: 0; }
+.mr-banner-title { font-size: 14px; font-weight: 700; color: #1e2a3a; }
+.mr-banner-detail { font-size: 13px; color: #475569; margin-top: 3px; line-height: 1.5; }
+.mr-banner-status {
+  font-size: 11px; font-weight: 700; color: #64748b; background: rgba(255,255,255,.7);
+  border: 1px solid rgba(15,28,51,.1); border-radius: 999px; padding: 1px 8px; margin-left: 8px;
+  vertical-align: 1px; font-variant-numeric: tabular-nums;
+}
+.mr-banner-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.mr-banner-stat {
+  background: rgba(255,255,255,.75); border: 1px solid rgba(15,28,51,.08);
+  border-radius: 9px; padding: 7px 13px; min-width: 92px;
+}
+.mr-banner-stat b { display: block; font-size: 18px; color: #1e2a3a; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.mr-banner-stat span { font-size: 11px; font-weight: 600; color: #64748b; }
+.mr-banner-list {
+  margin: 10px 0 0; padding: 0 0 0 18px; font-size: 12.5px; color: #475569;
+  line-height: 1.6; max-height: 132px; overflow-y: auto;
+}
+.mr-banner-more { font-size: 12px; color: #64748b; margin-top: 6px; font-style: italic; }
+.mr-banner-x {
+  border: none; background: transparent; color: #94a3b8; cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 5px; flex-shrink: 0;
+}
+.mr-banner-x:hover { color: #1e2a3a; background: rgba(255,255,255,.6); }
+.mr-banner-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ── panel ── */
 .mr-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; box-shadow: 0 2px 10px rgba(11,60,136,.06); overflow: hidden; }
@@ -321,13 +465,21 @@ const STYLES = `
 `;
 
 export default function MasterResources() {
-  const { vendors } = useData();
+  // `loading` from the data context covers the vendor (organisation) fetch.
+  const { vendors, loading: orgsLoading } = useData();
   const fileInputRef = useRef(null);
 
   // ---- project list (for both the upload card and the project filter) ----
   const [projects, setProjects] = useState([]);
+  // Starts true: the fetch is kicked off on mount, so the very first render
+  // is already a loading state — defaulting to false would flash "No
+  // projects available" before the request settles.
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   useEffect(() => {
     let active = true;
+    setProjectsLoading(true);
+    setProjectsFailed(false);
     projectsApi
       .listAll()
       .then((list) => {
@@ -338,9 +490,19 @@ export default function MasterResources() {
             .map((p) => ({ id: p.projectId, name: p.projectName || p.projectId }))
         );
       })
-      .catch(() => { if (active) setProjects([]); });
+      .catch(() => {
+        if (!active) return;
+        setProjects([]);
+        setProjectsFailed(true);
+      })
+      .finally(() => { if (active) setProjectsLoading(false); });
     return () => { active = false; };
   }, []);
+
+  // Placeholder text for a picker that may be loading, empty, or broken —
+  // shared so the upload card and the filter row never drift apart.
+  const pickerPlaceholder = ({ loading, failed, empty, ready, emptyText, failedText }) =>
+    loading ? "Loading…" : failed ? failedText : empty ? emptyText : ready;
 
   // ---- upload form ----
   const [upProjectId, setUpProjectId] = useState("");
@@ -388,11 +550,15 @@ export default function MasterResources() {
       const res = await fetch(`${API_BASE}${ENDPOINTS.resources.list(applied)}`, {
         headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!res.ok) throw new Error(`Couldn't load resources (${res.status})`);
-      const data = await res.json();
+      const data = await readBody(res);
+      if (!res.ok) {
+        setLoadError(describeHttpFailure("Couldn't load the registry", res.status, data));
+        setResources([]);
+        return;
+      }
       setResources(Array.isArray(data) ? data : data ? [data] : []);
     } catch (e) {
-      setLoadError(e.message || "Couldn't load resources");
+      setLoadError(describeNetworkFailure("Couldn't load the registry", e));
       setResources([]);
     } finally {
       setLoading(false);
@@ -446,24 +612,36 @@ export default function MasterResources() {
 
       // Read the body either way — success carries the row counts, failure
       // carries the server's explanation.
-      const text = await res.text();
-      let data;
-      try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      const data = await readBody(res);
 
       if (!res.ok) {
-        const detail =
-          (data && typeof data === "object" && (data.message || data.error || data.detail)) ||
-          (typeof data === "string" && data.trim()) ||
-          `Server responded ${res.status}.`;
-        setUploadMsg({ ok: false, text: detail });
+        setUploadMsg({
+          tone: "err",
+          ...describeHttpFailure("Upload failed", res.status, data),
+        });
         return;
       }
 
+      const totalRows = data?.totalRows;
+      const stored = data?.resourcesStored;
+      const skipped =
+        Number.isFinite(totalRows) && Number.isFinite(stored) ? totalRows - stored : 0;
+      const stats = [];
+      if (Number.isFinite(totalRows)) stats.push({ label: "Rows read", value: totalRows });
+      if (Number.isFinite(stored)) stats.push({ label: "Resources stored", value: stored });
+      if (skipped > 0) stats.push({ label: "Skipped", value: skipped });
+
+      // A partial import is not a success — the user needs to know rows
+      // fell out, or they'll assume the whole workbook landed.
       setUploadMsg({
-        ok: true,
-        totalRows: data?.totalRows,
-        resourcesStored: data?.resourcesStored,
-        text: "Resource file imported successfully.",
+        tone: skipped > 0 ? "warn" : "ok",
+        title: skipped > 0 ? "Imported with skipped rows" : "Import complete",
+        detail:
+          skipped > 0
+            ? `${stored} of ${totalRows} rows were stored. The rest were skipped — usually a missing Resource ID, or a designation with no rate card for this project and organisation.`
+            : "Every row in the workbook was stored. The registry below now shows this project.",
+        stats,
+        issues: issuesFromBody(data),
       });
       setUpFile(null);
       // Show the freshly imported rows: scope the table to the project that
@@ -472,7 +650,7 @@ export default function MasterResources() {
       setDraft(next);
       setApplied(next);
     } catch (err) {
-      setUploadMsg({ ok: false, text: err.message || "Upload failed. Check the file and try again." });
+      setUploadMsg({ tone: "err", ...describeNetworkFailure("Upload failed", err) });
     } finally {
       setUploading(false);
     }
@@ -526,40 +704,55 @@ export default function MasterResources() {
 
         <div className="mr-upload-body">
           {uploadMsg && (
-            <div className={`mr-msg ${uploadMsg.ok ? "ok" : "err"}`}>
-              <span>{uploadMsg.ok ? "✓" : "!"}</span>
-              <span>
-                {uploadMsg.text}
-                {uploadMsg.ok && uploadMsg.totalRows != null && (
-                  <>
-                    {" "}
-                    <b>{uploadMsg.resourcesStored ?? "—"}</b> of{" "}
-                    <b>{uploadMsg.totalRows}</b> rows stored.
-                  </>
-                )}
-              </span>
-            </div>
+            <ResultBanner {...uploadMsg} onDismiss={() => setUploadMsg(null)} />
           )}
 
           <div className="mr-upload-grid">
             <label className="mr-field">
-              <span className="mr-field-label">Project *</span>
-              <select value={upProjectId} onChange={(e) => setUpProjectId(e.target.value)}>
-                <option value="">Select a project…</option>
+              <span className="mr-field-label">
+                Project * {projectsLoading && <Spinner />}
+              </span>
+              <select
+                value={upProjectId}
+                onChange={(e) => setUpProjectId(e.target.value)}
+                disabled={projectsLoading || projects.length === 0}
+                className={projectsLoading ? "is-loading" : undefined}
+              >
+                <option value="">
+                  {pickerPlaceholder({
+                    loading: projectsLoading,
+                    failed: projectsFailed,
+                    empty: projects.length === 0,
+                    ready: "Select a project…",
+                    emptyText: "No projects available",
+                    failedText: "Couldn't load projects",
+                  })}
+                </option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             </label>
             <label className="mr-field">
-              <span className="mr-field-label">Organisation *</span>
+              <span className="mr-field-label">
+                Organisation * {upProjectId && orgsLoading && <Spinner />}
+              </span>
               <select
                 value={upOrgId}
                 onChange={(e) => setUpOrgId(e.target.value)}
-                disabled={!upProjectId}
+                disabled={!upProjectId || orgsLoading}
+                className={upProjectId && orgsLoading ? "is-loading" : undefined}
               >
                 <option value="">
-                  {upProjectId ? "Select an organisation…" : "Pick a project first"}
+                  {!upProjectId
+                    ? "Pick a project first"
+                    : pickerPlaceholder({
+                        loading: orgsLoading,
+                        failed: false,
+                        empty: uploadOrgs.length === 0,
+                        ready: "Select an organisation…",
+                        emptyText: "No organisation available",
+                      })}
                 </option>
                 {uploadOrgs.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}</option>
@@ -641,9 +834,18 @@ export default function MasterResources() {
         <div className="mr-filters">
           <div className="mr-filter-grid">
             <label className="mr-field">
-              <span className="mr-field-label">Project</span>
-              <select value={draft.projectId} onChange={setField("projectId")}>
-                <option value="">All projects</option>
+              <span className="mr-field-label">
+                Project {projectsLoading && <Spinner />}
+              </span>
+              <select
+                value={draft.projectId}
+                onChange={setField("projectId")}
+                disabled={projectsLoading}
+                className={projectsLoading ? "is-loading" : undefined}
+              >
+                <option value="">
+                  {projectsLoading ? "Loading projects…" : "All projects"}
+                </option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -718,10 +920,14 @@ export default function MasterResources() {
         {loading ? (
           <TableSkeleton />
         ) : loadError ? (
-          <div className="mr-empty">
-            <div className="mr-empty-emoji">⚠️</div>
-            <h3>{loadError}</h3>
-            <p>Something went wrong while loading the resource registry. Check your connection and try again.</p>
+          <div style={{ padding: "18px" }}>
+            <ResultBanner {...loadError} tone="err">
+              <div className="mr-banner-actions">
+                <button className="mr-btn-ghost" onClick={loadResources}>
+                  <FiRefreshCw size={14} /> Try again
+                </button>
+              </div>
+            </ResultBanner>
           </div>
         ) : resources.length === 0 ? (
           <div className="mr-empty">
@@ -866,17 +1072,32 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
           fetch(`${API_BASE}${ENDPOINTS.resources.history(resId)}`, { headers, signal: controller.signal })
             .catch(() => null),
         ]);
-        if (detailRes.status === 404) throw new Error("This resource has no employment stints on record.");
-        if (!detailRes.ok) throw new Error(`Couldn't load resource (${detailRes.status})`);
-        const detail = await detailRes.json();
+        if (detailRes.status === 404) {
+          if (active) {
+            setError({
+              title: "No employment record",
+              detail:
+                "This resource has no employment stints on file, so there is nothing to show. It may have been created without an assignment.",
+              status: 404,
+            });
+          }
+          return;
+        }
+        const detail = await readBody(detailRes);
+        if (!detailRes.ok) {
+          if (active) setError(describeHttpFailure("Couldn't load this resource", detailRes.status, detail));
+          return;
+        }
         if (!active) return;
         setData(detail);
         if (historyRes && historyRes.ok) {
-          const stints = await historyRes.json();
+          const stints = await readBody(historyRes);
           if (active) setHistory(Array.isArray(stints) ? stints : []);
         }
       } catch (e) {
-        if (active && e.name !== "AbortError") setError(e.message || "Couldn't load resource");
+        if (active && e.name !== "AbortError") {
+          setError(describeNetworkFailure("Couldn't load this resource", e));
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -925,10 +1146,21 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
     const bad = formYears.find(
       (yr) => form.rateCardByYear[yr] !== "" && !Number.isFinite(Number(form.rateCardByYear[yr]))
     );
-    if (bad) { setSaveError(`${bad} needs a valid number.`); return; }
-    if (!form.name.trim()) { setSaveError("Full name is required."); return; }
+    // Local checks are framed the same way as server failures so the user
+    // isn't reading two different kinds of error message.
+    if (bad) {
+      setSaveError({ title: "Check the rate card", detail: `${bad} needs a valid number.` });
+      return;
+    }
+    if (!form.name.trim()) {
+      setSaveError({ title: "Full name is required", detail: "Enter the resource's name before saving." });
+      return;
+    }
     if (form.lastDate && form.dateOfJoining && form.lastDate < form.dateOfJoining) {
-      setSaveError("Last date cannot be earlier than the date of joining.");
+      setSaveError({
+        title: "Dates are out of order",
+        detail: "The last date can't be earlier than the date of joining.",
+      });
       return;
     }
 
@@ -967,16 +1199,11 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
         body: JSON.stringify(payload),
       });
 
-      const text = await res.text();
-      let body;
-      try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      const body = await readBody(res);
 
       if (!res.ok) {
-        const detail =
-          (body && typeof body === "object" && (body.message || body.error || body.detail)) ||
-          (typeof body === "string" && body.trim()) ||
-          `Server responded ${res.status}.`;
-        throw new Error(detail);
+        setSaveError(describeHttpFailure("Couldn't save changes", res.status, body));
+        return;
       }
 
       // Prefer the server's echo — it may normalize values we sent.
@@ -986,7 +1213,7 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
       setSavedMsg("Resource details updated.");
       if (onSaved) onSaved(saved);
     } catch (e) {
-      setSaveError(e.message || "Save failed. Please try again.");
+      setSaveError(describeNetworkFailure("Couldn't save changes", e));
     } finally {
       setSaving(false);
     }
@@ -1063,10 +1290,16 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
           {loading ? (
             <div style={{ color: "#64748b", fontSize: 14, padding: "8px 0" }}>Loading…</div>
           ) : error ? (
-            <div className="mr-msg err"><span>!</span>{error}</div>
+            <ResultBanner {...error} tone={error.status === 404 ? "warn" : "err"} />
           ) : tab === "details" && editing ? (
             <div className="mr-form">
-              {saveError && <div className="mr-msg err" style={{ margin: 0 }}><span>!</span>{saveError}</div>}
+              {saveError && (
+                <ResultBanner
+                  {...saveError}
+                  tone="err"
+                  onDismiss={() => setSaveError(null)}
+                />
+              )}
 
               <div className="mr-readonly">
                 <span>Resource ID</span>
@@ -1162,7 +1395,14 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
             </div>
           ) : tab === "details" ? (
             <>
-              {savedMsg && <div className="mr-msg ok"><span>✓</span>{savedMsg}</div>}
+              {savedMsg && (
+                <ResultBanner
+                  tone="ok"
+                  title="Changes saved"
+                  detail={savedMsg}
+                  onDismiss={() => setSavedMsg("")}
+                />
+              )}
               {rows.map((row) => (
                 <div className="mr-detail-row" key={row.label}>
                   <span className="mr-detail-k">{row.label}</span>
@@ -1244,6 +1484,65 @@ function ResourceDrawer({ resId, projectName, onClose, onSaved }) {
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+// Marks a field whose options are still being fetched. Announced politely
+// so a screen reader hears it without the label being read twice.
+function Spinner() {
+  return <span className="mr-spinner" role="status" aria-label="Loading" />;
+}
+
+/* =====================================================================
+   ResultBanner — the single presentation for any API outcome here.
+   `stats` are the numbers the call returned; `issues` are the per-row
+   problems it listed. Both are optional, so the same component covers a
+   plain error and a detailed import report.
+   ===================================================================== */
+function ResultBanner({ tone = "err", title, detail, status, stats, issues, children, onDismiss }) {
+  const icon = tone === "ok" ? "✓" : tone === "warn" ? "!" : "✕";
+  const shown = Array.isArray(issues) ? issues.slice(0, 8) : [];
+  const hidden = Array.isArray(issues) ? issues.length - shown.length : 0;
+  return (
+    <div
+      className={`mr-banner mr-banner--${tone}`}
+      role={tone === "err" ? "alert" : "status"}
+    >
+      <span className="mr-banner-ic" aria-hidden="true">{icon}</span>
+      <div className="mr-banner-body">
+        <div className="mr-banner-title">
+          {title}
+          {/* The status code is diagnostic, not the message — keep it
+              present for a support ticket but out of the sentence. */}
+          {status != null && <span className="mr-banner-status">HTTP {status}</span>}
+        </div>
+        {detail && <div className="mr-banner-detail">{detail}</div>}
+        {Array.isArray(stats) && stats.length > 0 && (
+          <div className="mr-banner-stats">
+            {stats.map((s) => (
+              <div className="mr-banner-stat" key={s.label}>
+                <b>{s.value}</b>
+                <span>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {shown.length > 0 && (
+          <>
+            <ul className="mr-banner-list">
+              {shown.map((t, i) => <li key={i}>{t}</li>)}
+            </ul>
+            {hidden > 0 && (
+              <div className="mr-banner-more">…and {hidden} more.</div>
+            )}
+          </>
+        )}
+        {children}
+      </div>
+      {onDismiss && (
+        <button className="mr-banner-x" onClick={onDismiss} aria-label="Dismiss">✕</button>
+      )}
     </div>
   );
 }
