@@ -13,8 +13,8 @@ import { useEffect, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
   FiX, FiUser, FiBriefcase, FiHash, FiFileText, FiCalendar,
-  FiPlay, FiFlag, FiShield, FiChevronsRight, FiCreditCard,
-  FiUmbrella, FiLayers, FiPieChart, FiClock, FiDollarSign, FiInfo,
+  FiPlay, FiFlag, FiLayers, FiDollarSign, FiInfo, FiUmbrella,
+  FiShield, FiCreditCard, FiPieChart, FiClock,
 } from "react-icons/fi";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -26,25 +26,27 @@ const API_BASE = "http://10.1.131.199:8019";
 
 const C = {
   primary: "#0b3c88",
+  primaryDark: "#072a63",
   ink: "#16202e",
   muted: "#64748b",
   faint: "#94a3b8",
   border: "#e3e9f2",
+  borderStrong: "#cbd5e1",
+  divider: "#eef2f7",
   surface: "#f6f9fc",
   green: "#0f9d58",
   red: "#d64545",
   accentBg: "#eef2ff",
 };
 
-// Tinted background + icon colour per card tone.
+/* Pass / fail tint for the attendance pill — the only place on this page a
+   tinted block still earns its keep, because there the colour states the
+   result. The five decorative tones that used to sit alongside these (blue,
+   purple, orange, amber, teal) tinted an icon badge on every stat card and
+   info item; seven hues competing meant none of them said anything. */
 const TONES = {
-  blue: { bg: "#eef4ff", fg: "#2563eb" },
-  purple: { bg: "#f1edfe", fg: "#7c3aed" },
-  orange: { bg: "#fff1e6", fg: "#ea580c" },
   green: { bg: "#e9f9ef", fg: "#16a34a" },
   red: { bg: "#fdecec", fg: "#dc2626" },
-  amber: { bg: "#fff6e0", fg: "#d97706" },
-  teal: { bg: "#e6f7f6", fg: "#0d9488" },
 };
 
 // Quarter context — dates and the quarter number aren't counts, so they sit
@@ -54,12 +56,54 @@ const CONTEXT_CARDS = [
   { key: "quarterEnd", label: "Quarter End", tone: "orange", icon: <FiFlag /> },
 ];
 
+/* Every label on this page is the term the RFP uses (§5.24 Leave Policy,
+   §5.25 Payment Process) — "Permissible Leave", "Unpaid Leave", "Sandwich
+   Leave", "Relaxation", "Lapsed". These are the words the contract is
+   written in and the words the client already knows, so renaming them to
+   something that reads friendlier in isolation only forces a translation
+   back to the contract. The explanations below quote the RFP's own rules.
+
+   Donut segment colours — validated as a categorical set against a white
+   surface (scripts/validate_palette.js, --pairs all): worst pair ΔE 15.3
+   under deuteranopia, well clear of the ≥8 gate. Green-for-paid /
+   red-for-unpaid was the obvious first choice and FAILED that check at
+   ΔE 4.1 — the classic red/green confusion. Amber sits at 2.17:1 on white,
+   under the 3:1 bar, so every segment ships a visible value beside it. */
+const SPLIT = [
+  {
+    key: "paid",
+    label: "Paid Leave",
+    color: "#2a78d6",
+    hint: "Days covered by the quarter's permissible leave. No deduction for these.",
+  },
+  {
+    key: "relaxation",
+    label: "Relaxation",
+    color: "#eda100",
+    hint: "Unpaid days waived by UIDAI against an exigency request (RFP 5.24.1.b.vi). No deduction for these.",
+  },
+  {
+    key: "unpaid",
+    label: "Unpaid Leave",
+    color: "#e34948",
+    hint: "Absence beyond the permissible six days a quarter. Salary is deducted for these (RFP 5.24.1.a.i).",
+  },
+];
+
+/* The remaining figures from the report, in the RFP's terms. Kept as one
+   plain list rather than a grid of tiles — the numbers are reference, not
+   headlines, and eight loud tiles were what made this page hard to read. */
+/* The settlement order, straight from the RFP: leave is set against the
+   permissible allowance first, then any relaxation granted; the remainder
+   is unpaid and deducted. */
+const SECTION_HINT =
+  "Leave taken is settled in order: first against the permissible leave for the quarter, then against any relaxation granted. Whatever remains is unpaid and gets deducted.";
+
 // Leave-summary cards — key maps to the report payload, label is the display
 // text, tone/icon drive the styling. Order follows how the quarter settles:
 // allowance, then what was taken, then how it was absorbed.
 const SUMMARY_CARDS = [
   { key: "permissibleLeave", label: "Permissible Leave", tone: "green", icon: <FiShield /> },
-  // { key: "carriedForwardLeave", label: "Carried Forward Leave", tone: "blue", icon: <FiChevronsRight /> },
   { key: "leaveTaken", label: "Leave Taken", tone: "blue", icon: <FiBriefcase /> },
   { key: "paidLeave", label: "Paid Leave", tone: "green", icon: <FiCreditCard /> },
   { key: "unpaidLeave", label: "Unpaid Leave", tone: "red", icon: <FiFileText /> },
@@ -73,9 +117,6 @@ const SUMMARY_CARDS = [
 // (an allowance vs. what was used vs. what's left over), so every card carries
 // its meaning rather than leaving the reader to infer it.
 const HINTS = {
-  quarter: "The quarter this report covers.",
-  quarterStart: "First day of the quarter.",
-  quarterEnd: "Last day of the quarter.",
   permissibleLeave: "Paid leave allowed for this quarter. Leave within this limit costs the employee nothing.",
   leaveTaken: "Total days of leave taken in the quarter, before any of it is classified as paid or unpaid.",
   paidLeave: "Days covered by the permissible allowance. No salary is deducted for these.",
@@ -85,42 +126,6 @@ const HINTS = {
   totalUnpaidDays: "Every day being deducted this quarter — unpaid leave plus sandwich days.",
   lapsedLeave: "Allowance that went unused and has expired. It does not carry into the next quarter.",
 };
-
-const SECTION_HINT =
-  "Leave taken is settled in order: first against the paid allowance, then against any relaxation granted. Whatever remains is unpaid and gets deducted.";
-
-/* Donut segment colours — validated as a categorical set against a white
-   surface (scripts/validate_palette.js, --pairs all): worst pair ΔE 15.3
-   under deuteranopia, well clear of the ≥8 gate.
-
-   Green-for-paid / red-for-unpaid was the obvious first choice and FAILED
-   that check at ΔE 4.1 — the classic red/green confusion. Blue→amber→red
-   still reads as a scale from "fine" to "costs you money" without leaning
-   on the one hue pair a colourblind reader can't separate.
-
-   Amber sits at 2.17:1 on white, under the 3:1 bar, so every segment ships
-   a visible value in the legend beside it — the relief the check requires.
-   Colour is never the only channel here. */
-const SPLIT = [
-  {
-    key: "paid",
-    label: "Paid leave",
-    color: "#2a78d6",
-    hint: "Covered by the quarter's allowance. Nothing is deducted for these days.",
-  },
-  {
-    key: "relaxation",
-    label: "Relaxation",
-    color: "#eda100",
-    hint: "Days waived as an exception, on top of the allowance. Nothing is deducted for these either.",
-  },
-  {
-    key: "unpaid",
-    label: "Unpaid",
-    color: "#e34948",
-    hint: "Not covered by the allowance or by relaxation. Salary is deducted for these days.",
-  },
-];
 
 const show = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
 const num = (v) => {
@@ -138,7 +143,99 @@ const formatLabel = (key) =>
 const money = (v) =>
   `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+
 const pct = (v) => `${num(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+
+/* Day counts arrive as 19.5 / 2.0 — render a half day as "2.5" without
+   dressing a whole day up as "2.0". */
+const dayCount = (v) => {
+  const n = num(v);
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+};
+
+/* ═══════════════════════════════════════════════════════════════════
+   TEMPORARY — three candidate presentations for the leave dates, behind
+   a switcher, so they can be compared side by side. Once one is chosen,
+   delete the other two, the `view` state and the `.ld-switch` styles.
+   ═══════════════════════════════════════════════════════════════════ */
+const MONTH_NAMES = [
+  "", "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const DOW = ["M", "T", "W", "T", "F", "S", "S"];
+
+const pad2 = (n) => String(n).padStart(2, "0");
+
+/* Leave dates arrive as strings of no guaranteed shape, so reduce each to
+   a "YYYY-MM-DD" key before matching it against a calendar cell. The Date
+   fallback is gated on a four-digit year — Date parsing is lenient enough
+   to invent one, and a wrong key would mark the wrong day. */
+const dateKey = (v) => {
+  if (!v) return "";
+  const s = String(v).trim();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (iso) return `${iso[1]}-${pad2(iso[2])}-${pad2(iso[3])}`;
+  if (/\d{4}/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+  }
+  return "";
+};
+
+// Monday-first grid, padded to whole weeks.
+function buildMonthGrid(year, month) {
+  const jsDay = new Date(year, month - 1, 1).getDay();   // 0 = Sunday
+  const lead = (jsDay + 6) % 7;                          // shift to Monday-first
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+/* ── per-month leave, derived from the cost report ────────────────────
+   The monthly breakdown carries no "total leave" field, but it carries the
+   parts, and they reconcile exactly:
+
+     effectivePaidDays = presentDays + paidLeaveDaysApplied + relaxationDaysApplied
+     unpaid            = workingDays − effectivePaidDays
+     deductedAmount    = unpaid × perDayRate
+
+   Verified against a live Q3-2026 payload: July's 0.5 unpaid day × ₹4385.83
+   is exactly its ₹2192.91 deduction, and the same holds for the other two
+   months. So `unpaid` here is not an estimate — it is the very figure the
+   deduction is charged on. */
+function monthLeave(m) {
+  const paid = num(m.paidLeaveDaysApplied);
+  const unpaid = Math.max(0, num(m.workingDays) - num(m.effectivePaidDays));
+  return { paid, unpaid, total: paid + unpaid };
+}
+
+/* ── cost report envelope ─────────────────────────────────────────────
+   /api/attendance/cost/quarterly now answers with
+     { period, resourceCount, totals, resources: [ …one per resource… ] }
+   where each resource carries its own totalCost + monthlyBreakdown. Older
+   builds returned that single report object directly, or wrapped in an
+   array, so all three shapes are unwrapped here. Returns the one resource
+   this page is about, plus the envelope's totals for the summary cards. */
+function unwrapCostReport(json, resourceId) {
+  let payload = json && json.data && typeof json.data === "object" ? json.data : json;
+  if (Array.isArray(payload)) return { report: payload[0] || {}, totals: null };
+  if (!payload || typeof payload !== "object") return { report: {}, totals: null };
+
+  const rows = Array.isArray(payload.resources) ? payload.resources : null;
+  if (!rows) return { report: payload, totals: null };
+
+  const match =
+    rows.find((r) => String(r.attendanceId) === String(resourceId)) || rows[0] || {};
+  return {
+    report: { ...match, period: match.period || payload.period },
+    totals: payload.totals || null,
+  };
+}
 
 export default function LeaveDetailPage() {
   const { projectId, attendanceId } = useParams();
@@ -161,6 +258,7 @@ export default function LeaveDetailPage() {
 
   // Quarterly cost report — shown at the bottom of the page.
   const [costReport, setCostReport] = useState(null);
+  const [costTotals, setCostTotals] = useState(null);
   const [costLoading, setCostLoading] = useState(false);
   const [costError, setCostError] = useState(null);
 
@@ -214,10 +312,11 @@ export default function LeaveDetailPage() {
         });
         if (!res.ok) throw new Error(`Couldn't load quarterly cost report (${res.status})`);
         const json = await res.json();
-        let payload = json && json.data && typeof json.data === "object" ? json.data : json;
-        // Some endpoints wrap the single report object in an array — unwrap it.
-        if (Array.isArray(payload)) payload = payload[0] || {};
-        if (active) setCostReport(payload || {});
+        const { report, totals } = unwrapCostReport(json, resourceId);
+        if (active) {
+          setCostReport(report || {});
+          setCostTotals(totals);
+        }
       } catch (e) {
         if (active) setCostError(e?.message || "Couldn't load quarterly cost report");
       } finally {
@@ -258,45 +357,12 @@ export default function LeaveDetailPage() {
   const splitValues = { paid: paidLeave, relaxation: relaxUsed, unpaid: unpaidLeave };
   const splitSegments = SPLIT.map((s) => ({ ...s, value: num(splitValues[s.key]) }));
   const splitTotal = splitSegments.reduce((t, s) => t + s.value, 0);
-  const permissible = num(d.permissibleLeave);
-  const sandwich = num(d.sandwichDays);
-  const totalUnpaid = num(d.totalUnpaidDays);
+  /* The remaining report figures are rendered straight from `d` by the
+     SUMMARY_CARDS grid, so they need no locals here. The quarter's deduction
+     amount lives in the cost report below, where the per-month working
+     that produces it is also shown — repeating it up here would be the
+     same number in two places. */
 
-  // Money is the part a non-specialist actually reacts to, so pull the
-  // quarter's deduction out of the cost report and say it in words.
-  const deducted = (costReport?.monthlyBreakdown || []).reduce(
-    (t, m) => t + num(m.deductedAmount),
-    0
-  );
-
-  // One sentence, no jargon, stating the outcome of the quarter.
-  const verdict = (() => {
-    if (leaveTaken === 0) {
-      return {
-        tone: "good",
-        text: "No leave was taken this quarter, so nothing is deducted.",
-      };
-    }
-    if (totalUnpaid === 0) {
-      return {
-        tone: "good",
-        text: `All ${leaveTaken} ${leaveTaken === 1 ? "day" : "days"} of leave were covered${
-          relaxUsed > 0 ? " — partly by relaxation granted this quarter" : " by the paid allowance"
-        }. Nothing is deducted from salary.`,
-      };
-    }
-    const parts = [];
-    if (unpaidLeave > 0) parts.push(`${unpaidLeave} unpaid ${unpaidLeave === 1 ? "day" : "days"}`);
-    if (sandwich > 0) parts.push(`${sandwich} sandwich ${sandwich === 1 ? "day" : "days"}`);
-    return {
-      tone: "bad",
-      text: `Of the ${leaveTaken} ${leaveTaken === 1 ? "day" : "days"} taken, ${parts.join(
-        " and "
-      )} fall outside the allowance — ${totalUnpaid} ${
-        totalUnpaid === 1 ? "day is" : "days are"
-      } deducted from salary this quarter.`,
-    };
-  })();
   /* Relaxation exists to offset unpaid leave, so the unpaid balance is the
      only thing that decides whether the action is offered. Half-days count:
      `> 0` is deliberate — 0.5 unpaid days still earn the button, which a
@@ -340,32 +406,16 @@ export default function LeaveDetailPage() {
 
       {!loading && !error && (
         <>
-          {/* At a glance — leads the page so the outcome is readable before
-              any of the tables below. */}
+          {/* Leave summary — one card, one chart, one list. The donut shows
+              how Leave Taken splits; the list carries the remaining figures
+              from the report. All labels are the RFP's own terms. */}
           <section className="ld-section">
             <h2 className="ld-section-title">
-              At a glance
+              Leave summary
               <Hint text={SECTION_HINT} />
             </h2>
-
-            <div className={`ld-verdict ld-verdict--${verdict.tone}`}>
-              <span className="ld-verdict-ic" aria-hidden="true">
-                {verdict.tone === "good" ? "✓" : "!"}
-              </span>
-              <div>
-                <div className="ld-verdict-text">{verdict.text}</div>
-                {deducted > 0 && (
-                  <div className="ld-verdict-money">
-                    Approximately <strong>{money(deducted)}</strong> is withheld across the
-                    quarter — see the cost report below for the month-by-month figures.
-                  </div>
-                )}
-              </div>
-            </div>
-
             <div className="uidai-pmis-card ld-card">
               <div className="ld-glance">
-                {/* Part-to-whole: how the quarter's leave settled */}
                 <div className="ld-glance-chart">
                   <LeaveDonut
                     segments={splitSegments}
@@ -375,67 +425,54 @@ export default function LeaveDetailPage() {
                   />
                 </div>
 
-                {/* The legend is also the table view — every segment's exact
-                    value and share is here in text, so nothing is carried by
-                    colour alone or gated behind a hover. */}
+                {/* The legend doubles as the table view — every value is here
+                    as text, so nothing rides on colour or on hovering. */}
                 <div className="ld-legend">
-                  <div className="ld-legend-cap">How the {splitTotal} {splitTotal === 1 ? "day" : "days"} taken were settled</div>
-                  {splitSegments.map((s) => {
-                    const share = splitTotal > 0 ? (s.value / splitTotal) * 100 : 0;
-                    return (
-                      <div
-                        key={s.key}
-                        className={`ld-legend-row${hoverKey === s.key ? " is-on" : ""}${
-                          s.value === 0 ? " is-zero" : ""
-                        }`}
-                        onMouseEnter={() => s.value > 0 && setHoverKey(s.key)}
-                        onMouseLeave={() => setHoverKey(null)}
-                      >
-                        <span className="ld-legend-dot" style={{ background: s.color }} />
-                        <span className="ld-legend-lbl">
-                          {s.label}
-                          <Hint text={s.hint} />
-                        </span>
-                        <span className="ld-legend-val">
-                          {s.value} {s.value === 1 ? "day" : "days"}
-                        </span>
-                        <span className="ld-legend-pct">
-                          {splitTotal > 0 ? `${Math.round(share)}%` : "—"}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {splitSegments.map((s) => (
+                    <div
+                      key={s.key}
+                      className={`ld-legend-row${hoverKey === s.key ? " is-on" : ""}${
+                        s.value === 0 ? " is-zero" : ""
+                      }`}
+                      onMouseEnter={() => s.value > 0 && setHoverKey(s.key)}
+                      onMouseLeave={() => setHoverKey(null)}
+                    >
+                      <span className="ld-legend-dot" style={{ background: s.color }} />
+                      <span className="ld-legend-lbl">
+                        {s.label}
+                        <Hint text={s.hint} />
+                      </span>
+                      <span className="ld-legend-val">{s.value}</span>
+                    </div>
+                  ))}
                   {!breakdownBalances && leaveTaken > 0 && (
                     <div className="ld-legend-note">
-                      Note: the report lists {leaveTaken} {leaveTaken === 1 ? "day" : "days"} taken,
-                      which doesn&apos;t match the {splitTotal} shown here. The chart plots the
-                      paid / relaxation / unpaid figures as reported.
+                      Report lists {leaveTaken} days taken — chart plots {splitTotal}.
                     </div>
                   )}
                 </div>
 
-                {/* Two ratios against a limit — meters, not charts. */}
-                <div className="ld-meters">
-                  <Meter
-                    label="Paid allowance"
-                    used={Math.min(paidLeave, permissible)}
-                    cap={permissible}
-                    hue="#2a78d6"
-                    track="#cde2fb"
-                    hint="Paid days this quarter allows. Leave within this limit costs nothing."
-                  />
-                  {relaxCap > 0 && (
-                    <Meter
-                      label="Relaxation"
-                      used={relaxUsed}
-                      cap={relaxCap}
-                      hue="#eda100"
-                      track="#fdedc9"
-                      hint="Extra days that can be waived on top of the allowance this quarter."
-                    />
-                  )}
-                </div>
               </div>
+            </div>
+
+            {/* The eight-figure grid, as it was. The donut above shows how the
+                quarter split; this carries every number the report returns. */}
+            <div className="ld-grid" style={{ marginTop: 14 }}>
+              {SUMMARY_CARDS.map((c) => (
+                <StatCard
+                  key={c.key}
+                  tone={c.tone}
+                  icon={c.icon}
+                  label={c.label}
+                  value={show(d[c.key])}
+                  hint={HINTS[c.key]}
+                  sub={
+                    c.key === "relaxationLeave" && relaxCap > 0
+                      ? `${relaxUsed} of ${relaxCap} used · ${relaxLeft} left`
+                      : null
+                  }
+                />
+              ))}
             </div>
           </section>
 
@@ -455,67 +492,30 @@ export default function LeaveDetailPage() {
             </div>
           </section>
 
-          {/* Leave summary */}
-          <section className="ld-section">
-            <h2 className="ld-section-title">
-              Leave summary
-              <Hint text={SECTION_HINT} />
-            </h2>
-            <div className="ld-grid">
-              {SUMMARY_CARDS.map((c) => (
-                <StatCard
-                  key={c.key}
-                  tone={c.tone}
-                  icon={c.icon}
-                  label={c.label}
-                  value={show(d[c.key])}
-                  hint={HINTS[c.key]}
-                  sub={
-                    c.key === "relaxationLeave" && relaxCap > 0
-                      ? `${relaxUsed} of ${relaxCap} used · ${relaxLeft} left`
-                      : null
-                  }
-                />
-              ))}
-            </div>
-          </section>
-
-          {/* Leave dates — the breakdown sits here, where the paid vs unpaid
-              split is what the reader is actually trying to reconcile. */}
-          <section className="ld-section">
-            <h2 className="ld-section-title">Leave dates</h2>
-            <div className="uidai-pmis-card ld-card">
-              {/* The "taken = paid + relaxation + unpaid" equation that used to
-                  sit here is now the donut in "At a glance" — the same split,
-                  read as proportions instead of arithmetic. */}
-              <div className="ld-dates">
-                <DateList
-                  tone="green"
-                  title="Paid Leave Dates"
-                  dates={paidDates}
-                  hint="Leave days covered by the paid allowance — no deduction for these."
-                />
-                <DateList
-                  tone="red"
-                  title="Unpaid Leave Dates"
-                  dates={unpaidDates}
-                  hint="Leave days that fell outside the paid allowance. Any relaxation granted is applied against these."
-                  note={
-                    unpaidDates.length > 0 && unpaidLeave === 0
-                      ? relaxUsed > 0
-                        ? `Covered by ${relaxUsed} relaxation ${relaxUsed === 1 ? "day" : "days"} — nothing deducted.`
-                        : "No unpaid balance remaining — nothing deducted."
-                      : null
-                  }
-                />
-              </div>
-            </div>
-          </section>
+          {/* TEMPORARY — three candidate layouts behind a switcher. */}
+          <LeaveDatesSection
+            paidDates={paidDates}
+            unpaidDates={unpaidDates}
+            year={d.year || year}
+            quarter={d.quarter || quarter}
+            note={
+              unpaidDates.length > 0 && unpaidLeave === 0
+                ? relaxUsed > 0
+                  ? `Covered by ${relaxUsed} relaxation ${relaxUsed === 1 ? "day" : "days"} — nothing deducted.`
+                  : "No unpaid balance remaining — nothing deducted."
+                : null
+            }
+          />
 
           {/* Quarterly cost report */}
           <section className="ld-section">
             <h2 className="ld-section-title">Quarterly cost report</h2>
-            <CostReportSection loading={costLoading} error={costError} report={costReport} />
+            <CostReportSection
+              loading={costLoading}
+              error={costError}
+              report={costReport}
+              totals={costTotals}
+            />
           </section>
         </>
       )}
@@ -563,7 +563,9 @@ function Hint({ text }) {
    the legend beside it. */
 function LeaveDonut({ segments, total, hoverKey, onHover }) {
   const R = 58;
-  const STROKE = 22;
+  // Thinner ring reads more considered than a fat one; the arc maths is
+  // measured along the circumference, so stroke width doesn't touch it.
+  const STROKE = 16;
   const CIRC = 2 * Math.PI * R;
   const live = segments.filter((s) => s.value > 0);
 
@@ -629,84 +631,238 @@ function LeaveDonut({ segments, total, hoverKey, onHover }) {
   );
 }
 
-/* A single ratio against a limit — the form the data calls for is a meter,
-   not another chart. Track is a lighter step of the fill's own hue so the
-   state reads across the whole bar. */
-function Meter({ label, used, cap, hue, track, hint, unit = "days" }) {
-  const pctUsed = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
-  const left = Math.max(0, cap - used);
-  return (
-    <div className="ld-meter">
-      <div className="ld-meter-top">
-        <span className="ld-meter-lbl">
-          {label}
-          <Hint text={hint} />
-        </span>
-        <span className="ld-meter-val">
-          {used} <span className="ld-meter-of">of {cap}</span>
-        </span>
-      </div>
-      <div className="ld-meter-track" style={{ background: track }}>
-        <div className="ld-meter-fill" style={{ width: `${pctUsed}%`, background: hue }} />
-      </div>
-      <div className="ld-meter-foot">
-        {left > 0
-          ? `${left} ${left === 1 ? unit.replace(/s$/, "") : unit} still available`
-          : "Fully used — further leave is unpaid"}
-      </div>
-    </div>
-  );
-}
-
-function InfoItem({ tone, icon, label, value }) {
-  const t = TONES[tone] || TONES.blue;
+// Same restraint as StatCard — the icon is a quiet marker beside the label,
+// not a coloured badge competing with the value.
+function InfoItem({ icon, label, value }) {
   return (
     <div className="ld-info-item">
-      <span className="ld-info-ico" style={{ background: t.bg, color: t.fg }}>{icon}</span>
-      <div className="ld-info-text">
-        <div className="ld-info-lbl">{label}</div>
-        <div className="ld-info-val">{value}</div>
+      <div className="ld-info-lbl">
+        {icon && <span className="ld-info-ico">{icon}</span>}
+        {label}
       </div>
+      <div className="ld-info-val">{value}</div>
     </div>
   );
 }
 
+/* Colour is spent only where it carries meaning: the figures that mean pay
+   is being withheld. Every other tile stays neutral — eight tinted icon
+   chips in seven hues were decorating the page, not informing it, and they
+   drowned out the two numbers that actually matter. */
 function StatCard({ tone, icon, label, value, hint, sub }) {
-  const t = TONES[tone] || TONES.blue;
+  const alert = tone === "red";
   return (
-    <div className="ld-stat">
-      <span className="ld-stat-ico" style={{ background: t.bg, color: t.fg }}>{icon}</span>
-      <div className="ld-stat-text">
-        <div className="ld-stat-lbl">
-          {label}
-          <Hint text={hint} />
-        </div>
-        <div className="ld-stat-val">{value}</div>
-        {sub && <div className="ld-stat-sub">{sub}</div>}
+    <div className={`ld-stat${alert ? " ld-stat--alert" : ""}`}>
+      <div className="ld-stat-lbl">
+        {icon && <span className="ld-stat-ico">{icon}</span>}
+        <span className="ld-stat-lbl-txt">{label}</span>
+        <Hint text={hint} />
       </div>
+      <div className="ld-stat-val">{value}</div>
+      {sub && <div className="ld-stat-sub">{sub}</div>}
     </div>
   );
 }
 
-function DateList({ tone, title, dates, hint, note }) {
-  const t = TONES[tone] || TONES.green;
+function DateList({ color, chipBg, title, dates, note }) {
   return (
     <div className="ld-datecol">
-      <div className="ld-datehead" style={{ color: t.fg }}>
-        <FiCalendar /> {title.toUpperCase()} ({dates.length})
-        <Hint text={hint} />
+      {/* The swatch is the exact donut-segment colour, so the tie between
+          this list and that slice is visual rather than explained. */}
+      <div className="ld-datehead">
+        <span className="ld-datehead-dot" style={{ background: color }} />
+        {title} · {dates.length} {dates.length === 1 ? "day" : "days"}
       </div>
       {note && <div className="ld-datenote">{note}</div>}
       {dates.length ? (
         <div className="ld-datechips">
           {dates.map((dt, i) => (
-            <span key={i} className="ld-datechip" style={{ background: t.bg, color: t.fg }}>{dt}</span>
+            <span key={i} className="ld-datechip" style={{ background: chipBg, color: C.ink }}>{dt}</span>
           ))}
         </div>
       ) : (
         <div className="ld-muted" style={{ padding: "4px 0" }}>None</div>
       )}
     </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TEMPORARY — the three candidates. Keep one, delete the rest.
+   ═══════════════════════════════════════════════════════════════════ */
+
+function MonthGrid({ year, month, paidSet, unpaidSet }) {
+  const cells = buildMonthGrid(year, month);
+  return (
+    <div className="ld-cal">
+      <div className="ld-cal-title">{MONTH_NAMES[month]} {year}</div>
+      <div className="ld-cal-dow">
+        {DOW.map((d, i) => <span key={i}>{d}</span>)}
+      </div>
+      <div className="ld-cal-grid">
+        {cells.map((day, i) => {
+          if (!day) return <span key={i} className="ld-cal-cell is-blank" />;
+          const key = `${year}-${pad2(month)}-${pad2(day)}`;
+          const paid = paidSet.has(key);
+          const unpaid = unpaidSet.has(key);
+          // Monday-first grid: indexes 5 and 6 of each week are Sat/Sun.
+          const weekend = i % 7 >= 5;
+          const cls = paid ? " is-paid" : unpaid ? " is-unpaid" : weekend ? " is-weekend" : "";
+          const title = paid ? `${key} · Paid Leave` : unpaid ? `${key} · Unpaid Leave` : key;
+          return (
+            <span key={i} className={`ld-cal-cell${cls}`} title={title}>{day}</span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* Candidate A — quarter calendar. The only view where a weekend caught
+   between two unpaid days is visible, which is what sandwich leave is. */
+function QuarterCalendar({ year, quarter, paidDates, unpaidDates }) {
+  const q = Number(quarter) || 1;
+  const yr = Number(year) || new Date().getFullYear();
+  const paidSet = new Set(paidDates.map(dateKey).filter(Boolean));
+  const unpaidSet = new Set(unpaidDates.map(dateKey).filter(Boolean));
+  const months = [0, 1, 2].map((i) => (q - 1) * 3 + 1 + i);
+
+  const matched = paidSet.size + unpaidSet.size;
+  const total = paidDates.length + unpaidDates.length;
+
+  return (
+    <>
+      <div className="ld-cal-wrap">
+        {months.map((m) => (
+          <MonthGrid key={m} year={yr} month={m} paidSet={paidSet} unpaidSet={unpaidSet} />
+        ))}
+      </div>
+      <div className="ld-cal-legend">
+        <span><i className="ld-cal-key is-paid" /> Paid Leave</span>
+        <span><i className="ld-cal-key is-unpaid" /> Unpaid Leave</span>
+        <span><i className="ld-cal-key is-weekend" /> Weekend</span>
+      </div>
+      {/* An unreadable date format would silently mark nothing — say so
+          rather than showing an empty quarter as if it were leave-free. */}
+      {total > 0 && matched === 0 && (
+        <div className="ld-datenote" style={{ marginTop: 12 }}>
+          {total} leave dates were returned but none could be read as calendar
+          dates, so no days are marked below.
+        </div>
+      )}
+    </>
+  );
+}
+
+/* Candidate B — the current chip lists, foldable. */
+function DateChipLists({ paidDates, unpaidDates, note }) {
+  return (
+    <div className="ld-dates">
+      <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} />
+      <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} />
+    </div>
+  );
+}
+
+/* Hosts all three so they can be compared. The switcher is scaffolding —
+   it goes when one is picked. */
+function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
+  const [view, setView] = useState("calendar");
+  const [open, setOpen] = useState(true);
+  const [drawer, setDrawer] = useState(false);
+
+  const VIEWS = [
+    ["calendar", "A · Calendar"],
+    ["collapse", "B · Collapsible"],
+    ["drawer", "C · Side drawer"],
+  ];
+
+  return (
+    <section className="ld-section">
+      <h2 className="ld-section-title">
+        Leave dates
+        <span className="ld-switch">
+          {VIEWS.map(([k, lbl]) => (
+            <button
+              key={k}
+              type="button"
+              className={`ld-switch-btn${view === k ? " is-on" : ""}`}
+              onClick={() => setView(k)}
+            >
+              {lbl}
+            </button>
+          ))}
+        </span>
+      </h2>
+
+      {view === "calendar" && (
+        <div className="uidai-pmis-card ld-card">
+          <QuarterCalendar
+            year={year}
+            quarter={quarter}
+            paidDates={paidDates}
+            unpaidDates={unpaidDates}
+          />
+        </div>
+      )}
+
+      {view === "collapse" && (
+        <div className="uidai-pmis-card ld-card" style={{ padding: 0 }}>
+          <button
+            type="button"
+            className="ld-fold"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+          >
+            <span className="ld-fold-chev">{open ? "▾" : "▸"}</span>
+            Paid &amp; unpaid leave dates
+            <span className="ld-fold-count">
+              {paidDates.length + unpaidDates.length} dates
+            </span>
+          </button>
+          {open && (
+            <div style={{ padding: "0 20px 18px" }}>
+              <DateChipLists paidDates={paidDates} unpaidDates={unpaidDates} note={note} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "drawer" && (
+        <>
+          <div className="uidai-pmis-card ld-card">
+            <div className="ld-drawer-teaser">
+              <div>
+                <div className="ld-drawer-teaser-num">
+                  {paidDates.length + unpaidDates.length}
+                </div>
+                <div className="ld-drawer-teaser-cap">leave dates this quarter</div>
+              </div>
+              <button className="ld-btn ld-btn--ghost" onClick={() => setDrawer(true)}>
+                View leave dates →
+              </button>
+            </div>
+          </div>
+          {drawer && (
+            <div className="ld-scrim" onMouseDown={(e) => e.target === e.currentTarget && setDrawer(false)}>
+              <aside className="ld-drawer" role="dialog" aria-modal="true" aria-label="Leave dates">
+                <div className="ld-drawer-head">
+                  <h3 className="ld-drawer-title">Leave dates</h3>
+                  <button className="ld-close" onClick={() => setDrawer(false)} aria-label="Close">
+                    <FiX size={18} />
+                  </button>
+                </div>
+                <div className="ld-drawer-body">
+                  <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} />
+                  <div style={{ height: 22 }} />
+                  <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} />
+                </div>
+              </aside>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -724,7 +880,7 @@ const COST_KNOWN_KEYS = new Set([
   "attendanceId", "employeeName", "projectId", "period", "totalCost", "monthlyBreakdown",
 ]);
 
-function CostReportSection({ loading, error, report }) {
+function CostReportSection({ loading, error, report, totals }) {
   if (loading) return <div className="ld-muted">Loading cost report…</div>;
   if (error) return <div className="ld-error">⚠️ {error}</div>;
   if (!report || typeof report !== "object" || Object.keys(report).length === 0) {
@@ -734,6 +890,21 @@ function CostReportSection({ loading, error, report }) {
   const months = Array.isArray(report.monthlyBreakdown) ? report.monthlyBreakdown : [];
   const extraEntries = Object.entries(report).filter(([k]) => !COST_KNOWN_KEYS.has(k));
 
+  /* Relaxation is GRANTED per quarter but APPLIED per month —
+     relaxationDaysApplied is 1.0 in July and 0.0 in Aug/Sep of the live
+     payload, i.e. real per-month values rather than one figure stamped
+     across the rows. The quarter's total is therefore the sum, not the max.
+     It is summarised here rather than kept as a column because the grant it
+     draws on is a quarterly one. */
+  const relaxationApplied = months.reduce((t, m) => t + num(m.relaxationDaysApplied), 0);
+
+  /* The envelope's totals carry the quarter's deduction; without one (older
+     payload shape) the months add up to the same figure. */
+  const totalDeducted =
+    totals?.totalDeductedAmount != null
+      ? num(totals.totalDeductedAmount)
+      : months.reduce((t, m) => t + num(m.deductedAmount), 0);
+
   return (
     <>
       {/* Summary cards */}
@@ -742,8 +913,12 @@ function CostReportSection({ loading, error, report }) {
           hint="The quarter this cost report covers." />
         <StatCard tone="green" icon={<FiDollarSign />} label="Total Cost" value={money(report.totalCost)}
           hint="Billable cost for the quarter — the sum of each month's cost after deductions." />
+        <StatCard tone="red" icon={<FiFileText />} label="Total Deducted" value={money(totalDeducted)}
+          hint="Amount withheld across the quarter for absent and unpaid days." />
         <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
           hint="How many months of the quarter are included in the breakdown below." />
+        <StatCard tone="amber" icon={<FiUmbrella />} label="Relaxation Applied" value={dayCount(relaxationApplied)}
+          hint="Relaxation days applied across the quarter, against the relaxation granted for it." />
       </div>
 
       {/* Monthly breakdown table */}
@@ -757,7 +932,7 @@ function CostReportSection({ loading, error, report }) {
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
                 <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
-                <th className="ld-num" title="Relaxation days allowed for the quarter.">Relaxation Allowed</th>
+                <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
                 <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th>
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Monthly rate divided by the working days in the month.">Per Day Rate</th>
@@ -767,13 +942,20 @@ function CostReportSection({ loading, error, report }) {
               </tr>
             </thead>
             <tbody>
-              {months.map((m, i) => (
+              {months.map((m, i) => {
+                const leave = monthLeave(m);
+                return (
                 <tr key={i}>
                   <td className="ld-costtable-period">{show(m.period)}</td>
                   <td>{show(m.rateYear)}</td>
                   <td className="ld-num">{show(m.workingDays)}</td>
                   <td className="ld-num">{show(m.presentDays)}</td>
-                  <td className="ld-num">{show(m.relaxationDaysApplied)}</td>
+                  <td
+                    className="ld-num"
+                    title={`${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid`}
+                  >
+                    {dayCount(leave.total)}
+                  </td>
                   <td className="ld-num">
                     <span
                       className="ld-attpill"
@@ -792,10 +974,13 @@ function CostReportSection({ loading, error, report }) {
                   <td className="ld-num ld-costtable-cost">{money(m.deductedAmount)}</td>
                                     <td className="ld-num">{money(m.cost)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             <tfoot>
               <tr>
+                {/* 9 = the ten body columns minus the Cost column this
+                    total sits under. Bump it if a column is added. */}
                 <td colSpan={9} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
               </tr>
@@ -1009,33 +1194,41 @@ const LD_CSS = `
 .ld-page :focus-visible { outline: 2px solid ${C.primary}; outline-offset: 2px; border-radius: 6px; }
 
 /* Section card — pairs with .uidai-pmis-card so it inherits the house
-   navy→cyan top stripe, the same way .att-card does. */
-.ld-card { padding: 16px 18px; margin-bottom: 0; border: 1px solid ${C.border}; }
+   navy→cyan top stripe. The house shadow is traded for a hairline: at four
+   cards a page the drop shadows stacked up and read heavy. */
+.ld-card { padding: 18px 20px; margin-bottom: 0; border: 1px solid ${C.border};
+  box-shadow: 0 1px 2px rgba(16,32,60,.04); }
 
 /* header */
-.ld-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.ld-head { display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; margin-bottom: 26px; padding-bottom: 18px; border-bottom: 1px solid ${C.border};
+  flex-wrap: wrap; }
 .ld-head-main { min-width: 0; }
-.ld-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: ${C.primary}; margin-bottom: 6px; }
-.ld-title { margin: 0 0 4px; letter-spacing: -.02em; }
-.ld-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
+.ld-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 7px; }
+.ld-title { margin: 0 0 5px; letter-spacing: -.022em; }
+.ld-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; font-size: 13.5px; }
 .ld-head-actions { display: flex; align-items: center; gap: 10px; }
 .ld-close { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid ${C.border}; background: #fff; color: ${C.muted}; cursor: pointer; transition: all .15s ease; }
-.ld-close:hover { background: ${C.surface}; color: ${C.ink}; }
+.ld-close:hover { background: ${C.surface}; color: ${C.ink}; border-color: ${C.faint}; }
 
-/* sections */
-.ld-section { margin-bottom: 22px; }
-.ld-section-title { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 10px; letter-spacing: -.01em; }
+/* sections — the title is a quiet label with a rule running off it, so the
+   eye goes to the figures rather than to the headings. */
+.ld-section { margin-bottom: 28px; }
+.ld-section-title { display: flex; align-items: center; gap: 8px; font-size: 11.5px;
+  font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: ${C.muted};
+  margin: 0 0 12px; }
+.ld-section-title::after { content: ""; flex: 1; height: 1px; background: ${C.border}; }
 
 /* employee info */
 /* six fields — 3×2 keeps both rows full rather than orphaning the last one */
-.ld-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 20px; }
+.ld-info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 24px; }
 @media (max-width: 860px) { .ld-info { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .ld-info { grid-template-columns: 1fr; } }
-.ld-info-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.ld-info-ico { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font-size: 14px; flex: 0 0 30px; }
-.ld-info-text { min-width: 0; }
-.ld-info-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 1px; }
-.ld-info-val { font-size: 13.5px; font-weight: 700; color: ${C.ink}; word-break: break-word; }
+.ld-info-item { min-width: 0; }
+.ld-info-ico { display: inline-grid; place-items: center; font-size: 12px; color: ${C.faint}; }
+.ld-info-lbl { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 4px; }
+.ld-info-val { font-size: 14px; font-weight: 600; color: ${C.ink}; word-break: break-word; }
 
 /* leave summary grid — eight tiles, so they run denser than the four-up
    metric row on Attendance while keeping the same card treatment. */
@@ -1043,12 +1236,23 @@ const LD_CSS = `
 @media (max-width: 980px) { .ld-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 720px) { .ld-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 460px) { .ld-grid { grid-template-columns: 1fr; } }
-.ld-stat { display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid ${C.border}; border-radius: 10px; padding: 11px 13px; box-shadow: 0 1px 2px rgba(16,32,60,.04); }
-.ld-stat-ico { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font-size: 14px; flex: 0 0 30px; }
-.ld-stat-text { min-width: 0; }
-.ld-stat-lbl { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; line-height: 1.3; }
-.ld-stat-val { font-size: 20px; font-weight: 800; color: ${C.ink}; line-height: 1.1; margin-top: 3px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; word-break: break-word; }
-.ld-stat-sub { font-size: 11px; color: ${C.faint}; margin-top: 2px; }
+/* Figure tile — label above, number below. Reading order matches how the
+   tile is scanned, and dropping the icon badge lets the number own the
+   card instead of sharing it with a coloured square. */
+.ld-stat { background: #fff; border: 1px solid ${C.border}; border-radius: 10px;
+  padding: 13px 15px 14px; transition: border-color .15s ease; min-width: 0; }
+.ld-stat:hover { border-color: ${C.faint}; }
+.ld-stat-ico { display: inline-grid; place-items: center; font-size: 12px; color: ${C.faint}; flex: 0 0 auto; }
+.ld-stat-lbl { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; line-height: 1.3; }
+/* Truncate rather than wrap to two lines — a ragged label pushes the number
+   down and breaks the grid's baseline. */
+.ld-stat-lbl-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-stat-val { font-size: 23px; font-weight: 700; color: ${C.ink}; line-height: 1.15;
+  margin-top: 8px; letter-spacing: -.025em; font-variant-numeric: tabular-nums; word-break: break-word; }
+/* The one place colour is spent in this grid: figures that cost money. */
+.ld-stat--alert .ld-stat-val { color: ${C.red}; }
+.ld-stat-sub { font-size: 11px; color: ${C.faint}; margin-top: 4px; }
 
 /* hint tooltip */
 .ld-hint { position: relative; display: inline-grid; place-items: center; width: 15px; height: 15px;
@@ -1065,79 +1269,115 @@ const LD_CSS = `
 .ld-hint:hover .ld-hint-bub, .ld-hint:focus-visible .ld-hint-bub { opacity: 1; visibility: visible; }
 @media (max-width: 520px) { .ld-hint-bub { max-width: 190px; } }
 
-/* ── at a glance ──────────────────────────────────────────────────
-   Verdict line, donut + legend, and the two allowance meters. */
-.ld-verdict { display: flex; align-items: flex-start; gap: 11px; border: 1px solid;
-  border-radius: 12px; padding: 13px 16px; margin-bottom: 12px; }
-.ld-verdict--good { background: #e9f7ef; border-color: #c3e6d1; }
-.ld-verdict--bad { background: #fdf0ea; border-color: #f6d3c1; }
-.ld-verdict-ic { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px;
-  border-radius: 7px; font-size: 13px; font-weight: 700; color: #fff; margin-top: 1px; }
-.ld-verdict--good .ld-verdict-ic { background: #0ca30c; }
-.ld-verdict--bad .ld-verdict-ic { background: #ec835a; }
-.ld-verdict-text { font-size: 14px; font-weight: 600; color: ${C.ink}; line-height: 1.5; }
-.ld-verdict-money { font-size: 13px; color: ${C.muted}; line-height: 1.5; margin-top: 4px; }
-.ld-verdict-money strong { color: ${C.ink}; }
-
-/* Chart · legend · meters. Collapses to one column early — the donut and
-   its legend must never end up on separate screens. */
-.ld-glance { display: grid; grid-template-columns: auto minmax(240px, 1fr) minmax(200px, 260px);
-  gap: 20px 26px; align-items: center; }
-/* Below three columns the meters drop to their own full-width row rather
-   than being squeezed into the donut's narrow column. */
-@media (max-width: 1040px) {
-  .ld-glance { grid-template-columns: auto 1fr; }
-  .ld-meters { grid-column: 1 / -1; flex-direction: row; gap: 22px; }
-  .ld-meters > * { flex: 1; }
-}
-@media (max-width: 700px) {
+/* ── leave summary ────────────────────────────────────────────────
+   Donut + legend on one row; the eight-figure grid sits under them. */
+.ld-glance { display: grid; grid-template-columns: auto minmax(200px, 1fr);
+  gap: 20px 32px; align-items: center; }
+@media (max-width: 560px) {
   .ld-glance { grid-template-columns: 1fr; justify-items: center; }
-  .ld-meters { flex-direction: column; gap: 14px; }
+  .ld-legend { width: 100%; }
 }
 .ld-glance-chart { display: grid; place-items: center; }
 .ld-donut { width: 160px; height: 160px; display: block; }
 /* Proportional figures — tabular would make the centre number look loose
    at this size. */
-.ld-donut-num { font-size: 34px; font-weight: 800; fill: ${C.ink}; letter-spacing: -.02em; }
-.ld-donut-cap { font-size: 9.5px; font-weight: 700; fill: ${C.muted}; letter-spacing: .1em; }
+.ld-donut-num { font-size: 32px; font-weight: 700; fill: ${C.ink}; letter-spacing: -.025em; }
+.ld-donut-cap { font-size: 9px; font-weight: 700; fill: ${C.muted}; letter-spacing: .11em; }
 
 .ld-legend { min-width: 0; width: 100%; }
-.ld-legend-cap { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
-  color: ${C.muted}; margin-bottom: 8px; }
-.ld-legend-row { display: grid; grid-template-columns: 10px 1fr auto 44px; align-items: center;
-  gap: 10px; padding: 7px 8px; border-radius: 8px; transition: background .15s ease; }
+/* Rows are separated by a hairline rather than sitting in tinted blocks —
+   the whole legend then reads as one small table. */
+.ld-legend-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center;
+  gap: 11px; padding: 9px 2px; border-bottom: 1px solid ${C.divider};
+  transition: background .15s ease; }
+.ld-legend-row:last-of-type { border-bottom: none; }
 .ld-legend-row.is-on { background: ${C.surface}; }
-.ld-legend-row.is-zero { opacity: .55; }
-.ld-legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+.ld-legend-row.is-zero { opacity: .45; }
+.ld-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
 /* Text wears ink tokens, never the series colour — the dot carries identity. */
-.ld-legend-lbl { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 600; color: ${C.ink}; }
-.ld-legend-val { font-size: 13.5px; font-weight: 700; color: ${C.ink}; font-variant-numeric: tabular-nums; }
-.ld-legend-pct { font-size: 12.5px; color: ${C.muted}; text-align: right; font-variant-numeric: tabular-nums; }
-.ld-legend-note { font-size: 12px; color: ${C.muted}; line-height: 1.5; margin-top: 8px;
-  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 8px; padding: 7px 10px; }
-
-.ld-meters { display: flex; flex-direction: column; gap: 14px; width: 100%; min-width: 0; }
-.ld-meter-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-.ld-meter-lbl { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700;
-  letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; }
-.ld-meter-val { font-size: 14px; font-weight: 800; color: ${C.ink}; font-variant-numeric: tabular-nums; }
-.ld-meter-of { font-size: 12px; font-weight: 600; color: ${C.faint}; }
-.ld-meter-track { height: 8px; border-radius: 999px; overflow: hidden; }
-.ld-meter-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
-.ld-meter-foot { font-size: 11.5px; color: ${C.muted}; margin-top: 5px; }
+.ld-legend-lbl { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 500; color: ${C.ink}; }
+.ld-legend-val { font-size: 15px; font-weight: 700; color: ${C.ink}; font-variant-numeric: tabular-nums; }
+.ld-legend-note { font-size: 11.5px; color: ${C.muted}; line-height: 1.45; margin-top: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ld-meter-fill, .ld-legend-row, .ld-donut circle { transition: none !important; }
+  .ld-legend-row, .ld-donut circle { transition: none !important; }
 }
 
 /* leave dates */
 .ld-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 640px) { .ld-dates { grid-template-columns: 1fr; } }
-.ld-datehead { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: .05em; margin-bottom: 9px; }
+.ld-datehead { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase; color: ${C.muted};
+  padding-bottom: 9px; margin-bottom: 12px; border-bottom: 1px solid ${C.divider}; }
+.ld-datehead-dot { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 8px; }
 .ld-datenote { font-size: 12.5px; color: ${C.muted}; background: ${C.surface}; border: 1px solid ${C.border};
   border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; line-height: 1.45; }
-.ld-datechips { display: flex; flex-wrap: wrap; gap: 8px; }
-.ld-datechip { font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 8px; }
+.ld-datechips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A hairline plus the faintest tint of the segment's hue. The tint alone,
+   at full chip weight, turned twenty dates into a block of colour; the
+   border does the containing so the wash can stay almost white. */
+.ld-datechip { font-size: 12.5px; font-weight: 500; padding: 5px 10px; border-radius: 6px;
+  border: 1px solid ${C.border}; font-variant-numeric: tabular-nums; }
+
+/* ═══ TEMPORARY — styles for the three candidate layouts ═══ */
+
+/* switcher (scaffolding) */
+.ld-switch { display: inline-flex; gap: 2px; padding: 2px; margin-left: 4px;
+  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 8px; }
+.ld-switch-btn { border: none; background: transparent; font-family: inherit;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: ${C.muted};
+  padding: 5px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+  text-transform: none; transition: background .15s, color .15s; }
+.ld-switch-btn:hover { color: ${C.ink}; }
+.ld-switch-btn.is-on { background: #fff; color: ${C.primary};
+  box-shadow: 0 1px 2px rgba(16,32,60,.10); }
+
+/* A — quarter calendar */
+.ld-cal-wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+@media (max-width: 860px) { .ld-cal-wrap { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .ld-cal-wrap { grid-template-columns: 1fr; } }
+.ld-cal-title { font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: ${C.muted}; margin-bottom: 10px; }
+.ld-cal-dow, .ld-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.ld-cal-dow span { text-align: center; font-size: 9.5px; font-weight: 700;
+  color: ${C.faint}; padding-bottom: 5px; }
+.ld-cal-cell { display: grid; place-items: center; aspect-ratio: 1; border-radius: 6px;
+  font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
+.ld-cal-cell.is-blank { visibility: hidden; }
+.ld-cal-cell.is-weekend { color: ${C.faint}; background: ${C.surface}; }
+/* Same two hues as the donut segments, so a day and its slice read as one. */
+.ld-cal-cell.is-paid { background: #2a78d6; color: #fff; font-weight: 700; }
+.ld-cal-cell.is-unpaid { background: #e34948; color: #fff; font-weight: 700; }
+.ld-cal-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px;
+  padding-top: 14px; border-top: 1px solid ${C.divider};
+  font-size: 12px; color: ${C.muted}; }
+.ld-cal-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.ld-cal-key { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.ld-cal-key.is-paid { background: #2a78d6; }
+.ld-cal-key.is-unpaid { background: #e34948; }
+.ld-cal-key.is-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
+
+/* B — collapsible */
+.ld-fold { display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; font-family: inherit; cursor: pointer;
+  padding: 16px 20px; font-size: 13.5px; font-weight: 600; color: ${C.ink}; text-align: left; }
+.ld-fold:hover { background: ${C.surface}; }
+.ld-fold-chev { color: ${C.faint}; font-size: 11px; width: 10px; }
+.ld-fold-count { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: ${C.muted}; }
+
+/* C — side drawer */
+.ld-drawer-teaser { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.ld-drawer-teaser-num { font-size: 26px; font-weight: 700; color: ${C.ink}; letter-spacing: -.025em; line-height: 1.1; }
+.ld-drawer-teaser-cap { font-size: 12.5px; color: ${C.muted}; margin-top: 2px; }
+.ld-scrim { position: fixed; inset: 0; background: rgba(15,23,42,.42);
+  display: flex; justify-content: flex-end; z-index: 1000; }
+.ld-drawer { width: min(430px, 100%); height: 100%; background: #fff;
+  display: flex; flex-direction: column; box-shadow: -18px 0 48px rgba(11,23,42,.18); }
+.ld-drawer-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 20px 22px; border-bottom: 1px solid ${C.border}; }
+.ld-drawer-title { margin: 0; font-size: 17px; font-weight: 700; color: ${C.ink}; }
+.ld-drawer-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
 
 /* cost report */
 
@@ -1146,16 +1386,19 @@ const LD_CSS = `
 .ld-costtable-card { border: 1px solid ${C.border}; padding: 0; margin-bottom: 0; overflow: hidden; }
 .ld-costtable-wrap { overflow: auto; border-radius: 0 0 12px 12px; }
 .ld-costtable { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 720px; }
-.ld-costtable thead th { text-align: left; font-size: 11.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: ${C.muted}; background: ${C.surface}; padding: 12px 14px; border-bottom: 1px solid ${C.border}; white-space: nowrap; }
-.ld-costtable tbody td { padding: 12px 14px; border-bottom: 1px solid ${C.border}; color: ${C.ink}; white-space: nowrap; }
+/* Header sits on white with a rule under it rather than a filled band —
+   at ten columns a grey strip dominated the card. */
+.ld-costtable thead th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: ${C.muted}; background: #fff; padding: 13px 14px 11px; border-bottom: 1px solid ${C.borderStrong}; white-space: nowrap; }
+.ld-costtable tbody td { padding: 12px 14px; border-bottom: 1px solid ${C.divider}; color: ${C.ink}; white-space: nowrap; font-size: 13.5px; }
 .ld-costtable tbody tr:last-child td { border-bottom: none; }
 .ld-costtable tbody tr:hover { background: ${C.surface}; }
 .ld-costtable .ld-num { text-align: right; font-variant-numeric: tabular-nums; }
-.ld-costtable-period { font-weight: 700; }
-.ld-costtable-cost { font-weight: 800; color: ${C.primary}; }
-.ld-costtable tfoot td { padding: 12px 14px; border-top: 2px solid ${C.border}; }
-.ld-costtable-totallbl { text-align: right; font-weight: 800; color: ${C.ink}; text-transform: uppercase; font-size: 11.5px; letter-spacing: .04em; }
-.ld-attpill { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.ld-costtable-period { font-weight: 600; }
+/* Only the money column that the total keys off is accented. */
+.ld-costtable-cost { font-weight: 700; color: ${C.primary}; }
+.ld-costtable tfoot td { padding: 14px; border-top: 1px solid ${C.border}; background: ${C.surface}; }
+.ld-costtable-totallbl { text-align: right; font-weight: 700; color: ${C.muted}; text-transform: uppercase; font-size: 10.5px; letter-spacing: .07em; }
+.ld-attpill { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; }
 
 .ld-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }
 .ld-error { display: flex; align-items: center; gap: 8px; background: #fdecec; border: 1px solid #f5c9c9; color: ${C.red}; border-radius: 10px; padding: 10px 14px; font-size: 13.5px; margin: 8px 0; }
@@ -1165,8 +1408,10 @@ const LD_CSS = `
 .ld-btn:disabled { opacity: .55; cursor: not-allowed; }
 .ld-btn--ghost { background: #fff; color: ${C.ink}; }
 .ld-btn--ghost:hover:not(:disabled) { border-color: ${C.primary}; color: ${C.primary}; }
-.ld-btn--primary { border: none; color: #fff; background: linear-gradient(90deg, ${C.primary}, #129ab8); box-shadow: 0 2px 6px rgba(11,60,136,.2); }
-.ld-btn--primary:hover:not(:disabled) { filter: brightness(1.06); }
+/* Flat brand fill. The two-stop gradient it replaced read as decoration and
+   fought the one accent colour the rest of the page now uses. */
+.ld-btn--primary { border: 1px solid ${C.primary}; color: #fff; background: ${C.primary}; }
+.ld-btn--primary:hover:not(:disabled) { background: ${C.primaryDark}; border-color: ${C.primaryDark}; }
 
 /* relaxation modal */
 .ld-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 1000; }

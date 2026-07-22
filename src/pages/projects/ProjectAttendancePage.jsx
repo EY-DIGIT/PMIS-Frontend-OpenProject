@@ -56,6 +56,40 @@ const num = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// The monthly/quarterly report endpoints return an envelope
+// { period, resourceCount, totals, resources } — older builds returned a bare
+// array, so both shapes are accepted here.
+const reportRows = (payload) =>
+  Array.isArray(payload) ? payload : Array.isArray(payload?.resources) ? payload.resources : [];
+
+const reportTotals = (payload) =>
+  !Array.isArray(payload) && payload?.totals ? payload.totals : null;
+
+// Prefer the API's own totals; fall back to summing rows for the array shape.
+function buildMetrics(payload, employees) {
+  if (!employees.length) return null;
+  const t = reportTotals(payload);
+  if (t) {
+    return {
+      n: num(t.resourceCount) || employees.length,
+      avg: num(t.avgAttendancePercentage),
+      present: num(t.presentDays),
+      absent: num(t.absentDays),
+      paidLeave: t.paidLeaveDays == null ? null : num(t.paidLeaveDays),
+      unpaidLeave: t.unpaidLeaveDays == null ? null : num(t.unpaidLeaveDays),
+    };
+  }
+  const n = employees.length;
+  return {
+    n,
+    avg: employees.reduce((s, e) => s + num(e.attendancePercentage), 0) / n,
+    present: employees.reduce((s, e) => s + num(e.presentDays), 0),
+    absent: employees.reduce((s, e) => s + num(e.absentDays), 0),
+    paidLeave: null,
+    unpaidLeave: null,
+  };
+}
+
 function isWeekdayName(name) {
   return WEEKDAY_NAMES.has(String(name ?? "").trim().toLowerCase());
 }
@@ -271,21 +305,20 @@ export default function ProjectAttendancePage() {
       `/projects/${encodeURIComponent(projectId)}/attendance/leave/${encodeURIComponent(emp.attendanceId)}?year=${year}&quarter=${quarterNum}`
     );
 
-  const employees = Array.isArray(summary) ? summary : [];
+  const employees = useMemo(() => reportRows(summary), [summary]);
   const period =
+    summary?.period ||
     employees[0]?.period ||
     (selectedMonth !== "all" ? `${MONTH_NAMES[Number(selectedMonth)]} ${year}` : "");
 
   // At-a-glance metrics for the selected month.
-  const metrics = useMemo(() => {
-    if (!employees.length) return null;
-    const n = employees.length;
-    const avg = employees.reduce((s, e) => s + num(e.attendancePercentage), 0) / n;
-    const present = employees.reduce((s, e) => s + num(e.presentDays), 0);
-    const leave = employees.reduce((s, e) => s + num(e.leaveDays), 0);
-    const absent = employees.reduce((s, e) => s + num(e.absentDays), 0);
-    return { n, avg, present, leave, absent };
-  }, [employees]);
+  const metrics = useMemo(() => buildMetrics(summary, employees), [summary, employees]);
+
+  const quarterlyRows = useMemo(() => reportRows(quarterly), [quarterly]);
+  const quarterlyMetrics = useMemo(
+    () => buildMetrics(quarterly, quarterlyRows),
+    [quarterly, quarterlyRows]
+  );
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -373,27 +406,7 @@ export default function ProjectAttendancePage() {
         )}
         {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length > 0 && (
           <>
-            {metrics && (
-              <div className="att-metrics">
-                <StatCard label="Team size" value={metrics.n} sub={metrics.n === 1 ? "employee" : "employees"} />
-                <StatCard
-                  label="Avg attendance"
-                  value={`${metrics.avg.toFixed(1)}%`}
-                  sub={`${attTone(metrics.avg).label} overall`}
-                  tone={attTone(metrics.avg).color}
-                />
-                <StatCard label="Present" value={metrics.present} sub="days across team" />
-                {/* On leave stat hidden for now — uncomment to restore.
-                <StatCard label="On leave" value={metrics.leave} sub="days taken" />
-                */}
-                <StatCard
-                  label="Absent"
-                  value={metrics.absent}
-                  sub="days"
-                  tone={metrics.absent > 0 ? C.red : undefined}
-                />
-              </div>
-            )}
+            <MetricsRow metrics={metrics} />
             <AttendanceTable
               period={period}
               employees={employees}
@@ -421,7 +434,9 @@ export default function ProjectAttendancePage() {
         {quarterlyError && <div className="att-error">{quarterlyError}</div>}
         {!quarterlyLoading && !quarterlyError && (
           <QuarterlyPanel
-            data={Array.isArray(quarterly) ? quarterly : []}
+            data={quarterlyRows}
+            metrics={quarterlyMetrics}
+            period={quarterly?.period}
             quarter={quarter}
             year={year}
             onRowClick={(emp) => goLeaveDetail(emp, quarter)}
@@ -456,6 +471,11 @@ export default function ProjectAttendancePage() {
    ===================================================================== */
 function AttendanceTable({ period, employees, onRowClick }) {
   const clickable = typeof onRowClick === "function";
+  // The report now splits leave into paid/unpaid and leaves `leaveDays` at 0.
+  // Older payloads only carry `leaveDays`, so pick whichever the rows have.
+  const splitLeave = employees.some(
+    (e) => e.paidLeaveDays != null || e.unpaidLeaveDays != null
+  );
   return (
     <div className="uidai-pmis-card att-card">
       <div className="att-card-head">
@@ -474,7 +494,14 @@ function AttendanceTable({ period, employees, onRowClick }) {
               <th className="att-th att-num">Working</th>
               <th className="att-th att-num">Present</th>
               <th className="att-th att-num">Half</th>
-              <th className="att-th att-num">Leave Taken</th>
+              {splitLeave ? (
+                <>
+                  <th className="att-th att-num">Paid Leave</th>
+                  <th className="att-th att-num">Unpaid Leave</th>
+                </>
+              ) : (
+                <th className="att-th att-num">Leave Taken</th>
+              )}
               <th className="att-th att-num">Absent</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
@@ -496,7 +523,16 @@ function AttendanceTable({ period, employees, onRowClick }) {
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
                 <td className="att-td att-num att-dim">{emp.halfDays}</td>
-                <td className="att-td att-num">{emp.leaveDays}</td>
+                {splitLeave ? (
+                  <>
+                    <td className="att-td att-num">{num(emp.paidLeaveDays)}</td>
+                    <td className={`att-td att-num${num(emp.unpaidLeaveDays) > 0 ? " att-warn" : " att-dim"}`}>
+                      {num(emp.unpaidLeaveDays)}
+                    </td>
+                  </>
+                ) : (
+                  <td className="att-td att-num">{emp.leaveDays}</td>
+                )}
                 <td className={`att-td att-num${num(emp.absentDays) > 0 ? " att-danger" : " att-dim"}`}>
                   {emp.absentDays}
                 </td>
@@ -519,9 +555,9 @@ function AttendanceTable({ period, employees, onRowClick }) {
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
-function QuarterlyPanel({ data, quarter, year, onRowClick }) {
+function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRowClick }) {
   const employees = data ?? [];
-  const period = employees[0]?.period || `Q${quarter} ${year}`;
+  const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
 
   if (employees.length === 0) {
     return (
@@ -532,7 +568,49 @@ function QuarterlyPanel({ data, quarter, year, onRowClick }) {
       />
     );
   }
-  return <AttendanceTable period={period} employees={employees} onRowClick={onRowClick} />;
+  return (
+    <>
+      <MetricsRow metrics={metrics} />
+      <AttendanceTable period={period} employees={employees} onRowClick={onRowClick} />
+    </>
+  );
+}
+
+/* =====================================================================
+   Metric cards — driven by the report's `totals` block when the API sends
+   one, otherwise by row sums.
+   ===================================================================== */
+function MetricsRow({ metrics }) {
+  if (!metrics) return null;
+  return (
+    <div className="att-metrics">
+      <StatCard label="Team size" value={metrics.n} sub={metrics.n === 1 ? "employee" : "employees"} />
+      <StatCard
+        label="Avg attendance"
+        value={`${metrics.avg.toFixed(1)}%`}
+        sub={`${attTone(metrics.avg).label} overall`}
+        tone={attTone(metrics.avg).color}
+      />
+      <StatCard label="Present" value={metrics.present} sub="days across team" />
+      {metrics.paidLeave != null && (
+        <StatCard label="Paid leave" value={metrics.paidLeave} sub="days across team" />
+      )}
+      {metrics.unpaidLeave != null && (
+        <StatCard
+          label="Unpaid leave"
+          value={metrics.unpaidLeave}
+          sub="days across team"
+          tone={metrics.unpaidLeave > 0 ? C.amber : undefined}
+        />
+      )}
+      <StatCard
+        label="Absent"
+        value={metrics.absent}
+        sub="days"
+        tone={metrics.absent > 0 ? C.red : undefined}
+      />
+    </div>
+  );
 }
 
 /* =====================================================================
@@ -1207,6 +1285,7 @@ const ATT_CSS = `
 .att-dim { color: ${C.faint}; }
 .att-strong { font-weight: 600; }
 .att-danger { color: ${C.red}; font-weight: 700; }
+.att-warn { color: ${C.amber}; font-weight: 700; }
 .att-att-cell { padding-right: 16px; }
 .att-row { transition: background-color .13s ease; }
 .att-row:hover { background: ${C.surface}; }
