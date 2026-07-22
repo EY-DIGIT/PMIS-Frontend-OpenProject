@@ -70,6 +70,7 @@ import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
 import DesignationRatePage from "./pages/projects/DesignationRatePage";
+import AttendanceSystemHub, { AttendanceSystemLayout } from "./pages/projects/AttendanceSystem";
 import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
 import LeaveDetailPage from "./pages/projects/LeaveDetailPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
@@ -333,10 +334,27 @@ function Breadcrumbs() {
             </nav>
         );
     }
-    if (segments[0] === "projects" && (segments[2] === "resource" || segments[2] === "attendance")) {
+    /* Attendance System cluster — Home › Project Detail › Attendance System › <page>.
+       The hub itself stops at the third crumb. */
+    const AS_SECTIONS = {
+        "attendance-system": null,
+        resource: "Resources",
+        attendance: "Attendance",
+        "designation-rate": "Designation Rates",
+        "leave-config": "Leave Policy",
+        "penalty-report": "Penalty Report"
+    };
+    // hasOwnProperty, not `in` — `in` walks the prototype chain, so a URL
+    // segment like "constructor" would otherwise match.
+    if (
+        segments[0] === "projects" &&
+        segments[1] &&
+        Object.prototype.hasOwnProperty.call(AS_SECTIONS, segments[2] || "")
+    ) {
         const pid = decodeURIComponent(segments[1]);
         const projectUrl = `/projects/${encodeURIComponent(pid)}`;
-        const label = segments[2] === "resource" ? "Resource" : "Attendance";
+        const hubUrl = `${projectUrl}/attendance-system`;
+        const leaf = AS_SECTIONS[segments[2]];
         return (
             <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
                 paddingBottom: "10px",
@@ -355,7 +373,17 @@ function Breadcrumbs() {
                     Project Detail
                 </Link>
                 <span style={{ color: "#999" }}>›</span>
-                <span style={{ color: "#333", fontWeight: 600 }}>{label}</span>
+                {leaf ? (
+                    <>
+                        <Link to={hubUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                            Attendance System
+                        </Link>
+                        <span style={{ color: "#999" }}>›</span>
+                        <span style={{ color: "#333", fontWeight: 600 }}>{leaf}</span>
+                    </>
+                ) : (
+                    <span style={{ color: "#333", fontWeight: 600 }}>Attendance System</span>
+                )}
             </nav>
         );
     }
@@ -765,15 +793,25 @@ export default function MainApp() {
                                                 />
                                                 <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
-                                                <Route path="/projects/:projectId/resource" element={<RequirePermission action="viewProjects"><ProjectResourcePage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/attendance" element={<RequirePermission action="viewProjects"><ProjectAttendancePage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/attendance/leave/:attendanceId" element={<RequirePermission action="viewProjects"><LeaveDetailPage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
+                                                {/* Attendance System — resources, rates, attendance, leave and
+                                                    penalties share the same underlying records, so they're grouped
+                                                    under one section. The layout route is PATHLESS: it only adds the
+                                                    section nav, leaving every URL below exactly as it was so existing
+                                                    links and bookmarks keep working. */}
+                                                <Route element={<AttendanceSystemLayout />}>
+                                                    <Route path="/projects/:projectId/attendance-system" element={<RequirePermission action="viewProjects"><AttendanceSystemHub /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/resource" element={<RequirePermission action="viewProjects"><ProjectResourcePage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/attendance" element={<RequirePermission action="viewProjects"><ProjectAttendancePage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/attendance/leave/:attendanceId" element={<RequirePermission action="viewProjects"><LeaveDetailPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/designation-rate" element={<RequirePermission action="viewProjects"><DesignationRatePage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
+                                                </Route>
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/designation-rate" element={<RequirePermission action="viewProjects"><DesignationRatePage /></RequirePermission>} />
+                                                {/* penalty-report and designation-rate now live in the
+                                                    Attendance System layout route above. */}
 
 
                                                 {/* Vendors */}

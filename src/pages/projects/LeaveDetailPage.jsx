@@ -89,6 +89,39 @@ const HINTS = {
 const SECTION_HINT =
   "Leave taken is settled in order: first against the paid allowance, then against any relaxation granted. Whatever remains is unpaid and gets deducted.";
 
+/* Donut segment colours — validated as a categorical set against a white
+   surface (scripts/validate_palette.js, --pairs all): worst pair ΔE 15.3
+   under deuteranopia, well clear of the ≥8 gate.
+
+   Green-for-paid / red-for-unpaid was the obvious first choice and FAILED
+   that check at ΔE 4.1 — the classic red/green confusion. Blue→amber→red
+   still reads as a scale from "fine" to "costs you money" without leaning
+   on the one hue pair a colourblind reader can't separate.
+
+   Amber sits at 2.17:1 on white, under the 3:1 bar, so every segment ships
+   a visible value in the legend beside it — the relief the check requires.
+   Colour is never the only channel here. */
+const SPLIT = [
+  {
+    key: "paid",
+    label: "Paid leave",
+    color: "#2a78d6",
+    hint: "Covered by the quarter's allowance. Nothing is deducted for these days.",
+  },
+  {
+    key: "relaxation",
+    label: "Relaxation",
+    color: "#eda100",
+    hint: "Days waived as an exception, on top of the allowance. Nothing is deducted for these either.",
+  },
+  {
+    key: "unpaid",
+    label: "Unpaid",
+    color: "#e34948",
+    hint: "Not covered by the allowance or by relaxation. Salary is deducted for these days.",
+  },
+];
+
 const show = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
 const num = (v) => {
   const n = Number(v);
@@ -120,6 +153,9 @@ export default function LeaveDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [relaxOpen, setRelaxOpen] = useState(false);
+  // Which donut segment the pointer is on — shared by the arcs and the
+  // legend rows so hovering either one highlights the pair.
+  const [hoverKey, setHoverKey] = useState(null);
   // Bumped after a successful relaxation submit to re-fetch the leave detail.
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -213,9 +249,64 @@ export default function LeaveDetailPage() {
   // strip is hidden rather than showing an equation that doesn't balance.
   const breakdownBalances =
     leaveTaken > 0 && paidLeave + relaxUsed + unpaidLeave === leaveTaken;
-  // While the cost report is still loading (or failed), fall back to the
-  // unpaid balance so the action doesn't disappear on a slow request.
-  const canRelax = relaxCap > 0 ? relaxLeft > 0 : unpaidLeave > 0;
+
+  /* ── at-a-glance figures ───────────────────────────────────────────
+     The donut is plotted over the sum of its own parts, never over
+     leaveTaken — if the payload disagrees, a chart drawn to a total its
+     slices don't reach would be quietly wrong. The mismatch is called
+     out below the chart instead. */
+  const splitValues = { paid: paidLeave, relaxation: relaxUsed, unpaid: unpaidLeave };
+  const splitSegments = SPLIT.map((s) => ({ ...s, value: num(splitValues[s.key]) }));
+  const splitTotal = splitSegments.reduce((t, s) => t + s.value, 0);
+  const permissible = num(d.permissibleLeave);
+  const sandwich = num(d.sandwichDays);
+  const totalUnpaid = num(d.totalUnpaidDays);
+
+  // Money is the part a non-specialist actually reacts to, so pull the
+  // quarter's deduction out of the cost report and say it in words.
+  const deducted = (costReport?.monthlyBreakdown || []).reduce(
+    (t, m) => t + num(m.deductedAmount),
+    0
+  );
+
+  // One sentence, no jargon, stating the outcome of the quarter.
+  const verdict = (() => {
+    if (leaveTaken === 0) {
+      return {
+        tone: "good",
+        text: "No leave was taken this quarter, so nothing is deducted.",
+      };
+    }
+    if (totalUnpaid === 0) {
+      return {
+        tone: "good",
+        text: `All ${leaveTaken} ${leaveTaken === 1 ? "day" : "days"} of leave were covered${
+          relaxUsed > 0 ? " — partly by relaxation granted this quarter" : " by the paid allowance"
+        }. Nothing is deducted from salary.`,
+      };
+    }
+    const parts = [];
+    if (unpaidLeave > 0) parts.push(`${unpaidLeave} unpaid ${unpaidLeave === 1 ? "day" : "days"}`);
+    if (sandwich > 0) parts.push(`${sandwich} sandwich ${sandwich === 1 ? "day" : "days"}`);
+    return {
+      tone: "bad",
+      text: `Of the ${leaveTaken} ${leaveTaken === 1 ? "day" : "days"} taken, ${parts.join(
+        " and "
+      )} fall outside the allowance — ${totalUnpaid} ${
+        totalUnpaid === 1 ? "day is" : "days are"
+      } deducted from salary this quarter.`,
+    };
+  })();
+  /* Relaxation exists to offset unpaid leave, so the unpaid balance is the
+     only thing that decides whether the action is offered. Half-days count:
+     `> 0` is deliberate — 0.5 unpaid days still earn the button, which a
+     `>= 1` test would swallow.
+
+     This used to read `relaxCap > 0 ? relaxLeft > 0 : unpaidLeave > 0`,
+     which ignored the unpaid balance entirely whenever a cap was known —
+     hiding the button on unpaid days once the cap was spent, and offering
+     it on quarters with nothing to relax. */
+  const canRelax = unpaidLeave > 0;
 
   return (
     <div className="uidai-pmis-content ld-page">
@@ -249,6 +340,105 @@ export default function LeaveDetailPage() {
 
       {!loading && !error && (
         <>
+          {/* At a glance — leads the page so the outcome is readable before
+              any of the tables below. */}
+          <section className="ld-section">
+            <h2 className="ld-section-title">
+              At a glance
+              <Hint text={SECTION_HINT} />
+            </h2>
+
+            <div className={`ld-verdict ld-verdict--${verdict.tone}`}>
+              <span className="ld-verdict-ic" aria-hidden="true">
+                {verdict.tone === "good" ? "✓" : "!"}
+              </span>
+              <div>
+                <div className="ld-verdict-text">{verdict.text}</div>
+                {deducted > 0 && (
+                  <div className="ld-verdict-money">
+                    Approximately <strong>{money(deducted)}</strong> is withheld across the
+                    quarter — see the cost report below for the month-by-month figures.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="uidai-pmis-card ld-card">
+              <div className="ld-glance">
+                {/* Part-to-whole: how the quarter's leave settled */}
+                <div className="ld-glance-chart">
+                  <LeaveDonut
+                    segments={splitSegments}
+                    total={splitTotal}
+                    hoverKey={hoverKey}
+                    onHover={setHoverKey}
+                  />
+                </div>
+
+                {/* The legend is also the table view — every segment's exact
+                    value and share is here in text, so nothing is carried by
+                    colour alone or gated behind a hover. */}
+                <div className="ld-legend">
+                  <div className="ld-legend-cap">How the {splitTotal} {splitTotal === 1 ? "day" : "days"} taken were settled</div>
+                  {splitSegments.map((s) => {
+                    const share = splitTotal > 0 ? (s.value / splitTotal) * 100 : 0;
+                    return (
+                      <div
+                        key={s.key}
+                        className={`ld-legend-row${hoverKey === s.key ? " is-on" : ""}${
+                          s.value === 0 ? " is-zero" : ""
+                        }`}
+                        onMouseEnter={() => s.value > 0 && setHoverKey(s.key)}
+                        onMouseLeave={() => setHoverKey(null)}
+                      >
+                        <span className="ld-legend-dot" style={{ background: s.color }} />
+                        <span className="ld-legend-lbl">
+                          {s.label}
+                          <Hint text={s.hint} />
+                        </span>
+                        <span className="ld-legend-val">
+                          {s.value} {s.value === 1 ? "day" : "days"}
+                        </span>
+                        <span className="ld-legend-pct">
+                          {splitTotal > 0 ? `${Math.round(share)}%` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {!breakdownBalances && leaveTaken > 0 && (
+                    <div className="ld-legend-note">
+                      Note: the report lists {leaveTaken} {leaveTaken === 1 ? "day" : "days"} taken,
+                      which doesn&apos;t match the {splitTotal} shown here. The chart plots the
+                      paid / relaxation / unpaid figures as reported.
+                    </div>
+                  )}
+                </div>
+
+                {/* Two ratios against a limit — meters, not charts. */}
+                <div className="ld-meters">
+                  <Meter
+                    label="Paid allowance"
+                    used={Math.min(paidLeave, permissible)}
+                    cap={permissible}
+                    hue="#2a78d6"
+                    track="#cde2fb"
+                    hint="Paid days this quarter allows. Leave within this limit costs nothing."
+                  />
+                  {relaxCap > 0 && (
+                    <Meter
+                      label="Relaxation"
+                      used={relaxUsed}
+                      cap={relaxCap}
+                      hue="#eda100"
+                      track="#fdedc9"
+                      hint="Extra days that can be waived on top of the allowance this quarter."
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
           {/* Employee + quarter context */}
           <section className="ld-section">
             <h2 className="ld-section-title">Employee</h2>
@@ -295,23 +485,9 @@ export default function LeaveDetailPage() {
           <section className="ld-section">
             <h2 className="ld-section-title">Leave dates</h2>
             <div className="uidai-pmis-card ld-card">
-              {/* Only rendered when the parts actually add up, so a mismatched
-                  payload never shows a broken-looking equation. */}
-              {breakdownBalances && (
-                <div className="ld-breakdown">
-                  <span className="ld-breakdown-lbl">How this quarter adds up</span>
-                  <span className="ld-breakdown-eq">
-                    <b>{leaveTaken}</b> taken
-                    <span className="ld-breakdown-op">=</span>
-                    <span className="uidai-pmis-badge uidai-pmis-badge-green">{paidLeave} paid</span>
-                    <span className="ld-breakdown-op">+</span>
-                    <span className="uidai-pmis-badge">{relaxUsed} relaxation</span>
-                    <span className="ld-breakdown-op">+</span>
-                    <span className="uidai-pmis-badge uidai-pmis-badge-red">{unpaidLeave} unpaid</span>
-                  </span>
-                </div>
-              )}
-
+              {/* The "taken = paid + relaxation + unpaid" equation that used to
+                  sit here is now the donut in "At a glance" — the same split,
+                  read as proportions instead of arithmetic. */}
               <div className="ld-dates">
                 <DateList
                   tone="green"
@@ -370,6 +546,115 @@ function Hint({ text }) {
       <FiInfo />
       <span className="ld-hint-bub">{text}</span>
     </span>
+  );
+}
+
+/* =====================================================================
+   "At a glance" — the plain-language answer to "why this much data?"
+
+   A reader who has never seen this report needs three things before any
+   table: how the quarter's leave split, whether any of it costs money,
+   and how much allowance is left. Everything below is that, in order.
+   ===================================================================== */
+
+/* Donut of the leave split. Part-to-whole at a glance with three
+   segments, which is what a donut is actually good at — it is NOT here to
+   compare close values, so every segment also carries its exact number in
+   the legend beside it. */
+function LeaveDonut({ segments, total, hoverKey, onHover }) {
+  const R = 58;
+  const STROKE = 22;
+  const CIRC = 2 * Math.PI * R;
+  const live = segments.filter((s) => s.value > 0);
+
+  // The 2px separator is a gap in the surface, not a stroke around each
+  // arc. With a single segment there is no neighbour to separate from, so
+  // the gap would just read as a notch cut out of a full ring.
+  const gap = live.length > 1 ? 2 : 0;
+
+  let walked = 0;
+  const arcs = live.map((s) => {
+    const frac = s.value / total;
+    const full = frac * CIRC;
+    const arc = { ...s, len: Math.max(full - gap, 0.5), offset: walked };
+    walked += full;
+    return arc;
+  });
+
+  const focused = live.find((s) => s.key === hoverKey);
+
+  return (
+    <svg
+      className="ld-donut"
+      viewBox="0 0 160 160"
+      role="img"
+      aria-label={`Leave split: ${live
+        .map((s) => `${s.label} ${s.value} days`)
+        .join(", ")}. Total ${total} days.`}
+    >
+      <g transform="rotate(-90 80 80)">
+        {/* Track — visible only when there is nothing to plot, so an empty
+            quarter still renders as a ring rather than blank space. */}
+        {live.length === 0 && (
+          <circle cx="80" cy="80" r={R} fill="none" stroke="#e8edf5" strokeWidth={STROKE} />
+        )}
+        {arcs.map((a) => (
+          <circle
+            key={a.key}
+            cx="80"
+            cy="80"
+            r={R}
+            fill="none"
+            stroke={a.color}
+            strokeWidth={hoverKey === a.key ? STROKE + 4 : STROKE}
+            strokeDasharray={`${a.len} ${CIRC - a.len}`}
+            strokeDashoffset={-a.offset}
+            opacity={hoverKey && hoverKey !== a.key ? 0.35 : 1}
+            style={{ transition: "opacity .15s ease, stroke-width .15s ease", cursor: "pointer" }}
+            onMouseEnter={() => onHover(a.key)}
+            onMouseLeave={() => onHover(null)}
+          >
+            <title>{`${a.label}: ${a.value} of ${total} days`}</title>
+          </circle>
+        ))}
+      </g>
+      {/* Centre reads the total, or the hovered segment while pointing. */}
+      <text className="ld-donut-num" x="80" y="76" textAnchor="middle">
+        {focused ? focused.value : total}
+      </text>
+      <text className="ld-donut-cap" x="80" y="94" textAnchor="middle">
+        {focused ? focused.label.toUpperCase() : total === 1 ? "DAY TAKEN" : "DAYS TAKEN"}
+      </text>
+    </svg>
+  );
+}
+
+/* A single ratio against a limit — the form the data calls for is a meter,
+   not another chart. Track is a lighter step of the fill's own hue so the
+   state reads across the whole bar. */
+function Meter({ label, used, cap, hue, track, hint, unit = "days" }) {
+  const pctUsed = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+  const left = Math.max(0, cap - used);
+  return (
+    <div className="ld-meter">
+      <div className="ld-meter-top">
+        <span className="ld-meter-lbl">
+          {label}
+          <Hint text={hint} />
+        </span>
+        <span className="ld-meter-val">
+          {used} <span className="ld-meter-of">of {cap}</span>
+        </span>
+      </div>
+      <div className="ld-meter-track" style={{ background: track }}>
+        <div className="ld-meter-fill" style={{ width: `${pctUsed}%`, background: hue }} />
+      </div>
+      <div className="ld-meter-foot">
+        {left > 0
+          ? `${left} ${left === 1 ? unit.replace(/s$/, "") : unit} still available`
+          : "Fully used — further leave is unpaid"}
+      </div>
+    </div>
   );
 }
 
@@ -687,9 +972,11 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
                   Relaxation Days{maxDays != null ? ` (${maxDays} left)` : ""}
                   <Hint text="Extra days waived on top of the paid allowance, up to the quarter's limit. Each day granted removes one unpaid day." />
                 </span>
-                <input type="number" min="0" step="1" max={maxDays ?? undefined} className="ld-input"
+                {/* step 0.5, not 1 — unpaid leave is counted in half days,
+                    so a 0.5-day balance must be relaxable by 0.5. */}
+                <input type="number" min="0" step="0.5" max={maxDays ?? undefined} className="ld-input"
                   value={form.relaxationDays}
-                  onChange={(e) => set({ relaxationDays: e.target.value })} placeholder="e.g. 2" />
+                  onChange={(e) => set({ relaxationDays: e.target.value })} placeholder="e.g. 1.5" />
               </label>
               <label className="ld-field ld-field--full">
                 <span className="ld-field-lbl">Remarks</span>
@@ -778,14 +1065,70 @@ const LD_CSS = `
 .ld-hint:hover .ld-hint-bub, .ld-hint:focus-visible .ld-hint-bub { opacity: 1; visibility: visible; }
 @media (max-width: 520px) { .ld-hint-bub { max-width: 190px; } }
 
-/* leave breakdown strip — sits inside the leave-dates card */
-.ld-breakdown { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 10px;
-  padding: 11px 14px; margin-bottom: 16px; }
-.ld-breakdown-lbl { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; }
-.ld-breakdown-eq { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: ${C.ink}; }
-.ld-breakdown-eq b { font-size: 15px; font-weight: 800; }
-.ld-breakdown-op { color: ${C.faint}; font-weight: 700; }
+/* ── at a glance ──────────────────────────────────────────────────
+   Verdict line, donut + legend, and the two allowance meters. */
+.ld-verdict { display: flex; align-items: flex-start; gap: 11px; border: 1px solid;
+  border-radius: 12px; padding: 13px 16px; margin-bottom: 12px; }
+.ld-verdict--good { background: #e9f7ef; border-color: #c3e6d1; }
+.ld-verdict--bad { background: #fdf0ea; border-color: #f6d3c1; }
+.ld-verdict-ic { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px;
+  border-radius: 7px; font-size: 13px; font-weight: 700; color: #fff; margin-top: 1px; }
+.ld-verdict--good .ld-verdict-ic { background: #0ca30c; }
+.ld-verdict--bad .ld-verdict-ic { background: #ec835a; }
+.ld-verdict-text { font-size: 14px; font-weight: 600; color: ${C.ink}; line-height: 1.5; }
+.ld-verdict-money { font-size: 13px; color: ${C.muted}; line-height: 1.5; margin-top: 4px; }
+.ld-verdict-money strong { color: ${C.ink}; }
+
+/* Chart · legend · meters. Collapses to one column early — the donut and
+   its legend must never end up on separate screens. */
+.ld-glance { display: grid; grid-template-columns: auto minmax(240px, 1fr) minmax(200px, 260px);
+  gap: 20px 26px; align-items: center; }
+/* Below three columns the meters drop to their own full-width row rather
+   than being squeezed into the donut's narrow column. */
+@media (max-width: 1040px) {
+  .ld-glance { grid-template-columns: auto 1fr; }
+  .ld-meters { grid-column: 1 / -1; flex-direction: row; gap: 22px; }
+  .ld-meters > * { flex: 1; }
+}
+@media (max-width: 700px) {
+  .ld-glance { grid-template-columns: 1fr; justify-items: center; }
+  .ld-meters { flex-direction: column; gap: 14px; }
+}
+.ld-glance-chart { display: grid; place-items: center; }
+.ld-donut { width: 160px; height: 160px; display: block; }
+/* Proportional figures — tabular would make the centre number look loose
+   at this size. */
+.ld-donut-num { font-size: 34px; font-weight: 800; fill: ${C.ink}; letter-spacing: -.02em; }
+.ld-donut-cap { font-size: 9.5px; font-weight: 700; fill: ${C.muted}; letter-spacing: .1em; }
+
+.ld-legend { min-width: 0; width: 100%; }
+.ld-legend-cap { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: ${C.muted}; margin-bottom: 8px; }
+.ld-legend-row { display: grid; grid-template-columns: 10px 1fr auto 44px; align-items: center;
+  gap: 10px; padding: 7px 8px; border-radius: 8px; transition: background .15s ease; }
+.ld-legend-row.is-on { background: ${C.surface}; }
+.ld-legend-row.is-zero { opacity: .55; }
+.ld-legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+/* Text wears ink tokens, never the series colour — the dot carries identity. */
+.ld-legend-lbl { display: flex; align-items: center; gap: 5px; font-size: 13.5px; font-weight: 600; color: ${C.ink}; }
+.ld-legend-val { font-size: 13.5px; font-weight: 700; color: ${C.ink}; font-variant-numeric: tabular-nums; }
+.ld-legend-pct { font-size: 12.5px; color: ${C.muted}; text-align: right; font-variant-numeric: tabular-nums; }
+.ld-legend-note { font-size: 12px; color: ${C.muted}; line-height: 1.5; margin-top: 8px;
+  background: ${C.surface}; border: 1px solid ${C.border}; border-radius: 8px; padding: 7px 10px; }
+
+.ld-meters { display: flex; flex-direction: column; gap: 14px; width: 100%; min-width: 0; }
+.ld-meter-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.ld-meter-lbl { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; color: ${C.muted}; }
+.ld-meter-val { font-size: 14px; font-weight: 800; color: ${C.ink}; font-variant-numeric: tabular-nums; }
+.ld-meter-of { font-size: 12px; font-weight: 600; color: ${C.faint}; }
+.ld-meter-track { height: 8px; border-radius: 999px; overflow: hidden; }
+.ld-meter-fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
+.ld-meter-foot { font-size: 11.5px; color: ${C.muted}; margin-top: 5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ld-meter-fill, .ld-legend-row, .ld-donut circle { transition: none !important; }
+}
 
 /* leave dates */
 .ld-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }

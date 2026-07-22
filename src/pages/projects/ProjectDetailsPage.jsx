@@ -1057,35 +1057,15 @@ export default function ProjectDetailsPage() {
       visible: milestoneCount !== 0 && canViewFinance
     },
     {
-  key: "resource",
-  label: "Resource",
-  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/resource`),
-  visible: true
-},
-{
-  key: "attendance",
-  label: "Attendance System",
-  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/attendance`),
-  visible: true
-},
-{
-  key: "designation-rate",
-  label: "Upload Designation Rate",
-  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/designation-rate`),
-  visible: true
-},
-{
-  key: "leave-config",
-  label: "Leave Policy Configure",
-  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/leave-config`),
-  visible: true
-},
-{
-  key: "leave-config",
-  label: "Penalty Report",
-  onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/penalty-report`),
-  visible: true
-},
+      /* Single entry point for the whole workforce cluster — Resources,
+         Attendance, Designation Rates, Leave Policy and Penalty Report.
+         They read the same records, so they live behind one hub with its
+         own section nav rather than five separate entries here. */
+      key: "attendance-system",
+      label: "Attendance System",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/attendance-system`),
+      visible: true
+    },
     {
       key: "Severity And LD Configure",
       label: "Severity And LD Configure",
