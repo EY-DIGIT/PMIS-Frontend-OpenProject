@@ -10,6 +10,7 @@ import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import "../../styles/global.css";
 import { getToken } from "../../api/auth";
+import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
@@ -180,6 +181,26 @@ const STYLES = `
   align-items: center; justify-content: center; transition: background .15s, color .15s;
 }
 .rp-iconbtn:hover { background: var(--rp-line-2); color: var(--rp-ink); }
+
+/* Organisation picker — the import endpoint needs it alongside projectId. */
+.rp-org { display: flex; align-items: center; gap: 8px; }
+.rp-org > span { font-size: 12.5px; font-weight: 600; color: var(--rp-muted); white-space: nowrap; }
+.rp-select {
+  border: 1px solid var(--rp-line); border-radius: 10px; padding: 10px 34px 10px 12px;
+  font-size: 14px; color: var(--rp-ink); background-color: var(--rp-surface);
+  font-family: inherit; outline: none; box-shadow: var(--rp-shadow-sm);
+  min-width: 190px; max-width: 300px; cursor: pointer; text-overflow: ellipsis;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  /* Page is light-only; without this a dark-mode browser paints the
+     dropdown list in its own palette. */
+  color-scheme: light;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+  transition: border-color .15s, box-shadow .15s;
+}
+.rp-select:hover:not(:disabled) { border-color: #c8d6ee; }
+.rp-select:focus { border-color: var(--rp-primary); box-shadow: 0 0 0 3px var(--rp-primary-50); }
+.rp-select:disabled { background-color: var(--rp-surface-2); color: var(--rp-muted); cursor: not-allowed; background-image: none; }
 
 .rp-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .rp-btn {
@@ -392,6 +413,14 @@ export default function ProjectResourcePage() {
   // template download
   const [downloading, setDownloading] = useState(false);
 
+  // Organisation the upload is attributed to. The import endpoint needs it
+  // alongside projectId, so the candidates come from the project's linked
+  // vendors — fetched here because the projects store isn't guaranteed to
+  // be hydrated on a deep link.
+  const [orgs, setOrgs] = useState([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [organisationId, setOrganisationId] = useState("");
+
   // table data
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -432,6 +461,42 @@ function closeApiResponse() {
     setPageContext({ projectName: project?.projectName || "" });
     return () => clearPageContext();
   }, [project?.projectName]);
+
+  // ---------- organisations: GET /projects/{id} → vendors[] ----------
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    setOrgsLoading(true);
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${GATEWAY_BASE}${ENDPOINTS.projects.get(projectId)}`,
+          { method: "GET", headers: { accept: "application/json" } }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.json().catch(() => ({}));
+        const vendors = (raw?.data ?? raw)?.vendors;
+        const list = (Array.isArray(vendors) ? vendors : [])
+          .filter((v) => v && v.id)
+          .map((v) => ({ id: v.id, name: v.name || v.id }));
+        if (!active) return;
+        setOrgs(list);
+        // Prefer the signed-in user's own organisation when it's on the
+        // project; otherwise fall back to the first linked vendor.
+        const own =
+          tokenStore.getUser()?.vendor_id || tokenStore.getUser()?.vendorId || "";
+        const preferred = list.find((o) => o.id === own) || list[0];
+        setOrganisationId(preferred ? preferred.id : "");
+      } catch {
+        // Only the upload needs an organisation — a failure here leaves the
+        // picker empty and the import disabled, with the table unaffected.
+        if (active) setOrgs([]);
+      } finally {
+        if (active) setOrgsLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
 
   // ---------- load: GET /api/resources ----------
   const loadResources = useCallback(async () => {
@@ -584,7 +649,9 @@ function closeApiResponse() {
 
   // ---------- upload: POST /api/resources/upload ----------
   async function uploadFile(file) {
-  if (!file || !projectId) return;
+  // organisationId is required by the endpoint — without it the server
+  // can't attribute the imported rows, so don't fire a doomed request.
+  if (!file || !projectId || !organisationId) return;
   setUploading(true);
 
   const formData = new FormData();
@@ -593,7 +660,7 @@ function closeApiResponse() {
   try {
     const token = getToken();
     const res = await fetch(
-      `${API_BASE}/api/resources/upload?projectId=${encodeURIComponent(projectId)}`,
+      `${API_BASE}${ENDPOINTS.resources.upload(projectId, organisationId)}`,
       {
         method: "POST",
         headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -763,6 +830,24 @@ function closeApiResponse() {
         </div>
 
         <div className="rp-actions">
+          <label className="rp-org">
+            <span>Organisation</span>
+            <select
+              className="rp-select"
+              value={organisationId}
+              onChange={(e) => setOrganisationId(e.target.value)}
+              disabled={orgsLoading || orgs.length === 0}
+              aria-label="Organisation for import"
+            >
+              {orgsLoading && <option value="">Loading…</option>}
+              {!orgsLoading && orgs.length === 0 && (
+                <option value="">No organisation linked</option>
+              )}
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+          </label>
           <button
             className="rp-btn rp-btn-ghost"
             onClick={loadResources}
@@ -784,8 +869,14 @@ function closeApiResponse() {
           <button
             className="rp-btn rp-btn-primary"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || !projectId}
-            title={projectId ? "Import resources from an Excel file" : "Open a project first"}
+            disabled={uploading || !projectId || !organisationId}
+            title={
+              !projectId
+                ? "Open a project first"
+                : !organisationId
+                  ? "Pick an organisation to import against"
+                  : "Import resources from an Excel file"
+            }
           >
             <UploadIcon />
             {uploading ? "Importing…" : "Import Excel"}
@@ -838,7 +929,8 @@ function closeApiResponse() {
               <button
                 className="rp-btn rp-btn-primary"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!projectId}
+                disabled={!projectId || !organisationId || uploading}
+                title={!organisationId ? "Pick an organisation to import against" : undefined}
               >
                 <UploadIcon /> Import Excel
               </button>
