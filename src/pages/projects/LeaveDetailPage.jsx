@@ -9,12 +9,12 @@
 // When the employee has unpaid leave, a "Relaxation" action opens a
 // small form that POSTs to /api/attendance/quarterly-relaxation.
 // ============================================================
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
   FiX, FiUser, FiBriefcase, FiHash, FiFileText, FiCalendar,
   FiPlay, FiFlag, FiLayers, FiDollarSign, FiInfo, FiUmbrella,
-  FiShield, FiCreditCard, FiPieChart, FiClock,
+  FiShield, FiCreditCard, FiPieChart, FiClock, FiUploadCloud, FiDownload,
 } from "react-icons/fi";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -237,6 +237,77 @@ function unwrapCostReport(json, resourceId) {
   };
 }
 
+/* ── the relaxation's supporting document ─────────────────────────────
+   GET /api/attendance/quarterly-relaxation/attachment
+       ?resourceId=&projectId=&year=&quarter=
+
+   Answers with the raw file. The response is fetched as a blob rather than
+   linked to directly because the endpoint sits behind the same bearer token
+   as the rest of the API, and a plain <a href> can't carry that header.
+
+   A non-2xx here means "no document was ever uploaded for this quarter",
+   which is an ordinary state, not a failure — so it resolves to null and
+   the card simply doesn't render. */
+const CD_EXT = {
+  "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
+  "image/gif": "gif", "application/pdf": "pdf",
+};
+
+// Content-Disposition carries the server's own filename when it sets one.
+// RFC 5987 `filename*` wins over plain `filename` when both are present.
+function filenameFromDisposition(cd) {
+  if (!cd) return "";
+  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(cd);
+  if (star) {
+    try { return decodeURIComponent(star[1].trim().replace(/^"|"$/g, "")); } catch { /* fall through */ }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(cd);
+  return plain ? plain[1].trim() : "";
+}
+
+function useRelaxationAttachment({ resourceId, projectId, year, quarter, refreshKey }) {
+  const [file, setFile] = useState(null);
+
+  useEffect(() => {
+    if (!resourceId || !projectId || !year || !quarter) return undefined;
+    let active = true;
+    let objectUrl = "";
+    (async () => {
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({ resourceId, projectId, year, quarter });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/quarterly-relaxation/attachment?${qs}`,
+          { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+        );
+        if (!res.ok) { if (active) setFile(null); return; }
+        const blob = await res.blob();
+        // Some builds answer 200 with an empty body instead of a 404.
+        if (!blob.size) { if (active) setFile(null); return; }
+        objectUrl = URL.createObjectURL(blob);
+        if (!active) { URL.revokeObjectURL(objectUrl); objectUrl = ""; return; }
+        const type = blob.type || res.headers.get("content-type") || "";
+        setFile({
+          url: objectUrl,
+          type,
+          size: blob.size,
+          name:
+            filenameFromDisposition(res.headers.get("content-disposition")) ||
+            `relaxation-Q${quarter}-${year}.${CD_EXT[type.toLowerCase()] || "bin"}`,
+        });
+      } catch {
+        if (active) setFile(null);
+      }
+    })();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [resourceId, projectId, year, quarter, refreshKey]);
+
+  return file;
+}
+
 export default function LeaveDetailPage() {
   const { projectId, attendanceId } = useParams();
   const [params] = useSearchParams();
@@ -341,6 +412,16 @@ export default function LeaveDetailPage() {
   );
   const relaxUsed = num(d.relaxationLeave);
   const relaxLeft = relaxCap - relaxUsed;
+
+  // The image filed with the relaxation request, if one was ever uploaded.
+  // Re-fetched after a submit so a freshly attached document appears at once.
+  const relaxDoc = useRelaxationAttachment({
+    resourceId,
+    projectId: d.projectId || projectId,
+    year: d.year || year,
+    quarter: d.quarter || quarter,
+    refreshKey,
+  });
 
   const leaveTaken = num(d.leaveTaken);
   const paidLeave = num(d.paidLeave);
@@ -474,6 +555,10 @@ export default function LeaveDetailPage() {
                 />
               ))}
             </div>
+
+            {/* Only rendered when a document was actually filed — see the
+                hook's note on why a missing one isn't an error. */}
+            <RelaxationDocCard file={relaxDoc} />
           </section>
 
           {/* Employee + quarter context */}
@@ -527,6 +612,7 @@ export default function LeaveDetailPage() {
           year={d.year || year}
           quarter={d.quarter || quarter}
           maxDays={relaxCap > 0 ? relaxLeft : null}
+          hasDocument={!!relaxDoc}
           onSuccess={() => setRefreshKey((k) => k + 1)}
           onClose={() => setRelaxOpen(false)}
         />
@@ -1057,7 +1143,175 @@ async function readErrorMessage(res) {
   return candidate && isReadableMessage(candidate) ? candidate.trim() : fallback;
 }
 
-function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSuccess, onClose }) {
+/* The relaxation endpoint takes every field in the query string and the
+   supporting image as the `attachment` part of a multipart body:
+
+     POST /api/attendance/quarterly-relaxation?resourceId=&projectId=
+          &year=&quarter=&relaxationDays=
+     Content-Type: multipart/form-data   -F attachment=@proof.png
+
+   The attachment is optional, so the form always sends a FormData — empty
+   when no image was picked. That keeps the request multipart either way,
+   which a controller declaring `consumes = multipart/form-data` requires,
+   while the absent part satisfies an optional @RequestPart. */
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const ACCEPTED_IMAGE = /^image\/(png|jpe?g|webp|gif)$/i;
+
+const fmtBytes = (n) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/* Drop zone before a file is chosen, thumbnail + remove after. The preview
+   URL is revoked when the file changes or the modal closes, so picking a
+   few images in a row doesn't leak blobs. */
+function AttachmentField({ file, onPick, onClear, error, disabled, replacing }) {
+  const [dragOver, setDragOver] = useState(false);
+
+  // Derived, not stored — a preview held in state would need a setState inside
+  // an effect to stay in step with `file`. The effect only handles the revoke.
+  const preview = useMemo(() => (file ? URL.createObjectURL(file) : ""), [file]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  const drop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (!disabled) onPick(e.dataTransfer?.files?.[0]);
+  };
+
+  return (
+    <div className="ld-field ld-field--full">
+      <span className="ld-field-lbl">
+        Supporting Document
+        <span className="ld-optional">Optional</span>
+        <Hint text="A screenshot, scan or photo backing the exigency request (RFP 5.24.1.b.vi). The relaxation can be submitted without one." />
+      </span>
+
+      {file ? (
+        <div className="ld-file">
+          <img className="ld-file-thumb" src={preview} alt="" />
+          <div className="ld-file-meta">
+            <div className="ld-file-name" title={file.name}>{file.name}</div>
+            <div className="ld-file-size">{fmtBytes(file.size)}</div>
+          </div>
+          <button
+            type="button"
+            className="ld-file-x"
+            onClick={onClear}
+            disabled={disabled}
+            aria-label={`Remove ${file.name}`}
+          >
+            <FiX size={15} />
+          </button>
+        </div>
+      ) : (
+        <label
+          className={`ld-drop${dragOver ? " is-over" : ""}${error ? " is-bad" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={drop}
+        >
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="ld-drop-input"
+            disabled={disabled}
+            onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ""; }}
+          />
+          <FiUploadCloud className="ld-drop-ico" />
+          <span className="ld-drop-main">
+            Click to upload<span className="ld-drop-or"> or drag an image here</span>
+          </span>
+          <span className="ld-drop-sub">PNG, JPG, WEBP or GIF · up to 5 MB</span>
+        </label>
+      )}
+
+      {error && <div className="ld-field-err">{error}</div>}
+      {replacing && !error && (
+        <div className="ld-field-note">
+          A document is already on file for this quarter — uploading one replaces it.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The filed document, shown under the leave summary. The thumbnail opens a
+   full-size view; Download is a plain anchor over the blob URL, so the file
+   is already in the browser and the save costs no second request. */
+function RelaxationDocCard({ file }) {
+  const [zoom, setZoom] = useState(false);
+
+  useEffect(() => {
+    if (!zoom) return undefined;
+    const onKey = (e) => e.key === "Escape" && setZoom(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
+
+  if (!file) return null;
+  const isImage = file.type.startsWith("image/");
+
+  return (
+    <>
+      <div className="ld-doc">
+        {isImage ? (
+          <button
+            type="button"
+            className="ld-doc-thumbbtn"
+            onClick={() => setZoom(true)}
+            aria-label={`View ${file.name} full size`}
+          >
+            <img className="ld-doc-thumb" src={file.url} alt="" />
+          </button>
+        ) : (
+          <span className="ld-doc-thumb ld-doc-thumb--generic"><FiFileText /></span>
+        )}
+
+        <div className="ld-doc-meta">
+          <div className="ld-doc-lbl">
+            Relaxation supporting document
+            <Hint text="The evidence filed with the relaxation request for this quarter." />
+          </div>
+          <div className="ld-doc-name" title={file.name}>{file.name}</div>
+          <div className="ld-doc-size">{fmtBytes(file.size)}</div>
+        </div>
+
+        <div className="ld-doc-actions">
+          {isImage && (
+            <button type="button" className="ld-btn ld-btn--ghost" onClick={() => setZoom(true)}>View</button>
+          )}
+          <a className="ld-btn ld-btn--ghost" href={file.url} download={file.name}>
+            <FiDownload size={14} /> Download
+          </a>
+        </div>
+      </div>
+
+      {zoom && isImage && (
+        <div
+          className="ld-backdrop"
+          onMouseDown={(e) => e.target === e.currentTarget && setZoom(false)}
+        >
+          <div className="ld-lightbox" role="dialog" aria-modal="true" aria-label={file.name}>
+            <div className="ld-lightbox-head">
+              <span className="ld-lightbox-name" title={file.name}>{file.name}</span>
+              <a className="ld-btn ld-btn--ghost" href={file.url} download={file.name}>
+                <FiDownload size={14} /> Download
+              </a>
+              <button className="ld-close" onClick={() => setZoom(false)} aria-label="Close">
+                <FiX size={18} />
+              </button>
+            </div>
+            <img className="ld-lightbox-img" src={file.url} alt={file.name} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDocument, onSuccess, onClose }) {
   const [form, setForm] = useState({
     resourceId: resourceId || "",
     projectId: projectId || "",
@@ -1069,6 +1323,8 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  const [attachment, setAttachment] = useState(null);
+  const [fileError, setFileError] = useState(null);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -1077,6 +1333,23 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
   }, [onClose]);
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  /* Rejecting a bad file here rather than at submit keeps the attachment
+     out of the main error line — the request is still perfectly valid
+     without it, so an oversized image shouldn't read like a blocked form. */
+  const pickFile = (f) => {
+    if (!f) return;
+    if (!ACCEPTED_IMAGE.test(f.type)) {
+      setFileError("That file isn't an image. Choose a PNG, JPG, WEBP or GIF.");
+      return;
+    }
+    if (f.size > MAX_ATTACHMENT_BYTES) {
+      setFileError(`That image is ${fmtBytes(f.size)} — the limit is 5 MB.`);
+      return;
+    }
+    setFileError(null);
+    setAttachment(f);
+  };
 
   const submit = async () => {
     setError(null);
@@ -1091,21 +1364,27 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
     try {
       setSaving(true);
       const token = getToken();
-      const res = await fetch(`${API_BASE}/api/attendance/quarterly-relaxation`, {
+      const qs = new URLSearchParams({
+        resourceId: String(form.resourceId),
+        projectId: String(form.projectId),
+        year: String(Number(form.year)),
+        quarter: String(Number(form.quarter)),
+        relaxationDays: String(days),
+      });
+      if (form.remarks.trim()) qs.set("remarks", form.remarks.trim());
+
+      // Always multipart — see the note above ACCEPTED_IMAGE. Content-Type is
+      // deliberately unset so the browser writes it with the part boundary.
+      const body = new FormData();
+      if (attachment) body.append("attachment", attachment, attachment.name);
+
+      const res = await fetch(`${API_BASE}/api/attendance/quarterly-relaxation?${qs}`, {
         method: "POST",
         headers: {
           accept: "*/*",
-          "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          resourceId: String(form.resourceId),
-          projectId: String(form.projectId),
-          year: Number(form.year),
-          quarter: Number(form.quarter),
-          relaxationDays: days,
-          remarks: form.remarks || "",
-        }),
+        body,
       });
       if (!res.ok) throw new Error(await readErrorMessage(res));
       setDone(true);
@@ -1169,6 +1448,15 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, onSucc
                   onChange={(e) => set({ remarks: e.target.value })} placeholder="Reason for the relaxation…"
                   style={{ resize: "vertical", fontFamily: "inherit" }} />
               </label>
+
+              <AttachmentField
+                file={attachment}
+                onPick={pickFile}
+                onClear={() => { setAttachment(null); setFileError(null); }}
+                error={fileError}
+                disabled={saving}
+                replacing={hasDocument}
+              />
             </div>
 
             {error && <div className="ld-error">{error}</div>}
@@ -1426,6 +1714,70 @@ const LD_CSS = `
 .ld-input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border}; background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; outline: none; }
 .ld-input:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
 .ld-input:disabled { background: ${C.surface}; color: ${C.muted}; }
+.ld-optional { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: ${C.faint}; border: 1px solid ${C.border}; border-radius: 5px; padding: 1px 5px; }
+.ld-field-err { font-size: 12px; color: ${C.red}; }
+.ld-field-note { font-size: 12px; color: ${C.muted}; }
+
+/* optional image attachment — drop zone, then the picked file */
+.ld-drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 20px 16px; border: 1.5px dashed ${C.borderStrong}; border-radius: 10px;
+  background: ${C.surface}; cursor: pointer; text-align: center;
+  transition: border-color .15s ease, background .15s ease; }
+.ld-drop:hover { border-color: ${C.primary}; background: ${C.accentBg}; }
+.ld-drop.is-over { border-color: ${C.primary}; background: ${C.accentBg}; border-style: solid; }
+.ld-drop.is-bad { border-color: ${C.red}; }
+.ld-drop:focus-within { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
+.ld-drop-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.ld-drop-ico { font-size: 21px; color: ${C.primary}; margin-bottom: 3px; }
+.ld-drop-main { font-size: 13px; font-weight: 600; color: ${C.primary}; }
+.ld-drop-or { color: ${C.muted}; font-weight: 500; }
+.ld-drop-sub { font-size: 11.5px; color: ${C.faint}; }
+@media (max-width: 480px) { .ld-drop-or { display: none; } }
+
+.ld-file { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid ${C.border}; border-radius: 10px; background: #fff; }
+.ld-file-thumb { width: 44px; height: 44px; flex: 0 0 44px; border-radius: 8px;
+  object-fit: cover; background: ${C.surface}; border: 1px solid ${C.border}; }
+.ld-file-meta { min-width: 0; flex: 1; }
+.ld-file-name { font-size: 13px; font-weight: 600; color: ${C.ink};
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-file-size { font-size: 11.5px; color: ${C.faint}; margin-top: 2px; }
+.ld-file-x { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px;
+  border-radius: 7px; border: 1px solid ${C.border}; background: #fff; color: ${C.muted};
+  cursor: pointer; transition: all .15s ease; }
+.ld-file-x:hover:not(:disabled) { background: #fdecec; border-color: ${C.red}; color: ${C.red}; }
+.ld-file-x:disabled { opacity: .5; cursor: not-allowed; }
+
+/* the filed document, under the leave summary */
+.ld-doc { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding: 12px 14px;
+  background: #fff; border: 1px solid ${C.border}; border-radius: 10px; }
+.ld-doc-thumbbtn { padding: 0; border: 0; background: none; cursor: zoom-in; line-height: 0; border-radius: 8px; }
+.ld-doc-thumb { width: 52px; height: 52px; flex: 0 0 52px; border-radius: 8px; object-fit: cover;
+  background: ${C.surface}; border: 1px solid ${C.border}; transition: border-color .15s ease; }
+.ld-doc-thumbbtn:hover .ld-doc-thumb { border-color: ${C.primary}; }
+.ld-doc-thumb--generic { display: grid; place-items: center; font-size: 20px; color: ${C.faint}; }
+.ld-doc-meta { min-width: 0; flex: 1; }
+.ld-doc-lbl { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 4px; }
+.ld-doc-name { font-size: 13.5px; font-weight: 600; color: ${C.ink};
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-doc-size { font-size: 11.5px; color: ${C.faint}; margin-top: 2px; }
+.ld-doc-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.ld-doc-actions .ld-btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  padding: 8px 14px; font-size: 13px; }
+@media (max-width: 560px) {
+  .ld-doc { flex-wrap: wrap; }
+  .ld-doc-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* full-size view of the document */
+.ld-lightbox { display: flex; flex-direction: column; gap: 12px; max-width: min(900px, 94vw); }
+.ld-lightbox-head { display: flex; align-items: center; gap: 10px; }
+.ld-lightbox-name { flex: 1; min-width: 0; color: #fff; font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-lightbox-img { display: block; max-width: 100%; max-height: 78vh; object-fit: contain;
+  border-radius: 12px; background: #fff; box-shadow: 0 18px 50px rgba(11,23,42,.4); }
 .ld-success { display: flex; align-items: center; gap: 8px; color: ${C.green}; font-weight: 600; background: #e7f6ee; border: 1px solid #c7ead6; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
 .ld-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 `;
