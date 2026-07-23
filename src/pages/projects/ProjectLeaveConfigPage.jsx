@@ -17,6 +17,9 @@ import { API_BASE, authorizedFetch } from "../../api/client";
 import { getToken, logout } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import { loadProjectById } from "../../api/milestoneConfigApi";
+import {
+  readErrorMessage, requestErrorMessage, notifyActionError, notifyActionSuccess,
+} from "../../utils/apiMessage";
 import "../../styles/global.css";
 
 // ---------- design tokens ----------
@@ -59,6 +62,72 @@ const toStrOrNull = (v) => {
   return s || null;
 };
 
+/* ---------- validation ----------
+   A day can't be longer than a day, and an allowance without a period (or a
+   period without an allowance) is only half a rule. Both are checked here
+   because the API accepts either silently and the mistake only surfaces
+   months later in someone's leave balance. */
+const MAX_HOURS = 24;
+/* A yearly grant beyond this isn't a policy, it's a typo. */
+const MAX_LEAVE_DAYS = 366;
+
+/* Returns "" when valid. Hours are entered as 4 / 8 / 7.5 — decimals are
+   allowed, everything else is not. */
+function validateHours(raw, label) {
+  const text = String(raw ?? "").trim();
+  if (!text) return "";                                  // optional
+  if (!/^\d+(\.\d+)?$/.test(text)) return `${label} must be a number, for example 8.`;
+  const n = Number(text);
+  if (!Number.isFinite(n)) return `${label} must be a number, for example 8.`;
+  if (n <= 0) return `${label} must be greater than 0.`;
+  if (n > MAX_HOURS) return `${label} can't be more than ${MAX_HOURS}.`;
+  return "";
+}
+
+function validateConfig(f) {
+  const errs = {};
+
+  const halfErr = validateHours(f.halfDayHours, "Half-day hours");
+  if (halfErr) errs.halfDayHours = halfErr;
+  const fullErr = validateHours(f.fullDayHours, "Full-day hours");
+  if (fullErr) errs.fullDayHours = fullErr;
+
+  // Only compare once both are individually valid, or the message misleads.
+  if (!halfErr && !fullErr && f.halfDayHours !== "" && f.fullDayHours !== "") {
+    const half = Number(f.halfDayHours);
+    const full = Number(f.fullDayHours);
+    if (half >= full) {
+      errs.halfDayHours = "A half day has to be shorter than a full day.";
+    }
+  }
+
+  const countText = String(f.leavesPerFrequencyCount ?? "").trim();
+  if (countText) {
+    if (!/^\d+$/.test(countText)) errs.leavesPerFrequencyCount = "Enter a whole number of days.";
+    else if (Number(countText) > MAX_LEAVE_DAYS) {
+      errs.leavesPerFrequencyCount = `That's more days than a year holds.`;
+    }
+  }
+
+  /* The two halves of the allowance rule. A count with no frequency is
+     dropped on save (see buildConfig), so it must be caught here rather
+     than silently discarded. */
+  if (f.leavesFrequency && !countText) {
+    errs.leavesPerFrequencyCount = "Set how many days each period grants.";
+  }
+  if (!f.leavesFrequency && countText) {
+    errs.leavesFrequency = "Choose how often these days are granted.";
+  }
+
+  /* Weekend on with neither day picked sends both as null, which is exactly
+     what "off" sends — the setting would appear saved but do nothing. */
+  if (f.weekendWorking === "yes" && !f.saturday && !f.sunday) {
+    errs.saturday = "Pick a day type for Saturday or Sunday, or turn weekend working off.";
+  }
+
+  return errs;
+}
+
 export default function ProjectLeaveConfigPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -72,8 +141,38 @@ export default function ProjectLeaveConfigPage() {
   // The store's project is empty on a hard refresh, which blanks the navbar
   // project name. Keep the name we fetch below as a fallback so it survives.
   const [fetchedName, setFetchedName] = useState("");
+  // Per-field messages, shown once a save has been attempted.
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  // Set on the first edit; drives the unsaved-changes guard on Back.
+  const [dirty, setDirty] = useState(false);
 
-  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const set = (patch) => {
+    setForm((f) => {
+      const next = { ...f, ...patch };
+      // Only re-validate after a failed save — flagging fields the user
+      // hasn't reached yet reads as nagging.
+      if (submitted) setFieldErrors(validateConfig(next));
+      return next;
+    });
+    setDirty(true);
+    if (msg) setMsg(null);
+  };
+
+  /* A policy edit is easy to lose: the form holds a dozen values and Back is
+     right next to Save. Warn on both a browser-level exit and the in-page
+     Back button rather than discarding the work silently. */
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  const goBack = () => {
+    if (dirty && !window.confirm("Discard your unsaved changes to this leave policy?")) return;
+    navigate(-1);
+  };
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || fetchedName || "" });
@@ -112,13 +211,17 @@ export default function ProjectLeaveConfigPage() {
           });
         }
       } catch (e) {
-        if (active) setLoadError(e?.message || "Failed to load leave policy");
+        const err = requestErrorMessage(e, "Couldn't load the leave policy.");
+        if (active && err) setLoadError(err);
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
   }, [projectId]);
+
+  // A freshly loaded policy isn't an edit — clear the guard after prefill.
+  useEffect(() => { setDirty(false); }, [projectId]);
 
   const weekendOn = form?.weekendWorking === "yes";
 
@@ -138,7 +241,29 @@ export default function ProjectLeaveConfigPage() {
   });
 
   async function submit() {
+    if (saving) return;                         // guards a double-click
     setMsg(null);
+    setSubmitted(true);
+
+    if (!projectId) {
+      setMsg({ type: "error", text: "This project couldn't be identified." });
+      return;
+    }
+
+    const errs = validateConfig(form);
+    setFieldErrors(errs);
+    const firstBad = Object.keys(errs)[0];
+    if (firstBad) {
+      document.getElementById(`lc-${firstBad}`)?.focus();
+      setMsg({
+        type: "error",
+        text: Object.keys(errs).length === 1
+          ? errs[firstBad]
+          : `${Object.keys(errs).length} fields need attention before saving.`,
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const token = getToken();
@@ -153,12 +278,19 @@ export default function ProjectLeaveConfigPage() {
       );
       if (res.status === 401) { logout(); navigate("/login"); return; }
       if (!res.ok && res.status !== 204) {
-        const body = await res.text().catch(() => "");
-        throw new Error(body || `Request failed (${res.status})`);
+        /* The raw body used to be thrown verbatim, so an HTML error page or
+           a JSON envelope was shown as-is. */
+        throw new Error(await readErrorMessage(res, "Couldn't save the leave policy."));
       }
-      setMsg({ type: "ok", text: "Leave policy saved successfully." });
+      /* The outcome of an action goes through the app's shared popup, the
+         same one the rest of the project uses. The inline banner stays for
+         validation, which belongs beside the fields it's about. */
+      notifyActionSuccess("Leave policy saved", "Your changes have been saved.");
+      setDirty(false);          // saved work is no longer at risk on Back
+      setSubmitted(false);
+      setFieldErrors({});
     } catch (e) {
-      setMsg({ type: "error", text: e?.message || "Failed to save leave policy" });
+      notifyActionError("Save failed", requestErrorMessage(e, "Couldn't save the leave policy."));
     } finally {
       setSaving(false);
     }
@@ -177,7 +309,10 @@ export default function ProjectLeaveConfigPage() {
       </header>
 
       {msg && (
-        <div className={`lc-banner lc-banner--${msg.type}`}>
+        <div
+          className={`lc-banner lc-banner--${msg.type}`}
+          role={msg.type === "error" ? "alert" : "status"}
+        >
           <span aria-hidden="true">{msg.type === "error" ? "⚠️" : "✓"}</span>
           {msg.text}
         </div>
@@ -193,29 +328,56 @@ export default function ProjectLeaveConfigPage() {
             <h2 className="lc-section-title">Hours &amp; entitlement</h2>
             <div className="uidai-pmis-card lc-card">
               <div className="lc-grid">
-                <Field label="Half-day hours" hint="Hours that count as half a day's attendance.">
+                {/* text + inputMode, not type="number": a number input reports
+                    "" for an entry like "8e2" or "1..5", so the validator
+                    never sees what was typed and the value is silently
+                    blanked instead of explained. */}
+                <Field
+                  label="Half-day hours"
+                  hint="Hours that count as half a day's attendance."
+                  error={fieldErrors.halfDayHours}
+                >
                   <input
-                    type="number" min="0" step="0.5"
-                    className="lc-input"
+                    id="lc-halfDayHours"
+                    type="text"
+                    inputMode="decimal"
+                    className={`lc-input${fieldErrors.halfDayHours ? " is-bad" : ""}`}
+                    aria-invalid={!!fieldErrors.halfDayHours}
                     value={form.halfDayHours}
-                    onChange={(e) => set({ halfDayHours: e.target.value })}
+                    onChange={(e) =>
+                      set({ halfDayHours: e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
+                    }
                     placeholder="e.g. 4"
                   />
                 </Field>
 
-                <Field label="Full-day hours" hint="Hours that count as a full day's attendance.">
+                <Field
+                  label="Full-day hours"
+                  hint="Hours that count as a full day's attendance."
+                  error={fieldErrors.fullDayHours}
+                >
                   <input
-                    type="number" min="0" step="0.5"
-                    className="lc-input"
+                    id="lc-fullDayHours"
+                    type="text"
+                    inputMode="decimal"
+                    className={`lc-input${fieldErrors.fullDayHours ? " is-bad" : ""}`}
+                    aria-invalid={!!fieldErrors.fullDayHours}
                     value={form.fullDayHours}
-                    onChange={(e) => set({ fullDayHours: e.target.value })}
+                    onChange={(e) =>
+                      set({ fullDayHours: e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
+                    }
                     placeholder="e.g. 8"
                   />
                 </Field>
 
-                <Field label="Leave frequency" hint="How often the leave allowance is granted.">
+                <Field
+                  label="Leave frequency"
+                  hint="How often the leave allowance is granted."
+                  error={fieldErrors.leavesFrequency}
+                >
                   <select
-                    className="lc-input"
+                    id="lc-leavesFrequency"
+                    className={`lc-input${fieldErrors.leavesFrequency ? " is-bad" : ""}`}
                     value={form.leavesFrequency}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -237,12 +399,16 @@ export default function ProjectLeaveConfigPage() {
                       ? "Leave days granted each period."
                       : "Select a leave frequency first."
                   }
+                  error={fieldErrors.leavesPerFrequencyCount}
                 >
                   <input
-                    type="number" min="0" step="1"
-                    className="lc-input"
+                    id="lc-leavesPerFrequencyCount"
+                    type="text"
+                    inputMode="numeric"
+                    className={`lc-input${fieldErrors.leavesPerFrequencyCount ? " is-bad" : ""}`}
+                    aria-invalid={!!fieldErrors.leavesPerFrequencyCount}
                     value={form.leavesPerFrequencyCount}
-                    onChange={(e) => set({ leavesPerFrequencyCount: e.target.value })}
+                    onChange={(e) => set({ leavesPerFrequencyCount: e.target.value.replace(/[^\d]/g, "") })}
                     placeholder="e.g. 2"
                     disabled={!form.leavesFrequency}
                   />
@@ -287,9 +453,10 @@ export default function ProjectLeaveConfigPage() {
 
               {weekendOn && (
                 <div className="lc-grid lc-grid--nested">
-                  <Field label="Saturday">
+                  <Field label="Saturday" error={fieldErrors.saturday}>
                     <select
-                      className="lc-input"
+                      id="lc-saturday"
+                      className={`lc-input${fieldErrors.saturday ? " is-bad" : ""}`}
                       value={form.saturday}
                       onChange={(e) => set({ saturday: e.target.value })}
                     >
@@ -301,7 +468,8 @@ export default function ProjectLeaveConfigPage() {
                   </Field>
                   <Field label="Sunday">
                     <select
-                      className="lc-input"
+                      id="lc-sunday"
+                      className={`lc-input${fieldErrors.saturday ? " is-bad" : ""}`}
                       value={form.sunday}
                       onChange={(e) => set({ sunday: e.target.value })}
                     >
@@ -317,7 +485,7 @@ export default function ProjectLeaveConfigPage() {
           </section>
 
           <div className="lc-actions">
-            <button className="lc-btn lc-btn--ghost" onClick={() => navigate(-1)} disabled={saving}>
+            <button className="lc-btn lc-btn--ghost" onClick={goBack} disabled={saving}>
               Back
             </button>
             <button className="lc-btn lc-btn--primary" onClick={submit} disabled={saving}>
@@ -332,12 +500,16 @@ export default function ProjectLeaveConfigPage() {
 
 /* ---------- building blocks ---------- */
 
-function Field({ label, hint, children }) {
+function Field({ label, hint, children, error }) {
   return (
     <label className="lc-field">
       <span className="lc-field-label">{label}</span>
       {children}
-      {hint && <span className="lc-field-hint">{hint}</span>}
+      {/* The error replaces the hint rather than stacking under it — two
+          lines of guidance where one is a complaint reads as noise. */}
+      {error
+        ? <span className="lc-field-err">{error}</span>
+        : hint && <span className="lc-field-hint">{hint}</span>}
     </label>
   );
 }
@@ -423,6 +595,12 @@ const LC_CSS = `
 .lc-field-label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: ${C.muted}; }
 .lc-field-hint { font-size: 11.5px; color: ${C.faint}; line-height: 1.45; }
+/* Sits where the hint would, so a field doesn't change height when it fails. */
+.lc-field-err { font-size: 11.5px; color: ${C.red}; line-height: 1.45; font-weight: 600; }
+/* Invalid control — a red edge alongside the message, so the error is
+   findable by colour and readable without relying on it. */
+.lc-input.is-bad { border-color: ${C.red}; }
+.lc-input.is-bad:focus { border-color: ${C.red}; box-shadow: 0 0 0 3px rgba(214,69,69,.14); }
 
 .lc-input { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
   background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; outline: none;

@@ -20,6 +20,10 @@ import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { getToken } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
+import {
+  readErrorMessage, readSuccessMessage, readJsonBody, requestErrorMessage,
+  notifyActionError, parseYear, parseQuarter, MIN_YEAR, MAX_YEAR,
+} from "../../utils/apiMessage";
 import "../../styles/global.css";
 
 const API_BASE = "http://10.1.131.199:8019";
@@ -127,7 +131,15 @@ const HINTS = {
   lapsedLeave: "Allowance that went unused and has expired. It does not carry into the next quarter.",
 };
 
-const show = (v) => (v === null || v === undefined || v === "" ? "—" : String(v));
+/* Never let a raw structure reach the screen. An object here would render as
+   "[object Object]" and an array as a comma-splice of its parts — both read
+   as a bug to anyone looking at the page, so they degrade to a dash. */
+const show = (v) => {
+  if (v === null || v === undefined || v === "") return "—";
+  if (typeof v === "object") return "—";
+  if (typeof v === "number" && !Number.isFinite(v)) return "—";
+  return String(v);
+};
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -144,7 +156,8 @@ const money = (v) =>
   `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 
-const pct = (v) => `${num(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+/* Only the commented-out Attendance % column used this — uncomment with it. */
+// const pct = (v) => `${num(v).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 
 /* Day counts arrive as 19.5 / 2.0 — render a half day as "2.5" without
    dressing a whole day up as "2.0". */
@@ -265,11 +278,16 @@ function filenameFromDisposition(cd) {
   return plain ? plain[1].trim() : "";
 }
 
-function useRelaxationAttachment({ resourceId, projectId, year, quarter, refreshKey }) {
+function useRelaxationAttachment({ resourceId, projectId, year, quarter, refreshKey, enabled = true }) {
   const [file, setFile] = useState(null);
 
   useEffect(() => {
-    if (!resourceId || !projectId || !year || !quarter) return undefined;
+    // `enabled` is false when the page's own params are invalid — no point
+    // asking for an attachment keyed on a year the server will reject.
+    if (!enabled) return undefined;
+    if (!resourceId || !projectId || parseYear(year) === null || parseQuarter(quarter) === null) {
+      return undefined;
+    }
     let active = true;
     let objectUrl = "";
     (async () => {
@@ -303,7 +321,7 @@ function useRelaxationAttachment({ resourceId, projectId, year, quarter, refresh
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [resourceId, projectId, year, quarter, refreshKey]);
+  }, [resourceId, projectId, year, quarter, refreshKey, enabled]);
 
   return file;
 }
@@ -316,6 +334,25 @@ export default function LeaveDetailPage() {
 
   const year = params.get("year") || "";
   const quarter = params.get("quarter") || "";
+
+  /* The URL is user-editable, so nothing is trusted from it. An invalid
+     year/quarter is caught here instead of being echoed into three API
+     calls that would each come back 400 and render as "(400)". */
+  const paramError = useMemo(() => {
+    if (!attendanceId) return "No employee was specified in the link.";
+    if (!projectId) return "No project was specified in the link.";
+    if (parseYear(year) === null) {
+      return year
+        ? `"${year}" isn't a valid year. Open this page from the Attendance table.`
+        : "The link is missing a year. Open this page from the Attendance table.";
+    }
+    if (parseQuarter(quarter) === null) {
+      return quarter
+        ? `"${quarter}" isn't a valid quarter — it must be 1, 2, 3 or 4.`
+        : "The link is missing a quarter. Open this page from the Attendance table.";
+    }
+    return "";
+  }, [attendanceId, projectId, year, quarter]);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -339,8 +376,12 @@ export default function LeaveDetailPage() {
   }, [project?.projectName]);
 
   useEffect(() => {
-    if (!attendanceId) return;
+    // A bad link is reported by `paramError`; don't fire a request we know
+    // the server will reject.
+    if (paramError) { setLoading(false); return undefined; }
+    const FALLBACK = "Couldn't load the leave detail.";
     let active = true;
+    const controller = new AbortController();
     (async () => {
       setLoading(true);
       setError(null);
@@ -349,20 +390,25 @@ export default function LeaveDetailPage() {
         const qs = new URLSearchParams({ year, quarter, projectId });
         const res = await fetch(
           `${API_BASE}${ENDPOINTS.resources.leaveReport(attendanceId)}?${qs}`,
-          { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+          {
+            signal: controller.signal,
+            headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          }
         );
-        if (!res.ok) throw new Error(`Couldn't load leave detail (${res.status})`);
-        const json = await res.json();
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const json = await readJsonBody(res, FALLBACK);
         const payload = json && json.data && typeof json.data === "object" ? json.data : json;
-        if (active) setData(payload || {});
+        // A 200 with no body is a real answer — an empty quarter, not a failure.
+        if (active) setData(payload && typeof payload === "object" ? payload : {});
       } catch (e) {
-        if (active) setError(e?.message || "Couldn't load leave detail");
+        const msg = requestErrorMessage(e, FALLBACK);
+        if (active && msg) setError(msg);
       } finally {
         if (active) setLoading(false);
       }
     })();
-    return () => { active = false; };
-  }, [attendanceId, year, quarter, projectId, refreshKey]);
+    return () => { active = false; controller.abort(); };
+  }, [attendanceId, year, quarter, projectId, refreshKey, paramError]);
 
   const d = data || {};
   const resourceId = d.resourceId || d.attendanceId || attendanceId;
@@ -370,8 +416,10 @@ export default function LeaveDetailPage() {
   // Fetch the quarterly cost report once we know the resourceId (comes back
   // from the leave-detail payload) and have a year/quarter to query with.
   useEffect(() => {
-    if (!resourceId || !year || !quarter) return;
+    if (paramError || !resourceId) return undefined;
+    const FALLBACK = "Couldn't load the quarterly cost report.";
     let active = true;
+    const controller = new AbortController();
     (async () => {
       setCostLoading(true);
       setCostError(null);
@@ -379,23 +427,25 @@ export default function LeaveDetailPage() {
         const token = getToken();
         const qs = new URLSearchParams({ resourceId, year, quarter });
         const res = await fetch(`${API_BASE}/api/attendance/cost/quarterly?${qs}`, {
+          signal: controller.signal,
           headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         });
-        if (!res.ok) throw new Error(`Couldn't load quarterly cost report (${res.status})`);
-        const json = await res.json();
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const json = await readJsonBody(res, FALLBACK);
         const { report, totals } = unwrapCostReport(json, resourceId);
         if (active) {
           setCostReport(report || {});
           setCostTotals(totals);
         }
       } catch (e) {
-        if (active) setCostError(e?.message || "Couldn't load quarterly cost report");
+        const msg = requestErrorMessage(e, FALLBACK);
+        if (active && msg) setCostError(msg);
       } finally {
         if (active) setCostLoading(false);
       }
     })();
-    return () => { active = false; };
-  }, [resourceId, year, quarter, refreshKey]);
+    return () => { active = false; controller.abort(); };
+  }, [resourceId, year, quarter, refreshKey, paramError]);
 
   const employeeName = d.employeeName || attendanceId || "Employee";
   const unpaidLeave = num(d.unpaidLeave);
@@ -431,6 +481,7 @@ export default function LeaveDetailPage() {
     year: d.year || year,
     quarter: d.quarter || quarter,
     refreshKey,
+    enabled: !paramError,
   });
 
   const leaveTaken = num(d.leaveTaken);
@@ -481,9 +532,9 @@ export default function LeaveDetailPage() {
           </p>
         </div>
         <div className="ld-head-actions">
-          {canRelax && !loading && !error && (
+          {canRelax && !loading && !error && !paramError && (
             <button className="ld-btn ld-btn--primary" onClick={() => setRelaxOpen(true)}>
-              Relaxation{relaxCap > 0 ? ` (${relaxLeft} left)` : ""}
+              Relaxation{relaxCap > 0 ? ` (${dayCount(relaxLeft)} left)` : ""}
             </button>
           )}
           <button className="ld-close" onClick={() => navigate(-1)} aria-label="Close">
@@ -492,10 +543,26 @@ export default function LeaveDetailPage() {
         </div>
       </header>
 
-      {loading && <div className="ld-muted">Loading leave detail…</div>}
-      {error && <div className="ld-error">⚠️ {error}</div>}
+      {/* A malformed link is a dead end, not a retry — say what's wrong and
+          offer the way back rather than leaving a spinner or a bare 400. */}
+      {paramError ? (
+        <div className="ld-error" role="alert">
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            {paramError}
+            <button type="button" className="ld-error-act" onClick={() => navigate(-1)}>
+              Go back
+            </button>
+          </span>
+        </div>
+      ) : (
+        <>
+          {loading && <div className="ld-muted">Loading leave detail…</div>}
+          {error && <div className="ld-error" role="alert">⚠️ {error}</div>}
+        </>
+      )}
 
-      {!loading && !error && (
+      {!loading && !error && !paramError && (
         <>
           {/* Leave summary — one card, one chart, one list. The donut shows
               how Leave Taken splits; the list carries the remaining figures
@@ -1121,7 +1188,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
                 <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
-                <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th>
+                {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Monthly rate divided by the working days in the month.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
@@ -1144,7 +1211,7 @@ function CostReportSection({ loading, error, report, totals }) {
                   >
                     {dayCount(leave.total)}
                   </td>
-                  <td className="ld-num">
+                  {/* <td className="ld-num">
                     <span
                       className="ld-attpill"
                       style={{
@@ -1154,7 +1221,7 @@ function CostReportSection({ loading, error, report, totals }) {
                     >
                       {pct(m.attendancePercentage)}
                     </span>
-                  </td>
+                  </td> */}
                   <td className="ld-num">{money(m.monthlyRate)}</td>
 
                   <td className="ld-num">{money(m.perDayRate)}</td>
@@ -1166,16 +1233,18 @@ function CostReportSection({ loading, error, report, totals }) {
               })}
             </tbody>
             <tfoot>
-              {/* 9 = the ten body columns minus the Cost column these
-                  figures sit under. Bump it if a column is added. */}
+              {/* 8 = the nine body columns minus the Cost column these figures
+                  sit under. Bump it if a column is added — or restored: the
+                  commented-out Attendance % and HalfDay Amount columns each
+                  need a +1 here when they come back. */}
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9} className="ld-costtable-totallbl">Subtotal</td>
+                    <td colSpan={8} className="ld-costtable-totallbl">Subtotal</td>
                     <td className="ld-num">{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9} className="ld-costtable-totallbl">
+                    <td colSpan={8} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -1188,7 +1257,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 </>
               )}
               <tr>
-                <td colSpan={9} className="ld-costtable-totallbl">Total Cost</td>
+                <td colSpan={8} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
               </tr>
             </tfoot>
@@ -1215,53 +1284,35 @@ function CostReportSection({ loading, error, report, totals }) {
    POST /api/attendance/quarterly-relaxation
    ===================================================================== */
 
-// A backend string is only worth showing if it reads like a sentence. JSON
-// dumps, stack traces and Java exception names get swapped for a plain line.
-function isReadableMessage(value) {
-  const text = String(value ?? "").trim();
-  if (!text || text.length > 300) return false;
-  if (/^[[{]/.test(text)) return false;              // a serialised body
-  if (/\sat\s[\w.$]+\(/.test(text)) return false;    // a stack trace
-  if (/\b\w+(\.\w+)+(Exception|Error)\b/.test(text)) return false;
-  return true;
-}
+/* ── input validation ────────────────────────────────────────────────
+   The HTTP-message and value parsers live in utils/apiMessage.js and are
+   shared with the Attendance page; only the rules specific to a
+   relaxation grant are defined here. */
 
-// Error bodies from this API vary: {message}, {error}, {errors:[…]} holding
-// either strings or objects, or plain text. Reduce all of that to one line.
-async function readErrorMessage(res) {
-  const fallback = `Couldn't submit the relaxation (${res.status}). Please try again.`;
+/* No quarter holds more days than this, so a larger relaxation is a typo
+   (or a stray keypress) rather than a real grant. */
+const MAX_RELAX_DAYS = 92;
+const MAX_REMARKS = 500;
 
-  let raw = "";
-  try {
-    raw = await res.text();
-  } catch {
-    return fallback;
+/* Returns "" when valid, otherwise the message to show under the field.
+   Half days are the unit here, so 1.3 is rejected as firmly as -1: the
+   backend counts leave in 0.5 steps and a stray 1.3 would be silently
+   rounded somewhere downstream. */
+function validateRelaxationDays(raw, maxDays) {
+  const text = String(raw ?? "").trim();
+  if (!text) return "Enter the number of relaxation days.";
+  if (!/^\d+(\.\d+)?$/.test(text)) return "Enter a number, for example 1.5.";
+  const n = Number(text);
+  if (!Number.isFinite(n)) return "Enter a number, for example 1.5.";
+  if (n <= 0) return "Relaxation days must be greater than 0.";
+  if (Math.round(n * 2) !== n * 2) {
+    return "Relaxation is counted in half days — use 0.5, 1, 1.5 and so on.";
   }
-  if (!raw.trim()) return fallback;
-
-  let data;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return isReadableMessage(raw) ? raw.trim() : fallback;   // plain-text body
+  if (maxDays != null && n > maxDays) {
+    return `Only ${dayCount(maxDays)} relaxation ${maxDays === 1 ? "day is" : "days are"} left this quarter.`;
   }
-
-  if (typeof data === "string") {
-    return isReadableMessage(data) ? data.trim() : fallback;
-  }
-
-  const fromList = Array.isArray(data?.errors)
-    ? data.errors
-        .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
-        .filter(Boolean)
-        .join(", ")
-    : "";
-
-  const candidate = [data?.message, data?.error, data?.detail, fromList].find(
-    (v) => typeof v === "string" && v.trim()
-  );
-
-  return candidate && isReadableMessage(candidate) ? candidate.trim() : fallback;
+  if (n > MAX_RELAX_DAYS) return "That's more days than a quarter contains.";
+  return "";
 }
 
 /* The relaxation endpoint takes every field in the query string and the
@@ -1444,16 +1495,52 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(false);
+  const [doneMessage, setDoneMessage] = useState("");
   const [attachment, setAttachment] = useState(null);
   const [fileError, setFileError] = useState(null);
+  // Per-field messages, keyed by field name. Populated on submit, then kept
+  // live as the user edits so a corrected field clears the moment it's valid.
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose();
+    const onKey = (e) => e.key === "Escape" && !saving && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, saving]);
 
-  const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  /* One validator for the whole form, used both to gate submit and to
+     re-check a field as it's edited — so the two can never disagree. */
+  const validate = (f) => {
+    const errs = {};
+    if (!String(f.resourceId || "").trim()) {
+      errs.resourceId = "This employee has no resource ID, so a relaxation can't be filed.";
+    }
+    if (!String(f.projectId || "").trim()) {
+      errs.projectId = "This page has no project ID, so a relaxation can't be filed.";
+    }
+    if (parseYear(f.year) === null) {
+      errs.year = `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
+    }
+    if (parseQuarter(f.quarter) === null) errs.quarter = "Choose a quarter from 1 to 4.";
+    const daysError = validateRelaxationDays(f.relaxationDays, maxDays);
+    if (daysError) errs.relaxationDays = daysError;
+    if (String(f.remarks || "").length > MAX_REMARKS) {
+      errs.remarks = `Remarks are limited to ${MAX_REMARKS} characters.`;
+    }
+    return errs;
+  };
+
+  const set = (patch) => {
+    setForm((f) => {
+      const next = { ...f, ...patch };
+      // Only re-validate once the user has tried to submit — flagging fields
+      // they haven't reached yet reads as nagging.
+      if (submitted) setFieldErrors(validate(next));
+      return next;
+    });
+    if (error) setError(null);
+  };
 
   /* Rejecting a bad file here rather than at submit keeps the attachment
      out of the main error line — the request is still perfectly valid
@@ -1464,6 +1551,10 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
       setFileError("That file isn't an image. Choose a PNG, JPG, WEBP or GIF.");
       return;
     }
+    if (!f.size) {
+      setFileError("That file is empty. Choose an image with content.");
+      return;
+    }
     if (f.size > MAX_ATTACHMENT_BYTES) {
       setFileError(`That image is ${fmtBytes(f.size)} — the limit is 5 MB.`);
       return;
@@ -1472,27 +1563,36 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
     setAttachment(f);
   };
 
+  // True when the form points at a different period than the page is showing.
+  const periodChanged =
+    String(form.year) !== String(year) || Number(form.quarter) !== Number(quarter);
+
   const submit = async () => {
+    if (saving) return;                       // guards a double-click / Enter twice
     setError(null);
-    if (!form.resourceId) { setError("Resource ID is missing."); return; }
-    if (!form.projectId) { setError("Project ID is missing."); return; }
-    const days = Number(form.relaxationDays);
-    if (!Number.isFinite(days) || days <= 0) { setError("Enter relaxation days greater than 0."); return; }
-    if (maxDays != null && days > maxDays) {
-      setError(`Only ${maxDays} relaxation ${maxDays === 1 ? "day is" : "days are"} left this quarter.`);
+    setSubmitted(true);
+
+    const errs = validate(form);
+    setFieldErrors(errs);
+    const firstBad = Object.keys(errs)[0];
+    if (firstBad) {
+      // Take the user to the offending field rather than making them hunt.
+      document.getElementById(`relax-${firstBad}`)?.focus();
       return;
     }
+
+    const days = Number(String(form.relaxationDays).trim());
     try {
       setSaving(true);
       const token = getToken();
       const qs = new URLSearchParams({
-        resourceId: String(form.resourceId),
-        projectId: String(form.projectId),
-        year: String(Number(form.year)),
-        quarter: String(Number(form.quarter)),
+        resourceId: String(form.resourceId).trim(),
+        projectId: String(form.projectId).trim(),
+        year: String(parseYear(form.year)),
+        quarter: String(parseQuarter(form.quarter)),
         relaxationDays: String(days),
       });
-      if (form.remarks.trim()) qs.set("remarks", form.remarks.trim());
+      if (form.remarks.trim()) qs.set("remarks", form.remarks.trim().slice(0, MAX_REMARKS));
 
       // Always multipart — see the note above ACCEPTED_IMAGE. Content-Type is
       // deliberately unset so the browser writes it with the part boundary.
@@ -1507,30 +1607,47 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
         },
         body,
       });
-      if (!res.ok) throw new Error(await readErrorMessage(res));
+      const FALLBACK = "Couldn't submit the relaxation. Please try again.";
+      if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+      // Show what the server actually reported when it reads like a sentence.
+      setDoneMessage(await readSuccessMessage(res, "Relaxation submitted successfully."));
       setDone(true);
       onSuccess?.(); // refresh the parent's leave detail (and cost report) with the new figures
     } catch (err) {
-      setError(err?.message || "Couldn't submit the relaxation. Try again.");
+      /* A failed action reports through the app's shared popup, matching the
+         rest of the project. The inline line under the form is kept in step
+         so the reason is still visible after the popup is dismissed. */
+      const msg =
+        requestErrorMessage(err, "Couldn't submit the relaxation. Please try again.") ||
+        "Couldn't submit the relaxation. Please try again.";
+      setError(msg);
+      notifyActionError("Relaxation not submitted", msg);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="ld-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    /* Backdrop and ✕ are both inert while the request is in flight —
+       dismissing mid-submit would orphan a write the user can't see. */
+    <div
+      className="ld-backdrop"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}
+    >
       <div className="ld-modal" role="dialog" aria-modal="true" aria-label="Quarterly Relaxation">
         <div className="ld-modal-head">
           <div>
             <div className="ld-eyebrow" style={{ marginBottom: 4 }}>Quarterly Relaxation</div>
             <h2 className="ld-modal-title">Add relaxation days</h2>
           </div>
-          <button className="ld-close" onClick={onClose} aria-label="Close"><FiX size={18} /></button>
+          <button className="ld-close" onClick={onClose} disabled={saving} aria-label="Close">
+            <FiX size={18} />
+          </button>
         </div>
 
         {done ? (
           <>
-            <div className="ld-success">✓ Relaxation submitted successfully.</div>
+            <div className="ld-success" role="status">✓ {doneMessage}</div>
             <div className="ld-modal-actions">
               <button className="ld-btn ld-btn--primary" onClick={onClose}>Done</button>
             </div>
@@ -1540,34 +1657,87 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
             <div className="ld-form">
               <label className="ld-field">
                 <span className="ld-field-lbl">Resource ID</span>
-                <input className="ld-input" value={form.resourceId} disabled />
+                <input id="relax-resourceId" className="ld-input" value={form.resourceId} disabled />
+                {fieldErrors.resourceId && <span className="ld-field-err">{fieldErrors.resourceId}</span>}
+                {fieldErrors.projectId && <span className="ld-field-err">{fieldErrors.projectId}</span>}
               </label>
               <label className="ld-field">
                 <span className="ld-field-lbl">Year</span>
-                <input type="number" className="ld-input" value={form.year} onChange={(e) => set({ year: e.target.value })} />
+                {/* text + inputMode rather than type="number": a number input
+                    reports "" for an unparseable entry like "20e5", so the
+                    validator never sees what was actually typed. */}
+                <input
+                  id="relax-year"
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={4}
+                  className={`ld-input${fieldErrors.year ? " is-bad" : ""}`}
+                  value={form.year}
+                  aria-invalid={!!fieldErrors.year}
+                  onChange={(e) => set({ year: e.target.value.replace(/[^\d]/g, "") })}
+                />
+                {fieldErrors.year && <span className="ld-field-err">{fieldErrors.year}</span>}
               </label>
               <label className="ld-field">
                 <span className="ld-field-lbl">Quarter</span>
-                <select className="ld-input" value={form.quarter} onChange={(e) => set({ quarter: Number(e.target.value) })}>
+                <select
+                  id="relax-quarter"
+                  className={`ld-input${fieldErrors.quarter ? " is-bad" : ""}`}
+                  value={form.quarter}
+                  onChange={(e) => set({ quarter: Number(e.target.value) })}
+                >
                   {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
                 </select>
+                {fieldErrors.quarter && <span className="ld-field-err">{fieldErrors.quarter}</span>}
               </label>
               <label className="ld-field">
                 <span className="ld-field-lbl">
-                  Relaxation Days{maxDays != null ? ` (${maxDays} left)` : ""}
+                  Relaxation Days{maxDays != null ? ` (${dayCount(maxDays)} left)` : ""}
                   <Hint text="Extra days waived on top of the paid allowance, up to the quarter's limit. Each day granted removes one unpaid day." />
                 </span>
-                {/* step 0.5, not 1 — unpaid leave is counted in half days,
-                    so a 0.5-day balance must be relaxable by 0.5. */}
-                <input type="number" min="0" step="0.5" max={maxDays ?? undefined} className="ld-input"
+                {/* Half days are the unit — 0.5, 1, 1.5 — so the field accepts
+                    digits and a single dot and the validator enforces the step.
+                    type="number" would blank the value on "1..2" and hide the
+                    mistake instead of naming it. */}
+                <input
+                  id="relax-relaxationDays"
+                  type="text"
+                  inputMode="decimal"
+                  className={`ld-input${fieldErrors.relaxationDays ? " is-bad" : ""}`}
                   value={form.relaxationDays}
-                  onChange={(e) => set({ relaxationDays: e.target.value })} placeholder="e.g. 1.5" />
+                  aria-invalid={!!fieldErrors.relaxationDays}
+                  onChange={(e) =>
+                    set({ relaxationDays: e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
+                  }
+                  placeholder="e.g. 1.5"
+                />
+                {fieldErrors.relaxationDays && (
+                  <span className="ld-field-err">{fieldErrors.relaxationDays}</span>
+                )}
               </label>
               <label className="ld-field ld-field--full">
-                <span className="ld-field-lbl">Remarks</span>
-                <textarea className="ld-input" rows={3} value={form.remarks}
-                  onChange={(e) => set({ remarks: e.target.value })} placeholder="Reason for the relaxation…"
-                  style={{ resize: "vertical", fontFamily: "inherit" }} />
+                <span className="ld-field-lbl">
+                  Remarks
+                  <span className="ld-optional">Optional</span>
+                  {/* Counter appears only as the limit approaches, so it isn't
+                      clutter for the one-line reason that's typical. */}
+                  {form.remarks.length > MAX_REMARKS - 100 && (
+                    <span className={`ld-counter${form.remarks.length > MAX_REMARKS ? " is-bad" : ""}`}>
+                      {form.remarks.length} / {MAX_REMARKS}
+                    </span>
+                  )}
+                </span>
+                <textarea
+                  id="relax-remarks"
+                  className={`ld-input${fieldErrors.remarks ? " is-bad" : ""}`}
+                  rows={3}
+                  maxLength={MAX_REMARKS}
+                  value={form.remarks}
+                  onChange={(e) => set({ remarks: e.target.value })}
+                  placeholder="Reason for the relaxation…"
+                  style={{ resize: "vertical", fontFamily: "inherit" }}
+                />
+                {fieldErrors.remarks && <span className="ld-field-err">{fieldErrors.remarks}</span>}
               </label>
 
               <AttachmentField
@@ -1580,7 +1750,17 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
               />
             </div>
 
-            {error && <div className="ld-error">{error}</div>}
+            {/* Year and quarter are editable, so they can be pointed at a
+                period other than the one on screen. That's allowed, but it
+                silently files the grant elsewhere — so it's called out. */}
+            {periodChanged && (
+              <div className="ld-warn" role="status">
+                This will be filed against <strong>Q{form.quarter} {form.year}</strong>, not the
+                Q{quarter} {year} shown on this page.
+              </div>
+            )}
+
+            {error && <div className="ld-error" role="alert">{error}</div>}
 
             <div className="ld-modal-actions">
               <button className="ld-btn ld-btn--ghost" onClick={onClose} disabled={saving}>Cancel</button>
@@ -1876,6 +2056,21 @@ const LD_CSS = `
 .ld-optional { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
   color: ${C.faint}; border: 1px solid ${C.border}; border-radius: 5px; padding: 1px 5px; }
 .ld-field-err { font-size: 12px; color: ${C.red}; }
+/* Invalid field — a red edge plus the message below it, so the error is
+   findable by colour and readable without it. */
+.ld-input.is-bad { border-color: ${C.red}; }
+.ld-input.is-bad:focus { border-color: ${C.red}; box-shadow: 0 0 0 3px rgba(214,69,69,.14); }
+.ld-counter { margin-left: auto; font-size: 10.5px; font-weight: 600; color: ${C.faint}; }
+.ld-counter.is-bad { color: ${C.red}; }
+/* A caution, not a failure — the action is still allowed to proceed. */
+.ld-warn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5;
+  background: #fff8ec; border: 1px solid #f0dcb8; color: #8a5a00;
+  border-radius: 10px; padding: 10px 13px; margin-bottom: 12px; }
+.ld-warn strong { color: #6d4700; }
+/* Inline recovery action inside an error banner. */
+.ld-error-act { margin-left: 10px; font: inherit; font-size: 12.5px; font-weight: 700;
+  color: ${C.red}; background: none; border: none; padding: 0; cursor: pointer;
+  text-decoration: underline; }
 .ld-field-note { font-size: 12px; color: ${C.muted}; }
 
 /* optional image attachment — drop zone, then the picked file */

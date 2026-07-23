@@ -3,6 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
+import {
+  readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, notifyActionError,
+  parseYear, parseQuarter, parseMonth, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
+} from "../../utils/apiMessage";
 import { getToken } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import "../../styles/global.css";
@@ -89,6 +93,18 @@ function buildMetrics(payload, employees) {
     unpaidLeave: null,
   };
 }
+
+/* Attendance sheets are small; anything this size is the wrong file. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/* A single upload covers a month or a quarter — a longer span means the
+   dates were mistyped (a wrong year is the usual culprit). */
+const MAX_RANGE_DAYS = 366;
+
+const fmtBytes = (n) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 function isWeekdayName(name) {
   return WEEKDAY_NAMES.has(String(name ?? "").trim().toLowerCase());
@@ -223,15 +239,30 @@ export default function ProjectAttendancePage() {
   }, [milestones]);
   const milestoneName = (id) => milestoneNameById.get(String(id)) || "";
 
+  /* Year, month and quarter drive three API calls, so they're checked before
+     a request is built rather than after the backend rejects one. They come
+     from selects today, but a stale bookmark or a future URL-driven filter
+     would put anything here — and "(400)" tells the user nothing. */
+  const paramError = useMemo(() => {
+    if (!projectId) return "No project was specified in the link.";
+    if (parseYear(year) === null) return `"${year}" isn't a valid year (${MIN_YEAR}–${MAX_YEAR}).`;
+    if (selectedMonth !== "all" && parseMonth(selectedMonth) === null) {
+      return `"${selectedMonth}" isn't a valid month.`;
+    }
+    if (parseQuarter(quarter) === null) return `"${quarter}" isn't a valid quarter — it must be 1 to 4.`;
+    return "";
+  }, [projectId, year, selectedMonth, quarter]);
+
   // Monthly summary — fetched per selected month. "All months" shows a prompt instead.
   useEffect(() => {
-    if (!projectId) return;
+    if (paramError) { setSummaryLoading(false); return undefined; }
     if (selectedMonth === "all") {
       setSummary(null);
       setSummaryError(null);
       setSummaryLoading(false);
-      return;
+      return undefined;
     }
+    const FALLBACK = "Couldn't load the attendance summary.";
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -239,26 +270,33 @@ export default function ProjectAttendancePage() {
       setSummaryError(null);
       try {
         const token = getToken();
+        const qs = new URLSearchParams({
+          projectId,
+          year: String(parseYear(year)),
+          month: String(parseMonth(selectedMonth)),
+        });
         const res = await fetch(
-          `${API_BASE}/api/attendance/report/monthly?projectId=${projectId}&year=${year}&month=${selectedMonth}`,
+          `${API_BASE}/api/attendance/report/monthly?${qs}`,
           { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        const data = await res.json();
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        // An empty 200 is a month with nothing logged, not a failure.
+        const data = await readJsonBody(res, FALLBACK);
         if (active) setSummary(data);
       } catch (err) {
-        if (active && err.name !== "AbortError")
-          setSummaryError(err.message || "Couldn't load the attendance summary.");
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active && msg) setSummaryError(msg);
       } finally {
         if (active) setSummaryLoading(false);
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, selectedMonth]);
+  }, [projectId, year, selectedMonth, paramError]);
 
   // Quarterly leave policy
   useEffect(() => {
-    if (!projectId) return;
+    if (paramError) { setQuarterlyLoading(false); return undefined; }
+    const FALLBACK = "Couldn't load the quarterly attendance.";
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -266,22 +304,27 @@ export default function ProjectAttendancePage() {
       setQuarterlyError(null);
       try {
         const token = getToken();
+        const qs = new URLSearchParams({
+          projectId,
+          year: String(parseYear(year)),
+          quarter: String(parseQuarter(quarter)),
+        });
         const res = await fetch(
-          `${API_BASE}/api/attendance/report/quarterly?projectId=${projectId}&year=${year}&quarter=${quarter}`,
+          `${API_BASE}/api/attendance/report/quarterly?${qs}`,
           { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
-        if (!res.ok) throw new Error(`Request failed (${res.status})`);
-        const data = await res.json();
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
         if (active) setQuarterly(data);
       } catch (err) {
-        if (active && err.name !== "AbortError")
-          setQuarterlyError(err.message || "Couldn't load quarterly leave.");
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active && msg) setQuarterlyError(msg);
       } finally {
         if (active) setQuarterlyLoading(false);
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter]);
+  }, [projectId, year, quarter, paramError]);
 
   // Holidays + calendar — lazy fetch when modal opens (or year changes while open).
   useEffect(() => {
@@ -293,20 +336,30 @@ export default function ProjectAttendancePage() {
       setHolidayError(null);
       try {
         const token = getToken();
+        const safeYear = parseYear(year);
+        if (safeYear === null) throw new Error(`"${year}" isn't a valid year.`);
         const [hRes, cRes] = await Promise.all([
-          fetch(`${API_BASE}/api/holidays/${year}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
-          fetch(`${API_BASE}/api/calendar/${year}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
+          fetch(`${API_BASE}/api/holidays/${safeYear}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
+          fetch(`${API_BASE}/api/calendar/${safeYear}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
         ]);
-        if (!hRes.ok) throw new Error(`Holidays request failed (${hRes.status})`);
-        const hData = await hRes.json();
-        const cData = cRes.ok ? await cRes.json() : null;
+        const FALLBACK = "Couldn't load the holiday calendar.";
+        if (!hRes.ok) throw new Error(await readErrorMessage(hRes, FALLBACK));
+        const hData = await readJsonBody(hRes, FALLBACK);
+        // The calendar is supporting detail — a failure there shouldn't take
+        // the holiday list down with it, so it's read defensively.
+        let cData = null;
+        if (cRes.ok) {
+          try { cData = await readJsonBody(cRes, FALLBACK); } catch { cData = null; }
+        }
         if (active) {
-          setHolidays(normalizeHolidays(hData));
+          // normalizeHolidays iterates its argument — an object or null body
+          // would throw, so anything that isn't a list becomes an empty one.
+          setHolidays(normalizeHolidays(Array.isArray(hData) ? hData : []));
           setCalendar(cData);
         }
       } catch (err) {
-        if (active && err.name !== "AbortError")
-          setHolidayError(err.message || "Couldn't load holidays.");
+        const msg = requestErrorMessage(err, "Couldn't load the holiday calendar.");
+        if (active && msg) setHolidayError(msg);
       } finally {
         if (active) setHolidayLoading(false);
       }
@@ -352,13 +405,15 @@ export default function ProjectAttendancePage() {
         <button
           className="att-btn-primary"
           onClick={() => setUploadOpen(true)}
-          disabled={milestonesLoading || uploadableMilestones.length === 0}
+          disabled={milestonesLoading || uploadableMilestones.length === 0 || !!paramError}
           title={
-            milestonesLoading
-              ? "Loading milestones…"
-              : uploadableMilestones.length === 0
-                ? "No resource-based milestones are ready for upload"
-                : "Upload attendance for a resource-based milestone"
+            paramError
+              ? "Fix the filters above before uploading"
+              : milestonesLoading
+                ? "Loading milestones…"
+                : uploadableMilestones.length === 0
+                  ? "No resource-based milestones are ready for upload"
+                  : "Upload attendance for a resource-based milestone"
           }
         >
           <UploadIcon />
@@ -366,7 +421,8 @@ export default function ProjectAttendancePage() {
         </button>
       </header>
 
-      {milestonesError && <div className="att-error">{milestonesError}</div>}
+      {paramError && <div className="att-error" role="alert">⚠️ {paramError}</div>}
+      {milestonesError && <div className="att-error" role="alert">{milestonesError}</div>}
 
       {/* Controls */}
       <div className="att-toolbar">
@@ -436,15 +492,32 @@ export default function ProjectAttendancePage() {
       <section className="att-section">
         <div className="att-section-head">
           <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly Attendance</h2>
-          <Field label="Quarter">
-            <select
-              className="att-select"
-              value={quarter}
-              onChange={(e) => setQuarter(Number(e.target.value))}
-            >
-              {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
-            </select>
-          </Field>
+          {/* Year sits beside Quarter so a quarter can be picked without
+              scrolling back to the toolbar. It's the SAME `year` state the
+              toolbar uses — one source of truth, so the two controls can't
+              disagree about which year the page is showing. Unlike the
+              toolbar's copy this one leaves the month alone: resetting the
+              monthly view from a quarterly control would be a surprise. */}
+          <div className="att-controls att-section-controls">
+            <Field label="Year">
+              <select
+                className="att-select"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </Field>
+            <Field label="Quarter">
+              <select
+                className="att-select"
+                value={quarter}
+                onChange={(e) => setQuarter(Number(e.target.value))}
+              >
+                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              </select>
+            </Field>
+          </div>
         </div>
         {quarterlyLoading && <SkeletonTable rows={5} cols={7} />}
         {quarterlyError && <div className="att-error">{quarterlyError}</div>}
@@ -697,6 +770,9 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
   // Holds the actual message returned by the API so the popup reflects
   // what the backend reported, rather than a hardcoded string.
   const [responseMessage, setResponseMessage] = useState("");
+  // Per-field messages, shown once a submit has been attempted.
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
 
   // Fetch rate-year options from the resources service.
   useEffect(() => {
@@ -720,7 +796,59 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     return () => { active = false; };
   }, [projectId]);
 
-  useModalChrome(onClose);
+  useModalChrome(onClose, uploading);
+
+  /* ── validation ──────────────────────────────────────────────────
+     The date range is validated in one place because three things depend
+     on it: the template download, the upload, and the range-vs-milestone
+     caution. Returns "" when valid. */
+  const validateRange = (start, end) => {
+    if (!start || !end) return "Set both a start and an end date.";
+    if (!parseISODate(start)) return "The start date isn't a valid date.";
+    if (!parseISODate(end)) return "The end date isn't a valid date.";
+    if (end < start) return "The end date can't be earlier than the start date.";
+    const span = daysBetween(start, end);
+    if (span !== null && span > MAX_RANGE_DAYS) {
+      return `That range covers ${span} days — upload a period of ${MAX_RANGE_DAYS} days or less.`;
+    }
+    return "";
+  };
+
+  /* An .xlsx is a zip and an .xls is a compound file; browsers report their
+     MIME types inconsistently (and not at all for a drag from some apps), so
+     the extension is the reliable check and the MIME type is a bonus. */
+  const validateFile = (f) => {
+    if (!f) return "Choose an Excel file to upload.";
+    if (!/\.(xlsx|xls)$/i.test(f.name || "")) {
+      return "That isn't an Excel file. Choose a .xlsx or .xls file.";
+    }
+    if (!f.size) return "That file is empty. Choose the filled-in template.";
+    if (f.size > MAX_UPLOAD_BYTES) {
+      return `That file is ${fmtBytes(f.size)} — the limit is ${fmtBytes(MAX_UPLOAD_BYTES)}.`;
+    }
+    return "";
+  };
+
+  const validateForm = () => {
+    const errs = {};
+    if (!milestone?.apiId) errs.milestone = "Choose a milestone to upload against.";
+    const rangeError = validateRange(startDate, endDate);
+    if (rangeError) errs.startDate = rangeError;
+    const fileError = validateFile(file);
+    if (fileError) errs.file = fileError;
+    return errs;
+  };
+
+  // Re-check after a failed submit so a corrected field clears as it's fixed.
+  const revalidate = () => { if (submitted) setFieldErrors(validateForm()); };
+
+  /* The upload range sitting outside the milestone's own dates is allowed —
+     a milestone can be extended later — but it's almost always a mis-pick,
+     so it's called out rather than silently accepted. */
+  const outsideMilestone =
+    milestone && startDate && endDate && milestone.startDate && milestone.endDate &&
+    !validateRange(startDate, endDate) &&
+    (startDate < milestone.startDate || endDate > milestone.endDate);
 
   // Reads the response body once, tolerating JSON or plain text.
   // Returns { raw, data } — data is the parsed JSON, or null if it wasn't JSON.
@@ -737,7 +865,9 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
   // The API's validation errors array sometimes lists resource IDs that
   // simply belong to a different project ("Resource X does not exist.").
   // Surface that as one clear, actionable line instead of a raw ID dump.
-  // Any other error shape falls through to the API's own message/error text.
+  // Anything else goes through the shared gate, which drops JSON, HTML
+  // pages and stack traces — the old `|| raw` fallback here put the whole
+  // response body on screen whenever it carried no message field.
   const buildErrorMessage = (data, raw, status) => {
     const validationErrors = Array.isArray(data?.errors) ? data.errors : null;
     const isResourceMismatch =
@@ -747,16 +877,18 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     if (isResourceMismatch) {
       return "These resources belong to another project. Please upload the correct attendance file.";
     }
-    return data?.message || data?.error || raw || `Upload failed (${status})`;
+    return messageFromBody(raw, status, "The upload didn't go through. Please try again.");
   };
 
   // GET /api/export/template/attendance — a blank sheet covering the chosen
   // range. Binary .xlsx, so it's read as a blob and saved via <a download>.
   const downloadTemplate = async () => {
+    if (downloading || uploading) return;
     setError(null);
     setNotice(null);
-    if (!startDate || !endDate) { setError("Set both dates to download a matching template."); return; }
-    if (endDate < startDate) { setError("End date can't be earlier than the start date."); return; }
+    // The template is built for the range, so the range rules apply here too.
+    const rangeError = validateRange(startDate, endDate);
+    if (rangeError) { setError(rangeError); return; }
 
     try {
       setDownloading(true);
@@ -766,13 +898,17 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
         { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
       );
 
+      const DL_FALLBACK = "Couldn't download the template. Please try again.";
       if (!res.ok) {
-        // An error body is text/JSON, not a spreadsheet.
-        const { raw, data } = await parseResponseBody(res);
-        throw new Error(data?.message || data?.error || raw || `Download failed (${res.status})`);
+        // An error body is text/JSON, not a spreadsheet — and it must not be
+        // shown raw, which the old `|| raw` fallback did.
+        throw new Error(await readErrorMessage(res, DL_FALLBACK));
       }
 
       const blob = await res.blob();
+      // A 200 with an empty body would save a 0-byte file that Excel refuses
+      // to open — clearer to report it than to hand over a broken download.
+      if (!blob.size) throw new Error("The server returned an empty template file.");
       const disposition = res.headers.get("content-disposition") || "";
       const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
       // Cross-origin JS can't read Content-Disposition unless the backend
@@ -792,24 +928,35 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
 
       setNotice(`Template downloaded — ${filename}`);
     } catch (err) {
-      setError(err?.message || "Couldn't download the template. Try again.");
+      /* Action outcome → the app's shared popup. The inline line is kept in
+         step so the reason survives dismissing the popup. */
+      const msg = requestErrorMessage(err, "Couldn't download the template. Please try again.");
+      setError(msg);
+      notifyActionError("Download failed", msg);
     } finally {
       setDownloading(false);
     }
   };
 
   const upload = async () => {
+    if (uploading || downloading) return;     // guards a double-click
     setError(null);
     setNotice(null);
+    setSubmitted(true);
+
     if (uploadType === "quarterly") {
       setNotice("Quarterly upload isn't available yet — it'll be enabled once the API is ready.");
       return;
     }
-    if (!milestone?.apiId) { setError("Choose a milestone to upload against."); return; }
-    if (!file) { setError("Choose an Excel file to upload."); return; }
-    if (!startDate || !endDate) { setError("Set both a start and end date."); return; }
-    if (endDate < startDate) { setError("End date can't be earlier than the start date."); return; }
     if (!projectId) { setError("This project couldn't be identified."); return; }
+
+    const errs = validateForm();
+    setFieldErrors(errs);
+    const firstBad = Object.keys(errs)[0];
+    if (firstBad) {
+      document.getElementById(`upl-${firstBad}`)?.focus();
+      return;
+    }
 
     const body = new FormData();
     body.append("file", file);
@@ -839,26 +986,40 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
         throw new Error(buildErrorMessage(data, raw, res.status));
       }
 
-      // Always show a clean, fixed message — never surface the raw API
-      // response body here (that belongs to the error path only).
-      setResponseMessage("Attendance uploaded successfully.");
+      /* The success body is shown only when it reads like a sentence —
+         `raw` was already read above, so it's re-checked through the same
+         gate rather than printed. Falls back to a fixed line. */
+      setResponseMessage(
+        messageFromBody(
+          typeof data?.message === "string" ? data.message : "",
+          res.status,
+          "Attendance uploaded successfully."
+        )
+      );
       setDone(true);
     } catch (err) {
-      setError(err?.message || "The upload didn't go through. Try again.");
+      const msg = requestErrorMessage(err, "The upload didn't go through. Please try again.");
+      setError(msg);
+      notifyActionError("Upload failed", msg);
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    /* Dismissing mid-upload would orphan a write the user can't see, so the
+       backdrop and ✕ are inert until the request settles. */
+    <div
+      className="att-backdrop"
+      onMouseDown={(e) => { if (e.target === e.currentTarget && !uploading) onClose(); }}
+    >
       <div className="att-modal" role="dialog" aria-modal="true" aria-label="Leave Management" style={{ maxWidth: 540 }}>
         <div className="att-modal-head">
           <div>
             <div className="att-eyebrow" style={{ marginBottom: 4 }}>Leave Management</div>
             <h2 className="att-modal-title">Upload attendance</h2>
           </div>
-          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+          <button className="att-close" onClick={onClose} disabled={uploading} aria-label="Close">✕</button>
         </div>
 
         <div className="att-modal-sub">
@@ -882,9 +1043,11 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
             <div className="att-controls" style={{ marginBottom: 14 }}>
               <Field label="Milestone">
                 <select
-                  className="att-select att-select--wide"
+                  id="upl-milestone"
+                  className={`att-select att-select--wide${fieldErrors.milestone ? " is-bad" : ""}`}
                   value={milestoneId}
-                  onChange={(e) => { setMilestoneId(e.target.value); setError(null); }}
+                  aria-invalid={!!fieldErrors.milestone}
+                  onChange={(e) => { setMilestoneId(e.target.value); setError(null); revalidate(); }}
                 >
                   <option value="">Select a milestone…</option>
                   {milestones.map((m) => (
@@ -893,6 +1056,7 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                     </option>
                   ))}
                 </select>
+                {fieldErrors.milestone && <span className="att-field-err">{fieldErrors.milestone}</span>}
               </Field>
               <Field label="Upload type">
                 <select
@@ -906,19 +1070,23 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
               </Field>
               <Field label="Start date">
                 <input
+                  id="upl-startDate"
                   type="date"
-                  className="att-select"
+                  className={`att-select${fieldErrors.startDate ? " is-bad" : ""}`}
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  max={endDate || undefined}
+                  aria-invalid={!!fieldErrors.startDate}
+                  onChange={(e) => { setStartDate(e.target.value); setError(null); revalidate(); }}
                 />
               </Field>
               <Field label="End date">
                 <input
+                  id="upl-endDate"
                   type="date"
-                  className="att-select"
+                  className={`att-select${fieldErrors.startDate ? " is-bad" : ""}`}
                   value={endDate}
                   min={startDate || undefined}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={(e) => { setEndDate(e.target.value); setError(null); revalidate(); }}
                 />
               </Field>
               <Field label="Rate year">
@@ -928,6 +1096,17 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                 </select>
               </Field>
             </div>
+
+            {/* The range error covers both date fields, so it sits under the
+                pair rather than being duplicated beneath each one. */}
+            {fieldErrors.startDate && <div className="att-field-err">{fieldErrors.startDate}</div>}
+            {outsideMilestone && !fieldErrors.startDate && (
+              <div className="att-note att-note--warn" role="status">
+                These dates fall outside the milestone's own range
+                ({milestone.startDate || "—"} → {milestone.endDate || "—"}). You can still
+                upload, but check you've picked the right milestone.
+              </div>
+            )}
 
             {/* Template is built for the range above, so it sits between the
                 dates and the file picker — download, fill, then upload. */}
@@ -951,23 +1130,37 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
             </div>
 
             <Field label="Attendance file">
-              <label className="att-file">
+              <label className={`att-file${fieldErrors.file ? " is-bad" : ""}`}>
                 <input
+                  id="upl-file"
                   type="file"
                   accept=".xlsx,.xls"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  disabled={uploading}
+                  onChange={(e) => {
+                    /* `accept` is a filter, not a guarantee — a user can pick
+                       "All files", and a drag-and-drop bypasses it entirely.
+                       Validate here so a .pdf is caught before the request. */
+                    const picked = e.target.files?.[0] || null;
+                    setFile(picked);
+                    setError(null);
+                    const msg = picked ? validateFile(picked) : "";
+                    setFieldErrors((prev) => ({ ...prev, file: msg || undefined }));
+                  }}
                 />
                 <span className="att-file-btn"><UploadIcon />Choose file</span>
-                <span className="att-file-name">{file ? file.name : "No file selected — .xlsx or .xls"}</span>
+                <span className="att-file-name">
+                  {file ? `${file.name} · ${fmtBytes(file.size)}` : "No file selected — .xlsx or .xls"}
+                </span>
               </label>
+              {fieldErrors.file && <span className="att-field-err">{fieldErrors.file}</span>}
             </Field>
 
-            {notice && <div className="att-note">{notice}</div>}
-            {error && <div className="att-error">{error}</div>}
+            {notice && <div className="att-note" role="status">{notice}</div>}
+            {error && <div className="att-error" role="alert">{error}</div>}
 
             <div className="att-modal-actions">
               <button className="att-btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
-              <button className="att-btn-primary" onClick={upload} disabled={uploading}>
+              <button className="att-btn-primary" onClick={upload} disabled={uploading || downloading}>
                 {uploading ? "Uploading…" : "Upload attendance"}
               </button>
             </div>
@@ -1197,9 +1390,11 @@ function SkeletonTable({ rows = 4, cols = 6, withMetrics = false }) {
 }
 
 /* ---------- shared modal behaviour (esc to close + scroll lock) ---------- */
-function useModalChrome(onClose) {
+/* `busy` blocks Escape while a request is in flight, matching the inert
+   backdrop and ✕ — closing mid-write orphans it. */
+function useModalChrome(onClose, busy = false) {
   useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose();
+    const onKey = (e) => { if (e.key === "Escape" && !busy) onClose(); };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -1207,7 +1402,7 @@ function useModalChrome(onClose) {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [onClose]);
+  }, [onClose, busy]);
 }
 
 /* ---------- icons ---------- */
@@ -1279,6 +1474,9 @@ const ATT_CSS = `
 .att-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
 .att-controls { display: flex; gap: 12px; flex-wrap: wrap; }
+/* Filters sitting inside a section heading rather than the page toolbar —
+   held to the right edge and kept from stretching the heading row. */
+.att-section-controls { flex: 0 0 auto; align-items: flex-end; }
 .att-field { display: flex; flex-direction: column; gap: 6px; }
 .att-field-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; color: ${C.muted}; }
@@ -1373,6 +1571,14 @@ const ATT_CSS = `
   border: 1px solid #f4cccc; border-radius: 10px; margin: 4px 0; }
 .att-note { color: ${C.muted}; font-size: 14px; padding: 12px 14px; background: #f6f8fb;
   border: 1px solid ${C.border}; border-radius: 10px; margin: 4px 0; }
+/* A caution, not a failure — the action is still allowed to proceed. */
+.att-note--warn { background: #fff8ec; border-color: #f0dcb8; color: #8a5a00; }
+/* Field-level validation message — sits under the control it belongs to. */
+.att-field-err { display: block; font-size: 12.5px; color: ${C.red}; margin-top: 5px; line-height: 1.45; }
+/* Invalid control — a red edge alongside the message, so the error is
+   findable by colour and readable without relying on it. */
+.att-select.is-bad, .att-file.is-bad { border-color: ${C.red}; }
+.att-select.is-bad:focus { border-color: ${C.red}; box-shadow: 0 0 0 3px rgba(214,69,69,.14); }
 .att-empty { display: flex; flex-direction: column; align-items: center; text-align: center;
   padding: 34px 20px; border: 1px dashed ${C.borderStrong}; border-radius: 14px; background: #fbfcfe; }
 .att-empty-icon { display: inline-flex; align-items: center; justify-content: center;

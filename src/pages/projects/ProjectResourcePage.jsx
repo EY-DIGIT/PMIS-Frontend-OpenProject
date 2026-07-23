@@ -12,8 +12,49 @@ import "../../styles/global.css";
 import { getToken } from "../../api/auth";
 import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
+import {
+  readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody,
+  isReadableMessage, parseISODate,
+} from "../../utils/apiMessage";
 
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
+
+/* ── upload + field limits ──────────────────────────────────────────
+   A resource master sheet is small; anything past this is the wrong
+   file. The text caps mirror what the columns realistically hold and
+   stop a paste of a whole document reaching the API. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_NAME = 120;
+const MAX_TEXT = 120;
+/* A rate card entry is an annual figure in rupees — ₹100 crore is already
+   far past anything real, so beyond it the value is a typo. */
+const MAX_RATE = 1_000_000_000;
+
+const fmtBytes = (n) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/* An .xlsx is a zip and an .xls a compound file, so browsers report their
+   MIME types inconsistently (and not at all for some drag sources) — the
+   extension is the reliable check. Returns "" when the file is usable. */
+function validateSheetFile(f) {
+  if (!f) return "Choose a file to import.";
+  if (!/\.(xlsx|xls)$/i.test(f.name || "")) {
+    return "That isn't an Excel file. Choose a .xlsx or .xls file.";
+  }
+  if (!f.size) return "That file is empty. Choose the filled-in template.";
+  if (f.size > MAX_UPLOAD_BYTES) {
+    return `That file is ${fmtBytes(f.size)} — the limit is ${fmtBytes(MAX_UPLOAD_BYTES)}.`;
+  }
+  return "";
+}
+
+/* Deliberately permissive: this only catches the typo cases (missing @,
+   trailing dot, spaces). Anything stricter rejects addresses that are
+   perfectly valid, and the server is the real authority. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 // ---------- formatting helpers ----------
 // Swap "en-IN" / "INR" if the rate card is in another currency.
@@ -320,6 +361,12 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
 .rp-track.on .rp-thumb { left: 20px; }
 
 .rp-inline-error { background: var(--rp-danger-bg); border: 1px solid #f5c9c9; color: var(--rp-danger); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; display: flex; align-items: center; gap: 10px; }
+/* Field-level validation message, sitting under the control it belongs to. */
+.rp-field-err { display: block; font-size: 12.5px; color: var(--rp-danger); margin-top: 5px; line-height: 1.45; font-weight: 500; }
+/* Invalid control — a red edge alongside the message, so the error is
+   findable by colour and readable without relying on it. */
+.rp-input.is-bad { border-color: var(--rp-danger); }
+.rp-input.is-bad:focus { border-color: var(--rp-danger); box-shadow: 0 0 0 3px rgba(220,38,38,.14); }
 .rp-inline-success { background: var(--rp-success-bg); border: 1px solid #bfe6cf; color: var(--rp-success); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
 
 /* ---- rate card by year (edit drawer) ---- */
@@ -509,11 +556,13 @@ function closeApiResponse() {
       const url = projectId
         ? `${API_BASE}/api/resources?projectId=${encodeURIComponent(projectId)}`
         : `${API_BASE}/api/resources`;
+      const FALLBACK = "Couldn't load the resources.";
       const res = await fetch(url, {
         headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!res.ok) throw new Error(`Couldn't load resources (${res.status})`);
-      const data = await res.json();
+      if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+      // An empty 200 is a project with no resources yet, not a failure.
+      const data = await readJsonBody(res, FALLBACK);
       const list = Array.isArray(data) ? data : data ? [data] : [];
 
       // Safety net: if the server ever returns unscoped data, still filter
@@ -527,7 +576,7 @@ function closeApiResponse() {
       }
       setResources(scoped);
     } catch (e) {
-      setLoadError(e.message || "Couldn't load resources");
+      setLoadError(requestErrorMessage(e, "Couldn't load the resources."));
     } finally {
       setLoading(false);
     }
@@ -565,27 +614,47 @@ function closeApiResponse() {
 
   // ---------- server lookup: GET /api/resources/{resId} ----------
   async function fetchById(resId) {
+    const id = String(resId ?? "").trim();
+    // The caller gates on a digits-only query, but this is the value that
+    // ends up in the URL path — check it here rather than trusting that.
+    if (!/^\d{3,}$/.test(id)) {
+      pushToast({ type: "warn", title: "Invalid ID", msg: "A resource ID is at least 3 digits." });
+      return;
+    }
     setServerSearching(true);
     try {
+      const FALLBACK = "Couldn't look that resource up.";
       const token = getToken();
       const res = await fetch(
-        `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
+        `${API_BASE}/api/resources/${encodeURIComponent(id)}`,
         { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
       );
       if (res.status === 404) {
-        pushToast({ type: "warn", title: "Not found", msg: `No resource matches ${resId}.` });
+        pushToast({ type: "warn", title: "Not found", msg: `No resource matches ${id}.` });
         return;
       }
-      if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
-      const data = await res.json();
+      if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+      const data = await readJsonBody(res, FALLBACK);
+      // A 200 carrying nothing usable would splice a blank row into the table.
+      if (!data || typeof data !== "object" || !data.resId) {
+        throw new Error(`The server returned no details for ${id}.`);
+      }
       setResources((prev) =>
         prev.some((r) => r.resId === data.resId)
           ? prev.map((r) => (r.resId === data.resId ? data : r))
           : [data, ...prev]
       );
-      pushToast({ type: "ok", title: "Found on server", msg: `${data.name} (${data.resId}) added to the list.` });
+      pushToast({
+        type: "ok",
+        title: "Found on server",
+        msg: `${data.name || "Resource"} (${data.resId}) added to the list.`,
+      });
     } catch (e) {
-      pushToast({ type: "error", title: "Lookup failed", msg: e.message || "Please try again." });
+      pushToast({
+        type: "error",
+        title: "Lookup failed",
+        msg: requestErrorMessage(e, "Couldn't look that resource up."),
+      });
     } finally {
       setServerSearching(false);
     }
@@ -609,13 +678,9 @@ function closeApiResponse() {
       }
     );
   } catch (err) {
-    setApiResponse({
-      title: "Save failed",
-      ok: false,
-      status: null,
-      data: { message: err.message },
-    });
-    throw err; // let EditDrawer still show its inline error + stay open
+    const msg = requestErrorMessage(err, "Couldn't save the changes. Please try again.");
+    setApiResponse({ title: "Save failed", ok: false, status: null, data: { message: msg } });
+    throw new Error(msg); // let EditDrawer still show its inline error + stay open
   }
 
   const text = await res.text();
@@ -623,15 +688,21 @@ function closeApiResponse() {
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
-    body = text; // non-JSON body — show raw text
+    body = null;   // a non-JSON body is never shown raw — see below
   }
 
   if (!res.ok) {
-    setApiResponse({ title: "Save failed", ok: false, status: res.status, data: body });
-    throw new Error(`Save failed (${res.status})`);
+    /* The raw text used to be handed to the modal, which meant an HTML error
+       page or a bare JSON envelope was rendered verbatim. Reduce it to one
+       sentence first, and use that for both the modal and the thrown error
+       so the drawer's inline message matches. */
+    const msg = messageFromBody(text, res.status, "Couldn't save the changes. Please try again.");
+    setApiResponse({ title: "Save failed", ok: false, status: res.status, data: { message: msg } });
+    throw new Error(msg);
   }
 
-  const saved = body || updated;
+  // A non-object body (plain "OK", or unparseable) must not replace the row.
+  const saved = body && typeof body === "object" ? body : updated;
   setResources((prev) =>
     prev.map((r) => (r.resId === saved.resId ? { ...r, ...saved } : r))
   );
@@ -649,9 +720,30 @@ function closeApiResponse() {
 
   // ---------- upload: POST /api/resources/upload ----------
   async function uploadFile(file) {
-  // organisationId is required by the endpoint — without it the server
-  // can't attribute the imported rows, so don't fire a doomed request.
-  if (!file || !projectId || !organisationId) return;
+  if (uploading) return;                      // guards a double-pick
+  /* organisationId is required by the endpoint — without it the server
+     can't attribute the imported rows, so don't fire a doomed request.
+     These used to return silently, leaving the user with no feedback at
+     all after choosing a file. */
+  if (!projectId) {
+    pushToast({ type: "error", title: "Import blocked", msg: "This project couldn't be identified." });
+    return;
+  }
+  if (!organisationId) {
+    pushToast({
+      type: "warn",
+      title: "Pick an organisation",
+      msg: "Choose the organisation these resources belong to, then import again.",
+    });
+    return;
+  }
+  /* `accept` on the input is a filter, not a guarantee — "All files" and
+     drag-and-drop both bypass it, so the file is checked here. */
+  const fileError = validateSheetFile(file);
+  if (fileError) {
+    pushToast({ type: "error", title: "Can't import this file", msg: fileError });
+    return;
+  }
   setUploading(true);
 
   const formData = new FormData();
@@ -668,18 +760,15 @@ function closeApiResponse() {
       }
     );
 
-    // read body regardless of status, so we can show it either way
+    // Read the body regardless of status, then reduce it to one sentence —
+    // it used to be passed through raw, so a non-JSON response was rendered
+    // verbatim in the modal.
     const text = await res.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = text; // not JSON — show raw text
-    }
 
     if (!res.ok) {
-      setApiResponse({ title: "Import failed", ok: false, status: res.status, data });
-      pushToast({ type: "error", title: "Import failed", msg: `Server responded ${res.status}.` });
+      const msg = messageFromBody(text, res.status, "The import didn't go through. Please try again.");
+      setApiResponse({ title: "Import failed", ok: false, status: res.status, data: { message: msg } });
+      pushToast({ type: "error", title: "Import failed", msg });
       return;
     }
 
@@ -693,8 +782,9 @@ function closeApiResponse() {
     pushToast({ type: "ok", title: "Import complete", msg: "Resources imported and the table refreshed." });
     await loadResources();
   } catch (err) {
-    setApiResponse({ title: "Import failed", ok: false, status: null, data: { message: err.message } });
-    pushToast({ type: "error", title: "Import failed", msg: err.message || "Check the file and try again." });
+    const msg = requestErrorMessage(err, "The import didn't go through. Check the file and try again.");
+    setApiResponse({ title: "Import failed", ok: false, status: null, data: { message: msg } });
+    pushToast({ type: "error", title: "Import failed", msg });
   } finally {
     setUploading(false);
   }
@@ -714,20 +804,24 @@ function closeApiResponse() {
       );
 
       if (!res.ok) {
-        // An error body is text/JSON, not a spreadsheet — surface it properly.
-        let detail = `Server responded ${res.status}.`;
-        try {
-          const text = await res.text();
-          if (text) {
-            const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
-            detail = parsed?.message || parsed?.error || text.slice(0, 200) || detail;
-          }
-        } catch { /* keep the status-based message */ }
+        /* An error body is text/JSON, not a spreadsheet. It used to fall
+           back to text.slice(0, 200) — a 200-character slice of raw HTML or
+           JSON on screen — so it now goes through the shared gate. */
+        const detail = await readErrorMessage(res, "Couldn't download the template. Please try again.");
         pushToast({ type: "error", title: "Download failed", msg: detail });
         return;
       }
 
       const blob = await res.blob();
+      // A 200 with an empty body saves a 0-byte file Excel refuses to open.
+      if (!blob.size) {
+        pushToast({
+          type: "error",
+          title: "Download failed",
+          msg: "The server returned an empty template file.",
+        });
+        return;
+      }
       // The API does send a Content-Disposition filename, but it isn't listed
       // in Access-Control-Expose-Headers, so cross-origin JS can't read it and
       // this returns null. Kept anyway: it starts working the moment the
@@ -753,7 +847,7 @@ function closeApiResponse() {
       pushToast({
         type: "error",
         title: "Download failed",
-        msg: err.message || "Check your connection and try again.",
+        msg: requestErrorMessage(err, "Couldn't download the template. Please try again."),
       });
     } finally {
       setDownloading(false);
@@ -1090,12 +1184,14 @@ function ResourceDetailDrawer({ resId, projectName, onClose, onEdit }) {
           `${API_BASE}/api/resources/${encodeURIComponent(resId)}`,
           { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: controller.signal }
         );
-        if (!res.ok) throw new Error(`Couldn't load resource (${res.status})`);
-        const json = await res.json();
+        const FALLBACK = "Couldn't load this resource.";
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const json = await readJsonBody(res, FALLBACK);
+        if (!json || typeof json !== "object") throw new Error(FALLBACK);
         if (active) setData(json);
       } catch (e) {
-        if (active && e.name !== "AbortError")
-          setError(e.message || "Couldn't load resource");
+        const msg = requestErrorMessage(e, "Couldn't load this resource.");
+        if (active && msg) setError(msg);
       } finally {
         if (active) setLoading(false);
       }
@@ -1209,6 +1305,8 @@ function EditDrawer({ resource, onClose, onSave }) {
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && !saving && onClose();
@@ -1216,32 +1314,112 @@ function EditDrawer({ resource, onClose, onSave }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, saving]);
 
+  const rateYears = Object.keys(form.rateCardByYear || {}).sort(yearKeyOrder);
+
+  /* One validator for the whole drawer, used to gate submit and to re-check
+     a field as it's edited, so the two can never disagree. Previously only
+     the rate numbers were checked — a blank name, a malformed email or a
+     last date before the joining date all went to the server unexamined. */
+  const validate = (f) => {
+    const errs = {};
+
+    const name = String(f.name || "").trim();
+    if (!name) errs.name = "A full name is required.";
+    else if (name.length > MAX_NAME) errs.name = `Keep the name under ${MAX_NAME} characters.`;
+
+    const email = String(f.emailId || "").trim();
+    if (email && !EMAIL_RE.test(email)) errs.emailId = "That doesn't look like an email address.";
+    else if (email.length > MAX_TEXT) errs.emailId = `Keep the email under ${MAX_TEXT} characters.`;
+
+    if (String(f.location || "").length > MAX_TEXT) {
+      errs.location = `Keep the location under ${MAX_TEXT} characters.`;
+    }
+    if (String(f.designationType || "").length > MAX_TEXT) {
+      errs.designationType = `Keep the designation under ${MAX_TEXT} characters.`;
+    }
+
+    if (f.dateOfJoining && !parseISODate(f.dateOfJoining)) {
+      errs.dateOfJoining = "That isn't a valid date.";
+    }
+    if (f.lastDate && !parseISODate(f.lastDate)) {
+      errs.lastDate = "That isn't a valid date.";
+    }
+    /* A last date before the joining date is the one date error that isn't
+       obvious from the field alone, and it silently corrupts tenure maths. */
+    if (
+      f.dateOfJoining && f.lastDate &&
+      parseISODate(f.dateOfJoining) && parseISODate(f.lastDate) &&
+      f.lastDate < f.dateOfJoining
+    ) {
+      errs.lastDate = "The last date can't be earlier than the joining date.";
+    }
+
+    rateYears.forEach((yr) => {
+      const raw = f.rateCardByYear?.[yr];
+      if (raw === "" || raw == null) return;         // blank means "0" on submit
+      const text = String(raw).trim();
+      if (!/^\d+(\.\d+)?$/.test(text)) {
+        errs[`rate:${yr}`] = `${yr} must be a number — no letters, signs or spaces.`;
+        return;
+      }
+      const n = Number(text);
+      if (!Number.isFinite(n)) errs[`rate:${yr}`] = `${yr} needs a valid number.`;
+      else if (n < 0) errs[`rate:${yr}`] = `${yr} can't be negative.`;
+      else if (n > MAX_RATE) errs[`rate:${yr}`] = `${yr} looks too large — check the figure.`;
+    });
+
+    return errs;
+  };
+
   const set = (key) => (e) => {
     const value = key === "active" ? e.target.checked : e.target.value;
-    setForm((f) => ({ ...f, [key]: value }));
+    setForm((f) => {
+      const next = { ...f, [key]: value };
+      if (submitted) setFieldErrors(validate(next));
+      return next;
+    });
+    if (error) setError(null);
   };
 
   // Rates are edited in place — the set of years comes from the backend and
   // isn't added to or removed from here.
   const setRate = (year) => (e) => {
     const value = e.target.value;
-    setForm((f) => ({ ...f, rateCardByYear: { ...f.rateCardByYear, [year]: value } }));
+    setForm((f) => {
+      const next = { ...f, rateCardByYear: { ...f.rateCardByYear, [year]: value } };
+      if (submitted) setFieldErrors(validate(next));
+      return next;
+    });
+    if (error) setError(null);
   };
 
-  const rateYears = Object.keys(form.rateCardByYear || {}).sort(yearKeyOrder);
-
   async function submit() {
-    setSaving(true);
+    if (saving) return;                       // guards a double-click
     setError(null);
-    try {
-      const badRate = rateYears.find(
-        (yr) => form.rateCardByYear[yr] !== "" && !Number.isFinite(Number(form.rateCardByYear[yr]))
-      );
-      if (badRate) throw new Error(`${badRate} needs a valid number.`);
+    setSubmitted(true);
 
+    const errs = validate(form);
+    setFieldErrors(errs);
+    const firstBad = Object.keys(errs)[0];
+    if (firstBad) {
+      document.getElementById(`res-${firstBad}`)?.focus();
+      // The summary names the count; each field carries its own message.
+      setError(
+        Object.keys(errs).length === 1
+          ? errs[firstBad]
+          : `${Object.keys(errs).length} fields need attention before saving.`
+      );
+      return;
+    }
+
+    setSaving(true);
+    try {
       const payload = {
         ...resource,
-        ...Object.fromEntries(EDITABLE_FIELDS.map((k) => [k, form[k]])),
+        ...Object.fromEntries(
+          // Trim on the way out so a stray space isn't persisted as data.
+          EDITABLE_FIELDS.map((k) => [k, typeof form[k] === "string" ? form[k].trim() : form[k]])
+        ),
         lastDate: form.lastDate ? form.lastDate : null,
         rateCardByYear: Object.fromEntries(
           rateYears.map((yr) => [
@@ -1255,7 +1433,7 @@ function EditDrawer({ resource, onClose, onSave }) {
       await onSave(payload);
       onClose();
     } catch (e) {
-      setError(e.message || "Save failed");
+      setError(requestErrorMessage(e, "Couldn't save the changes. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -1281,30 +1459,72 @@ function EditDrawer({ resource, onClose, onSave }) {
             <b>{resource.resId}</b>
           </div>
 
-          <EditField label="Full name">
-            <input className="rp-input" value={form.name || ""} onChange={set("name")} />
+          <EditField label="Full name" error={fieldErrors.name}>
+            <input
+              id="res-name"
+              className={`rp-input${fieldErrors.name ? " is-bad" : ""}`}
+              maxLength={MAX_NAME}
+              aria-invalid={!!fieldErrors.name}
+              value={form.name || ""}
+              onChange={set("name")}
+            />
           </EditField>
 
-          <EditField label="Email">
-            <input className="rp-input" type="email" value={form.emailId || ""} onChange={set("emailId")} />
+          <EditField label="Email" error={fieldErrors.emailId}>
+            <input
+              id="res-emailId"
+              className={`rp-input${fieldErrors.emailId ? " is-bad" : ""}`}
+              type="email"
+              maxLength={MAX_TEXT}
+              aria-invalid={!!fieldErrors.emailId}
+              value={form.emailId || ""}
+              onChange={set("emailId")}
+            />
           </EditField>
 
-          <EditField label="Designation">
-            <input className="rp-input" value={form.designationType || ""} onChange={set("designationType")} />
+          <EditField label="Designation" error={fieldErrors.designationType}>
+            <input
+              id="res-designationType"
+              className={`rp-input${fieldErrors.designationType ? " is-bad" : ""}`}
+              maxLength={MAX_TEXT}
+              value={form.designationType || ""}
+              onChange={set("designationType")}
+            />
           </EditField>
 
           <div className="rp-grid-2">
-            <EditField label="Location">
-              <input className="rp-input" value={form.location || ""} onChange={set("location")} />
+            <EditField label="Location" error={fieldErrors.location}>
+              <input
+                id="res-location"
+                className={`rp-input${fieldErrors.location ? " is-bad" : ""}`}
+                maxLength={MAX_TEXT}
+                value={form.location || ""}
+                onChange={set("location")}
+              />
             </EditField>
-            <EditField label="Date of joining">
-              <input className="rp-input" type="date" value={form.dateOfJoining || ""} onChange={set("dateOfJoining")} />
+            <EditField label="Date of joining" error={fieldErrors.dateOfJoining}>
+              <input
+                id="res-dateOfJoining"
+                className={`rp-input${fieldErrors.dateOfJoining ? " is-bad" : ""}`}
+                type="date"
+                max={form.lastDate || undefined}
+                value={form.dateOfJoining || ""}
+                onChange={set("dateOfJoining")}
+              />
             </EditField>
           </div>
 
           <div className="rp-grid-2">
-            <EditField label="Last date">
-              <input className="rp-input" type="date" value={form.lastDate || ""} onChange={set("lastDate")} />
+            <EditField label="Last date" error={fieldErrors.lastDate}>
+              <input
+                id="res-lastDate"
+                className={`rp-input${fieldErrors.lastDate ? " is-bad" : ""}`}
+                type="date"
+                min={form.dateOfJoining || undefined}
+                aria-invalid={!!fieldErrors.lastDate}
+                value={form.lastDate || ""}
+                onChange={set("lastDate")}
+              />
             </EditField>
             <EditField label="Status">
               <label className="rp-switch">
@@ -1332,16 +1552,33 @@ function EditDrawer({ resource, onClose, onSave }) {
                         <span className="rp-rate-current">current</span>
                       )}
                     </span>
+                    {/* text + inputMode, not type="number": a number input
+                        reports "" for an entry like "1e5" or "1..2", so the
+                        validator never sees what was typed and the value is
+                        silently blanked instead of explained. */}
                     <input
-                      className="rp-input"
-                      type="number"
+                      id={`res-rate:${yr}`}
+                      className={`rp-input${fieldErrors[`rate:${yr}`] ? " is-bad" : ""}`}
+                      type="text"
                       inputMode="decimal"
+                      aria-invalid={!!fieldErrors[`rate:${yr}`]}
                       value={form.rateCardByYear[yr]}
-                      onChange={setRate(yr)}
+                      onChange={(e) => {
+                        // Digits and a single dot; the validator does the rest.
+                        e.target.value = e.target.value
+                          .replace(/[^\d.]/g, "")
+                          .replace(/(\..*)\./g, "$1");
+                        setRate(yr)(e);
+                      }}
                       aria-label={`Rate for ${yr}`}
                     />
                   </div>
                 ))}
+                {rateYears
+                  .filter((yr) => fieldErrors[`rate:${yr}`])
+                  .map((yr) => (
+                    <div className="rp-field-err" key={`err-${yr}`}>{fieldErrors[`rate:${yr}`]}</div>
+                  ))}
               </div>
             )}
           </EditField>
@@ -1375,23 +1612,29 @@ function ApiResponseModal({ response, onClose }) {
   if (!response) return null;
   const { title, ok, status, data } = response;
 
+  /* Every branch here ends at a sentence. The previous version fell back to
+     JSON.stringify(e) for an unrecognised error entry and returned raw
+     strings unchecked, which put serialised bodies and HTML error pages in
+     front of the user; both now go through the shared readability gate. */
+  const GENERIC = "Something went wrong. Please try again.";
   function extractErrorMessage(d) {
-    if (d == null) return "Something went wrong. Please try again.";
-    if (typeof d === "string") return d.trim() || "Something went wrong. Please try again.";
-    if (typeof d === "object") {
-      return (
-        d.message ||
-        d.error ||
-        d.detail ||
-        d.errorMessage ||
-        d.msg ||
-        (Array.isArray(d.errors) && d.errors.length
-          ? d.errors.map((e) => (typeof e === "string" ? e : e.message || JSON.stringify(e))).join("\n")
-          : null) ||
-        "Something went wrong. Please try again."
-      );
+    if (d == null) return GENERIC;
+    if (typeof d === "string") {
+      return isReadableMessage(d) ? d.trim() : GENERIC;
     }
-    return String(d);
+    if (typeof d === "object") {
+      const fromList = Array.isArray(d.errors)
+        ? d.errors
+            .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
+            .filter((line) => line && isReadableMessage(line))
+            .join("\n")
+        : "";
+      const candidate = [d.message, d.error, d.detail, d.errorMessage, d.msg, fromList].find(
+        (v) => typeof v === "string" && v.trim() && isReadableMessage(v)
+      );
+      return candidate ? candidate.trim() : GENERIC;
+    }
+    return GENERIC;
   }
 
   // Success is always a human-readable line. If a caller ever hands us an
@@ -1436,11 +1679,14 @@ function ApiResponseModal({ response, onClose }) {
   );
 }
 
-function EditField({ label, children }) {
+function EditField({ label, children, error }) {
   return (
     <label className="rp-field">
       <span>{label}</span>
       {children}
+      {/* The message belongs with the control it's about — a single banner
+          at the foot makes the user hunt for which field is wrong. */}
+      {error && <span className="rp-field-err">{error}</span>}
     </label>
   );
 }

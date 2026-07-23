@@ -12,9 +12,36 @@ import "../../styles/global.css";
 import { getToken } from "../../api/auth";
 import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
+import {
+  readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, isReadableMessage,
+} from "../../utils/apiMessage";
 
 // Resource service — same host/port as the Resource and Attendance pages.
 const API_BASE = "http://10.1.131.199:8019"; // move to env / your api client
+
+/* A rate-card workbook is small; anything past this is the wrong file. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+const fmtBytes = (n) => {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/* An .xlsx is a zip and an .xls a compound file, so browsers report their
+   MIME types inconsistently (and not at all for some drag sources) — the
+   extension is the reliable check. Returns "" when the file is usable. */
+function validateSheetFile(f) {
+  if (!f) return "Choose a file to upload.";
+  if (!/\.(xlsx|xls)$/i.test(f.name || "")) {
+    return "That isn't an Excel file. Choose a .xlsx or .xls file.";
+  }
+  if (!f.size) return "That file is empty. Choose the filled-in template.";
+  if (f.size > MAX_UPLOAD_BYTES) {
+    return `That file is ${fmtBytes(f.size)} — the limit is ${fmtBytes(MAX_UPLOAD_BYTES)}.`;
+  }
+  return "";
+}
 
 // ---------- formatting helpers ----------
 const money = new Intl.NumberFormat("en-IN", {
@@ -339,11 +366,13 @@ export default function DesignationRatePage() {
           },
         }
       );
-      if (!res.ok) throw new Error(`Couldn't load designation rates (${res.status})`);
-      const data = await res.json();
+      const FALLBACK = "Couldn't load the designation rates.";
+      if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+      // An empty 200 means no rates are on file yet, not a failure.
+      const data = await readJsonBody(res, FALLBACK);
       setRates(Array.isArray(data) ? data : data ? [data] : []);
     } catch (e) {
-      setLoadError(e.message || "Couldn't load designation rates");
+      setLoadError(requestErrorMessage(e, "Couldn't load the designation rates."));
     } finally {
       setLoading(false);
     }
@@ -355,7 +384,28 @@ export default function DesignationRatePage() {
 
   // ---------- upload: POST /api/designation-rates/upload ----------
   async function uploadFile(file) {
-    if (!file || !projectId || !organisationId) return;
+    if (uploading) return;                    // guards a double-pick
+    /* These used to return silently, so choosing a file with no organisation
+       selected did nothing at all with no explanation. */
+    if (!projectId) {
+      pushToast({ type: "error", title: "Upload blocked", msg: "This project couldn't be identified." });
+      return;
+    }
+    if (!organisationId) {
+      pushToast({
+        type: "warn",
+        title: "Pick an organisation",
+        msg: "Choose the organisation these rates belong to, then upload again.",
+      });
+      return;
+    }
+    /* `accept` on the input is a filter, not a guarantee — "All files" and
+       drag-and-drop both bypass it, so the file is checked here. */
+    const fileError = validateSheetFile(file);
+    if (fileError) {
+      pushToast({ type: "error", title: "Can't upload this file", msg: fileError });
+      return;
+    }
     setUploading(true);
 
     const formData = new FormData();
@@ -379,12 +429,16 @@ export default function DesignationRatePage() {
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
-        data = text;
+        data = null;   // a non-JSON body is never shown raw — see below
       }
 
       if (!res.ok) {
-        setApiResponse({ title: "Upload failed", ok: false, status: res.status, data });
-        pushToast({ type: "error", title: "Upload failed", msg: `Server responded ${res.status}.` });
+        /* The raw text used to be handed to the modal, so an HTML error page
+           or a bare JSON envelope was rendered verbatim. Reduce it to one
+           sentence and use that for both the modal and the toast. */
+        const msg = messageFromBody(text, res.status, "The upload didn't go through. Please try again.");
+        setApiResponse({ title: "Upload failed", ok: false, status: res.status, data: { message: msg } });
+        pushToast({ type: "error", title: "Upload failed", msg });
         return;
       }
 
@@ -408,8 +462,9 @@ export default function DesignationRatePage() {
       });
       await loadRates();
     } catch (err) {
-      setApiResponse({ title: "Upload failed", ok: false, status: null, data: { message: err.message } });
-      pushToast({ type: "error", title: "Upload failed", msg: err.message || "Check the file and try again." });
+      const msg = requestErrorMessage(err, "The upload didn't go through. Check the file and try again.");
+      setApiResponse({ title: "Upload failed", ok: false, status: null, data: { message: msg } });
+      pushToast({ type: "error", title: "Upload failed", msg });
     } finally {
       setUploading(false);
     }
@@ -429,21 +484,24 @@ export default function DesignationRatePage() {
       );
 
       if (!res.ok) {
-        // An error body is text/JSON, not a spreadsheet — surface it
-        // properly instead of saving a corrupt file.
-        let detail = `Server responded ${res.status}.`;
-        try {
-          const text = await res.text();
-          if (text) {
-            const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
-            detail = parsed?.message || parsed?.error || text.slice(0, 200) || detail;
-          }
-        } catch { /* keep the status-based message */ }
+        /* An error body is text/JSON, not a spreadsheet. It used to fall back
+           to text.slice(0, 200) — a raw slice of HTML or JSON on screen — so
+           it now goes through the shared gate. */
+        const detail = await readErrorMessage(res, "Couldn't download the template. Please try again.");
         pushToast({ type: "error", title: "Download failed", msg: detail });
         return;
       }
 
       const blob = await res.blob();
+      // A 200 with an empty body saves a 0-byte file Excel refuses to open.
+      if (!blob.size) {
+        pushToast({
+          type: "error",
+          title: "Download failed",
+          msg: "The server returned an empty template file.",
+        });
+        return;
+      }
       // The API does send a Content-Disposition filename, but unless it is
       // listed in Access-Control-Expose-Headers cross-origin JS can't read
       // it and this returns null. Kept anyway: it starts working the moment
@@ -468,7 +526,7 @@ export default function DesignationRatePage() {
       pushToast({
         type: "error",
         title: "Download failed",
-        msg: err.message || "Check your connection and try again.",
+        msg: requestErrorMessage(err, "Couldn't download the template. Please try again."),
       });
     } finally {
       setDownloading(false);
@@ -538,6 +596,7 @@ export default function DesignationRatePage() {
         type="file"
         accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         onChange={handleFileChange}
+        disabled={uploading}
         style={{ display: "none" }}
       />
 
@@ -811,25 +870,29 @@ function ApiResponseModal({ response, onClose }) {
   if (!response) return null;
   const { title, ok, status, data, message, summary } = response;
 
+  /* Every branch here ends at a sentence. The previous version fell back to
+     JSON.stringify(e) for an unrecognised error entry and returned raw
+     strings unchecked, which put serialised bodies and HTML error pages in
+     front of the user; both now go through the shared readability gate. */
+  const GENERIC = "Something went wrong. Please try again.";
   function extractErrorMessage(d) {
-    if (d == null) return "Something went wrong. Please try again.";
-    if (typeof d === "string") return d.trim() || "Something went wrong. Please try again.";
-    if (typeof d === "object") {
-      return (
-        d.message ||
-        d.error ||
-        d.detail ||
-        d.errorMessage ||
-        d.msg ||
-        (Array.isArray(d.errors) && d.errors.length
-          ? d.errors
-              .map((e) => (typeof e === "string" ? e : e.message || JSON.stringify(e)))
-              .join("\n")
-          : null) ||
-        "Something went wrong. Please try again."
-      );
+    if (d == null) return GENERIC;
+    if (typeof d === "string") {
+      return isReadableMessage(d) ? d.trim() : GENERIC;
     }
-    return String(d);
+    if (typeof d === "object") {
+      const fromList = Array.isArray(d.errors)
+        ? d.errors
+            .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
+            .filter((line) => line && isReadableMessage(line))
+            .join("\n")
+        : "";
+      const candidate = [d.message, d.error, d.detail, d.errorMessage, d.msg, fromList].find(
+        (v) => typeof v === "string" && v.trim() && isReadableMessage(v)
+      );
+      return candidate ? candidate.trim() : GENERIC;
+    }
+    return GENERIC;
   }
 
   return (
