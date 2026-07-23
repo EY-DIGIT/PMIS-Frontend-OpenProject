@@ -69,6 +69,30 @@ const reportRows = (payload) =>
 const reportTotals = (payload) =>
   !Array.isArray(payload) && payload?.totals ? payload.totals : null;
 
+const money = (v) =>
+  `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/* Whole rupees, for the stat cards. A lakh-scale total at card font size is
+   far wider than "11" or "89.6%", and the paise carry no meaning at that
+   scale — the exact figure rides along as the card's tooltip. */
+const moneyShort = (v) =>
+  `₹${Math.round(num(v)).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
+/* Quarterly cost lands as a separate payload keyed the same way as the
+   attendance report — { resources: [{ attendanceId, totalCost,
+   relaxationAmount, monthlyBreakdown: [{ period, cost, ... }] }], totals }.
+   Index it by attendanceId so the table can join a cost onto each row
+   without caring about ordering (or about rows the cost API doesn't know). */
+function indexCostByResource(payload) {
+  const map = new Map();
+  reportRows(payload).forEach((r) => {
+    const id = r?.attendanceId;
+    if (id == null) return;
+    map.set(String(id), r);
+  });
+  return map;
+}
+
 // Prefer the API's own totals; fall back to summing rows for the array shape.
 function buildMetrics(payload, employees) {
   if (!employees.length) return null;
@@ -173,6 +197,12 @@ export default function ProjectAttendancePage() {
   const [quarterly, setQuarterly] = useState(null);
   const [quarterlyLoading, setQuarterlyLoading] = useState(false);
   const [quarterlyError, setQuarterlyError] = useState(null);
+
+  /* Quarterly cost is a second, independent call. It's supporting detail on
+     top of the attendance report, so a failure here only drops the Cost
+     column — the attendance table still renders. */
+  const [quarterlyCost, setQuarterlyCost] = useState(null);
+  const [quarterlyCostError, setQuarterlyCostError] = useState(null);
 
   // Holiday modal
   const [holidayOpen, setHolidayOpen] = useState(false);
@@ -326,6 +356,41 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, year, quarter, paramError]);
 
+  /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
+     attendance rows by attendanceId. `resourceId` is optional on this
+     endpoint and is deliberately omitted: the table shows the whole team, so
+     one call covers every row (pass it only when scoping to one resource).
+     Errors are kept out of the main error slot — the Cost column just
+     doesn't render. */
+  useEffect(() => {
+    if (paramError) return undefined;
+    const FALLBACK = "Couldn't load the quarterly cost.";
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      setQuarterlyCostError(null);
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({
+          projectId,
+          year: String(parseYear(year)),
+          quarter: String(parseQuarter(quarter)),
+        });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
+          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
+        );
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setQuarterlyCost(data);
+      } catch (err) {
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active) { setQuarterlyCost(null); if (msg) setQuarterlyCostError(msg); }
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, year, quarter, paramError]);
+
   // Holidays + calendar — lazy fetch when modal opens (or year changes while open).
   useEffect(() => {
     if (!holidayOpen) return;
@@ -387,6 +452,19 @@ export default function ProjectAttendancePage() {
     () => buildMetrics(quarterly, quarterlyRows),
     [quarterly, quarterlyRows]
   );
+  const quarterlyCostById = useMemo(
+    () => indexCostByResource(quarterlyCost),
+    [quarterlyCost]
+  );
+  /* Prefer the API's own total; fall back to summing the rows so the footer
+     still adds up if `totals` is ever missing. */
+  const quarterlyCostTotal = useMemo(() => {
+    const t = reportTotals(quarterlyCost);
+    if (t && t.totalCost != null) return num(t.totalCost);
+    let sum = 0;
+    quarterlyCostById.forEach((r) => { sum += num(r.totalCost); });
+    return sum;
+  }, [quarterlyCost, quarterlyCostById]);
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -529,6 +607,9 @@ export default function ProjectAttendancePage() {
             quarter={quarter}
             year={year}
             milestoneName={milestoneName}
+            costById={quarterlyCostById}
+            costTotal={quarterlyCostTotal}
+            costError={quarterlyCostError}
             onRowClick={(emp) => goLeaveDetail(emp, quarter)}
           />
         )}
@@ -559,8 +640,12 @@ export default function ProjectAttendancePage() {
 /* =====================================================================
    Shared attendance table — used by both monthly and quarterly views.
    ===================================================================== */
-function AttendanceTable({ period, employees, onRowClick, milestoneName }) {
+function AttendanceTable({ period, employees, onRowClick, milestoneName, costById, costTotal }) {
   const clickable = typeof onRowClick === "function";
+  /* Cost only exists for the quarterly view, so the column appears only when
+     a cost payload was actually joined in — the monthly table is unchanged. */
+  const showCost = !!costById && costById.size > 0;
+  const costFor = (emp) => (showCost ? costById.get(String(emp.attendanceId)) : null);
   // The report now splits leave into paid/unpaid and leaves `leaveDays` at 0.
   // Older payloads only carry `leaveDays`, so pick whichever the rows have.
   const splitLeave = employees.some(
@@ -628,6 +713,7 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName }) {
               */}
               <th className="att-th att-num">Holiday</th>
               <th className="att-th att-num att-th-att">Attendance</th>
+              {showCost && <th className="att-th att-num">Cost</th>}
             </tr>
           </thead>
           <tbody>
@@ -668,19 +754,49 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName }) {
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
+                {showCost && (() => {
+                  const c = costFor(emp);
+                  return (
+                    <td className={`att-td att-num${c ? " att-cost-total" : " att-dim"}`}>
+                      {c ? money(c.totalCost) : "—"}
+                    </td>
+                  );
+                })()}
               </tr>
             ))}
           </tbody>
+          {showCost && (
+            <tfoot>
+              <tr className="att-row att-foot-row">
+                {/* Everything up to the Cost column is one spanned label. The
+                    count adapts to the two optional columns above so the
+                    total always lands under Cost. */}
+                <td
+                  className="att-td att-strong"
+                  colSpan={9 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 1 : 0)}
+                >
+                  Total for {period}
+                </td>
+                <td className="att-td att-num att-strong att-cost-total">
+                  {money(costTotal)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
   );
 }
 
+
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
-function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName }) {
+function QuarterlyPanel({
+  data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
+  costById, costTotal, costError,
+}) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
 
@@ -693,13 +809,17 @@ function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRo
       />
     );
   }
+  const hasCost = !!costById && costById.size > 0;
   return (
     <>
-      <MetricsRow metrics={metrics} />
+      <MetricsRow metrics={metrics} costTotal={hasCost ? costTotal : null} />
+      {costError && <div className="att-error">{costError}</div>}
       <AttendanceTable
         period={period}
         employees={employees}
         milestoneName={milestoneName}
+        costById={costById}
+        costTotal={costTotal}
         onRowClick={onRowClick}
       />
     </>
@@ -710,11 +830,21 @@ function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRo
    Metric cards — driven by the report's `totals` block when the API sends
    one, otherwise by row sums.
    ===================================================================== */
-function MetricsRow({ metrics }) {
+function MetricsRow({ metrics, costTotal }) {
   if (!metrics) return null;
   return (
     <div className="att-metrics">
       <StatCard label="Team size" value={metrics.n} sub={metrics.n === 1 ? "employee" : "employees"} />
+      {costTotal != null && (
+        <StatCard
+          label="Quarter cost"
+          value={moneyShort(costTotal)}
+          sub="across team"
+          tone={C.primary}
+          title={money(costTotal)}
+          compact
+        />
+      )}
       <StatCard
         label="Avg attendance"
         value={`${metrics.avg.toFixed(1)}%`}
@@ -1327,11 +1457,19 @@ function Chip({ children, accent }) {
   return <span className={accent ? "att-chip att-chip-accent" : "att-chip"}>{children}</span>;
 }
 
-function StatCard({ label, value, sub, tone }) {
+/* `compact` drops the value to a smaller type scale — for long values such as
+   a lakh-scale currency figure that would otherwise overflow the card.
+   `title` carries the unrounded figure. */
+function StatCard({ label, value, sub, tone, title, compact }) {
   return (
-    <div className="att-metric" style={tone ? { borderTopColor: tone } : undefined}>
+    <div className="att-metric" style={tone ? { borderTopColor: tone } : undefined} title={title}>
       <div className="att-metric-label">{label}</div>
-      <div className="att-metric-value" style={tone ? { color: tone } : undefined}>{value}</div>
+      <div
+        className={`att-metric-value${compact ? " att-metric-value-sm" : ""}`}
+        style={tone ? { color: tone } : undefined}
+      >
+        {value}
+      </div>
       {sub != null && <div className="att-metric-sub">{sub}</div>}
     </div>
   );
@@ -1503,16 +1641,25 @@ const ATT_CSS = `
 .att-btn-primary:active:not(:disabled) { transform: translateY(1px); }
 .att-btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 
-/* ---- metric cards ---- */
-.att-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px; margin-bottom: 18px; }
+/* ---- metric cards ----
+   The strip carries up to eight cards, so each one has to survive at roughly
+   an eighth of the content width. Values are kept on one line (a wrapped
+   number reads as two numbers); anything long enough to threaten that gets
+   .att-metric-value-sm instead of being allowed to spill past the border. */
+.att-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
+  gap: 10px; margin-bottom: 18px; }
 .att-metric { background: #fff; border: 1px solid ${C.border}; border-top: 3px solid ${C.borderStrong};
-  border-radius: 12px; padding: 15px 16px 16px; box-shadow: 0 1px 2px rgba(16,32,60,.04); }
-.att-metric-label { font-size: 11px; font-weight: 700; letter-spacing: .06em;
-  text-transform: uppercase; color: ${C.muted}; }
-.att-metric-value { font-size: 27px; font-weight: 800; color: ${C.ink}; line-height: 1.05;
-  margin-top: 8px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.att-metric-sub { font-size: 12px; color: ${C.faint}; margin-top: 4px; }
+  border-radius: 12px; padding: 12px 13px 13px; box-shadow: 0 1px 2px rgba(16,32,60,.04);
+  min-width: 0; overflow: hidden; }
+.att-metric-label { font-size: 10px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: ${C.muted}; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.att-metric-value { font-size: 22px; font-weight: 800; color: ${C.ink}; line-height: 1.1;
+  margin-top: 6px; letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att-metric-value-sm { font-size: 17px; letter-spacing: -.01em; }
+.att-metric-sub { font-size: 11px; color: ${C.faint}; margin-top: 3px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- cards / tables ---- */
 .att-card { padding: 6px 6px 2px; margin-bottom: 4px; border: 1px solid ${C.border};
@@ -1550,6 +1697,13 @@ const ATT_CSS = `
 .att-danger { color: ${C.red}; font-weight: 700; }
 .att-warn { color: ${C.amber}; font-weight: 700; }
 .att-att-cell { padding-right: 16px; }
+/* Cost column — each resource's quarter total, and the team total in tfoot. */
+.att-cost-total { font-weight: 700; color: ${C.ink}; }
+.att-foot-row { background: ${C.surface}; }
+.att-foot-row:hover { background: ${C.surface}; }
+.att-foot-row .att-td { border-bottom: none; border-top: 2px solid ${C.border};
+  font-size: 13.5px; }
+.att-foot-row .att-cost-total { font-size: 15px; color: ${C.primary}; }
 .att-row { transition: background-color .13s ease; }
 .att-row:hover { background: ${C.surface}; }
 .att-row:last-child .att-td { border-bottom: none; }
