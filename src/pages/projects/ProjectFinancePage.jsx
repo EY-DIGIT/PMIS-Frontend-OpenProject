@@ -318,6 +318,15 @@ function SummaryPanel({ totals }) {
   const oneTime = Number(totals?.oneTimeCost) || 0;
   const recurring = Number(totals?.recurringCost) || 0;
   const total = Number(totals?.totalContractCost) || 0;
+  /* Allocated-vs-pending for the Out of Pocket Expense pool. These are the
+     authoritative roll-up — summing the per-phase oneTimeAllocated would
+     drift, because phases the backend clears (recurring-only) report no
+     allocation at all. */
+  const oneTimeAllocated = Number(totals?.oneTimeAllocated) || 0;
+  const oneTimePending = Number(totals?.oneTimePending) || 0;
+  const oneTimeAllocatedPercent = Number(totals?.oneTimeAllocatedPercent) || 0;
+  const oneTimePendingPercent = Number(totals?.oneTimePendingPercent) || 0;
+  const hasOneTimeSplit = oneTime > 0 && (oneTimeAllocated > 0 || oneTimePending > 0);
 
   const rowStyle = {
     display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -341,15 +350,29 @@ function SummaryPanel({ totals }) {
           </strong>
         </div>
         <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          gap: 8, fontSize: 13,
+          display: "flex", flexDirection: "column",
+          gap: 6, fontSize: 13,
           background: "#fff", border: "1px solid var(--uidai-pmis-border)",
           borderRadius: 8, padding: "8px 12px",
         }}>
-          <span style={muted}>Out of Pocket Expense</span>
-          <strong style={{ color: "#173e77" }} title={wordsHint(oneTime)}>
-            {inr(oneTime)}
-          </strong>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={muted}>Out of Pocket Expense</span>
+            <strong style={{ color: "#173e77" }} title={wordsHint(oneTime)}>
+              {inr(oneTime)}
+            </strong>
+          </div>
+          {hasOneTimeSplit && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5 }}>
+              <span style={{ color: "#0b6b8f" }} title={wordsHint(oneTimeAllocated)}>
+                Allocated {inr(oneTimeAllocated)}
+                {oneTimeAllocatedPercent > 0 && ` (${oneTimeAllocatedPercent}%)`}
+              </span>
+              <span style={{ color: "var(--uidai-pmis-muted)" }} title={wordsHint(oneTimePending)}>
+                Pending {inr(oneTimePending)}
+                {oneTimePendingPercent > 0 && ` (${oneTimePendingPercent}%)`}
+              </span>
+            </div>
+          )}
         </div>
         <div style={rowStyle}>
           <span style={muted}>Recurring Cost</span>
@@ -1608,7 +1631,12 @@ export default function ProjectFinancePage() {
        PUT /phases/{phase}/one-time
          { enabled: false }
          { enabled: true, mode: "percent" | "amount", value }
-     Returns the full recomputed page; the last phase auto-absorbs the rest. */
+     Returns the full recomputed page; the last phase auto-absorbs the rest.
+
+     A 422 comes back when the phase can't hold an allocation at all (a
+     recurring-only phase). The control is already disabled for those, so
+     this is the backstop — readJson lifts `error.message` out of the
+     envelope and it's shown verbatim. */
   async function setOneTimeForPhase(phase, body) {
     if (oneTimeSaving) return;
     setOneTimeSaving(true);
@@ -2899,9 +2927,8 @@ function PhasePanel({
      the other cost types. If the backend ever emits real payment terms for
      recurring costs, realTerms wins and this synthesis is skipped. */
   const realTerms = phase.paymentTerms || [];
-  const recurringItems = (costItems || []).filter(
-    (c) => c.costTypeCode === "recurring_cost" && c.phase === phase.phase
-  );
+  const phaseCostItems = (costItems || []).filter((c) => c.phase === phase.phase);
+  const recurringItems = phaseCostItems.filter((c) => c.costTypeCode === "recurring_cost");
   const terms = realTerms.length
     ? realTerms
     : recurringItems.flatMap((c) =>
@@ -2984,6 +3011,15 @@ function PhasePanel({
     mode: phase.oneTimeMode || "percent",
     value: phase.oneTimeValue,
   };
+  /* A phase whose only live cost is recurring can't hold an Out of Pocket
+     Expense share: the backend 422s the PUT and reports OPE as fully cleared
+     on read (oneTimeEnabled false / mode + value null). Offering the control
+     there would look like an edit that silently "resets" on the next visit,
+     so it's shown disabled instead — same treatment as the last phase, which
+     auto-absorbs the remainder and is likewise not user-settable. */
+  const isRecurringOnlyPhase =
+    phaseCostItems.length > 0 && recurringItems.length === phaseCostItems.length;
+  const otLocked = isLastPhase || isRecurringOnlyPhase;
   const canToggleOneTime = typeof onSetOneTime === "function" && oneTimeTotal > 0;
   const [otModalOpen, setOtModalOpen] = useState(false);
 
@@ -3108,11 +3144,13 @@ function PhasePanel({
             {canToggleOneTime && (
               <button
                 type="button"
-                disabled={isLastPhase || oneTimeBusy}
-                onClick={() => { if (!isLastPhase) setOtModalOpen(true); }}
+                disabled={otLocked || oneTimeBusy}
+                onClick={() => { if (!otLocked) setOtModalOpen(true); }}
                 title={isLastPhase
                   ? "Last phase auto-absorbs the remaining Out of Pocket Expense"
-                  : "Distribute Out of Pocket Expense to this phase"}
+                  : isRecurringOnlyPhase
+                    ? "This phase carries only recurring cost, so it can't take an Out of Pocket Expense share"
+                    : "Distribute Out of Pocket Expense to this phase"}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
                   border: otAmount > 0 ? "1px solid #0b6b8f" : "1px solid var(--uidai-pmis-border)",
@@ -3120,16 +3158,21 @@ function PhasePanel({
                   color: otAmount > 0 ? "#0b6b8f" : "#5b6b82",
                   borderRadius: 999, padding: "6px 12px",
                   fontSize: 12, fontWeight: 700,
-                  cursor: isLastPhase ? "default" : "pointer",
-                  opacity: oneTimeBusy ? 0.6 : 1,
+                  cursor: otLocked ? "default" : "pointer",
+                  opacity: oneTimeBusy ? 0.6 : isRecurringOnlyPhase ? 0.55 : 1,
                   boxShadow: "0 1px 2px rgba(20, 50, 110, 0.06)",
                 }}
               >
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: otAmount > 0 ? "#0b6b8f" : "#c2cdda" }} />
-                Out of Pocket Expense: {otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
+                Out of Pocket Expense:{" "}
+                {isRecurringOnlyPhase
+                  ? "n/a"
+                  : otAmount > 0 ? inr(otAmount) : (otEnabled ? inr(0) : "Off")}
                 {isLastPhase
                   ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(auto)</span>
-                  : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
+                  : isRecurringOnlyPhase
+                    ? <span style={{ fontWeight: 600, opacity: 0.85 }}>(recurring only)</span>
+                    : <span aria-hidden="true" style={{ opacity: 0.8 }}>✎</span>}
               </button>
             )}
           </div>

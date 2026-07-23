@@ -49,7 +49,17 @@ export default function VendorList() {
         await vendorsApi.remove(v.vendorId);
         await refresh();
       } catch (err) {
-        window.alert(err?.message || 'Failed to delete organization');
+        /* 409 = the org is still mapped to active (non-closed/completed)
+           projects; the message names them. Deleting is only possible once
+           those mappings are removed, so say that instead of leaving the
+           user with a bare server string (#138). */
+        if (err?.status === 409) {
+          window.alert(
+            `${err.message}\n\nUnmap this organization from the project(s) above, then delete it.`
+          );
+        } else {
+          window.alert(err?.message || 'Failed to delete organization');
+        }
       } finally {
         setDeletingId('');
       }

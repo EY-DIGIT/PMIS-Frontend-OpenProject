@@ -7,6 +7,8 @@ import * as usersApi from '../../api/users';
 import { API_BASE, authorizedFetch, tokenStore } from '../../api/client';
 import { ENDPOINTS } from '../../api/endpoint';
 import { getRoleMeta, useCurrentRole } from '../../auth/permissions';
+import { userHasRole } from '../../auth/roleNormalize';
+import * as sessionsApi from '../../api/sessions';
 import rolesConfig from '../../config/roles.json';
 
 // Edit is allowed only when the logged-in user's role is strictly higher
@@ -38,6 +40,9 @@ export default function UserDetails() {
   const myId = me?.id || me?.uuid || me?.userId || '';
   const isSelf = !!(myId && id && String(myId) === String(id));
   const currentRole = useCurrentRole();
+  /* Session management (#365) is super_admin-only server-side — anyone
+     else gets a 403 — so the panel is hidden rather than shown broken. */
+  const isSuperAdmin = userHasRole(me, 'super_admin');
 
   const [user, setUser] = useState(fallback);
   const [loading, setLoading] = useState(false);
@@ -375,6 +380,8 @@ export default function UserDetails() {
         {loadError && !saveError && <div className="uidai-error-msg" style={{ marginTop: 8 }}>{loadError}</div>}
       </div>
 
+      {isSuperAdmin && <ActiveSessionsPanel userId={id} />}
+
       <div className="uidai-pmis-card">
         <h3>Remarks</h3>
         <br />
@@ -388,5 +395,151 @@ export default function UserDetails() {
         </div>
       </div>
     </>
+  );
+}
+
+function fmtSessionTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString();
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   ActiveSessionsPanel — the target user's live sessions, with a
+   per-session and an all-sessions revoke (#365).
+
+   Revocation is an instant hard cut: the user's current access token
+   stops working immediately, not at the next refresh — hence the
+   confirmations. Rendered only for super_admin; every other role gets
+   a 403 from all three routes.
+   ───────────────────────────────────────────────────────────────── */
+function ActiveSessionsPanel({ userId }) {
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState('');
+  const [revokingAll, setRevokingAll] = useState(false);
+
+  async function load() {
+    if (!userId) return;
+    setLoading(true);
+    setError('');
+    try {
+      setSessions(await sessionsApi.listSessions(userId));
+    } catch (err) {
+      setSessions([]);
+      setError(err?.message || 'Failed to load sessions');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tokenStore.get()) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  async function handleRevoke(s) {
+    if (!window.confirm('Revoke this session? The user is signed out immediately.')) return;
+    setBusyId(s.sessionId);
+    setError('');
+    try {
+      await sessionsApi.revokeSession(userId, s.sessionId);
+      await load();
+    } catch (err) {
+      setError(err?.message || 'Failed to revoke session');
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  async function handleRevokeAll() {
+    if (!window.confirm('Revoke ALL sessions for this user? They are signed out everywhere immediately.')) return;
+    setRevokingAll(true);
+    setError('');
+    try {
+      const revoked = await sessionsApi.revokeAllSessions(userId);
+      await load();
+      window.alert(`${revoked} session${revoked === 1 ? '' : 's'} revoked.`);
+    } catch (err) {
+      setError(err?.message || 'Failed to revoke sessions');
+    } finally {
+      setRevokingAll(false);
+    }
+  }
+
+  return (
+    <div className="uidai-pmis-card">
+      <div className="uidai-pmis-card-actions">
+        <button
+          type="button"
+          className="uidai-pmis-btn uidai-pmis-btn-cancel"
+          onClick={load}
+          disabled={loading || revokingAll}
+        >
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+        <button
+          type="button"
+          className="uidai-pmis-btn"
+          onClick={handleRevokeAll}
+          disabled={revokingAll || loading || sessions.length === 0}
+        >
+          {revokingAll ? 'Revoking…' : 'Revoke All'}
+        </button>
+      </div>
+      <h3>Active Sessions</h3>
+      <p className="uidai-pmis-subtitle" style={{ marginTop: 4 }}>
+        Revoking is immediate — the affected access token is rejected on the very
+        next request.
+      </p>
+
+      {error && (
+        <div className="uidai-error-msg" style={{ marginTop: 8 }}>{error}</div>
+      )}
+
+      <div className="uidai-pmis-table-wrap" style={{ marginTop: 12 }}>
+        <table className="uidai-pmis-table uidai-pmis-table-compact">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Signed In</th>
+              <th>Last Used</th>
+              <th>Expires</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && sessions.length === 0 ? (
+              <tr className="uidai-pmis-no-results"><td colSpan={5}>Loading…</td></tr>
+            ) : sessions.length === 0 ? (
+              <tr className="uidai-pmis-no-results"><td colSpan={5}>No active sessions.</td></tr>
+            ) : (
+              sessions.map((s) => (
+                <tr key={s.sessionId}>
+                  <td title={s.sessionId} style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                    {s.sessionId.length > 12 ? `${s.sessionId.slice(0, 12)}…` : s.sessionId}
+                  </td>
+                  <td>{fmtSessionTime(s.issuedAt)}</td>
+                  <td>{fmtSessionTime(s.lastUsedAt)}</td>
+                  <td>{fmtSessionTime(s.expiresAt)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="uidai-pmis-btn uidai-pmis-btn-small"
+                      onClick={() => handleRevoke(s)}
+                      disabled={busyId === s.sessionId || revokingAll}
+                    >
+                      {busyId === s.sessionId ? 'Revoking…' : 'Revoke'}
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

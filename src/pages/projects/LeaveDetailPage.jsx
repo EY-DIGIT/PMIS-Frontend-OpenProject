@@ -1062,6 +1062,8 @@ function LeaveDatesSection({
    ===================================================================== */
 const COST_KNOWN_KEYS = new Set([
   "attendanceId", "employeeName", "projectId", "period", "totalCost", "monthlyBreakdown",
+  // Rendered as a footer row in the table rather than as loose cards below it.
+  "relaxationAmount", "relaxationDays",
 ]);
 
 function CostReportSection({ loading, error, report, totals }) {
@@ -1080,6 +1082,18 @@ function CostReportSection({ loading, error, report, totals }) {
     totals?.totalDeductedAmount != null
       ? num(totals.totalDeductedAmount)
       : months.reduce((t, m) => t + num(m.deductedAmount), 0);
+
+  /* ── why the relaxation line sits inside the table ─────────────────────
+     The Cost column doesn't add up to Total Cost on its own — the relaxation
+     amount is added back on top of it. Verified against the live Q3-2026
+     payload: the three months' costs (₹94,295.26 + ₹95,830.30 + ₹91,266.95)
+     come to ₹2,81,392.51, and only with the ₹7,092.70 relaxation do they
+     reach the ₹2,88,485.21 Total Cost. Shown as a card beneath the table it
+     read as an unrelated statistic and left the total looking wrong; as the
+     row directly above the total, the arithmetic closes. */
+  const relaxationAmount = num(report.relaxationAmount);
+  const relaxationDays = num(report.relaxationDays);
+  const monthsSubtotal = months.reduce((t, m) => t + num(m.cost), 0);
 
   return (
     <>
@@ -1152,9 +1166,28 @@ function CostReportSection({ loading, error, report, totals }) {
               })}
             </tbody>
             <tfoot>
+              {/* 9 = the ten body columns minus the Cost column these
+                  figures sit under. Bump it if a column is added. */}
+              {relaxationAmount > 0 && (
+                <>
+                  <tr className="ld-costtable-subrow">
+                    <td colSpan={9} className="ld-costtable-totallbl">Subtotal</td>
+                    <td className="ld-num">{money(monthsSubtotal)}</td>
+                  </tr>
+                  <tr className="ld-costtable-subrow">
+                    <td colSpan={9} className="ld-costtable-totallbl">
+                      Relaxation Amount
+                      {relaxationDays > 0 && (
+                        <span className="ld-costtable-sublbl">
+                          {dayCount(relaxationDays)} {relaxationDays === 1 ? "day" : "days"} waived
+                        </span>
+                      )}
+                    </td>
+                    <td className="ld-num">+ {money(relaxationAmount)}</td>
+                  </tr>
+                </>
+              )}
               <tr>
-                {/* 9 = the ten body columns minus the Cost column this
-                    total sits under. Bump it if a column is added. */}
                 <td colSpan={9} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
               </tr>
@@ -1806,6 +1839,12 @@ const LD_CSS = `
 .ld-costtable-cost { font-weight: 700; color: ${C.primary}; }
 .ld-costtable tfoot td { padding: 14px; border-top: 1px solid ${C.border}; background: ${C.surface}; }
 .ld-costtable-totallbl { text-align: right; font-weight: 700; color: ${C.muted}; text-transform: uppercase; font-size: 10.5px; letter-spacing: .07em; }
+/* The two working rows that lead into the total — lighter and tighter than
+   the total itself, so the sum still reads as the row that concludes. */
+.ld-costtable-subrow td { padding: 9px 14px; border-top: 1px solid ${C.divider}; background: #fff; }
+.ld-costtable-subrow .ld-num { font-weight: 600; color: ${C.ink}; }
+.ld-costtable-sublbl { margin-left: 8px; font-weight: 600; font-size: 10px;
+  text-transform: none; letter-spacing: 0; color: ${C.faint}; }
 .ld-attpill { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 6px; }
 
 .ld-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }

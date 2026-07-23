@@ -37,6 +37,7 @@ import MasterDivisions from './pages/master/MasterDivisions';
 import MasterDivisionForm from './pages/master/MasterDivisionForm';
 import MasterHolidays from './pages/master/MasterHolidays';
 import MasterResources from './pages/master/MasterResources';
+import DocumentAccess from './pages/master/DocumentAccess';
 import ApprovalInboxConcernedDivision from './pages/approvals/ApprovalInboxConcernedDivision';
 import ApprovalInboxActivityOwner from './pages/approvals/ApprovalInboxActivityOwner';
 import MeetingsListPage from './pages/meetings/MeetingsListPage';
@@ -137,6 +138,7 @@ function Breadcrumbs() {
         divisions: "Divisions",
         master: "Master Data",
         resources: "Resource Data",
+        "document-access": "Document Access",
         new: "New",
         dashboard: "Dashboard",
         "manage-users": "Manage Team",
@@ -834,6 +836,9 @@ export default function MainApp() {
                                                 <Route path="master/divisions/:code" element={<RequirePermission action="editDivision"><MasterDivisionForm /></RequirePermission>} />
                                                 <Route path="master/holidays" element={<RequirePermission action="viewMasterData"><MasterHolidays /></RequirePermission>} />
                                                 <Route path="master/resources" element={<RequirePermission action="viewMasterData"><MasterResources /></RequirePermission>} />
+                                                {/* Role-based document access (#323) — superadmin/admin only,
+                                                    which is exactly what manageProjectDocuments encodes. */}
+                                                <Route path="master/document-access" element={<RequirePermission action="manageProjectDocuments"><DocumentAccess /></RequirePermission>} />
                                                 {/* Approval Inbox — visible only to the division_approver
                                                     workflow role, matching the sidebar. project_admin,
                                                     project_member and org_admin are blocked here too. */}

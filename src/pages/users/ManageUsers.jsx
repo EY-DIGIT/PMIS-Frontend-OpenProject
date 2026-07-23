@@ -280,9 +280,15 @@ export default function ManageTeam() {
   const [divisionUsersById, setDivisionUsersById] = useState({});
   /* Dedicated team-candidate dropdown sources (server-derived). The two
      project-owner lists are project-level; the activity lists are keyed
-     by lower-cased division code (see divKey). */
-  const [projectOwnerCandidates, setProjectOwnerCandidates] = useState([]);
-  const [projectOwnerApproverCandidates, setProjectOwnerApproverCandidates] = useState([]);
+     by lower-cased division code (see divKey).
+
+     `null` / a missing key means "still loading". An EMPTY ARRAY is a real
+     answer — the candidate APIs are fail-closed, so empty means nobody is
+     eligible at that scope (e.g. no live "UIDAI" vendor in the environment),
+     never "fall back to everyone". Keeping those two states distinct is what
+     stops the broad directory pool from leaking back into these dropdowns. */
+  const [projectOwnerCandidates, setProjectOwnerCandidates] = useState(null);
+  const [projectOwnerApproverCandidates, setProjectOwnerApproverCandidates] = useState(null);
   const [activityMembersByDiv, setActivityMembersByDiv] = useState({});
   const [activityApproversByDiv, setActivityApproversByDiv] = useState({});
   /* Owner division shipped on the team-page response (id/code/name).
@@ -470,16 +476,20 @@ export default function ManageTeam() {
         /* Background fetch — dedicated candidate lists that back the role
            dropdowns. Project Owner + its Approver are project-level; the
            activity Owner/Approver (and each Concerned Division) are fetched
-           per division code. These take priority over the division-derived
-           lists above, which now act only as a fallback. */
+           per division code. These are AUTHORITATIVE: the server has already
+           applied Division + Role + Org=UIDAI, so once a call settles its
+           result replaces the division-derived list entirely — including when
+           it settles empty. A failure resolves to empty for the same reason:
+           an empty dropdown is correct-and-restrictive, the broad pool is not.
+           The division-derived lists only cover the in-flight window. */
         listProjectOwnerCandidates(projectId)
           .then(normalizeUsersList)
           .then((users) => { if (!cancelled) setProjectOwnerCandidates(users); })
-          .catch(() => {});
+          .catch(() => { if (!cancelled) setProjectOwnerCandidates([]); });
         listProjectOwnerApproverCandidates(projectId)
           .then(normalizeUsersList)
           .then((users) => { if (!cancelled) setProjectOwnerApproverCandidates(users); })
-          .catch(() => {});
+          .catch(() => { if (!cancelled) setProjectOwnerApproverCandidates([]); });
 
         const divCodes = new Set();
         activities.forEach((a) => {
@@ -490,18 +500,18 @@ export default function ManageTeam() {
         divCodes.forEach((code) => {
           listActivityMemberCandidates(projectId, code)
             .then(normalizeUsersList)
+            .catch(() => [])
             .then((users) => {
               if (cancelled) return;
               setActivityMembersByDiv((prev) => ({ ...prev, [divKey(code)]: users }));
-            })
-            .catch(() => {});
+            });
           listActivityApproverCandidates(projectId, code)
             .then(normalizeUsersList)
+            .catch(() => [])
             .then((users) => {
               if (cancelled) return;
               setActivityApproversByDiv((prev) => ({ ...prev, [divKey(code)]: users }));
-            })
-            .catch(() => {});
+            });
         });
       } catch (err) {
         if (!cancelled) {
@@ -756,21 +766,28 @@ export default function ManageTeam() {
   };
 
   /* ─── Team-candidate dropdown sources ───
-     These return the server-provided candidate lists for each role and
-     fall back to the legacy division/directory lists while the candidate
-     fetch is in flight (or if the endpoint responds empty), so a dropdown
-     is never blank when we have something to show. */
+     Project Owners / Owner Approvers / Activity Members / Activity Approvers
+     come from the per-dropdown `team-candidates/*` endpoints — NOT from the
+     broad assignable_users / userDirectory pool. The server already applies
+     Division + Role + Org=UIDAI, so its answer is final.
+
+     Crucially, these endpoints are FAIL-CLOSED: they return empty when no
+     live "UIDAI" vendor exists in the environment. An empty response is a
+     real "nobody is eligible", so it must render as an empty dropdown. The
+     fallback below therefore covers ONLY the in-flight window (list still
+     null / key still absent) — treating empty as "no data yet" is exactly
+     what surfaced the wrong users. */
   const ownerCandidatesOr = (fallback) =>
-    (projectOwnerCandidates.length ? projectOwnerCandidates : fallback);
+    (Array.isArray(projectOwnerCandidates) ? projectOwnerCandidates : fallback);
   const ownerApproverCandidatesOr = (fallback) =>
-    (projectOwnerApproverCandidates.length ? projectOwnerApproverCandidates : fallback);
+    (Array.isArray(projectOwnerApproverCandidates) ? projectOwnerApproverCandidates : fallback);
   const activityMembersForCode = (code, fallback) => {
     const list = activityMembersByDiv[divKey(code)];
-    return (Array.isArray(list) && list.length) ? list : fallback;
+    return Array.isArray(list) ? list : fallback;
   };
   const activityApproversForCode = (code, fallback) => {
     const list = activityApproversByDiv[divKey(code)];
-    return (Array.isArray(list) && list.length) ? list : fallback;
+    return Array.isArray(list) ? list : fallback;
   };
 
   /* Project-wide id → display name map, built once from the team-page

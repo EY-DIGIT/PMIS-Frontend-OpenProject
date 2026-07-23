@@ -17,6 +17,7 @@ import {
   FiChevronDown,
   FiMessageSquare,
   FiFileText,
+  FiLock,
   FiTag
 } from "react-icons/fi";
 import { useCan, useCurrentRole } from "../auth/permissions";
@@ -35,6 +36,9 @@ export default function Sidebar({ collapsed, onAddProject, onSearchProject }) {
   const canCreateProject = useCan("createProject");
   const canViewMasterData = useCan("viewMasterData");
   const canViewDivisions = useCan("viewDivisions");
+  // Role-based document access (#323) is a superadmin/admin menu —
+  // manageProjectDocuments is true for exactly those two roles.
+  const canManageDocumentAccess = useCan("manageProjectDocuments");
   const canViewVendors = useCan("viewVendors");
   const canCreateVendor = useCan("createVendor");
   const canViewUsers = useCan("viewUsers");
@@ -100,6 +104,7 @@ const showAllTickets =
   const divisionDataActive = isUnder("/master/divisions");
   const holidayDataActive = isUnder("/master/holidays");
   const resourceDataActive = isUnder("/master/resources");
+  const documentAccessActive = isUnder("/master/document-access");
 
   const addVendorActive = isUnder("/vendors/new");
   const searchVendorActive = isUnder("/vendors") && !addVendorActive;
@@ -340,6 +345,16 @@ const showAllTickets =
                 <FiFileText size={ICON_SIZE} />
                 <span className="pmis-text">SLA Masters</span>
               </div>
+              {canManageDocumentAccess && (
+                <div
+                  title="Document Access"
+                  className={documentAccessActive ? "active" : ""}
+                  onClick={() => navigate("/master/document-access")}
+                >
+                  <FiLock size={ICON_SIZE} />
+                  <span className="pmis-text">Document Access</span>
+                </div>
+              )}
             </div>
           </>
         )}

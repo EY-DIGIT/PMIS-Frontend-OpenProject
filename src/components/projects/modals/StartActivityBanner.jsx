@@ -5,9 +5,17 @@
    Two states (mirroring the HTML reference's `.activity-start-banner`):
      • Not started — amber banner with a "▶ Start Activity" button. Click
        opens a small confirm popup with the Actual Start Date pre-filled to
-       today; on OK it PATCHes /api/v3/activities/{id} with
-       { activityStarted: true, actualStartDate: <chosen date ISO> } and
-       stamps that date on the local form. Errors surface inline.
+       today; on OK it POSTs /api/v3/activities/{id}/start with
+       { actualStartDate: <chosen date ISO> } and stamps that date on the
+       local form.
+
+       The backend rejects the start with a 422 when the activity is already
+       started or completed, the project is closed, or a predecessor activity
+       isn't finished yet — that message is surfaced inline verbatim.
+
+       Starting is NOT submitting: the activity stays `not_completed` and the
+       approval workflow (submit / approve) runs separately from the panel on
+       the right.
      • Started — green banner showing the actual start date.
    ══════════════════════════════════════════════════════════════════ */
 
@@ -64,10 +72,11 @@ export default function StartActivityBanner({ activity, form, editable, projectP
     setBusy(true);
     setError("");
     try {
-      // Send the chosen date at local midnight as an ISO timestamp.
+      // Send the chosen date at local midnight as an ISO timestamp. The
+      // body is optional — omitting it would default to "now" — but the
+      // user picked a date, so it's always sent.
       const iso = new Date(`${startDate}T00:00:00`).toISOString();
-      await api.patch(ENDPOINTS.activities.update(businessId), {
-        activityStarted: true,
+      await api.post(ENDPOINTS.activities.start(businessId), {
         actualStartDate: iso
       });
       /* Apply the local start-activity transition (adds the system comment)
@@ -78,6 +87,10 @@ export default function StartActivityBanner({ activity, form, editable, projectP
       onChange({ ...next, activityStarted: true, actualStartDate: startDate });
       setConfirmOpen(false);
     } catch (err) {
+      /* A 422 carries the reason the start was refused (already started /
+         completed, project closed, predecessor incomplete). ApiError already
+         lifts `error.message` out of the envelope, so show it as-is rather
+         than a generic failure line. */
       setError(err && err.message ? err.message : "Failed to start activity.");
     } finally {
       setBusy(false);

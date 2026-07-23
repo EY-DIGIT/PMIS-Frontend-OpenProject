@@ -177,6 +177,19 @@ export const ENDPOINTS = {
        Backs the "Assigned To" dropdown in the task / subtask modals. */
     vendorAssignableUsers: (vendorId) =>
       `/users/api/v3/vendors/${enc(vendorId)}/assignable-users`,
+    /* SuperAdmin session management (#365). super_admin ONLY — every other
+       role gets a 403. Responses on this branch are snake_case:
+         GET    sessions        → { user_id, sessions: [{ session_id,
+                                    issued_at, last_used_at, expires_at }] }
+         POST   revokeAllSessions → { revoked: n }
+         DELETE session           → { revoked: 1 }
+       Revocation is an instant hard cut — the target's current access
+       token stops working immediately. */
+    sessions: (userId) => `/users/api/v3/users/${enc(userId)}/sessions`,
+    revokeAllSessions: (userId) =>
+      `/users/api/v3/users/${enc(userId)}/sessions/revoke-all`,
+    session: (userId, sessionId) =>
+      `/users/api/v3/users/${enc(userId)}/sessions/${enc(sessionId)}`,
   },
 
   vendors: {
@@ -246,6 +259,13 @@ export const ENDPOINTS = {
     milestoneCreate: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/milestones/create`,
     auditLogs: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/audit-logs`,
     attachments: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/attachments`,
+    /* Late-start ("Actual Start Date + Remarks") reason documents (#322).
+       These are DELIBERATELY separate from the general project attachments
+       above — `attachments` excludes them, so each list renders its own
+       section. POST is multipart with the form key `files` repeated once
+       per file; GET returns only these documents. */
+    actualStartAttachments: (uuid) =>
+      `/projects/api/v3/projects/${enc(uuid)}/actual-start-attachments`,
     discussionFeed: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/discussion-feed`,
     criticalPathDependencies: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
     criticalPathAnalysis: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/analysis`,
@@ -306,6 +326,28 @@ export const ENDPOINTS = {
   costItems: {
     update: (id) => `/projects/api/v3/cost-items/${enc(id)}`,
     remove: (id) => `/projects/api/v3/cost-items/${enc(id)}`,
+  },
+
+  /* ──────────────────────────────────────────────────────────────────
+     Role-based document access (#323). Every attachment — project,
+     milestone, activity, task or subtask — is PUBLIC by default.
+     Superadmin/admin can restrict one to specific role(s); the first
+     rule turns the document into a WHITELIST (superadmin/admin, the
+     uploader, and holders of a granted role at the document's scope).
+
+     Everyone else stops seeing the document in EVERY list — the server
+     filters it out, so the normal attachment views need no "locked"
+     state and no changes at all. Only the admin menu below talks to
+     these routes.
+       GET  access?targetKind=&targetId=  → the target's docs, newest first
+       GET  documentAccess(commentId)     → one document's rules
+       PUT  documentAccess(commentId)     → { rules: [{ roleName,
+                                              organizationId?, division? }] }
+                                            (an EMPTY rules array = public)
+     ────────────────────────────────────────────────────────────────── */
+  documents: {
+    access: '/projects/api/v3/documents/access',
+    documentAccess: (commentId) => `/projects/api/v3/documents/${enc(commentId)}/access`,
   },
 
   milestones: {
@@ -376,6 +418,14 @@ export const ENDPOINTS = {
   activities: {
     get: (id) => `/projects/api/v3/activities/${enc(id)}`,
     update: (id) => `/projects/api/v3/activities/${enc(id)}`,
+    /* Start Activity (#188). Body is optional —
+       { actualStartDate: "2026-04-01T00:00:00Z" }, defaulting to now.
+       Returns the updated activity (activityStarted: true + the stamped
+       actualStartDate). Rejects with 422 + error.message when the activity
+       is already started/completed, the project is closed, or a predecessor
+       activity isn't complete. "Start" is NOT "submit" — a started activity
+       is still not_completed and runs the approval workflow later. */
+    start: (id) => `/projects/api/v3/activities/${enc(id)}/start`,
     remove: (id) => `/projects/api/v3/activities/${enc(id)}`,
     tasks: (id) => `/projects/api/v3/activities/${enc(id)}/tasks`,
     taskCreate: (id) => `/projects/api/v3/activities/${enc(id)}/tasks/create`,

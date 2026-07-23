@@ -173,7 +173,15 @@ const BODY_HTML = `
         <div style="font-weight:600;color:var(--navy);font-size:13px;">SLA Number <span class="required">*</span></div>
         <div class="field-help">RFP table header. e.g. PMU-SLA001.</div>
       </div>
-      <div class="dyn-cell-value"><input id="s_sla_ref" type="text" placeholder="PMU-SLA001"></div>
+      <div class="dyn-cell-value"><input id="s_sla_ref" type="text" placeholder="PMU-SLA001" oninput="window.__slaOnb._syncContractType()"></div>
+      <div class="dyn-cell-delete"></div>
+    </div>
+    <div class="dyn-row">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Contract Type</div>
+        <div class="field-help">Derived from the SLA Number prefix — BSP-SLA001 → BSP. Set server-side; shown here for confirmation.</div>
+      </div>
+      <div class="dyn-cell-value"><input id="s_contract_type" type="text" readonly placeholder="—" style="background:#f8fafc;font-weight:600;color:var(--navy);"></div>
       <div class="dyn-cell-delete"></div>
     </div>
     <div class="dyn-row">
@@ -330,7 +338,10 @@ export default function SlaOnboardingPage() {
                     { value: "FIXED_AMOUNT", label: "Deliverable Cost (set per mapping)" },
                 ], default: "QUARTERLY_PAYMENT",
             },
-            { key: "effective_from", label: "Active From", section: "Cadence", input_type: "date", required: true, default: "2024-04-01" },
+            /* No `default` here on purpose (#349): a hardcoded start date is
+               the same trap as a placeholder value — it looks filled in, so it
+               gets saved unchanged. The field is required, so the user picks. */
+            { key: "effective_from", label: "Active From", section: "Cadence", input_type: "date", required: true },
             { key: "effective_until", label: "Active Until", section: "Cadence", input_type: "date" },
             { key: "measurement", label: "What is measured (primary)", section: "Measurement", input_type: "measurement_set", required: true },
             { key: "secondary_measurement", label: "What is measured (secondary)", section: "Measurement", input_type: "measurement_set" },
@@ -470,6 +481,20 @@ export default function SlaOnboardingPage() {
             const ordered = RFP_FIELDS.filter((f) => _TEMPLATE_KEYS.includes(f.key) && !present.has(f.key))
                 .sort((a, b) => _TEMPLATE_KEYS.indexOf(a.key) - _TEMPLATE_KEYS.indexOf(b.key));
             ordered.forEach((f) => addRow(f.key));
+        }
+
+        /* #362 — Contract Type auto-derives server-side from the SLA ref
+           prefix (BSP-SLA001 → BSP) when it's omitted, which is why Mapping
+           no longer shows it blank. Mirroring that derivation here is purely
+           informational: the field is read-only and is NOT submitted, so the
+           backend stays the single source of truth. */
+        function _syncContractType() {
+            const src = host.querySelector("#s_sla_ref");
+            const out = host.querySelector("#s_contract_type");
+            if (!src || !out) return;
+            const ref = (src.value || "").trim();
+            const m = ref.match(/^([A-Za-z0-9]+)[-_]/);
+            out.value = m ? m[1].toUpperCase() : "";
         }
 
         function _onStaticCategoryChange() {
@@ -623,9 +648,11 @@ export default function SlaOnboardingPage() {
             cell.innerHTML = `<div class="dyn-cell-empty">Unknown widget: ${esc(t)}</div>`;
             return undefined;
         }
-        function _widgetText(cell, f) { cell.innerHTML = `<input type="text" data-v="${esc(f.key)}" placeholder="${esc(f.placeholder || "")}">`; }
-        function _widgetTextarea(cell, f) { cell.innerHTML = `<textarea data-v="${esc(f.key)}" placeholder="${esc(f.placeholder || "")}"></textarea>`; }
-        function _widgetDate(cell, f) { cell.innerHTML = `<input type="date" data-v="${esc(f.key)}" value="${esc(f.default || "")}">`; }
+        /* Placeholders are routed through _cleanExample so a junk catalog
+           example ("test" / "string" / "1.1") never even suggests itself. */
+        function _widgetText(cell, f) { cell.innerHTML = `<input type="text" data-v="${esc(f.key)}" placeholder="${esc(_cleanExample(f.placeholder))}">`; }
+        function _widgetTextarea(cell, f) { cell.innerHTML = `<textarea data-v="${esc(f.key)}" placeholder="${esc(_cleanExample(f.placeholder))}"></textarea>`; }
+        function _widgetDate(cell, f) { cell.innerHTML = `<input type="date" data-v="${esc(f.key)}" value="${esc(_cleanExample(f.default))}">`; }
         function _widgetSelect(cell, f) {
             const opts = (f.options || []).map((o) => {
                 const v = typeof o === "string" ? o : o.value;
@@ -709,7 +736,26 @@ export default function SlaOnboardingPage() {
             hostEl.querySelector(".mv-unit").value = (v && v.unit) || "";
             hostEl.querySelector(".mv-metric-key").value = key;
             const tgt = hostEl.querySelector(".mv-target");
-            if (tgt && !tgt.value && v && v.example_value) tgt.value = v.example_value;
+            /* #349 — the catalog's example_value is a HINT, never a value.
+               Pre-filling it is what put "test" / "string" / "1.1" into real
+               SLA rows: the user saw a filled field, left it alone, and the
+               placeholder got saved. Show it as a placeholder instead, and
+               drop the known junk sentinels entirely so they can't even
+               suggest themselves. */
+            if (tgt) {
+                const hint = _cleanExample(v && v.example_value);
+                tgt.placeholder = hint || "0";
+            }
+        }
+        /* Values the old catalog rows shipped as "examples". They carry no
+           meaning, so they're never surfaced — not as a value, not as a
+           placeholder. */
+        const _JUNK_EXAMPLES = new Set(["test", "string", "1.1", "0.0", "example", "none", "n/a", "na", "null"]);
+        function _cleanExample(raw) {
+            if (raw === null || raw === undefined) return "";
+            const s = String(raw).trim();
+            if (!s) return "";
+            return _JUNK_EXAMPLES.has(s.toLowerCase()) ? "" : s;
         }
         function _confirmNewMeasurement(btn) {
             const hostEl = btn.closest("[data-mv-host]");
@@ -1087,6 +1133,12 @@ export default function SlaOnboardingPage() {
                 host.querySelector("#dynBody").innerHTML = "";
 
                 if (d.sla_ref) host.querySelector("#s_sla_ref").value = d.sla_ref;
+                /* Prefer the stored contract_type when the SLA already has
+                   one; otherwise fall back to the prefix derivation so the
+                   row isn't blank on an older record. */
+                const ctEl = host.querySelector("#s_contract_type");
+                if (ctEl && d.contract_type) ctEl.value = d.contract_type;
+                else _syncContractType();
                 if (d.title) host.querySelector("#s_title").value = d.title;
                 if (d.project_id) host.querySelector("#s_project_id").value = d.project_id;
                 const catCode = d.category_code || d.category;
@@ -1282,7 +1334,7 @@ export default function SlaOnboardingPage() {
 
         /* ── expose handler-referenced functions for the inline DOM events ── */
         window.__slaOnb = {
-            boot, _onStaticCategoryChange, useTemplate, cancelOnboarding, submitSla,
+            boot, _onStaticCategoryChange, _syncContractType, useTemplate, cancelOnboarding, submitSla,
             addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
             _addSevRow, _updateSevPill, _onSevInputVarChange, _deleteSevRow, _renderLinPreview, _addPhRow,
         };

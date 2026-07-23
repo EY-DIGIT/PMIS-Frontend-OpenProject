@@ -208,6 +208,21 @@ export default function ProjectAttendancePage() {
     [resourceMilestones]
   );
 
+  /* The report rows now carry the milestoneId whose Excel produced them.
+     Resolve it against the milestone list this page already loads, so the
+     table can name the source instead of printing a UUID. Built from the
+     full list rather than `uploadableMilestones` — a milestone that has
+     since been closed or un-flagged as resource-based still has rows that
+     came from it, and those should stay named. */
+  const milestoneNameById = useMemo(() => {
+    const map = new Map();
+    milestones.forEach((m) => {
+      if (m.apiId) map.set(String(m.apiId), m.name || "");
+    });
+    return map;
+  }, [milestones]);
+  const milestoneName = (id) => milestoneNameById.get(String(id)) || "";
+
   // Monthly summary — fetched per selected month. "All months" shows a prompt instead.
   useEffect(() => {
     if (!projectId) return;
@@ -410,6 +425,7 @@ export default function ProjectAttendancePage() {
             <AttendanceTable
               period={period}
               employees={employees}
+              milestoneName={milestoneName}
               onRowClick={(emp) => goLeaveDetail(emp, Math.ceil(Number(selectedMonth) / 3))}
             />
           </>
@@ -439,6 +455,7 @@ export default function ProjectAttendancePage() {
             period={quarterly?.period}
             quarter={quarter}
             year={year}
+            milestoneName={milestoneName}
             onRowClick={(emp) => goLeaveDetail(emp, quarter)}
           />
         )}
@@ -469,19 +486,48 @@ export default function ProjectAttendancePage() {
 /* =====================================================================
    Shared attendance table — used by both monthly and quarterly views.
    ===================================================================== */
-function AttendanceTable({ period, employees, onRowClick }) {
+function AttendanceTable({ period, employees, onRowClick, milestoneName }) {
   const clickable = typeof onRowClick === "function";
   // The report now splits leave into paid/unpaid and leaves `leaveDays` at 0.
   // Older payloads only carry `leaveDays`, so pick whichever the rows have.
   const splitLeave = employees.some(
     (e) => e.paidLeaveDays != null || e.unpaidLeaveDays != null
   );
+
+  /* Which milestone's upload each row came from. In practice a report is
+     usually one upload, so the id repeats down every row — showing it as a
+     column then means eleven identical cells. It becomes a header chip when
+     the whole table shares one milestone, and only earns a column when the
+     rows genuinely differ. Rows from older payloads carry no milestoneId at
+     all, in which case neither appears. */
+  const milestoneIds = Array.from(
+    new Set(employees.map((e) => e.milestoneId).filter(Boolean))
+  );
+  const sharedMilestoneId = milestoneIds.length === 1 ? milestoneIds[0] : null;
+  const showMilestoneCol = milestoneIds.length > 1;
+  // Name if we have it; otherwise a truncated id, with the full one on hover.
+  const labelFor = (id) => {
+    const name = milestoneName?.(id);
+    if (name) return name;
+    const s = String(id || "");
+    return s.length > 10 ? `${s.slice(0, 8)}…` : s;
+  };
+
   return (
     <div className="uidai-pmis-card att-card">
       <div className="att-card-head">
         <strong className="att-card-title">{period}</strong>
         <div className="att-chips">
           <Chip>{employees.length} {employees.length === 1 ? "employee" : "employees"}</Chip>
+          {sharedMilestoneId && (
+            <span
+              className="att-ms-chip"
+              title={`Uploaded against milestone ${sharedMilestoneId}`}
+            >
+              <span className="att-ms-chip-lbl">Milestone</span>
+              {labelFor(sharedMilestoneId)}
+            </span>
+          )}
           {clickable && <span className="att-hint-inline">Click a row for full leave detail</span>}
         </div>
       </div>
@@ -491,6 +537,7 @@ function AttendanceTable({ period, employees, onRowClick }) {
             <tr>
               <th className="att-th">ID</th>
               <th className="att-th">Name</th>
+              {showMilestoneCol && <th className="att-th">Milestone</th>}
               <th className="att-th att-num">Working</th>
               <th className="att-th att-num">Present</th>
               <th className="att-th att-num">Half</th>
@@ -520,6 +567,11 @@ function AttendanceTable({ period, employees, onRowClick }) {
               >
                 <td className="att-td"><code className="att-code">{emp.attendanceId}</code></td>
                 <td className="att-td att-strong">{emp.employeeName}</td>
+                {showMilestoneCol && (
+                  <td className="att-td att-dim" title={emp.milestoneId || ""}>
+                    {emp.milestoneId ? labelFor(emp.milestoneId) : "—"}
+                  </td>
+                )}
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
                 <td className="att-td att-num att-dim">{emp.halfDays}</td>
@@ -555,7 +607,7 @@ function AttendanceTable({ period, employees, onRowClick }) {
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
-function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRowClick }) {
+function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName }) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
 
@@ -571,7 +623,12 @@ function QuarterlyPanel({ data, metrics, period: periodProp, quarter, year, onRo
   return (
     <>
       <MetricsRow metrics={metrics} />
-      <AttendanceTable period={period} employees={employees} onRowClick={onRowClick} />
+      <AttendanceTable
+        period={period}
+        employees={employees}
+        milestoneName={milestoneName}
+        onRowClick={onRowClick}
+      />
     </>
   );
 }
@@ -1270,6 +1327,14 @@ const ATT_CSS = `
 .att-chip { font-size: 12px; background: ${C.surface}; color: ${C.ink2};
   padding: 3px 10px; border-radius: 999px; border: 1px solid ${C.border}; white-space: pre-line; }
 .att-chip-accent { background: ${C.accentBg}; color: ${C.primary}; border-color: #d7def7; font-weight: 600; }
+/* Source milestone — the same pill as .att-chip with its label built in, so
+   "Milestone" reads as a field name rather than part of the value. */
+.att-ms-chip { display: inline-flex; align-items: baseline; gap: 6px; max-width: 320px;
+  font-size: 12px; font-weight: 600; background: ${C.accentBg}; color: ${C.primary};
+  padding: 3px 10px; border-radius: 999px; border: 1px solid #d7def7;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-ms-chip-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: ${C.muted}; flex: 0 0 auto; }
 .att-hint-inline { font-size: 12px; color: ${C.faint}; }
 
 .att-table-wrap { overflow-x: auto; }
