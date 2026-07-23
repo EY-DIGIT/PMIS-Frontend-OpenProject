@@ -27,8 +27,10 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_NAME = 120;
 const MAX_TEXT = 120;
 /* A rate card entry is an annual figure in rupees — ₹100 crore is already
-   far past anything real, so beyond it the value is a typo. */
+   far past anything real, so beyond it the value is a typo. Unused while the
+   rate card is read-only; restore with the rate inputs in EditDrawer.
 const MAX_RATE = 1_000_000_000;
+*/
 
 const fmtBytes = (n) => {
   if (n < 1024) return `${n} B`;
@@ -141,6 +143,16 @@ const EDITABLE_FIELDS = [
 const yearKeyOrder = (a, b) =>
   (parseInt(String(a).replace(/\D+/g, ""), 10) || 0) -
   (parseInt(String(b).replace(/\D+/g, ""), 10) || 0);
+
+/* Which organisation a resource row belongs to. The field name isn't stable
+   across the resource service's payloads, so every spelling we've seen is
+   accepted and the first present one wins. Returns "" when the row carries no
+   organisation at all — which is meaningfully different from "belongs to a
+   different org" (see the filter in loadResources). */
+const resourceOrgId = (r) =>
+  String(
+    r?.organisationId ?? r?.organizationId ?? r?.orgId ?? r?.vendorId ?? ""
+  );
 
 // Table columns — drives both the header and sorting. One source of truth.
 const COLUMNS = [
@@ -377,6 +389,13 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
   color: var(--rp-primary); background: var(--rp-primary-50); border-radius: 999px; padding: 2px 7px; }
 .rp-rate-empty { font-size: 13.5px; color: var(--rp-muted); background: #f6f8fb;
   border: 1px solid var(--rp-line-2); border-radius: 10px; padding: 11px 13px; }
+/* Read-only rate. Deliberately NOT styled as a disabled input — a greyed-out
+   field reads as "temporarily locked"; a plain value reads as "reference". */
+.rp-rate-value { font-size: 13.5px; font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--rp-ink);
+  background: #f6f8fb; border: 1px solid var(--rp-line-2); border-radius: 8px;
+  padding: 9px 12px; }
+.rp-rate-note { font-size: 12px; color: var(--rp-muted); line-height: 1.5; margin-top: 2px; }
 
 /* ---- toasts ---- */
 .rp-toasts { position: fixed; right: 20px; bottom: 20px; z-index: 1100; display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
@@ -472,6 +491,10 @@ export default function ProjectResourcePage() {
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  /* True when the last load actually narrowed by organisation. Lets the empty
+     state say "none for THIS organisation" instead of the flatly wrong "none
+     on this project" — the two call for different next steps. */
+  const [orgScoped, setOrgScoped] = useState(false);
 
   // search + sort
   const [query, setQuery] = useState("");
@@ -551,11 +574,16 @@ function closeApiResponse() {
     setLoadError(null);
     try {
       const token = getToken();
-      // The API is project-aware — pass projectId so the server returns only
-      // this project's resources instead of the whole list.
-      const url = projectId
-        ? `${API_BASE}/api/resources?projectId=${encodeURIComponent(projectId)}`
-        : `${API_BASE}/api/resources`;
+      /* The API is project-aware — pass projectId so the server returns only
+         this project's resources instead of the whole list. organisationId
+         goes along too: the service may or may not filter on it, and a param
+         it doesn't know is ignored rather than rejected. The client-side
+         narrowing below is what actually guarantees the picker takes effect. */
+      const params = new URLSearchParams();
+      if (projectId) params.set("projectId", projectId);
+      if (organisationId) params.set("organisationId", organisationId);
+      const qs = params.toString();
+      const url = qs ? `${API_BASE}/api/resources?${qs}` : `${API_BASE}/api/resources`;
       const FALLBACK = "Couldn't load the resources.";
       const res = await fetch(url, {
         headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -574,17 +602,36 @@ function closeApiResponse() {
         );
         scoped = byProject.length ? byProject : list;
       }
+
+      /* Narrow to the picked organisation — but ONLY when the rows actually
+         carry an organisation. If the service doesn't return the field, every
+         row would read as "" and a strict filter would blank the table.
+
+         Note this deliberately does NOT use the projectId filter's
+         "fall back to everything when nothing matches" rule: once the field
+         exists, an empty result means the org genuinely has no resources, and
+         quietly showing another org's people instead would be a worse lie
+         than an empty table. */
+      const canScopeByOrg = !!organisationId && scoped.some((r) => resourceOrgId(r));
+      if (canScopeByOrg) {
+        scoped = scoped.filter((r) => resourceOrgId(r) === String(organisationId));
+      }
+      setOrgScoped(canScopeByOrg);
+
       setResources(scoped);
     } catch (e) {
       setLoadError(requestErrorMessage(e, "Couldn't load the resources."));
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, organisationId]);
 
+  /* Wait for the organisation picker to settle on its default before the
+     first load, otherwise the table renders once unscoped and then jumps. */
   useEffect(() => {
+    if (orgsLoading) return;
     loadResources();
-  }, [loadResources]);
+  }, [loadResources, orgsLoading]);
 
   // ---------- client-side filter + sort ----------
   const filtered = useMemo(() => {
@@ -611,6 +658,11 @@ function closeApiResponse() {
 
   const looksLikeResId = /^\d{3,}$/.test(query.trim());
   const showServerFallback = sorted.length === 0 && looksLikeResId && !loading;
+
+  const selectedOrgName = orgs.find((o) => o.id === organisationId)?.name || "";
+  /* An empty table with no search box in play is "this organisation has
+     nobody" whenever the org filter is what's doing the narrowing. */
+  const emptyBecauseOrg = !query && orgScoped && !!selectedOrgName;
 
   // ---------- server lookup: GET /api/resources/{resId} ----------
   async function fetchById(resId) {
@@ -1002,14 +1054,24 @@ function closeApiResponse() {
           </div>
         ) : sorted.length === 0 ? (
           <div className="rp-empty">
-            <div className="rp-empty-emoji">{query ? "🔍" : "👥"}</div>
-            <h3>{query ? "No matching resources" : "No resources yet"}</h3>
+            <div className="rp-empty-emoji">
+              {query ? "🔍" : emptyBecauseOrg ? "🏢" : "👥"}
+            </div>
+            <h3>
+              {query
+                ? "No matching resources"
+                : emptyBecauseOrg
+                  ? `No resources for ${selectedOrgName}`
+                  : "No resources yet"}
+            </h3>
             <p>
               {query
                 ? showServerFallback
                   ? "This ID isn't loaded on this page. Search the server to pull it in."
                   : "Try a different name, email, ID, or designation."
-                : "Import a spreadsheet to add team members for this project and start tracking capacity."}
+                : emptyBecauseOrg
+                  ? "Nobody on this project is mapped to this organisation. Pick a different organisation above, or import a spreadsheet to add them."
+                  : "Import a spreadsheet to add team members for this project and start tracking capacity."}
             </p>
             {showServerFallback ? (
               <button
@@ -1256,21 +1318,26 @@ function ResourceDetailDrawer({ resId, projectName, onClose, onEdit }) {
                   </span>
                 </div>
               ))}
-              {/* Rate Card by Year hidden for now — uncomment to restore.
+              {/* Rate Card by Year — read-only. This drawer is a view, so
+                  the values are simply displayed; the ★ row is the year
+                  currently in force. Rates come from the designation rate
+                  card, which is why they can't be edited from a resource. */}
               {data.rateCardByYear && Object.keys(data.rateCardByYear).length > 0 && (
                 <div style={{ marginTop: "16px" }}>
                   <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--rp-muted)", textTransform: "uppercase", letterSpacing: ".06em", marginBottom: "8px" }}>Rate Card by Year</div>
                   <div style={{ border: "1px solid var(--rp-line)", borderRadius: "10px", overflow: "hidden" }}>
-                    {Object.entries(data.rateCardByYear).map(([yr, rate], i) => (
-                      <div key={yr} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderBottom: i < Object.keys(data.rateCardByYear).length - 1 ? "1px solid var(--rp-line-2)" : "none", background: yr === `Year-${data.rateYear}` ? "var(--rp-primary-50)" : "transparent" }}>
+                    {Object.entries(data.rateCardByYear).sort(([a], [b]) => yearKeyOrder(a, b)).map(([yr, rate], i, arr) => (
+                      <div key={yr} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderBottom: i < arr.length - 1 ? "1px solid var(--rp-line-2)" : "none", background: yr === `Year-${data.rateYear}` ? "var(--rp-primary-50)" : "transparent" }}>
                         <span style={{ fontSize: "13px", fontWeight: yr === `Year-${data.rateYear}` ? 700 : 500, color: yr === `Year-${data.rateYear}` ? "var(--rp-primary)" : "var(--rp-ink-2)" }}>{yr}{yr === `Year-${data.rateYear}` ? " ★" : ""}</span>
                         <span style={{ fontSize: "13px", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: "var(--rp-ink)" }}>{formatMoney(rate)}</span>
                       </div>
                     ))}
                   </div>
+                  <div className="rp-rate-note" style={{ marginTop: "8px" }}>
+                    Set from the designation rate card — update it under Designation Rates.
+                  </div>
                 </div>
               )}
-              */}
             </div>
           )}
         </div>
@@ -1294,14 +1361,6 @@ function EditDrawer({ resource, onClose, onSave }) {
     ...resource,
     lastDate: resource.lastDate || "",
     location: resource.location || "",
-    // Held as strings while editing so the inputs stay controlled and the user
-    // can clear a field mid-typing; coerced back to numbers on submit.
-    rateCardByYear: Object.fromEntries(
-      Object.entries(resource.rateCardByYear || {}).map(([yr, rate]) => [
-        yr,
-        rate == null ? "" : String(rate),
-      ])
-    ),
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -1314,7 +1373,8 @@ function EditDrawer({ resource, onClose, onSave }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, saving]);
 
-  const rateYears = Object.keys(form.rateCardByYear || {}).sort(yearKeyOrder);
+  // Read straight off the resource — rates aren't part of the edit form.
+  const rateYears = Object.keys(resource.rateCardByYear || {}).sort(yearKeyOrder);
 
   /* One validator for the whole drawer, used to gate submit and to re-check
      a field as it's edited, so the two can never disagree. Previously only
@@ -1354,19 +1414,9 @@ function EditDrawer({ resource, onClose, onSave }) {
       errs.lastDate = "The last date can't be earlier than the joining date.";
     }
 
-    rateYears.forEach((yr) => {
-      const raw = f.rateCardByYear?.[yr];
-      if (raw === "" || raw == null) return;         // blank means "0" on submit
-      const text = String(raw).trim();
-      if (!/^\d+(\.\d+)?$/.test(text)) {
-        errs[`rate:${yr}`] = `${yr} must be a number — no letters, signs or spaces.`;
-        return;
-      }
-      const n = Number(text);
-      if (!Number.isFinite(n)) errs[`rate:${yr}`] = `${yr} needs a valid number.`;
-      else if (n < 0) errs[`rate:${yr}`] = `${yr} can't be negative.`;
-      else if (n > MAX_RATE) errs[`rate:${yr}`] = `${yr} looks too large — check the figure.`;
-    });
+    /* Rates used to be validated here. They're read-only now — the values
+       go back to the server exactly as they arrived, so there's nothing
+       the user can enter for this drawer to reject. */
 
     return errs;
   };
@@ -1375,18 +1425,6 @@ function EditDrawer({ resource, onClose, onSave }) {
     const value = key === "active" ? e.target.checked : e.target.value;
     setForm((f) => {
       const next = { ...f, [key]: value };
-      if (submitted) setFieldErrors(validate(next));
-      return next;
-    });
-    if (error) setError(null);
-  };
-
-  // Rates are edited in place — the set of years comes from the backend and
-  // isn't added to or removed from here.
-  const setRate = (year) => (e) => {
-    const value = e.target.value;
-    setForm((f) => {
-      const next = { ...f, rateCardByYear: { ...f.rateCardByYear, [year]: value } };
       if (submitted) setFieldErrors(validate(next));
       return next;
     });
@@ -1421,11 +1459,13 @@ function EditDrawer({ resource, onClose, onSave }) {
           EDITABLE_FIELDS.map((k) => [k, typeof form[k] === "string" ? form[k].trim() : form[k]])
         ),
         lastDate: form.lastDate ? form.lastDate : null,
+        /* Echoed back untouched — the drawer can't change these, but the PUT
+           schema still expects the map, so it's rebuilt from the resource. */
         rateCardByYear: Object.fromEntries(
-          rateYears.map((yr) => [
-            yr,
-            form.rateCardByYear[yr] === "" ? 0 : Number(form.rateCardByYear[yr]),
-          ])
+          rateYears.map((yr) => {
+            const raw = resource.rateCardByYear?.[yr];
+            return [yr, raw === "" || raw == null ? 0 : Number(raw)];
+          })
         ),
       };
       // rateCard isn't part of the PUT schema — the per-year map replaces it.
@@ -1539,6 +1579,11 @@ function EditDrawer({ resource, onClose, onSave }) {
             </EditField>
           </div>
 
+          {/* Rate card — READ ONLY. Rates are derived from the designation
+              rate card upload, not from the individual resource, so editing
+              them here would put one person out of step with everyone on the
+              same designation. Shown for reference; change them by
+              re-uploading Designation Rates. */}
           <EditField label="Rate card by year (₹)">
             {rateYears.length === 0 ? (
               <div className="rp-rate-empty">No rate card years set for this resource.</div>
@@ -1552,33 +1597,15 @@ function EditDrawer({ resource, onClose, onSave }) {
                         <span className="rp-rate-current">current</span>
                       )}
                     </span>
-                    {/* text + inputMode, not type="number": a number input
-                        reports "" for an entry like "1e5" or "1..2", so the
-                        validator never sees what was typed and the value is
-                        silently blanked instead of explained. */}
-                    <input
-                      id={`res-rate:${yr}`}
-                      className={`rp-input${fieldErrors[`rate:${yr}`] ? " is-bad" : ""}`}
-                      type="text"
-                      inputMode="decimal"
-                      aria-invalid={!!fieldErrors[`rate:${yr}`]}
-                      value={form.rateCardByYear[yr]}
-                      onChange={(e) => {
-                        // Digits and a single dot; the validator does the rest.
-                        e.target.value = e.target.value
-                          .replace(/[^\d.]/g, "")
-                          .replace(/(\..*)\./g, "$1");
-                        setRate(yr)(e);
-                      }}
-                      aria-label={`Rate for ${yr}`}
-                    />
+                    <span className="rp-rate-value">
+                      {formatMoney(resource.rateCardByYear?.[yr])}
+                    </span>
                   </div>
                 ))}
-                {rateYears
-                  .filter((yr) => fieldErrors[`rate:${yr}`])
-                  .map((yr) => (
-                    <div className="rp-field-err" key={`err-${yr}`}>{fieldErrors[`rate:${yr}`]}</div>
-                  ))}
+                <div className="rp-rate-note">
+                  Set from the designation rate card — update it under
+                  Designation Rates.
+                </div>
               </div>
             )}
           </EditField>

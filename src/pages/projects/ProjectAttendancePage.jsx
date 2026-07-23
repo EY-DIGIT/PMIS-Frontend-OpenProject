@@ -50,6 +50,10 @@ const WEEKDAY_NAMES = new Set([
 const now = new Date();
 const CURRENT_YEAR = now.getFullYear();
 const CURRENT_QUARTER = Math.floor(now.getMonth() / 3) + 1;
+/* The Quarterly Attendance section opens on Q1 rather than on whichever
+   quarter today falls in. Fixed on purpose — swap back to CURRENT_QUARTER
+   to have it follow the calendar again. */
+const DEFAULT_QUARTER = 1;
 const YEAR_OPTIONS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2];
 
 // ---------- helpers ----------
@@ -130,6 +134,52 @@ const fmtBytes = (n) => {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+/* GET /api/export/template/attendance — a blank sheet covering the range.
+   Binary .xlsx, so it's read as a blob and saved via <a download>. Shared by
+   the page header and the upload modal; both need the identical request and
+   the identical failure handling, so it lives here rather than in either.
+   Returns the saved filename; throws with a showable message on failure. */
+async function downloadAttendanceTemplate(startDate, endDate) {
+  const DL_FALLBACK = "Couldn't download the template. Please try again.";
+  const token = getToken();
+  const res = await fetch(
+    `${API_BASE}${ENDPOINTS.resources.attendanceTemplate(startDate, endDate)}`,
+    { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+  );
+
+  // An error body is text/JSON, not a spreadsheet, and must not be shown raw.
+  if (!res.ok) throw new Error(await readErrorMessage(res, DL_FALLBACK));
+
+  const blob = await res.blob();
+  // A 200 with an empty body would save a 0-byte file that Excel refuses to
+  // open — clearer to report it than to hand over a broken download.
+  if (!blob.size) throw new Error("The server returned an empty template file.");
+
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  // Cross-origin JS can't read Content-Disposition unless the backend exposes
+  // it, so this usually falls back to our own naming.
+  const filename = match
+    ? decodeURIComponent(match[1].trim())
+    : `attendance_template_${startDate}_${endDate}.xlsx`;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return filename;
+}
+
+/* Last day of a month, as a YYYY-MM-DD string. Day 0 of the NEXT month is
+   the last of this one, which sidesteps leap-year special-casing. */
+function lastDayOfMonth(year, month) {
+  return `${year}-${pad2(month)}-${pad2(new Date(year, month, 0).getDate())}`;
+}
+
 function isWeekdayName(name) {
   return WEEKDAY_NAMES.has(String(name ?? "").trim().toLowerCase());
 }
@@ -188,7 +238,7 @@ export default function ProjectAttendancePage() {
 
   const [year, setYear] = useState(CURRENT_YEAR);
   const [selectedMonth, setSelectedMonth] = useState("all");
-  const [quarter, setQuarter] = useState(CURRENT_QUARTER);
+  const [quarter, setQuarter] = useState(DEFAULT_QUARTER);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -217,6 +267,15 @@ export default function ProjectAttendancePage() {
   const [milestonesError, setMilestonesError] = useState(null);
   // Attendance upload modal — the milestone is picked inside it.
   const [uploadOpen, setUploadOpen] = useState(false);
+
+  /* Header template download. The endpoint is built for a date range, and the
+     header has no dates of its own, so the range comes from the Year + Month
+     controls right below it: a chosen month covers that month, "All months"
+     covers the whole year. The exact range is spelled out in the button's
+     tooltip so it's never a guess. */
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateMsg, setTemplateMsg] = useState(null);
+  const [templateError, setTemplateError] = useState(null);
 
   useEffect(() => {
     setPageContext({ projectName: project?.projectName || "" });
@@ -432,6 +491,36 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [holidayOpen, year]);
 
+  /* Range for the header's template button, derived from Year + Month. */
+  const templateRange = useMemo(() => {
+    const y = parseYear(year);
+    if (y === null) return null;
+    const m = selectedMonth === "all" ? null : parseMonth(selectedMonth);
+    if (m === null) return { start: `${y}-01-01`, end: `${y}-12-31`, label: String(y) };
+    return {
+      start: `${y}-${pad2(m)}-01`,
+      end: lastDayOfMonth(y, m),
+      label: `${MONTH_NAMES[m]} ${y}`,
+    };
+  }, [year, selectedMonth]);
+
+  async function handleHeaderTemplate() {
+    if (templateBusy || !templateRange) return;
+    setTemplateBusy(true);
+    setTemplateMsg(null);
+    setTemplateError(null);
+    try {
+      const filename = await downloadAttendanceTemplate(templateRange.start, templateRange.end);
+      setTemplateMsg(`Template downloaded — ${filename}`);
+    } catch (err) {
+      const msg = requestErrorMessage(err, "Couldn't download the template. Please try again.");
+      setTemplateError(msg);
+      notifyActionError("Download failed", msg);
+    } finally {
+      setTemplateBusy(false);
+    }
+  }
+
   // Row click → open the full-page leave detail (year + quarter in the URL).
   const goLeaveDetail = (emp, quarterNum) =>
     navigate(
@@ -480,27 +569,44 @@ export default function ProjectAttendancePage() {
             Monthly attendance, quarterly leave and the holiday calendar for your project team.
           </p>
         </div>
-        <button
-          className="att-btn-primary"
-          onClick={() => setUploadOpen(true)}
-          disabled={milestonesLoading || uploadableMilestones.length === 0 || !!paramError}
-          title={
-            paramError
-              ? "Fix the filters above before uploading"
-              : milestonesLoading
-                ? "Loading milestones…"
-                : uploadableMilestones.length === 0
-                  ? "No resource-based milestones are ready for upload"
-                  : "Upload attendance for a resource-based milestone"
-          }
-        >
-          <UploadIcon />
-          Upload attendance
-        </button>
+        <div className="att-head-actions">
+          <button
+            className="att-btn-secondary"
+            onClick={handleHeaderTemplate}
+            disabled={templateBusy || !templateRange}
+            title={
+              templateRange
+                ? `Download a blank attendance template for ${templateRange.label} (${templateRange.start} → ${templateRange.end})`
+                : "Fix the filters above first"
+            }
+          >
+            <DownloadIcon />
+            {templateBusy ? "Preparing…" : "Download template"}
+          </button>
+          <button
+            className="att-btn-primary"
+            onClick={() => setUploadOpen(true)}
+            disabled={milestonesLoading || uploadableMilestones.length === 0 || !!paramError}
+            title={
+              paramError
+                ? "Fix the filters above before uploading"
+                : milestonesLoading
+                  ? "Loading milestones…"
+                  : uploadableMilestones.length === 0
+                    ? "No resource-based milestones are ready for upload"
+                    : "Upload attendance for a resource-based milestone"
+            }
+          >
+            <UploadIcon />
+            Upload attendance
+          </button>
+        </div>
       </header>
 
       {paramError && <div className="att-error" role="alert">⚠️ {paramError}</div>}
       {milestonesError && <div className="att-error" role="alert">{milestonesError}</div>}
+      {templateError && <div className="att-error" role="alert">{templateError}</div>}
+      {templateMsg && <div className="att-note" role="status">{templateMsg}</div>}
 
       {/* Controls */}
       <div className="att-toolbar">
@@ -884,8 +990,8 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     milestones.length === 1 ? String(milestones[0].apiId) : ""
   );
   const milestone = milestones.find((m) => String(m.apiId) === String(milestoneId)) || null;
-  // Monthly is the only type the API supports today; quarterly is wired up in
-  // the UI and blocked at submit until the backend endpoint exists.
+  // Monthly is the only type the API supports, and now the only option in the
+  // dropdown — so there's no unsupported value left to block at submit.
   const [uploadType, setUploadType] = useState("monthly");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -992,26 +1098,48 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     }
   };
 
-  // The API's validation errors array sometimes lists resource IDs that
-  // simply belong to a different project ("Resource X does not exist.").
-  // Surface that as one clear, actionable line instead of a raw ID dump.
-  // Anything else goes through the shared gate, which drops JSON, HTML
-  // pages and stack traces — the old `|| raw` fallback here put the whole
-  // response body on screen whenever it carried no message field.
-  const buildErrorMessage = (data, raw, status) => {
-    const validationErrors = Array.isArray(data?.errors) ? data.errors : null;
-    const isResourceMismatch =
-      validationErrors?.length > 0 &&
-      validationErrors.every((e) => /does not exist/i.test(String(e)));
+  /* What the SERVER said went wrong, not a generic stand-in.
 
-    if (isResourceMismatch) {
-      return "These resources belong to another project. Please upload the correct attendance file.";
+     The shared messageFromBody() joins an `errors` array into one comma-
+     separated line and then drops the whole thing when it exceeds 300 chars
+     — which a real row-by-row validation list always does. The upshot was
+     that the more the server explained, the less the user saw: a fifty-row
+     rejection surfaced as "Some values weren't accepted."
+
+     So the array is read directly here and rendered one error per line.
+     Long lists are capped with a count of the remainder rather than being
+     discarded. The shared gate still handles the no-array case, where it
+     does its real job of keeping HTML pages and stack traces off screen. */
+  const MAX_LISTED_ERRORS = 12;
+  const buildErrorMessage = (data, raw, status) => {
+    const list = (Array.isArray(data?.errors) ? data.errors : [])
+      .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+
+    if (list.length) {
+      // Every row failing for the same reason means the wrong file, not fifty
+      // separate problems — say that once instead of listing it fifty times.
+      if (list.every((e) => /does not exist/i.test(e))) {
+        return "These resources belong to another project. Please upload the correct attendance file.";
+      }
+      const shown = list.slice(0, MAX_LISTED_ERRORS);
+      const rest = list.length - shown.length;
+      const headline =
+        typeof data?.message === "string" && data.message.trim()
+          ? data.message.trim()
+          : `The server rejected ${list.length} ${list.length === 1 ? "entry" : "entries"}:`;
+      return [
+        headline,
+        ...shown.map((e) => `• ${e}`),
+        rest > 0 ? `…and ${rest} more.` : null,
+      ].filter(Boolean).join("\n");
     }
+
     return messageFromBody(raw, status, "The upload didn't go through. Please try again.");
   };
 
-  // GET /api/export/template/attendance — a blank sheet covering the chosen
-  // range. Binary .xlsx, so it's read as a blob and saved via <a download>.
+  // Blank sheet for the chosen range — see downloadAttendanceTemplate.
   const downloadTemplate = async () => {
     if (downloading || uploading) return;
     setError(null);
@@ -1022,40 +1150,7 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
 
     try {
       setDownloading(true);
-      const token = getToken();
-      const res = await fetch(
-        `${API_BASE}${ENDPOINTS.resources.attendanceTemplate(startDate, endDate)}`,
-        { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
-      );
-
-      const DL_FALLBACK = "Couldn't download the template. Please try again.";
-      if (!res.ok) {
-        // An error body is text/JSON, not a spreadsheet — and it must not be
-        // shown raw, which the old `|| raw` fallback did.
-        throw new Error(await readErrorMessage(res, DL_FALLBACK));
-      }
-
-      const blob = await res.blob();
-      // A 200 with an empty body would save a 0-byte file that Excel refuses
-      // to open — clearer to report it than to hand over a broken download.
-      if (!blob.size) throw new Error("The server returned an empty template file.");
-      const disposition = res.headers.get("content-disposition") || "";
-      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-      // Cross-origin JS can't read Content-Disposition unless the backend
-      // exposes it, so this usually falls back to the API's own naming.
-      const filename = match
-        ? decodeURIComponent(match[1].trim())
-        : `attendance_template_${startDate}_${endDate}.xlsx`;
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
+      const filename = await downloadAttendanceTemplate(startDate, endDate);
       setNotice(`Template downloaded — ${filename}`);
     } catch (err) {
       /* Action outcome → the app's shared popup. The inline line is kept in
@@ -1074,10 +1169,6 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     setNotice(null);
     setSubmitted(true);
 
-    if (uploadType === "quarterly") {
-      setNotice("Quarterly upload isn't available yet — it'll be enabled once the API is ready.");
-      return;
-    }
     if (!projectId) { setError("This project couldn't be identified."); return; }
 
     const errs = validateForm();
@@ -1113,7 +1204,15 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
       const { raw, data } = await parseResponseBody(res);
 
       if (!res.ok) {
-        throw new Error(buildErrorMessage(data, raw, res.status));
+        /* Handled here rather than thrown: requestErrorMessage() in the catch
+           below runs the message through the same 300-char readability gate
+           that was swallowing these lists in the first place. The full detail
+           goes inline where there's room to read it, and the popup gets the
+           headline only — a fifty-line modal helps nobody. */
+        const detail = buildErrorMessage(data, raw, res.status);
+        setError(detail);
+        notifyActionError("Upload failed", detail.split("\n")[0]);
+        return;
       }
 
       /* The success body is shown only when it reads like a sentence —
@@ -1188,6 +1287,8 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                 </select>
                 {fieldErrors.milestone && <span className="att-field-err">{fieldErrors.milestone}</span>}
               </Field>
+              {/* Monthly is the only type the API supports. The Quarterly
+                  option is withdrawn rather than shown-and-rejected. */}
               <Field label="Upload type">
                 <select
                   className="att-select"
@@ -1195,7 +1296,6 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                   onChange={(e) => { setUploadType(e.target.value); setError(null); setNotice(null); }}
                 >
                   <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
                 </select>
               </Field>
               <Field label="Start date">
@@ -1589,6 +1689,7 @@ const ATT_CSS = `
 .att-head { display: flex; align-items: flex-start; justify-content: space-between;
   gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
 .att-head-main { min-width: 0; }
+.att-head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
 .att-title { margin: 0 0 6px; letter-spacing: -0.02em; }
 .att-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
 /* milestone names are long — let that one select take the full modal row */
@@ -1721,8 +1822,12 @@ const ATT_CSS = `
 
 /* states */
 .att-muted { color: ${C.muted}; font-size: 14px; padding: 8px 0; }
+/* pre-line, so a server error listing one problem per line renders as a list
+   rather than collapsing into a wall of text. Capped in height because a
+   rejection can name dozens of rows and must not push the form off-screen. */
 .att-error { color: ${C.red}; font-size: 14px; padding: 12px 14px; background: ${C.redBg};
-  border: 1px solid #f4cccc; border-radius: 10px; margin: 4px 0; }
+  border: 1px solid #f4cccc; border-radius: 10px; margin: 4px 0;
+  white-space: pre-line; line-height: 1.55; max-height: 240px; overflow-y: auto; }
 .att-note { color: ${C.muted}; font-size: 14px; padding: 12px 14px; background: #f6f8fb;
   border: 1px solid ${C.border}; border-radius: 10px; margin: 4px 0; }
 /* A caution, not a failure — the action is still allowed to proceed. */

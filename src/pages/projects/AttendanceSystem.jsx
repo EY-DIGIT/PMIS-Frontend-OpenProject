@@ -17,7 +17,7 @@ import {
   FiCalendar,
   FiDollarSign,
   FiClipboard,
-  FiAlertTriangle,
+  // FiAlertTriangle — restore alongside the Penalty Report section below.
   FiGrid,
   FiArrowLeft,
 } from "react-icons/fi";
@@ -28,15 +28,35 @@ import {
 
    `slug` is the path segment directly under /projects/:projectId/. The
    overview's own segment is "attendance-system", which is also what the
-   project ⋮ menu links to. */
+   project ⋮ menu links to.
+
+   Order here is SET-UP ORDER, not alphabetical: leave policy and rates are
+   the configuration a resource's numbers resolve against, so they come
+   before resources and attendance. */
 export const SECTIONS = [
   {
     slug: "attendance-system",
-    label: "Overview",
+    label: "Attendance System",
     icon: FiGrid,
-    title: "Overview",
+    title: "Attendance System",
     blurb: "Everything workforce-related for this project, in one place.",
     hideOnHub: true,
+  },
+  {
+    slug: "leave-config",
+    label: "Leave Policy",
+    icon: FiClipboard,
+    title: "Leave Policy",
+    blurb:
+      "How leave is earned and counted here — half-day hours, sandwich leave, accrual frequency and proration.",
+  },
+  {
+    slug: "designation-rate",
+    label: "Designation Rates",
+    icon: FiDollarSign,
+    title: "Designation Rates",
+    blurb:
+      "The per-role, year-wise rate card. Upload this before importing resources so their rates resolve.",
   },
   {
     slug: "resource",
@@ -54,22 +74,9 @@ export const SECTIONS = [
     blurb:
       "Monthly and quarterly attendance per resource, with leave detail and the attendance-upload template.",
   },
-  {
-    slug: "designation-rate",
-    label: "Designation Rates",
-    icon: FiDollarSign,
-    title: "Designation Rates",
-    blurb:
-      "The per-role, year-wise rate card. Upload this before importing resources so their rates resolve.",
-  },
-  {
-    slug: "leave-config",
-    label: "Leave Policy",
-    icon: FiClipboard,
-    title: "Leave Policy",
-    blurb:
-      "How leave is earned and counted here — half-day hours, sandwich leave, accrual frequency and proration.",
-  },
+  /* Penalty Report — hidden for now. The page and its route are untouched,
+     so /projects/:projectId/penalty-report still resolves; only the hub card
+     and the nav tab are withdrawn. Restore by uncommenting.
   {
     slug: "penalty-report",
     label: "Penalty Report",
@@ -78,6 +85,7 @@ export const SECTIONS = [
     blurb:
       "Deductions arising from attendance shortfalls, calculated against the rates and leave policy above.",
   },
+  */
 ];
 
 /* The layout sits on a pathless route, so useParams() sees no params of
