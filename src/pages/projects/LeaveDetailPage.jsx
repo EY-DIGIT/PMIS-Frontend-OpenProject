@@ -401,6 +401,16 @@ export default function LeaveDetailPage() {
   const unpaidLeave = num(d.unpaidLeave);
   const paidDates = Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [];
   const unpaidDates = Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [];
+  /* halfDayDates is an OVERLAY on the two lists above, not a third category —
+     every date in it also appears as paid or unpaid, and marks that day as
+     counting 0.5 instead of 1. Verified against a live Q3-2026 payload: paid
+     had 4 full + 4 half = 6.0 (= paidLeave), unpaid 2 full + 5 half = 4.5,
+     less 1.5 relaxation = 3.0 (= unpaidLeave), totalling leaveTaken 10.5.
+     Rendering it as a separate list would double-count every one of them.
+     sandwichDates, by contrast, IS its own category — non-working days
+     caught between leave days and charged as leave. */
+  const halfDayDates = Array.isArray(d.halfDayDates) ? d.halfDayDates : [];
+  const sandwichDates = Array.isArray(d.sandwichDates) ? d.sandwichDates : [];
 
   // Relaxation is capped per quarter. The cost report carries that cap as
   // relaxationDaysApplied, stamped on the month it was computed for and 0 on
@@ -581,6 +591,8 @@ export default function LeaveDetailPage() {
           <LeaveDatesSection
             paidDates={paidDates}
             unpaidDates={unpaidDates}
+            halfDayDates={halfDayDates}
+            sandwichDates={sandwichDates}
             year={d.year || year}
             quarter={d.quarter || quarter}
             note={
@@ -750,21 +762,47 @@ function StatCard({ tone, icon, label, value, hint, sub }) {
   );
 }
 
-function DateList({ color, chipBg, title, dates, note }) {
+/* Days a list of dates actually costs — a half day counts 0.5. The header
+   used to read the array length as a day count, which is wrong the moment
+   any of them is a half day (8 dates, 6 days). */
+function countDays(dates, halfSet) {
+  return dates.reduce((sum, dt) => sum + (halfSet?.has(dateKey(dt)) ? 0.5 : 1), 0);
+}
+
+function DateList({ color, chipBg, title, dates, note, halfSet }) {
+  const days = countDays(dates, halfSet);
+  const halves = dates.filter((dt) => halfSet?.has(dateKey(dt))).length;
   return (
     <div className="ld-datecol">
       {/* The swatch is the exact donut-segment colour, so the tie between
           this list and that slice is visual rather than explained. */}
       <div className="ld-datehead">
         <span className="ld-datehead-dot" style={{ background: color }} />
-        {title} · {dates.length} {dates.length === 1 ? "day" : "days"}
+        {title} · {dayCount(days)} {days === 1 ? "day" : "days"}
+        {/* Only worth spelling out when the two numbers differ. */}
+        {halves > 0 && (
+          <span className="ld-datehead-sub">
+            {dates.length} dates · {halves} half
+          </span>
+        )}
       </div>
       {note && <div className="ld-datenote">{note}</div>}
       {dates.length ? (
         <div className="ld-datechips">
-          {dates.map((dt, i) => (
-            <span key={i} className="ld-datechip" style={{ background: chipBg, color: C.ink }}>{dt}</span>
-          ))}
+          {dates.map((dt, i) => {
+            const half = halfSet?.has(dateKey(dt));
+            return (
+              <span
+                key={i}
+                className={`ld-datechip${half ? " is-half" : ""}`}
+                // --chip-band colours the half-width underline (see .is-half::before).
+                style={{ background: chipBg, color: C.ink, "--chip-band": color }}
+                title={half ? `${dt} · Half day (0.5)` : `${dt} · Full day (1)`}
+              >
+                {dt}
+              </span>
+            );
+          })}
         </div>
       ) : (
         <div className="ld-muted" style={{ padding: "4px 0" }}>None</div>
@@ -777,7 +815,7 @@ function DateList({ color, chipBg, title, dates, note }) {
    TEMPORARY — the three candidates. Keep one, delete the rest.
    ═══════════════════════════════════════════════════════════════════ */
 
-function MonthGrid({ year, month, paidSet, unpaidSet }) {
+function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
   const cells = buildMonthGrid(year, month);
   return (
     <div className="ld-cal">
@@ -791,12 +829,28 @@ function MonthGrid({ year, month, paidSet, unpaidSet }) {
           const key = `${year}-${pad2(month)}-${pad2(day)}`;
           const paid = paidSet.has(key);
           const unpaid = unpaidSet.has(key);
+          const sandwich = sandwichSet.has(key);
+          // A half day is a modifier on paid/unpaid, never a state of its own.
+          const half = halfSet.has(key) && (paid || unpaid);
           // Monday-first grid: indexes 5 and 6 of each week are Sat/Sun.
           const weekend = i % 7 >= 5;
-          const cls = paid ? " is-paid" : unpaid ? " is-unpaid" : weekend ? " is-weekend" : "";
-          const title = paid ? `${key} · Paid Leave` : unpaid ? `${key} · Unpaid Leave` : key;
+          /* Sandwich is checked before the weekend fallback: a sandwich day IS
+             normally a weekend, and the fact that it's being charged as leave
+             outranks the fact that it's a Saturday. */
+          const cls = paid ? " is-paid"
+            : unpaid ? " is-unpaid"
+            : sandwich ? " is-sandwich"
+            : weekend ? " is-weekend" : "";
+          const kind = paid ? "Paid Leave"
+            : unpaid ? "Unpaid Leave"
+            : sandwich ? "Sandwich Leave" : "";
+          const title = kind
+            ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}`
+            : key;
           return (
-            <span key={i} className={`ld-cal-cell${cls}`} title={title}>{day}</span>
+            <span key={i} className={`ld-cal-cell${cls}${half ? " is-half" : ""}`} title={title}>
+              {day}
+            </span>
           );
         })}
       </div>
@@ -806,26 +860,41 @@ function MonthGrid({ year, month, paidSet, unpaidSet }) {
 
 /* Candidate A — quarter calendar. The only view where a weekend caught
    between two unpaid days is visible, which is what sandwich leave is. */
-function QuarterCalendar({ year, quarter, paidDates, unpaidDates }) {
+function QuarterCalendar({ year, quarter, paidDates, unpaidDates, halfDayDates = [], sandwichDates = [] }) {
   const q = Number(quarter) || 1;
   const yr = Number(year) || new Date().getFullYear();
   const paidSet = new Set(paidDates.map(dateKey).filter(Boolean));
   const unpaidSet = new Set(unpaidDates.map(dateKey).filter(Boolean));
+  const halfSet = new Set(halfDayDates.map(dateKey).filter(Boolean));
+  const sandwichSet = new Set(sandwichDates.map(dateKey).filter(Boolean));
   const months = [0, 1, 2].map((i) => (q - 1) * 3 + 1 + i);
 
-  const matched = paidSet.size + unpaidSet.size;
-  const total = paidDates.length + unpaidDates.length;
+  const matched = paidSet.size + unpaidSet.size + sandwichSet.size;
+  const total = paidDates.length + unpaidDates.length + sandwichDates.length;
+  const hasHalf = halfSet.size > 0;
 
   return (
     <>
       <div className="ld-cal-wrap">
         {months.map((m) => (
-          <MonthGrid key={m} year={yr} month={m} paidSet={paidSet} unpaidSet={unpaidSet} />
+          <MonthGrid
+            key={m}
+            year={yr}
+            month={m}
+            paidSet={paidSet}
+            unpaidSet={unpaidSet}
+            halfSet={halfSet}
+            sandwichSet={sandwichSet}
+          />
         ))}
       </div>
       <div className="ld-cal-legend">
         <span><i className="ld-cal-key is-paid" /> Paid Leave</span>
         <span><i className="ld-cal-key is-unpaid" /> Unpaid Leave</span>
+        {/* Keys for categories the quarter doesn't contain are omitted —
+            a legend entry with nothing to point at is just noise. */}
+        {hasHalf && <span><i className="ld-cal-key is-halfkey" /> Half Day (0.5)</span>}
+        {sandwichSet.size > 0 && <span><i className="ld-cal-key is-sandwich" /> Sandwich Leave</span>}
         <span><i className="ld-cal-key is-weekend" /> Weekend</span>
       </div>
       {/* An unreadable date format would silently mark nothing — say so
@@ -841,21 +910,36 @@ function QuarterCalendar({ year, quarter, paidDates, unpaidDates }) {
 }
 
 /* Candidate B — the current chip lists, foldable. */
-function DateChipLists({ paidDates, unpaidDates, note }) {
+function DateChipLists({ paidDates, unpaidDates, note, halfSet, sandwichDates = [] }) {
   return (
     <div className="ld-dates">
-      <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} />
-      <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} />
+      <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} halfSet={halfSet} />
+      <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} halfSet={halfSet} />
+      {/* Its own column, unlike half days — a sandwich day is charged on top
+          of the paid/unpaid lists rather than reclassifying a day in them. */}
+      {sandwichDates.length > 0 && (
+        <DateList color="#8a6d3b" chipBg="#f8f3ea" title="Sandwich Leave Dates" dates={sandwichDates} />
+      )}
     </div>
   );
 }
 
 /* Hosts all three so they can be compared. The switcher is scaffolding —
    it goes when one is picked. */
-function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
+function LeaveDatesSection({
+  paidDates, unpaidDates, note, year, quarter,
+  halfDayDates = [], sandwichDates = [],
+}) {
   const [view, setView] = useState("calendar");
   const [open, setOpen] = useState(true);
   const [drawer, setDrawer] = useState(false);
+
+  // Normalised once here — every candidate view below needs the same lookup.
+  const halfSet = useMemo(
+    () => new Set(halfDayDates.map(dateKey).filter(Boolean)),
+    [halfDayDates]
+  );
+  const totalDates = paidDates.length + unpaidDates.length + sandwichDates.length;
 
   const VIEWS = [
     ["calendar", "A · Calendar"],
@@ -888,6 +972,8 @@ function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
             quarter={quarter}
             paidDates={paidDates}
             unpaidDates={unpaidDates}
+            halfDayDates={halfDayDates}
+            sandwichDates={sandwichDates}
           />
         </div>
       )}
@@ -903,12 +989,18 @@ function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
             <span className="ld-fold-chev">{open ? "▾" : "▸"}</span>
             Paid &amp; unpaid leave dates
             <span className="ld-fold-count">
-              {paidDates.length + unpaidDates.length} dates
+              {totalDates} dates
             </span>
           </button>
           {open && (
             <div style={{ padding: "0 20px 18px" }}>
-              <DateChipLists paidDates={paidDates} unpaidDates={unpaidDates} note={note} />
+              <DateChipLists
+                paidDates={paidDates}
+                unpaidDates={unpaidDates}
+                sandwichDates={sandwichDates}
+                halfSet={halfSet}
+                note={note}
+              />
             </div>
           )}
         </div>
@@ -920,7 +1012,7 @@ function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
             <div className="ld-drawer-teaser">
               <div>
                 <div className="ld-drawer-teaser-num">
-                  {paidDates.length + unpaidDates.length}
+                  {totalDates}
                 </div>
                 <div className="ld-drawer-teaser-cap">leave dates this quarter</div>
               </div>
@@ -939,9 +1031,15 @@ function LeaveDatesSection({ paidDates, unpaidDates, note, year, quarter }) {
                   </button>
                 </div>
                 <div className="ld-drawer-body">
-                  <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} />
+                  <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} halfSet={halfSet} />
                   <div style={{ height: 22 }} />
-                  <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} />
+                  <DateList color="#e34948" chipBg="#fdecec" title="Unpaid Leave Dates" dates={unpaidDates} note={note} halfSet={halfSet} />
+                  {sandwichDates.length > 0 && (
+                    <>
+                      <div style={{ height: 22 }} />
+                      <DateList color="#8a6d3b" chipBg="#f8f3ea" title="Sandwich Leave Dates" dates={sandwichDates} />
+                    </>
+                  )}
                 </div>
               </aside>
             </div>
@@ -976,14 +1074,6 @@ function CostReportSection({ loading, error, report, totals }) {
   const months = Array.isArray(report.monthlyBreakdown) ? report.monthlyBreakdown : [];
   const extraEntries = Object.entries(report).filter(([k]) => !COST_KNOWN_KEYS.has(k));
 
-  /* Relaxation is GRANTED per quarter but APPLIED per month —
-     relaxationDaysApplied is 1.0 in July and 0.0 in Aug/Sep of the live
-     payload, i.e. real per-month values rather than one figure stamped
-     across the rows. The quarter's total is therefore the sum, not the max.
-     It is summarised here rather than kept as a column because the grant it
-     draws on is a quarterly one. */
-  const relaxationApplied = months.reduce((t, m) => t + num(m.relaxationDaysApplied), 0);
-
   /* The envelope's totals carry the quarter's deduction; without one (older
      payload shape) the months add up to the same figure. */
   const totalDeducted =
@@ -1003,8 +1093,6 @@ function CostReportSection({ loading, error, report, totals }) {
           hint="Amount withheld across the quarter for absent and unpaid days." />
         <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
           hint="How many months of the quarter are included in the breakdown below." />
-        <StatCard tone="amber" icon={<FiUmbrella />} label="Relaxation Applied" value={dayCount(relaxationApplied)}
-          hint="Relaxation days applied across the quarter, against the relaxation granted for it." />
       </div>
 
       {/* Monthly breakdown table */}
@@ -1606,6 +1694,15 @@ const LD_CSS = `
    border does the containing so the wash can stay almost white. */
 .ld-datechip { font-size: 12.5px; font-weight: 500; padding: 5px 10px; border-radius: 6px;
   border: 1px solid ${C.border}; font-variant-numeric: tabular-nums; }
+/* Half day — the chip form of the calendar's half-height band: the category
+   colour underlines the left half of the chip. Half the width rather than
+   half the height, because a chip is too short to band horizontally and
+   still leave the date legible. */
+.ld-datechip { position: relative; overflow: hidden; }
+.ld-datechip.is-half::before { content: ""; position: absolute; left: 0; bottom: 0;
+  width: 50%; height: 3px; background: var(--chip-band, ${C.muted}); }
+.ld-datehead-sub { margin-left: auto; font-size: 10px; font-weight: 600;
+  letter-spacing: 0; text-transform: none; color: ${C.faint}; }
 
 /* ═══ TEMPORARY — styles for the three candidate layouts ═══ */
 
@@ -1629,13 +1726,30 @@ const LD_CSS = `
 .ld-cal-dow, .ld-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
 .ld-cal-dow span { text-align: center; font-size: 9.5px; font-weight: 700;
   color: ${C.faint}; padding-bottom: 5px; }
-.ld-cal-cell { display: grid; place-items: center; aspect-ratio: 1; border-radius: 6px;
-  font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
+.ld-cal-cell { position: relative; display: grid; place-items: center; aspect-ratio: 1;
+  border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
 .ld-cal-cell.is-blank { visibility: hidden; }
 .ld-cal-cell.is-weekend { color: ${C.faint}; background: ${C.surface}; }
 /* Same two hues as the donut segments, so a day and its slice read as one. */
 .ld-cal-cell.is-paid { background: #2a78d6; color: #fff; font-weight: 700; }
 .ld-cal-cell.is-unpaid { background: #e34948; color: #fff; font-weight: 700; }
+/* Sandwich — a non-working day charged as leave. Hatched rather than given a
+   fourth hue: the stripes read as "weekend, but counted", and a pattern still
+   separates from paid/unpaid for anyone who can't tell the hues apart. */
+.ld-cal-cell.is-sandwich { font-weight: 700; color: #6b5426;
+  background: repeating-linear-gradient(135deg, #f3e6cd 0 4px, ${C.surface} 4px 8px); }
+/* Half day — the cell is literally half filled: pale tint overall with the
+   category's colour banding the bottom half. The split is horizontal rather
+   than diagonal so the digit sits wholly on the light part and keeps full
+   contrast (~15:1); a diagonal put it across both tones and forced the
+   number down to ~3.5:1. The tooltip carries the wording. */
+.ld-cal-cell.is-half {
+  background: linear-gradient(to bottom, var(--half-rest) 0 50%, var(--half-fill) 50% 100%);
+  align-content: start;
+  padding-top: 2px;
+}
+.ld-cal-cell.is-half.is-paid { --half-fill: #2a78d6; --half-rest: #e8f0fb; color: ${C.ink}; }
+.ld-cal-cell.is-half.is-unpaid { --half-fill: #e34948; --half-rest: #fdeaea; color: ${C.ink}; }
 .ld-cal-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px;
   padding-top: 14px; border-top: 1px solid ${C.divider};
   font-size: 12px; color: ${C.muted}; }
@@ -1644,6 +1758,12 @@ const LD_CSS = `
 .ld-cal-key.is-paid { background: #2a78d6; }
 .ld-cal-key.is-unpaid { background: #e34948; }
 .ld-cal-key.is-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
+.ld-cal-key.is-sandwich { background: repeating-linear-gradient(135deg, #f3e6cd 0 3px, ${C.surface} 3px 6px);
+  border: 1px solid ${C.border}; }
+/* Mirrors the cell's half-height band, in neutral tones so the key reads as
+   "this shape means half" rather than as a fourth category. */
+.ld-cal-key.is-halfkey { background: linear-gradient(to bottom, #e8edf5 0 50%, #6b7a90 50% 100%);
+  border: 1px solid ${C.border}; }
 
 /* B — collapsible */
 .ld-fold { display: flex; align-items: center; gap: 10px; width: 100%;
