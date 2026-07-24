@@ -804,7 +804,8 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
               {showMilestoneCol && <th className="att-th">Milestone</th>}
               <th className="att-th att-num">Working</th>
               <th className="att-th att-num">Present</th>
-              <th className="att-th att-num">Half</th>
+              {/* Half-day column withdrawn — half days already count as 0.5
+                  inside Present, so the separate tally was double-reporting. */}
               {splitLeave ? (
                 <>
                   <th className="att-th att-num">Paid Leave</th>
@@ -813,7 +814,7 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
               ) : (
                 <th className="att-th att-num">Leave Taken</th>
               )}
-              <th className="att-th att-num">Absent</th>
+              <th className="att-th att-num">Taken Leave</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
@@ -839,7 +840,6 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                 )}
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
-                <td className="att-td att-num att-dim">{emp.halfDays}</td>
                 {splitLeave ? (
                   <>
                     <td className="att-td att-num">{num(emp.paidLeaveDays)}</td>
@@ -879,7 +879,7 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                     total always lands under Cost. */}
                 <td
                   className="att-td att-strong"
-                  colSpan={9 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 1 : 0)}
+                  colSpan={8 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 1 : 0)}
                 >
                   Total for {period}
                 </td>
