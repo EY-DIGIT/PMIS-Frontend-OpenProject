@@ -72,6 +72,8 @@ import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
 import DesignationRatePage from "./pages/projects/DesignationRatePage";
 import AttendanceSystemHub, { AttendanceSystemLayout } from "./pages/projects/AttendanceSystem";
+import SlaSystemHub, { SlaSystemLayout } from "./pages/projects/SlaSystem";
+import SlaSettlementPage from "./pages/projects/SlaSettlementPage";
 import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
 import LeaveDetailPage from "./pages/projects/LeaveDetailPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
@@ -343,8 +345,9 @@ function Breadcrumbs() {
         resource: "Resources",
         attendance: "Attendance",
         "designation-rate": "Designation Rates",
-        "leave-config": "Leave Policy",
-        "penalty-report": "Penalty Report"
+        "leave-config": "Leave Policy"
+        /* penalty-report moved to the SLA System cluster below — it reports
+           delay → LD → payment, which is SLA work, not workforce work. */
     };
     // hasOwnProperty, not `in` — `in` walks the prototype chain, so a URL
     // segment like "constructor" would otherwise match.
@@ -389,12 +392,18 @@ function Breadcrumbs() {
             </nav>
         );
     }
-    /* /projects/:projectId/activity-slas — Map SLA flow. Trail:
+    /* /projects/:projectId/activity-slas?activityId=… — Map SLA reached FROM
+       an activity. Trail:
          Home › Project Detail › [Milestone] › [Activity] › Map SLA
        The milestone/activity names ride along as query params from the
-       launching activity modal (absent on a direct visit, so those crumbs
-       are dropped). Milestone/Activity link back to the config page. */
-    if (segments[0] === "projects" && segments[2] === "activity-slas") {
+       launching activity modal. Milestone/Activity link back to the config
+       page. Without an activityId the page was reached through the SLA
+       System nav instead, so it falls through to the section trail below. */
+    if (
+        segments[0] === "projects" &&
+        segments[2] === "activity-slas" &&
+        new URLSearchParams(search).get("activityId")
+    ) {
         const pid = decodeURIComponent(segments[1]);
         const projectUrl = `/projects/${encodeURIComponent(pid)}`;
         const configUrl = `${projectUrl}/config`;
@@ -429,6 +438,59 @@ function Breadcrumbs() {
                 <Link to={activityUrl} style={linkStyle}>{actName || "Activity"}</Link>
                 {sep}
                 <span style={{ color: "#333", fontWeight: 600 }}>Map SLA</span>
+            </nav>
+        );
+    }
+
+    /* SLA System cluster — Home › Project Detail › SLA System › <page>.
+       The hub itself stops at the third crumb. Mirrors AS_SECTIONS above;
+       note this runs AFTER the activity-slas branch, so arriving from an
+       activity keeps its Milestone › Activity trail. */
+    const SLA_SECTIONS = {
+        "sla-system": null,
+        severity: "Severity & LD Bands",
+        "activity-slas": "Activity SLA Mapping",
+        "sla-settlement": "Settlement & LD",
+        "penalty-report": "Penalty Report"
+    };
+    if (
+        segments[0] === "projects" &&
+        segments[1] &&
+        Object.prototype.hasOwnProperty.call(SLA_SECTIONS, segments[2] || "")
+    ) {
+        const pid = decodeURIComponent(segments[1]);
+        const projectUrl = `/projects/${encodeURIComponent(pid)}`;
+        const hubUrl = `${projectUrl}/sla-system`;
+        const leaf = SLA_SECTIONS[segments[2]];
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Home
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                <Link to={projectUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                    Project Detail
+                </Link>
+                <span style={{ color: "#999" }}>›</span>
+                {leaf ? (
+                    <>
+                        <Link to={hubUrl} style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>
+                            SLA System
+                        </Link>
+                        <span style={{ color: "#999" }}>›</span>
+                        <span style={{ color: "#333", fontWeight: 600 }}>{leaf}</span>
+                    </>
+                ) : (
+                    <span style={{ color: "#333", fontWeight: 600 }}>SLA System</span>
+                )}
             </nav>
         );
     }
@@ -793,10 +855,9 @@ export default function MainApp() {
                                                     path="/projects/:projectId/audit-logs"
                                                     element={<RequirePermission action="viewProjects"><AuditLogsPage /></RequirePermission>}
                                                 />
-                                                <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/finance" element={<RequireFinanceAccess><ProjectFinancePage /></RequireFinanceAccess>} />
-                                                {/* Attendance System — resources, rates, attendance, leave and
-                                                    penalties share the same underlying records, so they're grouped
+                                                {/* Attendance System — resources, rates, attendance and leave
+                                                    share the same underlying records, so they're grouped
                                                     under one section. The layout route is PATHLESS: it only adds the
                                                     section nav, leaving every URL below exactly as it was so existing
                                                     links and bookmarks keep working. */}
@@ -807,11 +868,22 @@ export default function MainApp() {
                                                     <Route path="/projects/:projectId/attendance/leave/:attendanceId" element={<RequirePermission action="viewProjects"><LeaveDetailPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/designation-rate" element={<RequirePermission action="viewProjects"><DesignationRatePage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
+                                                </Route>
+                                                {/* SLA System — severity/LD configuration, activity mappings,
+                                                    quarterly settlement and the penalty report are one chain
+                                                    (points → bands → mapping → evaluation → LD → payment), so
+                                                    they're grouped under one section. Same PATHLESS layout trick
+                                                    as Attendance above: every URL below is unchanged, the section
+                                                    nav is all that's added. */}
+                                                <Route element={<SlaSystemLayout />}>
+                                                    <Route path="/projects/:projectId/sla-system" element={<RequirePermission action="viewProjects"><SlaSystemHub /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/sla-settlement" element={<RequirePermission action="viewProjects"><SlaSettlementPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
                                                 </Route>
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
-                                                <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
                                                 {/* penalty-report and designation-rate now live in the
                                                     Attendance System layout route above. */}
 

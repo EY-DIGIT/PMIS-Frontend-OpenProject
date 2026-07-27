@@ -1,9 +1,12 @@
 /* ══════════════════════════════════════════════════════════════════
    Attendance System — the workforce cluster's shell and landing page.
 
-   Resource records, their rates, attendance, leave policy and penalties
-   all read the same underlying data, so they're presented as one section
-   instead of five unrelated entries in the project's ⋮ menu.
+   Resource records, their rates, attendance and leave policy all read the
+   same underlying data, so they're presented as one section instead of
+   four unrelated entries in the project's ⋮ menu.
+
+   The Penalty Report moved to the SLA System section (SlaSystem.jsx) —
+   it reports delay → LD → payment, which is SLA work, not workforce work.
 
    `AttendanceSystemLayout` is mounted as a PATHLESS layout route wrapping
    the existing page routes (see App.jsx). That keeps every current URL —
@@ -17,7 +20,6 @@ import {
   FiCalendar,
   FiDollarSign,
   FiClipboard,
-  // FiAlertTriangle — restore alongside the Penalty Report section below.
   FiGrid,
   FiArrowLeft,
 } from "react-icons/fi";
@@ -74,18 +76,8 @@ export const SECTIONS = [
     blurb:
       "Monthly and quarterly attendance per resource, with leave detail and the attendance-upload template.",
   },
-  /* Penalty Report — hidden for now. The page and its route are untouched,
-     so /projects/:projectId/penalty-report still resolves; only the hub card
-     and the nav tab are withdrawn. Restore by uncommenting.
-  {
-    slug: "penalty-report",
-    label: "Penalty Report",
-    icon: FiAlertTriangle,
-    title: "Penalty Report",
-    blurb:
-      "Deductions arising from attendance shortfalls, calculated against the rates and leave policy above.",
-  },
-  */
+  /* Penalty Report used to sit here (commented out). It now lives in the
+     SLA System section — same URL, /projects/:projectId/penalty-report. */
 ];
 
 /* The layout sits on a pathless route, so useParams() sees no params of

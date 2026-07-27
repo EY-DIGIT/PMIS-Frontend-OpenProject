@@ -1167,18 +1167,24 @@ export default function ProjectDetailsPage() {
     },
     {
       /* Single entry point for the whole workforce cluster — Resources,
-         Attendance, Designation Rates, Leave Policy and Penalty Report.
-         They read the same records, so they live behind one hub with its
-         own section nav rather than five separate entries here. */
+         Attendance, Designation Rates and Leave Policy. They read the same
+         records, so they live behind one hub with its own section nav
+         rather than four separate entries here. */
       key: "attendance-system",
       label: "Attendance System",
       onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/attendance-system`),
       visible: true
     },
     {
-      key: "Severity And LD Configure",
-      label: "Severity And LD Configure",
-      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/severity`),
+      /* Single entry point for the whole SLA cluster — Severity & LD,
+         the SLA library, activity mappings, quarterly settlement and the
+         penalty report. They form one chain (points → bands → mapping →
+         evaluation → LD → payment), so they live behind one hub with its
+         own section nav rather than scattered entries here, in the sidebar
+         and at the bottom of the mapping page. */
+      key: "sla-system",
+      label: "SLA System",
+      onClick: () => navigate(`/projects/${encodeURIComponent(project.projectId)}/sla-system`),
       visible: true
     },
     {

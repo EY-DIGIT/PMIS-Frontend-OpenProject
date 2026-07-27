@@ -1,25 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
+import { loadProjectTree } from "../../api/milestoneConfigApi";
 import ActivityCompliancePanel from "../../components/projects/sla/ActivityCompliancePanel";
-import SlaSettlementPanel from "../../components/projects/sla/SlaSettlementPanel";
 import "../../styles/global.css";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
 
 function today() {
     return new Date().toISOString().slice(0, 10);
-}
-
-// Last day of the one-quarter window starting at `iso` (start + 3 months − 1 day).
-// Used to cap the reporting-period end date.
-function quarterEndISO(iso) {
-    if (!iso) return undefined;
-    const d = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return undefined;
-    d.setMonth(d.getMonth() + 3);
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
 }
 
 // Pull the collection array regardless of which envelope shape the API uses.
@@ -384,14 +373,6 @@ function severityAccent(level) {
     return "#1f8a4c";
 }
 
-function bandBadgeClass(label) {
-    const s = String(label || "").toLowerCase();
-    if (/crit|breach|severe|fail|red|high/.test(s)) return "uidai-pmis-badge-red";
-    if (/major|warn|amber|medium|moderate/.test(s)) return "uidai-pmis-badge-orange";
-    if (/minor|ok|green|pass|low|none/.test(s)) return "uidai-pmis-badge-green";
-    return "uidai-pmis-badge-orange";
-}
-
 function EvalStatTile({ label, value, accent }) {
     return (
         <div style={{ background: "#f6f9fd", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, padding: "12px 14px" }}>
@@ -403,7 +384,6 @@ function EvalStatTile({ label, value, accent }) {
 
 const BREACH_COLS = [
     { key: "metric_key", label: "Metric", humanize: true },
-    { key: "band_label", label: "Band", band: true },
     { key: "observed_value", label: "Observed", num: true },
     { key: "days_in_band", label: "Days in Band", num: true },
     { key: "severity_level", label: "Severity", num: true },
@@ -430,7 +410,6 @@ function BreachTable({ rows }) {
                         <tr key={i}>
                             {cols.map((c) => {
                                 const v = r[c.key];
-                                if (c.band) return <td key={c.key}><span className={`uidai-pmis-badge ${bandBadgeClass(v)}`}>{v || "—"}</span></td>;
                                 if (c.num) return <td key={c.key} style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{evalNum(v)}</td>;
                                 if (c.humanize) return <td key={c.key}>{maybeHumanize(v)}</td>;
                                 return <td key={c.key}>{v === null || v === undefined || v === "" ? "—" : String(v)}</td>;
@@ -662,10 +641,155 @@ function EvaluationResult({ data }) {
     return <ResultView data={data} />;
 }
 
+// ---------------------------------------------------------------------------
+// Activity chooser — shown when the page is opened without ?activityId (i.e.
+// from the SLA System nav rather than from an activity's node modal).
+//
+// SLAs are mapped onto activities, so this page needs one before it can do
+// anything; without this the only ways in were walking the milestone tree or
+// knowing the raw activity UUID. Picking here writes the same query params the
+// node modal passes, so both entry points land in exactly the same state.
+// ---------------------------------------------------------------------------
+function ActivityChooser({ milestones, loading, error, onReload, onPick, current }) {
+    const [query, setQuery] = useState("");
+    // Milestone uid/index → expanded. Everything starts open when the project
+    // is small enough to scan; collapsed once there's a lot to wade through.
+    const [collapsed, setCollapsed] = useState(() => new Set());
+
+    const dim = { color: "var(--uidai-pmis-muted)" };
+    const q = query.trim().toLowerCase();
+
+    // Filter activities by code/name; keep a milestone if its own name matches
+    // (so searching a milestone shows everything under it).
+    const groups = (milestones || []).map((m, mi) => {
+        const acts = Array.isArray(m?.activities) ? m.activities : [];
+        const msLabel = `${m?.serverDisplayCode || `M${mi + 1}`} ${m?.name || ""}`;
+        const msHit = q && msLabel.toLowerCase().includes(q);
+        const rows = acts
+            .map((a, ai) => ({
+                apiId: a?.apiId || "",
+                name: a?.name || "",
+                code: a?.serverDisplayCode || `A${mi + 1}.${ai + 1}`,
+            }))
+            // No apiId means the activity was never saved server-side, so it has
+            // nothing to map an SLA against.
+            .filter((a) => a.apiId)
+            .filter((a) => !q || msHit || `${a.code} ${a.name}`.toLowerCase().includes(q));
+        return { key: m?.uid || m?.apiId || `m${mi}`, name: m?.name || `Milestone ${mi + 1}`, code: m?.serverDisplayCode || `M${mi + 1}`, rows };
+    });
+    const visible = groups.filter((g) => g.rows.length);
+    const totalShown = visible.reduce((n, g) => n + g.rows.length, 0);
+
+    return (
+        <div className="uidai-pmis-card">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
+                <div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77" }}>Choose an Activity</div>
+                    <div style={{ fontSize: 12, ...dim, marginTop: 2 }}>
+                        SLAs are mapped onto activities. Pick one to see its mappings and evaluate them.
+                    </div>
+                </div>
+                <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={onReload} disabled={loading}>
+                    {loading ? "Loading…" : "↻ Reload"}
+                </button>
+            </div>
+
+            <div className="uidai-pmis-filter-shell" style={{ marginBottom: 12 }}>
+                <input
+                    type="text"
+                    className="uidai-pmis-filter-select"
+                    style={{ width: "100%" }}
+                    placeholder="Search activities by code or name…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                />
+            </div>
+
+            {error && (
+                <div className="uidai-pmis-badge uidai-pmis-badge-red" style={{ display: "block", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontWeight: 600 }}>
+                    {error}
+                </div>
+            )}
+
+            {loading && !visible.length ? (
+                <div style={{ padding: 26, textAlign: "center", ...dim, fontSize: 13 }}>Loading the project's activities…</div>
+            ) : !visible.length ? (
+                <div style={{ padding: 26, textAlign: "center", ...dim, fontSize: 13 }}>
+                    <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">🗂️</div>
+                    {q ? "No activity matches that search." : "This project has no saved activities yet — add them in Milestone Configuration first."}
+                </div>
+            ) : (
+                <>
+                    <div style={{ fontSize: 12, ...dim, marginBottom: 8 }}>
+                        {totalShown} activit{totalShown === 1 ? "y" : "ies"} across {visible.length} milestone{visible.length === 1 ? "" : "s"}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {visible.map((g) => {
+                            const shut = collapsed.has(g.key);
+                            return (
+                                <div key={g.key} style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, overflow: "hidden" }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setCollapsed((s) => {
+                                            const next = new Set(s);
+                                            if (next.has(g.key)) next.delete(g.key); else next.add(g.key);
+                                            return next;
+                                        })}
+                                        style={{
+                                            display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+                                            background: "#f6f9fd", border: "none", cursor: "pointer", font: "inherit",
+                                            padding: "10px 12px", color: "#173e77", fontWeight: 800, fontSize: 13.5,
+                                        }}
+                                    >
+                                        <span style={{ ...dim, fontSize: 12 }} aria-hidden="true">{shut ? "▸" : "▾"}</span>
+                                        <span style={{ fontFamily: "monospace", fontSize: 12, ...dim }}>{g.code}</span>
+                                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
+                                        <span style={{ marginLeft: "auto", background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 9px", fontSize: 12, fontWeight: 800 }}>
+                                            {g.rows.length}
+                                        </span>
+                                    </button>
+                                    {!shut && (
+                                        <div style={{ display: "flex", flexDirection: "column" }}>
+                                            {g.rows.map((a) => {
+                                                const isCurrent = current && a.apiId === current;
+                                                return (
+                                                    <button
+                                                        key={a.apiId}
+                                                        type="button"
+                                                        onClick={() => onPick(g, a)}
+                                                        style={{
+                                                            display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+                                                            background: isCurrent ? "#eef3fb" : "#fff", border: "none",
+                                                            borderTop: "1px solid var(--uidai-pmis-border)", cursor: "pointer", font: "inherit",
+                                                            padding: "10px 14px", fontSize: 13, color: "var(--uidai-pmis-text)",
+                                                        }}
+                                                    >
+                                                        <span style={{ fontFamily: "monospace", fontSize: 12, ...dim, flex: "0 0 auto" }}>{a.code}</span>
+                                                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>
+                                                            {a.name || "(untitled activity)"}
+                                                        </span>
+                                                        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#173e77", flex: "0 0 auto" }}>
+                                                            {isCurrent ? "Current" : "Select →"}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
+
 export default function ActivitySlasPage() {
     // Prefill the Activity ID when we're launched from an activity's node modal
     // (it navigates here with ?activityId=…), so the user lands ready to map.
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     // The route is /projects/:projectId/activity-slas — that id scopes the SLA
     // library to this project (sent as ?project_id= to the masters API). Allow a
     // ?project_id= query override too, in case the page is opened standalone.
@@ -718,6 +842,11 @@ export default function ActivitySlasPage() {
     // Human-friendly name for the activity in headings — falls back to the raw
     // id. Declared after activityIdInput because it reads it.
     const activityLabel = searchParams.get("activityCode") || searchParams.get("activityName") || activityIdInput;
+    // ---- Activity chooser (shown when we arrive without an ?activityId) ----
+    const [chooserOpen, setChooserOpen] = useState(false);
+    const [tree, setTree] = useState(null);        // milestones[] with nested activities
+    const [treeLoading, setTreeLoading] = useState(false);
+    const [treeError, setTreeError] = useState("");
     const [effFrom, setEffFrom] = useState(today());
     const [effUntil, setEffUntil] = useState("");
     const [createLoading, setCreateLoading] = useState(false);
@@ -739,7 +868,7 @@ export default function ActivitySlasPage() {
     const [editMessage, setEditMessage] = useState("");
 
     // ---- Step 5a: single-mapping evaluate ----
-    const [singleEval, setSingleEval] = useState(null); // { mappingId, slaRef, slaTitle, period_start, period_end, ld_base_amount, observations, loadingMetrics }
+    const [singleEval, setSingleEval] = useState(null); // { mappingId, slaRef, slaTitle, period_start, ld_base_amount, observations, loadingMetrics }
     const [singleEvalLoading, setSingleEvalLoading] = useState(false);
     const [singleEvalResult, setSingleEvalResult] = useState(null);
     const [singleEvalError, setSingleEvalError] = useState("");
@@ -765,8 +894,50 @@ export default function ActivitySlasPage() {
         setActivityIdInput(fromQuery);
         loadMappings(fromQuery);
         setView("mapping");
+        setChooserOpen(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
+
+    // The chooser needs the project's milestone → activity tree (one round-trip,
+    // the same call Milestone Configuration makes). Loaded lazily: the common
+    // path in here carries an ?activityId and never opens the chooser.
+    const chooserVisible = chooserOpen || !activityIdInput.trim();
+    useEffect(() => {
+        if (!chooserVisible || !projectId || tree) return;
+        loadActivityTree();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chooserVisible, projectId]);
+
+    async function loadActivityTree() {
+        if (!projectId) { setTreeError("No project in the URL."); return; }
+        setTreeLoading(true);
+        setTreeError("");
+        try {
+            const project = await loadProjectTree(projectId);
+            setTree(Array.isArray(project?.milestones) ? project.milestones : []);
+        } catch (err) {
+            setTreeError(err?.message || "Failed to load the project's activities");
+            setTree([]);
+        } finally {
+            setTreeLoading(false);
+        }
+    }
+
+    // Write the same query params the activity node modal passes, so both entry
+    // points land in an identical state (and the breadcrumb reads the same).
+    // The prefill effect above picks the change up and loads the mappings.
+    function pickActivity(milestone, activity) {
+        const next = new URLSearchParams(searchParams);
+        next.set("activityId", activity.apiId);
+        next.set("activityCode", activity.code || "");
+        next.set("activityName", activity.name || "");
+        next.set("milestoneName", milestone.name || "");
+        // Belongs to the previously-selected activity's node form, not this one.
+        next.delete("nodeUid");
+        next.delete("activityMode");
+        setSearchParams(next);
+        setChooserOpen(false);
+    }
 
     // Shared response/error unwrapper.
     async function readJson(res) {
@@ -978,7 +1149,9 @@ export default function ActivitySlasPage() {
         setSingleEval({
             sla_ref: m.sla_ref, sla_title: m.sla_title,
             schema: null, loadingSchema: true, schemaError: "",
-            period_start: today(), period_end: today(), values: {},
+            // No period_end: the reporting window is the backend's to decide
+            // from the start date, so it is neither asked for nor sent.
+            period_start: today(), values: {},
         });
         const activityId = activityIdInput.trim();
         if (!activityId || !m.sla_ref) {
@@ -992,14 +1165,17 @@ export default function ActivitySlasPage() {
             );
             const payload = await readJson(res);
             const schema = payload?.data || payload;
-            setSingleEval((s) => (s && s.sla_ref === m.sla_ref ? {
-                ...s,
-                schema,
-                loadingSchema: false,
-                period_start: schema?.period?.start_default || schema?.start_default || s.period_start,
-                period_end: "", // user picks the end within one quarter of the start
-                values: {},
-            } : s));
+            setSingleEval((s) => {
+                if (!s || s.sla_ref !== m.sla_ref) return s;
+                const start = schema?.period?.start_default || schema?.start_default || s.period_start;
+                return {
+                    ...s,
+                    schema,
+                    loadingSchema: false,
+                    period_start: start,
+                    values: {},
+                };
+            });
         } catch (err) {
             setSingleEval((s) => (s && s.sla_ref === m.sla_ref ? { ...s, loadingSchema: false, schemaError: err?.message || "Failed to load the evaluation form." } : s));
         }
@@ -1016,10 +1192,10 @@ export default function ActivitySlasPage() {
             // Build the body from the filled inputs. Empty values are OMITTED
             // (never sent as null — the backend rejects null with a 422), required
             // inputs are validated up-front, and numeric inputs are coerced.
-            const body = {
-                period_start: singleEval.period_start,
-                period_end: singleEval.period_end,
-            };
+            // period_end is NOT sent — the backend derives the window from the
+            // start, so the payload is just the start plus the observed inputs
+            // (e.g. { period_start: "2025-11-10", value: 12 }).
+            const body = { period_start: singleEval.period_start };
             const missing = [];
             (schema.inputs || []).forEach((inp) => {
                 let v = singleEval.values[inp.name];
@@ -1036,15 +1212,10 @@ export default function ActivitySlasPage() {
                 }
                 body[inp.name] = v;
             });
-            if (!singleEval.period_start || !singleEval.period_end) missing.push("Reporting period");
+            if (!singleEval.period_start) missing.push("Reporting period");
             if (missing.length) {
                 setSingleEvalError(`Please enter: ${missing.join(", ")}.`);
                 return; // `finally` resets the loading flag
-            }
-            const maxEnd = quarterEndISO(singleEval.period_start);
-            if (singleEval.period_end < singleEval.period_start || (maxEnd && singleEval.period_end > maxEnd)) {
-                setSingleEvalError(`Period End must be between ${singleEval.period_start} and ${maxEnd} (one quarter).`);
-                return;
             }
             const url = schema.submit?.url
                 ? `${baseUrl}${schema.submit.url}`
@@ -1277,11 +1448,53 @@ export default function ActivitySlasPage() {
         <div className="uidai-pmis-content">
             {/* Header */}
             <div className="uidai-pmis-title">SLA → Activity Mapping &amp; Evaluation</div>
-            <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
-                {view === "picker"
-                    ? "Search the SLA library, view an SLA, then map it to this activity."
-                    : "Review the SLAs mapped to this activity, map new ones, and evaluate."}
-            </div>
+            {/* No subtitle on the mapping screen itself — the activity bar and
+                each card carry their own context. */}
+            {(view === "picker" || chooserVisible) && (
+                <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
+                    {view === "picker"
+                        ? "Search the SLA library, view an SLA, then map it to this activity."
+                        : "Pick the activity you want to work on — its mappings and evaluations open below."}
+                </div>
+            )}
+
+            {/* Which activity we're on + a way back to the chooser. Shown once
+                an activity is selected, whichever entry point brought us here. */}
+            {view === "mapping" && !chooserVisible && (
+                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Activity</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>
+                            {searchParams.get("activityName") || activityLabel}
+                            {searchParams.get("activityCode") && (
+                                <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>
+                                    {searchParams.get("activityCode")}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                        style={{ marginTop: 0, marginLeft: "auto" }}
+                        onClick={() => setChooserOpen(true)}
+                    >
+                        ⇄ Change activity
+                    </button>
+                </div>
+            )}
+
+            {/* CHOOSER — no activity yet (or the user asked to switch) */}
+            {view === "mapping" && chooserVisible && (
+                <ActivityChooser
+                    milestones={tree}
+                    loading={treeLoading}
+                    error={treeError}
+                    onReload={loadActivityTree}
+                    onPick={pickActivity}
+                    current={activityIdInput.trim()}
+                />
+            )}
 
             {/* PICKER — browse cards (left) + SLA details side-panel (right) */}
             {view === "picker" && (
@@ -1486,7 +1699,7 @@ export default function ActivitySlasPage() {
             )}
 
             {/* MAPPING — activity's current SLA mappings */}
-            {view === "mapping" && (
+            {view === "mapping" && !chooserVisible && (
                 <div className="uidai-pmis-card">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
                         <div>
@@ -1494,7 +1707,6 @@ export default function ActivitySlasPage() {
                                 Activity SLA Mappings
                                 {mappings.length > 0 && <span style={{ marginLeft: 8, background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 9px", fontSize: 12, fontWeight: 800 }}>{mappings.length}</span>}
                             </div>
-                            <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>SLAs attached to this activity — view the image, edit dates, or evaluate severity.</div>
                         </div>
                         <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                             <label style={{ fontSize: 13, color: "var(--uidai-pmis-text)", display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
@@ -1514,14 +1726,14 @@ export default function ActivitySlasPage() {
                         <table className="uidai-pmis-table">
                             <thead>
                                 <tr>
-                                    <th>SLA Ref</th><th>SLA Title</th><th>Contract</th><th>Status</th><th>Effective From</th><th>Effective Until</th><th style={{ textAlign: "center" }}>Actions</th>
+                                    <th>SLA Ref</th><th>SLA Title</th><th>Status</th><th>Effective From</th><th>Effective Until</th><th style={{ textAlign: "center" }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {mappingsLoading ? (
-                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
+                                    <tr><td colSpan={6} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
                                 ) : mappings.length === 0 ? (
-                                    <tr><td colSpan={7} style={{ textAlign: "center", padding: 34, ...muted }}>
+                                    <tr><td colSpan={6} style={{ textAlign: "center", padding: 34, ...muted }}>
                                         <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">📋</div>
                                         <div style={{ marginBottom: 12, fontSize: 13 }}>No SLAs mapped to this activity yet.</div>
                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>+ Map SLA</button>
@@ -1532,7 +1744,6 @@ export default function ActivitySlasPage() {
                                         <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
                                             <td><span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>{m.sla_ref || "—"}</span></td>
                                             <td>{m.sla_title || "—"}</td>
-                                            <td>{m.contract_type ? humanize(m.contract_type) : "—"}</td>
                                             <td>
                                                 {isEditing ? (
                                                     <select style={ctrl} value={editForm.status} onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}>
@@ -1556,7 +1767,7 @@ export default function ActivitySlasPage() {
                                                     <span style={{ display: "inline-flex", gap: 6 }}>
                                                         <button type="button" className="uidai-pm-icon-btn" title="View SLA image" onClick={() => openImagePreview(m)}>👁</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
-                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Evaluate</button>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Test</button>
                                                     </span>
                                                 )}
                                             </td>
@@ -1570,7 +1781,7 @@ export default function ActivitySlasPage() {
             )}
 
             {/* MAPPING — evaluation, two panels side by side */}
-            {view === "mapping" && (
+            {view === "mapping" && !chooserVisible && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 22, alignItems: "start" }}>
                     {/* Single-mapping evaluate */}
                     <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
@@ -1584,7 +1795,7 @@ export default function ActivitySlasPage() {
                         {!singleEval ? (
                             <div style={{ padding: 26, textAlign: "center", ...muted, fontSize: 13 }}>
                                 <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⚡</div>
-                                Pick a mapping above and click <b style={{ color: "#173e77" }}>Evaluate</b> to score a single SLA.
+                                Pick a mapping above and click <b style={{ color: "#173e77" }}>Test</b> to score a single SLA.
                             </div>
                         ) : (
                             <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1619,22 +1830,13 @@ export default function ActivitySlasPage() {
                                             <div className="uidai-pmis-filter-head">
                                                 <div className="uidai-pmis-filter-title">Reporting Period</div>
                                             </div>
-                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
+                                            {/* Start only — the end of the window is the backend's
+                                                to decide, so it is neither asked for nor sent. */}
+                                            <div style={{ maxWidth: 220, marginTop: 12 }}>
                                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                                     <label>{singleEval.schema.period?.label_start || singleEval.schema.label_start || "Period Start"}</label>
                                                     <input type="date" value={singleEval.period_start} readOnly style={{ background: "#f1f6fd" }} />
-                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Fixed start of the reporting period.</div>
-                                                </div>
-                                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                                    <label>{singleEval.schema.period?.label_end || singleEval.schema.label_end || "Period End"}</label>
-                                                    <input
-                                                        type="date"
-                                                        value={singleEval.period_end}
-                                                        min={singleEval.period_start || undefined}
-                                                        max={quarterEndISO(singleEval.period_start)}
-                                                        onChange={(e) => setSingleEval((s) => ({ ...s, period_end: e.target.value }))}
-                                                    />
-                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Pick an end date within one quarter of the start.</div>
+                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Start of the reporting period.</div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1804,10 +2006,27 @@ export default function ActivitySlasPage() {
                         <ActivityCompliancePanel activityId={activityIdInput.trim()} activityLabel={activityLabel} />
                     )}
 
-                    {/* Project-scoped quarterly settlement (aggregate → NPQP →
-                        capped LD → invoice lock). Lives here for now; it is
-                        prop-driven so it can move to a project-level page. */}
-                    {projectId && <SlaSettlementPanel projectId={projectId} />}
+                    {/* Quarterly settlement is PROJECT-scoped, not activity-scoped,
+                        so it moved to its own page in the SLA System section
+                        (/projects/:id/sla-settlement). Left as a pointer for
+                        anyone who knew it by its old spot. */}
+                    {projectId && (
+                        <div className="uidai-pmis-filter-shell" style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 13.5, fontWeight: 800, color: "#173e77" }}>Quarterly LD Settlement</div>
+                                <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>
+                                    Covers the whole project, not this activity — aggregate, NPQP, capped LD and the invoice lock.
+                                </div>
+                            </div>
+                            <Link
+                                to={`/projects/${encodeURIComponent(projectId)}/sla-settlement`}
+                                className="uidai-pmis-btn uidai-pmis-btn-small"
+                                style={{ marginTop: 0, marginLeft: "auto", textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                            >
+                                Open Settlement &amp; LD →
+                            </Link>
+                        </div>
+                    )}
                 </div>
             )}
 

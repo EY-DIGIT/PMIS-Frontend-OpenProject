@@ -126,6 +126,32 @@ function resolveNavTitle(segments) {
         tooltip: "Map SLA masters to an activity, edit mappings, and evaluate SLAs."
       };
     }
+    // /projects/:id/sla-system         → the SLA section's landing page.
+    // Renders its own header block, so suppress the navbar title.
+    if (segments[2] === "sla-system") {
+      return null;
+    }
+    // /projects/:id/severity           → severity levels + LD bands
+    if (segments[2] === "severity") {
+      return {
+        label: "Severity & LD Configuration",
+        tooltip: "Severity levels with their points, and the LD band lookup table."
+      };
+    }
+    // /projects/:id/sla-settlement     → project-level quarterly LD settlement
+    if (segments[2] === "sla-settlement") {
+      return {
+        label: "Settlement & LD",
+        tooltip: "Quarterly aggregate, NPQP, capped LD and the invoice lock."
+      };
+    }
+    // /projects/:id/penalty-report     → milestone delay → LD → net payable
+    if (segments[2] === "penalty-report") {
+      return {
+        label: "Penalty Report",
+        tooltip: "Milestone delay converted to LD% and applied to the milestone's payment."
+      };
+    }
     // /projects/:id/leave-config       → leave & attendance policy.
     // The page renders its own in-page header block, so suppress the
     // navbar title to avoid a duplicate heading.
