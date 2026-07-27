@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import { loadProjectTree } from "../../api/milestoneConfigApi";
+import { uiStore } from "../../store/project/uiStore";
 import ActivityCompliancePanel from "../../components/projects/sla/ActivityCompliancePanel";
 import "../../styles/global.css";
 
@@ -9,6 +10,34 @@ const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
 
 function today() {
     return new Date().toISOString().slice(0, 10);
+}
+
+// "2026-07-28" → "Q3 2026". LD is settled per calendar quarter, so an
+// evaluation is easier to place when the quarter is spelled out next to
+// the date it starts in.
+function quarterLabel(iso) {
+    if (!iso || iso.length < 7) return "";
+    const y = Number(iso.slice(0, 4));
+    const m = Number(iso.slice(5, 7));
+    if (!y || !m) return "";
+    return `Q${Math.floor((m - 1) / 3) + 1} ${y}`;
+}
+
+// Whether a mapping actually bites today. Status alone doesn't say it — an
+// ACTIVE mapping can still be out of its effective window, which is the thing
+// the reader is really working out from the two date columns.
+function forceState(m) {
+    const t = today();
+    if (String(m?.status || "").toUpperCase() === "RETIRED") return { label: "Retired", tone: "muted" };
+    const from = m?.effective_from || "";
+    const until = m?.effective_until || "";
+    if (from && from > t) return { label: `From ${from}`, tone: "muted" };
+    if (until && until < t) return { label: "Expired", tone: "bad" };
+    if (until) {
+        const days = Math.round((new Date(`${until}T00:00:00`) - new Date(`${t}T00:00:00`)) / 86400000);
+        if (Number.isFinite(days) && days <= 30) return { label: `Ends in ${days}d`, tone: "warn" };
+    }
+    return { label: "In force", tone: "ok" };
 }
 
 // Pull the collection array regardless of which envelope shape the API uses.
@@ -170,7 +199,7 @@ function slaImageUrl(s) {
     return img?.file_url || null;
 }
 
-function SlaCard({ sla, selected, onPick }) {
+function SlaCard({ sla, selected, mapped, onPick }) {
     const [hover, setHover] = useState(false);
     const real = slaImageUrl(sla);
     const fallback = demoTableImage(sla);
@@ -212,11 +241,41 @@ function SlaCard({ sla, selected, onPick }) {
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 9px", borderTop: "1px solid var(--uidai-pmis-border)", background: "#fbfdff" }}>
                     <span style={{ fontFamily: "monospace", fontSize: 10.5, color: "var(--uidai-pmis-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sla.sla_ref || "—"}</span>
-                    <StatusBadge status={sla.status} />
+                    {mapped
+                        ? <span style={{ fontSize: 10.5, fontWeight: 600, color: "#1f4e87", whiteSpace: "nowrap" }}>mapped</span>
+                        : <StatusBadge status={sla.status} />}
                 </div>
             </div>
         </div>
     );
+}
+
+// Sortable column header for the mappings table.
+function SortTh({ label, col, sort, onSort }) {
+    const active = sort.key === col;
+    return (
+        <th aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+            <button
+                type="button"
+                onClick={() => onSort(col)}
+                style={{
+                    border: "none", background: "none", font: "inherit", color: "inherit",
+                    cursor: "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4,
+                }}
+            >
+                {label}
+                <span aria-hidden="true" style={{ opacity: active ? 0.75 : 0.25, fontSize: 10 }}>
+                    {active && sort.dir === -1 ? "▼" : "▲"}
+                </span>
+            </button>
+        </th>
+    );
+}
+
+// Whether a mapping bites today — derived from status + the effective window.
+function InForce({ state }) {
+    const colour = { ok: "#1f8a4c", warn: "#c77700", bad: "#c0392b", muted: "var(--uidai-pmis-muted)" }[state.tone];
+    return <span style={{ fontSize: 12, fontWeight: state.tone === "muted" ? 400 : 600, color: colour, whiteSpace: "nowrap" }}>{state.label}</span>;
 }
 
 // Collapsible section for the SLA Details panel. Controlled internally so the
@@ -395,7 +454,7 @@ const BREACH_COLS = [
 
 function BreachTable({ rows }) {
     if (!Array.isArray(rows) || rows.length === 0) {
-        return <div style={{ fontSize: 12.5, color: "#1f8a4c", fontWeight: 600 }}>✓ No breaches recorded for this period.</div>;
+        return <div style={{ fontSize: 12.5, color: "var(--uidai-pmis-muted)" }}>No breaches recorded.</div>;
     }
     const has = (k) => rows.some((r) => r[k] !== null && r[k] !== undefined && r[k] !== "");
     const cols = BREACH_COLS.filter((c) => has(c.key));
@@ -682,24 +741,19 @@ function ActivityChooser({ milestones, loading, error, onReload, onPick, current
 
     return (
         <div className="uidai-pmis-card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 10 }}>
-                <div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77" }}>Choose an Activity</div>
-                    <div style={{ fontSize: 12, ...dim, marginTop: 2 }}>
-                        SLAs are mapped onto activities. Pick one to see its mappings and evaluate them.
-                    </div>
-                </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#173e77" }}>Choose an activity</div>
                 <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={onReload} disabled={loading}>
                     {loading ? "Loading…" : "↻ Reload"}
                 </button>
             </div>
 
-            <div className="uidai-pmis-filter-shell" style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 10 }}>
                 <input
                     type="text"
                     className="uidai-pmis-filter-select"
                     style={{ width: "100%" }}
-                    placeholder="Search activities by code or name…"
+                    placeholder="Search by code or name"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                 />
@@ -712,24 +766,24 @@ function ActivityChooser({ milestones, loading, error, onReload, onPick, current
             )}
 
             {loading && !visible.length ? (
-                <div style={{ padding: 26, textAlign: "center", ...dim, fontSize: 13 }}>Loading the project's activities…</div>
+                <div style={{ padding: 18, ...dim, fontSize: 13 }}>Loading activities…</div>
             ) : !visible.length ? (
-                <div style={{ padding: 26, textAlign: "center", ...dim, fontSize: 13 }}>
-                    <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">🗂️</div>
-                    {q ? "No activity matches that search." : "This project has no saved activities yet — add them in Milestone Configuration first."}
+                <div style={{ padding: 18, ...dim, fontSize: 13 }}>
+                    {q ? "No match." : "No saved activities in this project."}
                 </div>
             ) : (
                 <>
-                    <div style={{ fontSize: 12, ...dim, marginBottom: 8 }}>
-                        {totalShown} activit{totalShown === 1 ? "y" : "ies"} across {visible.length} milestone{visible.length === 1 ? "" : "s"}
+                    <div style={{ fontSize: 12, ...dim, marginBottom: 6 }}>
+                        {totalShown} activit{totalShown === 1 ? "y" : "ies"} in {visible.length} milestone{visible.length === 1 ? "" : "s"}
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {visible.map((g) => {
                             const shut = collapsed.has(g.key);
                             return (
-                                <div key={g.key} style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, overflow: "hidden" }}>
+                                <div key={g.key} style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 6, overflow: "hidden" }}>
                                     <button
                                         type="button"
+                                        aria-expanded={!shut}
                                         onClick={() => setCollapsed((s) => {
                                             const next = new Set(s);
                                             if (next.has(g.key)) next.delete(g.key); else next.add(g.key);
@@ -738,15 +792,13 @@ function ActivityChooser({ milestones, loading, error, onReload, onPick, current
                                         style={{
                                             display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
                                             background: "#f6f9fd", border: "none", cursor: "pointer", font: "inherit",
-                                            padding: "10px 12px", color: "#173e77", fontWeight: 800, fontSize: 13.5,
+                                            padding: "7px 10px", color: "#173e77", fontWeight: 600, fontSize: 13,
                                         }}
                                     >
-                                        <span style={{ ...dim, fontSize: 12 }} aria-hidden="true">{shut ? "▸" : "▾"}</span>
+                                        <span style={{ ...dim, fontSize: 11 }} aria-hidden="true">{shut ? "▸" : "▾"}</span>
                                         <span style={{ fontFamily: "monospace", fontSize: 12, ...dim }}>{g.code}</span>
                                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
-                                        <span style={{ marginLeft: "auto", background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 9px", fontSize: 12, fontWeight: 800 }}>
-                                            {g.rows.length}
-                                        </span>
+                                        <span style={{ marginLeft: "auto", fontSize: 12, ...dim }}>{g.rows.length}</span>
                                     </button>
                                     {!shut && (
                                         <div style={{ display: "flex", flexDirection: "column" }}>
@@ -761,16 +813,16 @@ function ActivityChooser({ milestones, loading, error, onReload, onPick, current
                                                             display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
                                                             background: isCurrent ? "#eef3fb" : "#fff", border: "none",
                                                             borderTop: "1px solid var(--uidai-pmis-border)", cursor: "pointer", font: "inherit",
-                                                            padding: "10px 14px", fontSize: 13, color: "var(--uidai-pmis-text)",
+                                                            padding: "6px 10px", fontSize: 13, color: "var(--uidai-pmis-text)",
                                                         }}
                                                     >
                                                         <span style={{ fontFamily: "monospace", fontSize: 12, ...dim, flex: "0 0 auto" }}>{a.code}</span>
-                                                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600 }}>
-                                                            {a.name || "(untitled activity)"}
+                                                        <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                            {a.name || "—"}
                                                         </span>
-                                                        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#173e77", flex: "0 0 auto" }}>
-                                                            {isCurrent ? "Current" : "Select →"}
-                                                        </span>
+                                                        {isCurrent && (
+                                                            <span style={{ marginLeft: "auto", fontSize: 12, ...dim, flex: "0 0 auto" }}>current</span>
+                                                        )}
                                                     </button>
                                                 );
                                             })}
@@ -847,6 +899,11 @@ export default function ActivitySlasPage() {
     const [tree, setTree] = useState(null);        // milestones[] with nested activities
     const [treeLoading, setTreeLoading] = useState(false);
     const [treeError, setTreeError] = useState("");
+    // ---- Copy-mappings-from-another-activity picker ----
+    const [copyOpen, setCopyOpen] = useState(false);
+    const [copyBusy, setCopyBusy] = useState(false);
+    // ---- Mappings table sort ----
+    const [sort, setSort] = useState({ key: "sla_ref", dir: 1 });
     const [effFrom, setEffFrom] = useState(today());
     const [effUntil, setEffUntil] = useState("");
     const [createLoading, setCreateLoading] = useState(false);
@@ -865,7 +922,6 @@ export default function ActivitySlasPage() {
     const [editingId, setEditingId] = useState("");
     const [editForm, setEditForm] = useState({ status: "ACTIVE", effective_until: "" });
     const [editLoading, setEditLoading] = useState(false);
-    const [editMessage, setEditMessage] = useState("");
 
     // ---- Step 5a: single-mapping evaluate ----
     const [singleEval, setSingleEval] = useState(null); // { mappingId, slaRef, slaTitle, period_start, ld_base_amount, observations, loadingMetrics }
@@ -903,10 +959,36 @@ export default function ActivitySlasPage() {
     // path in here carries an ?activityId and never opens the chooser.
     const chooserVisible = chooserOpen || !activityIdInput.trim();
     useEffect(() => {
-        if (!chooserVisible || !projectId || tree) return;
+        if ((!chooserVisible && !copyOpen) || !projectId || tree) return;
         loadActivityTree();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [chooserVisible, projectId]);
+    }, [chooserVisible, copyOpen, projectId]);
+
+    // SLA refs already on this activity — drives the "mapped" marker in the
+    // picker so the same SLA doesn't get attached twice.
+    const mappedRefs = useMemo(
+        () => new Set(mappings.map((m) => m.sla_ref).filter(Boolean)),
+        [mappings]
+    );
+
+    const sortedMappings = useMemo(() => {
+        const rows = mappings.slice();
+        const { key, dir } = sort;
+        return rows.sort((a, b) => {
+            const av = String(a?.[key] ?? "");
+            const bv = String(b?.[key] ?? "");
+            if (av === bv) return 0;
+            // Blanks last regardless of direction — an empty "until" is
+            // open-ended, not "earliest".
+            if (!av) return 1;
+            if (!bv) return -1;
+            return av.localeCompare(bv, undefined, { numeric: true }) * dir;
+        });
+    }, [mappings, sort]);
+
+    function toggleSort(key) {
+        setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }));
+    }
 
     async function loadActivityTree() {
         if (!projectId) { setTreeError("No project in the URL."); return; }
@@ -937,6 +1019,57 @@ export default function ActivitySlasPage() {
         next.delete("activityMode");
         setSearchParams(next);
         setChooserOpen(false);
+    }
+
+    // ---- Copy every mapping from another activity onto this one ----------------
+    // Mapping 11 SLAs across a project one activity at a time is the single
+    // biggest time sink here, and activities usually repeat the same set.
+    async function copyMappingsFrom(milestone, activity) {
+        const target = activityIdInput.trim();
+        if (!target || !activity?.apiId || activity.apiId === target) { setCopyOpen(false); return; }
+        setCopyBusy(true);
+        try {
+            const res = await authorizedFetch(
+                `${baseUrl}/api/v3/activities/${encodeURIComponent(activity.apiId)}/sla-mappings?active_only=true`,
+                { method: "GET", headers: { Accept: "application/json" } }
+            );
+            const source = extractElements(await readJson(res));
+            const existing = new Set(mappings.map((m) => m.sla_ref).filter(Boolean));
+            // The mapping rows don't carry the master's id, so resolve it off the
+            // SLA library we already loaded. Anything unresolved is reported, not
+            // silently dropped.
+            const byRef = new Map(slaList.map((s) => [s.sla_ref, s.id]));
+            const todo = source.filter((m) => m.sla_ref && !existing.has(m.sla_ref));
+            if (!todo.length) {
+                uiStore.showMessage(source.length ? "Nothing to copy — those SLAs are already mapped." : "That activity has no active mappings.");
+                return;
+            }
+            const skipped = [];
+            let copied = 0;
+            for (const m of todo) {
+                const slaId = byRef.get(m.sla_ref);
+                if (!slaId) { skipped.push(m.sla_ref); continue; }
+                try {
+                    const body = { sla_id: slaId, activity_id: target, effective_from: m.effective_from || today() };
+                    if (m.effective_until) body.effective_until = m.effective_until;
+                    const r = await authorizedFetch(`${baseUrl}/api/v3/sla-activity-mappings`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Accept: "application/json" },
+                        body: JSON.stringify(body),
+                    });
+                    await readJson(r);
+                    copied += 1;
+                } catch { skipped.push(m.sla_ref); }
+            }
+            await loadMappings(target);
+            if (skipped.length) uiStore.showError(`Copied ${copied}. Skipped: ${skipped.join(", ")}.`);
+            else uiStore.showMessage(`Copied ${copied} mapping${copied === 1 ? "" : "s"} from ${activity.code || activity.name}.`);
+        } catch (err) {
+            uiStore.showError(err?.message || "Failed to copy mappings");
+        } finally {
+            setCopyBusy(false);
+            setCopyOpen(false);
+        }
     }
 
     // Shared response/error unwrapper.
@@ -1110,14 +1243,20 @@ export default function ActivitySlasPage() {
     // ---------------------------------------------------------------------------
     function startEdit(m) {
         setEditingId(m.id);
-        setEditMessage("");
         setEditForm({ status: m.status || "ACTIVE", effective_until: m.effective_until || "" });
     }
-    function cancelEdit() { setEditingId(""); setEditMessage(""); }
+    function cancelEdit() { setEditingId(""); }
 
     async function saveEdit(mappingId) {
+        // Retiring is the nearest thing this page has to a delete — the mapping
+        // stops counting towards the activity's LD from here on. Everything else
+        // (dates) is freely reversible, so only this asks.
+        const wasActive = String(mappings.find((m) => m.id === mappingId)?.status || "").toUpperCase() !== "RETIRED";
+        if (wasActive && editForm.status === "RETIRED" &&
+            !window.confirm("Retire this mapping? It will stop being evaluated for this activity.")) {
+            return;
+        }
         setEditLoading(true);
-        setEditMessage("");
         try {
             // overrides intentionally omitted for now — backend support is pending.
             const body = { status: editForm.status, effective_until: editForm.effective_until || null };
@@ -1126,11 +1265,11 @@ export default function ActivitySlasPage() {
                 { method: "PATCH", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) }
             );
             await readJson(res);
-            setEditMessage("Mapping updated successfully.");
+            uiStore.showMessage("Mapping updated.");
             setEditingId("");
             loadMappings();
         } catch (err) {
-            setEditMessage(err?.message || "Failed to update mapping");
+            uiStore.showError(err?.message || "Failed to update mapping");
         } finally {
             setEditLoading(false);
         }
@@ -1342,7 +1481,10 @@ export default function ActivitySlasPage() {
     // ---------------------------------------------------------------------------
     // Local style helpers
     // ---------------------------------------------------------------------------
-    const sectionHead = { display: "flex", alignItems: "center", marginBottom: 16, fontSize: 16, fontWeight: 800, color: "#173e77" };
+    const sectionHead = { display: "flex", alignItems: "center", marginBottom: 10, fontSize: 14, fontWeight: 700, color: "#173e77" };
+    // Sub-heading inside a card — labels a block of fields without wrapping it
+    // in another bordered panel.
+    const subHead = { fontSize: 12, fontWeight: 600, color: "var(--uidai-pmis-muted)", marginBottom: 6 };
     const muted = { color: "var(--uidai-pmis-muted)" };
 
     function Banner({ text }) {
@@ -1448,18 +1590,8 @@ export default function ActivitySlasPage() {
         <div className="uidai-pmis-content">
             {/* Header */}
             <div className="uidai-pmis-title">SLA → Activity Mapping &amp; Evaluation</div>
-            {/* No subtitle on the mapping screen itself — the activity bar and
-                each card carry their own context. */}
-            {(view === "picker" || chooserVisible) && (
-                <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
-                    {view === "picker"
-                        ? "Search the SLA library, view an SLA, then map it to this activity."
-                        : "Pick the activity you want to work on — its mappings and evaluations open below."}
-                </div>
-            )}
 
-            {/* Which activity we're on + a way back to the chooser. Shown once
-                an activity is selected, whichever entry point brought us here. */}
+            {/* Which activity we're on, and the way back to the chooser. */}
             {view === "mapping" && !chooserVisible && (
                 <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <div style={{ minWidth: 0 }}>
@@ -1479,7 +1611,7 @@ export default function ActivitySlasPage() {
                         style={{ marginTop: 0, marginLeft: "auto" }}
                         onClick={() => setChooserOpen(true)}
                     >
-                        ⇄ Change activity
+                        Change activity
                     </button>
                 </div>
             )}
@@ -1496,9 +1628,11 @@ export default function ActivitySlasPage() {
                 />
             )}
 
-            {/* PICKER — browse cards (left) + SLA details side-panel (right) */}
+            {/* PICKER — browse cards (left) + SLA details side-panel (right).
+                Height is clamped, not a bare calc: on short viewports (or when
+                the SLA System tab strip wraps) a raw calc collapses the panes. */}
             {view === "picker" && (
-                <div style={{ display: "flex", gap: 14, alignItems: "stretch", height: "calc(100vh - 200px)", minHeight: 460 }}>
+                <div style={{ display: "flex", gap: 14, alignItems: "stretch", height: "clamp(460px, calc(100vh - 220px), 1100px)" }}>
                     <div style={{ flex: "1 1 auto", minWidth: 320, minHeight: 0, display: "flex" }}>
                         <div className="uidai-pmis-card" style={{ marginBottom: 0, display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", minHeight: 0 }}>
                     {/* Fixed top — header, filters, count (stay put while the cards scroll) */}
@@ -1561,7 +1695,7 @@ export default function ActivitySlasPage() {
                     ) : (
                         <div style={{ display: "grid", gridTemplateColumns: selectedSlaId ? "repeat(auto-fill, minmax(200px, 1fr))" : "repeat(4, minmax(0, 1fr))", gap: 16, alignItems: "start", padding: "4px 2px 8px" }}>
                             {pickerResults.map((s) => (
-                                <SlaCard key={s.id} sla={s} selected={s.id === selectedSlaId} onPick={() => pickSla(s)} />
+                                <SlaCard key={s.id} sla={s} selected={s.id === selectedSlaId} mapped={mappedRefs.has(s.sla_ref)} onPick={() => pickSla(s)} />
                             ))}
                         </div>
                     )}
@@ -1593,8 +1727,15 @@ export default function ActivitySlasPage() {
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => setShowMappingEdit((v) => !v)}>
                                 {showMappingEdit ? "Hide mapping fields" : "✎ Edit mapping"}
                             </button>
-                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={createMapping} disabled={createLoading || detailLoading || !slaDetail}>
-                                {createLoading ? "Mapping…" : "Map this SLA →"}
+                            <button
+                                type="button"
+                                className="uidai-pmis-btn uidai-pmis-btn-small"
+                                style={{ marginTop: 0 }}
+                                onClick={createMapping}
+                                title={mappedRefs.has(slaDetail?.sla_ref) ? "Already mapped to this activity" : undefined}
+                                disabled={createLoading || detailLoading || !slaDetail || mappedRefs.has(slaDetail?.sla_ref)}
+                            >
+                                {createLoading ? "Mapping…" : mappedRefs.has(slaDetail?.sla_ref) ? "Already mapped" : "Map this SLA →"}
                             </button>
                             <button type="button" className="uidai-pmis-filter-toggle" onClick={closeDetail} title="Close panel" style={{ padding: "6px 10px" }}>✕</button>
                         </div>
@@ -1638,7 +1779,6 @@ export default function ActivitySlasPage() {
                                                     {inp.unit ? <span style={{ ...muted, fontWeight: 400 }}> ({inp.unit})</span> : null}
                                                 </label>
                                                 <SchemaInput input={inp} value={mapValues[key]} onChange={(v) => setMapValues((mv) => ({ ...mv, [key]: v }))} />
-                                                {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
                                             </div>
                                         );
                                     })}
@@ -1715,30 +1855,36 @@ export default function ActivitySlasPage() {
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={loadMappings} disabled={mappingsLoading}>
                                 {mappingsLoading ? "Loading…" : "↻ Reload"}
                             </button>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => setCopyOpen(true)} disabled={copyBusy}>
+                                {copyBusy ? "Copying…" : "Copy from activity"}
+                            </button>
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>
                                 + Map SLA
                             </button>
                         </div>
                     </div>
                     {mappingsError && <Banner text={mappingsError} />}
-                    {editMessage && <Banner text={editMessage} />}
                     <div className="uidai-pmis-table-wrap">
-                        <table className="uidai-pmis-table">
+                        <table className="uidai-pmis-table uidai-pmis-table-compact">
                             <thead>
                                 <tr>
-                                    <th>SLA Ref</th><th>SLA Title</th><th>Status</th><th>Effective From</th><th>Effective Until</th><th style={{ textAlign: "center" }}>Actions</th>
+                                    <SortTh label="SLA Ref" col="sla_ref" sort={sort} onSort={toggleSort} />
+                                    <SortTh label="SLA Title" col="sla_title" sort={sort} onSort={toggleSort} />
+                                    <SortTh label="Status" col="status" sort={sort} onSort={toggleSort} />
+                                    <th>In force</th>
+                                    <SortTh label="Effective From" col="effective_from" sort={sort} onSort={toggleSort} />
+                                    <SortTh label="Effective Until" col="effective_until" sort={sort} onSort={toggleSort} />
+                                    <th style={{ textAlign: "center" }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {mappingsLoading ? (
-                                    <tr><td colSpan={6} style={{ textAlign: "center", padding: 28, ...muted }}>Loading mappings…</td></tr>
+                                    <tr><td colSpan={7} style={{ padding: 14, ...muted }}>Loading mappings…</td></tr>
                                 ) : mappings.length === 0 ? (
-                                    <tr><td colSpan={6} style={{ textAlign: "center", padding: 34, ...muted }}>
-                                        <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">📋</div>
-                                        <div style={{ marginBottom: 12, fontSize: 13 }}>No SLAs mapped to this activity yet.</div>
-                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openPicker}>+ Map SLA</button>
+                                    <tr><td colSpan={7} style={{ padding: 14, ...muted, fontSize: 13 }}>
+                                        No SLAs mapped to this activity.
                                     </td></tr>
-                                ) : mappings.map((m) => {
+                                ) : sortedMappings.map((m) => {
                                     const isEditing = editingId === m.id;
                                     return (
                                         <tr key={m.id} style={{ background: isEditing ? "#fff8ec" : undefined }}>
@@ -1751,6 +1897,7 @@ export default function ActivitySlasPage() {
                                                     </select>
                                                 ) : <StatusBadge status={m.status} />}
                                             </td>
+                                            <td><InForce state={forceState(m)} /></td>
                                             <td>{m.effective_from || "—"}</td>
                                             <td>
                                                 {isEditing ? (
@@ -1765,9 +1912,9 @@ export default function ActivitySlasPage() {
                                                     </span>
                                                 ) : (
                                                     <span style={{ display: "inline-flex", gap: 6 }}>
-                                                        <button type="button" className="uidai-pm-icon-btn" title="View SLA image" onClick={() => openImagePreview(m)}>👁</button>
-                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" onClick={() => startEdit(m)}>Edit</button>
-                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openSingleEval(m)}>Test</button>
+                                                        <button type="button" className="uidai-pm-icon-btn" title="View SLA image" aria-label={`View SLA image for ${m.sla_ref || "mapping"}`} onClick={() => openImagePreview(m)}>👁</button>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" aria-label={`Edit mapping ${m.sla_ref || ""}`} onClick={() => startEdit(m)}>Edit</button>
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} aria-label={`Test ${m.sla_ref || "mapping"}`} onClick={() => openSingleEval(m)}>Test</button>
                                                     </span>
                                                 )}
                                             </td>
@@ -1780,34 +1927,36 @@ export default function ActivitySlasPage() {
                 </div>
             )}
 
-            {/* MAPPING — evaluation, two panels side by side */}
-            {view === "mapping" && !chooserVisible && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 22, alignItems: "start" }}>
-                    {/* Single-mapping evaluate */}
-                    <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                            <div>
-                                <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate a Mapping</div>
-                                <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>Score one SLA for a reporting period.</div>
-                            </div>
-                            {singleEval && <button type="button" className="uidai-pmis-filter-toggle" onClick={closeSingleEval}>✕ Close</button>}
+            {/* Test drawer — opened by a row's Test button. It slides over the
+                page instead of sitting below the table, so the click has a
+                visible effect and the mappings stay in view behind it. */}
+            {view === "mapping" && !chooserVisible && singleEval && (
+                <div
+                    onMouseDown={(e) => { if (e.target === e.currentTarget) closeSingleEval(); }}
+                    style={{ position: "fixed", inset: 0, background: "rgba(7,26,52,.35)", zIndex: 1500, display: "flex", justifyContent: "flex-end" }}
+                >
+                    <aside
+                        role="dialog"
+                        aria-label="Test SLA evaluation"
+                        style={{
+                            width: "min(920px, 92vw)", height: "100%", background: "#fff",
+                            boxShadow: "-8px 0 28px rgba(7,26,52,.18)", display: "flex", flexDirection: "column",
+                        }}
+                    >
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid var(--uidai-pmis-border)" }}>
+                            <div style={{ ...sectionHead, marginBottom: 0 }}>Test evaluation</div>
+                            <span style={{ fontSize: 11.5, ...muted }}>ad-hoc run · result shows here only</span>
+                            <button type="button" className="uidai-pmis-filter-toggle" style={{ marginLeft: "auto" }} onClick={closeSingleEval}>✕ Close</button>
                         </div>
-                        {!singleEval ? (
-                            <div style={{ padding: 26, textAlign: "center", ...muted, fontSize: 13 }}>
-                                <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⚡</div>
-                                Pick a mapping above and click <b style={{ color: "#173e77" }}>Test</b> to score a single SLA.
-                            </div>
-                        ) : (
+                        <div style={{ flex: "1 1 auto", overflowY: "auto", padding: 16 }}>
                             <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
                                 <div style={{ flex: singleEvalResult !== null ? "1 1 380px" : "1 1 100%", minWidth: 0 }}>
                                 {/* Which mapping we're evaluating */}
-                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                                    <div>
-                                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Mapping</div>
-                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>
-                                            {singleEval.sla_title || "Mapping"}
-                                            <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.sla_ref}</span>
-                                        </div>
+                                <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Mapping</div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77" }}>
+                                        {singleEval.sla_title || "Mapping"}
+                                        <span style={{ ...muted, fontWeight: 400, fontFamily: "monospace", fontSize: 11, marginLeft: 8 }}>{singleEval.sla_ref}</span>
                                     </div>
                                 </div>
 
@@ -1825,18 +1974,21 @@ export default function ActivitySlasPage() {
                                             </div>
                                         )}
 
-                                        {/* Reporting period (labels + defaults from the schema) */}
+                                        {/* Reporting period — start only; the end of the window is
+                                            the backend's to decide, so it is neither asked nor sent. */}
                                         <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
                                             <div className="uidai-pmis-filter-head">
                                                 <div className="uidai-pmis-filter-title">Reporting Period</div>
                                             </div>
-                                            {/* Start only — the end of the window is the backend's
-                                                to decide, so it is neither asked for nor sent. */}
-                                            <div style={{ maxWidth: 220, marginTop: 12 }}>
+                                            <div style={{ maxWidth: 260, marginTop: 12 }}>
                                                 <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                                    <label>{singleEval.schema.period?.label_start || singleEval.schema.label_start || "Period Start"}</label>
+                                                    <label>
+                                                        {singleEval.schema.period?.label_start || singleEval.schema.label_start || "Period Start"}
+                                                        {quarterLabel(singleEval.period_start) && (
+                                                            <span style={{ ...muted, fontWeight: 400 }}> · {quarterLabel(singleEval.period_start)}</span>
+                                                        )}
+                                                    </label>
                                                     <input type="date" value={singleEval.period_start} readOnly style={{ background: "#f1f6fd" }} />
-                                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Start of the reporting period.</div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1860,7 +2012,6 @@ export default function ActivitySlasPage() {
                                                                 value={singleEval.values[inp.name]}
                                                                 onChange={(v) => setSingleEval((s) => ({ ...s, values: { ...s.values, [inp.name]: v } }))}
                                                             />
-                                                            {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1871,7 +2022,7 @@ export default function ActivitySlasPage() {
                                         {Array.isArray(singleEval.schema.bands) && singleEval.schema.bands.length > 0 && (
                                             <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14 }}>
                                                 <div className="uidai-pmis-filter-head">
-                                                    <div className="uidai-pmis-filter-title">Scoring Bands <span style={{ ...muted, fontWeight: 400, fontSize: 11, textTransform: "none", letterSpacing: 0 }}>(reference)</span></div>
+                                                    <div className="uidai-pmis-filter-title">Scoring Bands</div>
                                                 </div>
                                                 <div style={{ marginTop: 12 }}>
                                                     <EvalBandsReference bands={singleEval.schema.bands} />
@@ -1880,8 +2031,8 @@ export default function ActivitySlasPage() {
                                         )}
 
                                         <div>
-                                            <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
-                                                {singleEvalLoading ? "Evaluating…" : "⚡ Run Evaluation"}
+                                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={submitSingleEval} disabled={singleEvalLoading}>
+                                                {singleEvalLoading ? "Testing…" : "Test Evaluation"}
                                             </button>
                                         </div>
                                         {singleEvalError && <Banner text={singleEvalError} />}
@@ -1891,22 +2042,52 @@ export default function ActivitySlasPage() {
 
                                 {singleEvalResult !== null && (
                                     <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-                                        <div className="uidai-pmis-card" style={{ marginTop: 0, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                            <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
-                                                <span aria-hidden="true">📊</span> Evaluation Result
-                                            </div>
+                                        <div style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 6, padding: 12 }}>
+                                            <div style={subHead}>Result</div>
                                             <EvaluationResult data={singleEvalResult} />
                                         </div>
                                     </div>
                                 )}
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    </aside>
+                </div>
+            )}
 
+            {/* Copy mappings from another activity — same chooser as the main
+                one, in a modal so the current mappings stay behind it. */}
+            {copyOpen && (
+                <div
+                    onMouseDown={(e) => { if (e.target === e.currentTarget) setCopyOpen(false); }}
+                    style={{ position: "fixed", inset: 0, background: "rgba(7,26,52,.35)", zIndex: 1500, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 16px" }}
+                >
+                    <div role="dialog" aria-label="Copy mappings from another activity" style={{ width: "min(720px, 100%)", maxHeight: "88vh", overflowY: "auto", background: "#fff", borderRadius: 8, padding: 16 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                            <div style={{ ...sectionHead, marginBottom: 0 }}>Copy mappings from</div>
+                            <button type="button" className="uidai-pmis-filter-toggle" style={{ marginLeft: "auto" }} onClick={() => setCopyOpen(false)}>✕ Close</button>
+                        </div>
+                        <ActivityChooser
+                            milestones={tree}
+                            loading={treeLoading || copyBusy}
+                            error={treeError}
+                            onReload={loadActivityTree}
+                            onPick={copyMappingsFrom}
+                            current={activityIdInput.trim()}
+                        />
+                    </div>
+                </div>
+            )}
+
+            {/* MAPPING — whole-activity evaluation, compliance record, settlement */}
+            {view === "mapping" && !chooserVisible && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "start" }}>
                     {/* Whole-activity evaluate */}
                     <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                            <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate Whole Activity</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                <div style={{ ...sectionHead, marginBottom: 0 }}>Evaluate Whole Activity</div>
+                                <span style={{ fontSize: 11.5, ...muted }}>ad-hoc run · result shows here only</span>
+                            </div>
                             {!actEval ? (
                                 <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={openActivityEval} disabled={actEvalBuilding}>
                                     {actEvalBuilding ? "Preparing…" : "Configure & Evaluate"}
@@ -1915,14 +2096,10 @@ export default function ActivitySlasPage() {
                                 <button type="button" className="uidai-pmis-filter-toggle" onClick={closeActivityEval}>✕ Close</button>
                             )}
                         </div>
-                        <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                            Evaluates every active SLA mapping on activity{" "}
-                            <code style={{ background: "#f1f6fd", padding: "2px 8px", borderRadius: 6, color: "#173e77", fontWeight: 700 }}>{activityLabel}</code>.
-                        </div>
                         {actEvalError && <Banner text={actEvalError} />}
 
                         {actEval && (
-                            <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginTop: 14 }}>
+                            <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>
                                 <div style={{ flex: actEvalResult !== null ? "1 1 380px" : "1 1 100%", minWidth: 0 }}>
                                 <div className="uidai-pmis-filter-shell">
                                     <div className="uidai-pmis-filter-head">
@@ -1930,7 +2107,12 @@ export default function ActivitySlasPage() {
                                     </div>
                                     <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, maxWidth: 440, marginTop: 12 }}>
                                         <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                            <label>Period Start</label>
+                                            <label>
+                                                Period Start
+                                                {quarterLabel(actEval.period_start) && (
+                                                    <span style={{ ...muted, fontWeight: 400 }}> · {quarterLabel(actEval.period_start)}</span>
+                                                )}
+                                            </label>
                                             <input type="date" value={actEval.period_start} onChange={(e) => setActEval((a) => ({ ...a, period_start: e.target.value }))} />
                                         </div>
                                         <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
@@ -1958,7 +2140,7 @@ export default function ActivitySlasPage() {
                                             ) : g.inputs.length === 0 ? (
                                                 <div style={{ ...muted, fontSize: 12.5, fontStyle: "italic" }}>No input needed for this SLA.</div>
                                             ) : (
-                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+                                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
                                                     {g.inputs.map((inp) => (
                                                         <div key={inp.name} className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                                             <label>
@@ -1970,7 +2152,6 @@ export default function ActivitySlasPage() {
                                                                 value={g.values[inp.name]}
                                                                 onChange={(v) => setActEval((a) => ({ ...a, groups: a.groups.map((x, i) => i === gi ? { ...x, values: { ...x.values, [inp.name]: v } } : x) }))}
                                                             />
-                                                            {inp.help && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{inp.help}</div>}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -1980,19 +2161,16 @@ export default function ActivitySlasPage() {
                                 ))}
 
                                 <div style={{ marginTop: 14 }}>
-                                    <button type="button" className="uidai-pmis-btn" style={{ marginTop: 0 }} onClick={submitActivityEval} disabled={actEvalLoading}>
-                                        {actEvalLoading ? "Evaluating…" : "⚡ Evaluate All Active SLAs"}
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={submitActivityEval} disabled={actEvalLoading}>
+                                        {actEvalLoading ? "Evaluating…" : "Evaluate All Active SLAs"}
                                     </button>
                                 </div>
                                 </div>{/* /form column */}
 
                                 {actEvalResult !== null && (
                                     <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-                                        <div className="uidai-pmis-card" style={{ marginTop: 0, marginBottom: 0, boxShadow: "var(--uidai-pmis-shadow-soft)" }}>
-                                            <div style={{ fontSize: 14, fontWeight: 800, color: "#173e77", display: "flex", alignItems: "center", gap: 8 }}>
-                                                <span aria-hidden="true">📊</span> Activity Evaluation Result
-                                                <span style={{ ...muted, fontWeight: 400, fontSize: 12 }}>· one section per SLA</span>
-                                            </div>
+                                        <div style={{ border: "1px solid var(--uidai-pmis-border)", borderRadius: 6, padding: 12 }}>
+                                            <div style={subHead}>Result</div>
                                             <EvaluationResult data={actEvalResult} />
                                         </div>
                                     </div>
@@ -2012,12 +2190,7 @@ export default function ActivitySlasPage() {
                         anyone who knew it by its old spot. */}
                     {projectId && (
                         <div className="uidai-pmis-filter-shell" style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                            <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: 13.5, fontWeight: 800, color: "#173e77" }}>Quarterly LD Settlement</div>
-                                <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>
-                                    Covers the whole project, not this activity — aggregate, NPQP, capped LD and the invoice lock.
-                                </div>
-                            </div>
+                            <div style={{ fontSize: 13.5, fontWeight: 800, color: "#173e77" }}>Quarterly LD Settlement</div>
                             <Link
                                 to={`/projects/${encodeURIComponent(projectId)}/sla-settlement`}
                                 className="uidai-pmis-btn uidai-pmis-btn-small"
