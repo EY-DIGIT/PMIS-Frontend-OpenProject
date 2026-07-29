@@ -332,6 +332,55 @@ function useRelaxationAttachment({ resourceId, projectId, year, quarter, refresh
   return file;
 }
 
+/* ── which unpaid-leave dates can still be relaxed ────────────────────
+   GET /api/attendance/quarterly-relaxation/eligible-dates
+       ?resourceId=&projectId=&year=&quarter=
+   → { unpaidLeaveDates, approvedRelaxationDates, eligibleDates, … }
+
+   `eligibleDates` is the server's own unpaidLeaveDates minus whatever's
+   already been granted this quarter — it's the authoritative list, not a
+   figure to re-derive client-side, so the dropdown is built from it as-is. */
+function useEligibleRelaxationDates({ resourceId, projectId, year, quarter }) {
+  const [dates, setDates] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const y = parseYear(year);
+    const q = parseQuarter(quarter);
+    if (!resourceId || !projectId || y === null || q === null) {
+      setDates([]);
+      return undefined;
+    }
+    let active = true;
+    setLoading(true);
+    (async () => {
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({
+          resourceId: String(resourceId), projectId: String(projectId),
+          year: String(y), quarter: String(q),
+        });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/quarterly-relaxation/eligible-dates?${qs}`,
+          { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+        );
+        if (!res.ok) { if (active) setDates([]); return; }
+        const json = await res.json().catch(() => ({}));
+        const data = json?.data ?? json;
+        const list = Array.isArray(data?.eligibleDates) ? data.eligibleDates : [];
+        if (active) setDates(list);
+      } catch {
+        if (active) setDates([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [resourceId, projectId, year, quarter]);
+
+  return { dates, loading };
+}
+
 export default function LeaveDetailPage() {
   const { projectId, attendanceId } = useParams();
   const [params] = useSearchParams();
@@ -701,7 +750,6 @@ export default function LeaveDetailPage() {
           projectId={d.projectId || projectId}
           year={d.year || year}
           quarter={d.quarter || quarter}
-          maxDays={relaxCap > 0 ? relaxLeft : null}
           hasDocument={!!relaxDoc}
           onSuccess={() => setRefreshKey((k) => k + 1)}
           onClose={() => setRelaxOpen(false)}
@@ -1303,30 +1351,16 @@ function CostReportSection({ loading, error, report, totals }) {
    shared with the Attendance page; only the rules specific to a
    relaxation grant are defined here. */
 
-/* No quarter holds more days than this, so a larger relaxation is a typo
-   (or a stray keypress) rather than a real grant. */
-const MAX_RELAX_DAYS = 92;
 const MAX_REMARKS = 500;
 
-/* Returns "" when valid, otherwise the message to show under the field.
-   Half days are the unit here, so 1.3 is rejected as firmly as -1: the
-   backend counts leave in 0.5 steps and a stray 1.3 would be silently
-   rounded somewhere downstream. */
-function validateRelaxationDays(raw, maxDays) {
-  const text = String(raw ?? "").trim();
-  if (!text) return "Enter the number of relaxation days.";
-  if (!/^\d+(\.\d+)?$/.test(text)) return "Enter a number, for example 1.5.";
-  const n = Number(text);
-  if (!Number.isFinite(n)) return "Enter a number, for example 1.5.";
-  if (n <= 0) return "Relaxation days must be greater than 0.";
-  if (Math.round(n * 2) !== n * 2) {
-    return "Relaxation is counted in half days — use 0.5, 1, 1.5 and so on.";
-  }
-  if (maxDays != null && n > maxDays) {
-    return `Only ${dayCount(maxDays)} relaxation ${maxDays === 1 ? "day is" : "days are"} left this quarter.`;
-  }
-  if (n > MAX_RELAX_DAYS) return "That's more days than a quarter contains.";
-  return "";
+/* "2026-03-30" → "30 Mar 2026", for the eligible-dates dropdown. Falls back
+   to the raw value on anything dateKey can't parse, so an odd server string
+   still shows rather than vanishing. */
+function formatLeaveDate(raw) {
+  const key = dateKey(raw);
+  if (!key) return String(raw ?? "");
+  const [y, m, d] = key.split("-").map(Number);
+  return `${d} ${MONTH_NAMES[m].slice(0, 3)} ${y}`;
 }
 
 /* The relaxation endpoint takes every field in the query string and the
@@ -1497,13 +1531,13 @@ function RelaxationDocCard({ file }) {
   );
 }
 
-function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDocument, onSuccess, onClose }) {
+function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, onSuccess, onClose }) {
   const [form, setForm] = useState({
     resourceId: resourceId || "",
     projectId: projectId || "",
     year: year || "",
     quarter: Number(quarter) || 1,
-    relaxationDays: "",
+    relaxationDate: "",
     remarks: "",
   });
   const [saving, setSaving] = useState(false);
@@ -1516,6 +1550,27 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
   // live as the user edits so a corrected field clears the moment it's valid.
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
+
+  /* The dropdown's own source of truth — refetched whenever the form points
+     at a different resource/project/period, since editing Year or Quarter
+     here is allowed (see periodChanged below) and each period has its own
+     eligible dates. */
+  const { dates: eligibleDates, loading: datesLoading } = useEligibleRelaxationDates({
+    resourceId: form.resourceId,
+    projectId: form.projectId,
+    year: form.year,
+    quarter: form.quarter,
+  });
+
+  // Drop a stale pick if it fell out of the eligible list (e.g. Year/Quarter
+  // just changed, or the date was granted elsewhere in the meantime).
+  useEffect(() => {
+    setForm((f) =>
+      f.relaxationDate && !eligibleDates.includes(f.relaxationDate)
+        ? { ...f, relaxationDate: "" }
+        : f
+    );
+  }, [eligibleDates]);
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && !saving && onClose();
@@ -1537,8 +1592,11 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
       errs.year = `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
     }
     if (parseQuarter(f.quarter) === null) errs.quarter = "Choose a quarter from 1 to 4.";
-    const daysError = validateRelaxationDays(f.relaxationDays, maxDays);
-    if (daysError) errs.relaxationDays = daysError;
+    if (!String(f.relaxationDate || "").trim()) {
+      errs.relaxationDate = eligibleDates.length
+        ? "Choose the unpaid leave date to relax."
+        : "No unpaid leave dates are eligible for relaxation this quarter.";
+    }
     if (String(f.remarks || "").length > MAX_REMARKS) {
       errs.remarks = `Remarks are limited to ${MAX_REMARKS} characters.`;
     }
@@ -1595,7 +1653,6 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
       return;
     }
 
-    const days = Number(String(form.relaxationDays).trim());
     try {
       setSaving(true);
       const token = getToken();
@@ -1604,7 +1661,7 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
         projectId: String(form.projectId).trim(),
         year: String(parseYear(form.year)),
         quarter: String(parseQuarter(form.quarter)),
-        relaxationDays: String(days),
+        relaxationDates: form.relaxationDate,
       });
       if (form.remarks.trim()) qs.set("remarks", form.remarks.trim().slice(0, MAX_REMARKS));
 
@@ -1706,27 +1763,30 @@ function RelaxationModal({ resourceId, projectId, year, quarter, maxDays, hasDoc
               </label>
               <label className="ld-field">
                 <span className="ld-field-lbl">
-                  Relaxation Days{maxDays != null ? ` (${dayCount(maxDays)} left)` : ""}
-                  <Hint text="Extra days waived on top of the paid allowance, up to the quarter's limit. Each day granted removes one unpaid day." />
+                  Unpaid Leave Date
+                  <Hint text="The unpaid leave day being waived. Only dates still eligible for relaxation this quarter are listed." />
                 </span>
-                {/* Half days are the unit — 0.5, 1, 1.5 — so the field accepts
-                    digits and a single dot and the validator enforces the step.
-                    type="number" would blank the value on "1..2" and hide the
-                    mistake instead of naming it. */}
-                <input
-                  id="relax-relaxationDays"
-                  type="text"
-                  inputMode="decimal"
-                  className={`ld-input${fieldErrors.relaxationDays ? " is-bad" : ""}`}
-                  value={form.relaxationDays}
-                  aria-invalid={!!fieldErrors.relaxationDays}
-                  onChange={(e) =>
-                    set({ relaxationDays: e.target.value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1") })
-                  }
-                  placeholder="e.g. 1.5"
-                />
-                {fieldErrors.relaxationDays && (
-                  <span className="ld-field-err">{fieldErrors.relaxationDays}</span>
+                <select
+                  id="relax-relaxationDate"
+                  className={`ld-input${fieldErrors.relaxationDate ? " is-bad" : ""}`}
+                  value={form.relaxationDate}
+                  disabled={datesLoading || eligibleDates.length === 0}
+                  aria-invalid={!!fieldErrors.relaxationDate}
+                  onChange={(e) => set({ relaxationDate: e.target.value })}
+                >
+                  <option value="">
+                    {datesLoading
+                      ? "Loading eligible dates…"
+                      : eligibleDates.length === 0
+                        ? "No eligible dates this quarter"
+                        : "Select a date…"}
+                  </option>
+                  {eligibleDates.map((dt) => (
+                    <option key={dt} value={dt}>{formatLeaveDate(dt)}</option>
+                  ))}
+                </select>
+                {fieldErrors.relaxationDate && (
+                  <span className="ld-field-err">{fieldErrors.relaxationDate}</span>
                 )}
               </label>
               <label className="ld-field ld-field--full">

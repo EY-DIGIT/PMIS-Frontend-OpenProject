@@ -107,7 +107,6 @@ function buildMetrics(payload, employees) {
       n: num(t.resourceCount) || employees.length,
       avg: num(t.avgAttendancePercentage),
       present: num(t.presentDays),
-      absent: num(t.absentDays),
       paidLeave: t.paidLeaveDays == null ? null : num(t.paidLeaveDays),
       unpaidLeave: t.unpaidLeaveDays == null ? null : num(t.unpaidLeaveDays),
     };
@@ -117,7 +116,6 @@ function buildMetrics(payload, employees) {
     n,
     avg: employees.reduce((s, e) => s + num(e.attendancePercentage), 0) / n,
     present: employees.reduce((s, e) => s + num(e.presentDays), 0),
-    absent: employees.reduce((s, e) => s + num(e.absentDays), 0),
     paidLeave: null,
     unpaidLeave: null,
   };
@@ -879,11 +877,7 @@ function AttendanceTable({
                   <th className="att-th att-num">Unpaid Leave</th>
                 </>
               )}
-              {/* The total, alongside its two parts. This column used to be
-                  headed "Taken Leave" while printing absent days — the absent
-                  figure now has its own column below. */}
               <th className="att-th att-num">Leave Taken</th>
-              <th className="att-th att-num">Taken Leave</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
@@ -929,9 +923,6 @@ function AttendanceTable({
                 <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
                   {leaveTakenOf(emp)}
                 </td>
-                <td className={`att-td att-num${num(emp.absentDays) > 0 ? " att-danger" : " att-dim"}`}>
-                  {num(emp.absentDays)}
-                </td>
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 */}
@@ -955,13 +946,13 @@ function AttendanceTable({
           {showCost && (
             <tfoot>
               <tr className="att-row att-foot-row">
-                {/* Everything up to the Cost column is one spanned label. Eight
+                {/* Everything up to the Cost column is one spanned label. Seven
                     fixed columns, plus Milestone when the rows differ and the
                     paid/unpaid pair when the report splits leave — so the
                     total always lands under Cost. */}
                 <td
                   className="att-td att-strong"
-                  colSpan={8 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 2 : 0)}
+                  colSpan={7 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 2 : 0)}
                 >
                   Total for {period}
                 </td>
@@ -1052,12 +1043,6 @@ function MetricsRow({ metrics, costTotal }) {
           tone={metrics.unpaidLeave > 0 ? C.amber : undefined}
         />
       )}
-      <StatCard
-        label="Absent"
-        value={metrics.absent}
-        sub="days"
-        tone={metrics.absent > 0 ? C.red : undefined}
-      />
     </div>
   );
 }
