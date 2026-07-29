@@ -13,9 +13,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
   FiX, FiUser, FiBriefcase, FiHash, FiFileText, FiCalendar,
-  FiPlay, FiFlag, FiLayers, FiDollarSign, FiInfo, FiUmbrella,
+  FiPlay, FiFlag, FiLayers, FiInfo, FiUmbrella,
   FiShield, FiCreditCard, FiPieChart, FiClock, FiUploadCloud, FiDownload,
 } from "react-icons/fi";
+/* Feather has no rupee glyph, so the cost card's icon comes from Lucide —
+   Feather's successor, same grid and stroke width, so it doesn't read as a
+   different icon set next to the Fi icons above. */
+import { LuIndianRupee } from "react-icons/lu";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { getToken } from "../../api/auth";
@@ -54,10 +58,12 @@ const TONES = {
 };
 
 // Quarter context — dates and the quarter number aren't counts, so they sit
-// with the employee details rather than in the metric grid.
+// with the employee details rather than in the metric grid. Labelled "From"
+// and "To" rather than "Quarter Start/End": the quarter is already named in
+// the page subtitle, so what these add is the span itself.
 const CONTEXT_CARDS = [
-  { key: "quarterStart", label: "Quarter Start", tone: "purple", icon: <FiPlay /> },
-  { key: "quarterEnd", label: "Quarter End", tone: "orange", icon: <FiFlag /> },
+  { key: "quarterStart", label: "From Date", tone: "purple", icon: <FiPlay /> },
+  { key: "quarterEnd", label: "To Date", tone: "orange", icon: <FiFlag /> },
 ];
 
 /* Every label on this page is the term the RFP uses (§5.24 Leave Policy,
@@ -644,6 +650,11 @@ export default function LeaveDetailPage() {
             <div className="uidai-pmis-card ld-card">
               <div className="ld-info">
                 <InfoItem tone="blue" icon={<FiUser />} label="Employee Name" value={show(d.employeeName)} />
+                {/* Only when the payload carries it — this endpoint isn't the
+                    one the attendance report comes from, so it may not. */}
+                {d.designation && (
+                  <InfoItem tone="purple" icon={<FiLayers />} label="Designation" value={show(d.designation)} />
+                )}
                 <InfoItem tone="purple" icon={<FiHash />} label="Attendance ID" value={show(d.attendanceId || attendanceId)} />
                 <InfoItem tone="blue" icon={<FiBriefcase />} label="Project Name" value={show(d.projectName || project?.projectName)} />
                 <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={show(d.joiningDate)} />
@@ -908,7 +919,8 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
             : unpaid ? " is-unpaid"
             : sandwich ? " is-sandwich"
             : weekend ? " is-weekend" : "";
-          const kind = paid ? "Paid Leave"
+          // "Taken Leave" rather than "Paid Leave", matching the legend below.
+          const kind = paid ? "Taken Leave"
             : unpaid ? "Unpaid Leave"
             : sandwich ? "Sandwich Leave" : "";
           const title = kind
@@ -956,7 +968,7 @@ function QuarterCalendar({ year, quarter, paidDates, unpaidDates, halfDayDates =
         ))}
       </div>
       <div className="ld-cal-legend">
-        <span><i className="ld-cal-key is-paid" /> Paid Leave</span>
+        <span><i className="ld-cal-key is-paid" /> Taken Leave</span>
         <span><i className="ld-cal-key is-unpaid" /> Unpaid Leave</span>
         {/* Keys for categories the quarter doesn't contain are omitted —
             a legend entry with nothing to point at is just noise. */}
@@ -1168,11 +1180,13 @@ function CostReportSection({ loading, error, report, totals }) {
       <div className="ld-grid" style={{ marginBottom: 18 }}>
         <StatCard tone="blue" icon={<FiCalendar />} label="Period" value={show(report.period)}
           hint="The quarter this cost report covers." />
-        <StatCard tone="green" icon={<FiDollarSign />} label="Total Cost" value={money(report.totalCost)}
+        <StatCard tone="green" icon={<LuIndianRupee />} label="Total Cost" value={money(report.totalCost)}
           hint="Billable cost for the quarter — the sum of each month's cost after deductions." />
         <StatCard tone="red" icon={<FiFileText />} label="Total Deducted" value={money(totalDeducted)}
           hint="Amount withheld across the quarter for absent and unpaid days." />
-        <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
+        {/* <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
+          hint="How many months of the quarter are included in the breakdown below." /> */}
+          <StatCard tone="purple" icon={<FiLayers />} label="Planned Period Cost" value={show(report.plannedPeriodCost)}
           hint="How many months of the quarter are included in the breakdown below." />
       </div>
 
@@ -1266,7 +1280,7 @@ function CostReportSection({ loading, error, report, totals }) {
         </div>
       )}
 
-      {extraEntries.length > 0 && (
+      {/* {extraEntries.length > 0 && (
         <div className="ld-grid">
           {extraEntries
             .filter(([, v]) => v === null || typeof v !== "object")
@@ -1274,7 +1288,7 @@ function CostReportSection({ loading, error, report, totals }) {
               <StatCard key={key} tone="amber" icon={<FiFileText />} label={formatLabel(key)} value={show(value)} />
             ))}
         </div>
-      )}
+      )} */}
     </>
   );
 }

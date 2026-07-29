@@ -234,6 +234,26 @@ function normalizeHolidays(raw) {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/* Tooltip for the table's Holiday column: the count is in the cell, this says
+   which days it counted. Only `named` entries — the unnamed ones are weekday
+   artifacts of the API's own list, and the Holidays modal ignores them too.
+   Returns undefined when there's nothing to say, so the cell gets no title
+   rather than an empty one. */
+function buildHolidayTitle(holidays, range) {
+  if (!holidays?.length || !range) return undefined;
+  const inRange = holidays.filter(
+    (h) => h.named && h.date >= range.start && h.date <= range.end
+  );
+  if (!inRange.length) return undefined;
+  const lines = inRange.map(
+    (h) => `${dayNum(h.date)} ${MONTH_NAMES[Number(h.date.slice(5, 7))]} (${weekdayShort(h.date)}) — ${h.name}`
+  );
+  /* Deliberately "Holidays in <period>" and not "these are your N holidays":
+     a holiday landing on a week-off is in this list but not in the cell's
+     count, and the wording mustn't promise the two always match. */
+  return [`Holidays in ${range.label}:`, ...lines].join("\n");
+}
+
 function buildMonthGrid(year, month) {
   const startDay = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -463,9 +483,11 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, year, quarter, paramError]);
 
-  // Holidays + calendar — lazy fetch when modal opens (or year changes while open).
+  /* Holidays + calendar. Fetched as soon as the year is known rather than on
+     the modal opening: the attendance tables tooltip their Holiday counts with
+     these dates, so they're needed whether or not anyone clicks Holidays —
+     and the modal now opens with its data already in hand. */
   useEffect(() => {
-    if (!holidayOpen) return;
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -475,19 +497,23 @@ export default function ProjectAttendancePage() {
         const token = getToken();
         const safeYear = parseYear(year);
         if (safeYear === null) throw new Error(`"${year}" isn't a valid year.`);
-        const [hRes, cRes] = await Promise.all([
-          fetch(`${API_BASE}/api/holidays/${safeYear}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
-          fetch(`${API_BASE}/api/calendar/${safeYear}?month=all`, { signal: controller.signal , headers: token ? { Authorization: `Bearer ${token}` } : {}}),
-        ]);
+        const opts = {
+          signal: controller.signal,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        };
         const FALLBACK = "Couldn't load the holiday calendar.";
+        /* The calendar is supporting detail, so it's reduced to its payload or
+           null here, inside the Promise.all. Reading it afterwards meant a
+           calendar *network* failure rejected the whole batch and took the
+           holiday list down with it — the opposite of the intent. */
+        const [hRes, cData] = await Promise.all([
+          fetch(`${API_BASE}/api/holidays/${safeYear}?month=all`, opts),
+          fetch(`${API_BASE}/api/calendar/${safeYear}?month=all`, opts)
+            .then((r) => (r.ok ? readJsonBody(r, FALLBACK) : null))
+            .catch(() => null),
+        ]);
         if (!hRes.ok) throw new Error(await readErrorMessage(hRes, FALLBACK));
         const hData = await readJsonBody(hRes, FALLBACK);
-        // The calendar is supporting detail — a failure there shouldn't take
-        // the holiday list down with it, so it's read defensively.
-        let cData = null;
-        if (cRes.ok) {
-          try { cData = await readJsonBody(cRes, FALLBACK); } catch { cData = null; }
-        }
         if (active) {
           // normalizeHolidays iterates its argument — an object or null body
           // would throw, so anything that isn't a list becomes an empty one.
@@ -502,7 +528,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [holidayOpen, year]);
+  }, [year]);
 
   /* Range for the header's template button, derived from Year + Month. */
   const templateRange = useMemo(() => {
@@ -548,6 +574,30 @@ export default function ProjectAttendancePage() {
 
   // At-a-glance metrics for the selected month.
   const metrics = useMemo(() => buildMetrics(summary, employees), [summary, employees]);
+
+  /* Which holidays each table's Holiday column is counting. The monthly view
+     reuses the template's range (the selected month, or the whole year when
+     "all" is picked); the quarterly one spans its three months. */
+  const quarterRange = useMemo(() => {
+    const y = parseYear(year);
+    const q = parseQuarter(quarter);
+    if (y === null || q === null) return null;
+    const firstMonth = (q - 1) * 3 + 1;
+    return {
+      start: `${y}-${pad2(firstMonth)}-01`,
+      end: lastDayOfMonth(y, firstMonth + 2),
+      label: `Q${q} ${y}`,
+    };
+  }, [year, quarter]);
+
+  const monthlyHolidayTitle = useMemo(
+    () => buildHolidayTitle(holidays, templateRange),
+    [holidays, templateRange]
+  );
+  const quarterlyHolidayTitle = useMemo(
+    () => buildHolidayTitle(holidays, quarterRange),
+    [holidays, quarterRange]
+  );
 
   const quarterlyRows = useMemo(() => reportRows(quarterly), [quarterly]);
   const quarterlyMetrics = useMemo(
@@ -679,6 +729,7 @@ export default function ProjectAttendancePage() {
               period={period}
               employees={employees}
               milestoneName={milestoneName}
+              holidayTitle={monthlyHolidayTitle}
               onRowClick={(emp) => goLeaveDetail(emp, Math.ceil(Number(selectedMonth) / 3))}
             />
           </>
@@ -726,6 +777,7 @@ export default function ProjectAttendancePage() {
             quarter={quarter}
             year={year}
             milestoneName={milestoneName}
+            holidayTitle={quarterlyHolidayTitle}
             costById={quarterlyCostById}
             costTotal={quarterlyCostTotal}
             costError={quarterlyCostError}
@@ -759,7 +811,9 @@ export default function ProjectAttendancePage() {
 /* =====================================================================
    Shared attendance table — used by both monthly and quarterly views.
    ===================================================================== */
-function AttendanceTable({ period, employees, onRowClick, milestoneName, costById, costTotal }) {
+function AttendanceTable({
+  period, employees, onRowClick, milestoneName, costById, costTotal, holidayTitle,
+}) {
   const clickable = typeof onRowClick === "function";
   /* Cost only exists for the quarterly view, so the column appears only when
      a cost payload was actually joined in — the monthly table is unchanged. */
@@ -829,11 +883,13 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                   headed "Taken Leave" while printing absent days — the absent
                   figure now has its own column below. */}
               <th className="att-th att-num">Leave Taken</th>
-              <th className="att-th att-num">Absent</th>
+              <th className="att-th att-num">Taken Leave</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
-              <th className="att-th att-num">Holiday</th>
+              {/* The dates behind the count sit on both the header and each
+                  cell — whichever the pointer lands on, the answer is there. */}
+              <th className="att-th att-num" title={holidayTitle}>Holiday</th>
               <th className="att-th att-num att-th-att">Attendance</th>
               {showCost && <th className="att-th att-num">Cost</th>}
             </tr>
@@ -847,7 +903,14 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                 title={clickable ? "View leave detail" : undefined}
               >
                 <td className="att-td"><code className="att-code">{emp.attendanceId}</code></td>
-                <td className="att-td att-strong">{emp.employeeName}</td>
+                <td className="att-td att-strong att-name-cell">
+                  {emp.employeeName}
+                  {emp.designation && (
+                    <div className="att-desig" title={emp.designation}>
+                      {emp.designation}
+                    </div>
+                  )}
+                </td>
                 {showMilestoneCol && (
                   <td className="att-td att-dim" title={emp.milestoneId || ""}>
                     {emp.milestoneId ? labelFor(emp.milestoneId) : "—"}
@@ -872,7 +935,9 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 */}
-                <td className="att-td att-num att-dim">{emp.holidayDays}</td>
+                <td className="att-td att-num att-dim" title={holidayTitle}>
+                  {emp.holidayDays}
+                </td>
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
@@ -918,7 +983,7 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
    ===================================================================== */
 function QuarterlyPanel({
   data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
-  costById, costTotal, costError,
+  costById, costTotal, costError, holidayTitle,
 }) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
@@ -941,6 +1006,7 @@ function QuarterlyPanel({
         period={period}
         employees={employees}
         milestoneName={milestoneName}
+        holidayTitle={holidayTitle}
         costById={costById}
         costTotal={costTotal}
         onRowClick={onRowClick}
@@ -1870,6 +1936,13 @@ const ATT_CSS = `
 .att-row-click:hover { background: ${C.accentBg}; }
 .att-code { font-size: 13px; background: ${C.surface}; padding: 2px 7px; border-radius: 5px;
   border: 1px solid ${C.border}; font-variant-numeric: tabular-nums; }
+/* Designation rides under the employee name rather than in a column of its
+   own: titles like "Developer - Enrolment Server, Middleware and Logistics"
+   are far wider than any other cell and would push the table into a
+   horizontal scroll. It's the one cell allowed to wrap. */
+.att-name-cell { white-space: normal; min-width: 190px; max-width: 300px; }
+.att-desig { font-size: 12px; color: ${C.faint}; font-weight: 400; margin-top: 2px;
+  line-height: 1.35; }
 
 /* attendance strength meter */
 .att-bar { display: inline-flex; align-items: center; gap: 9px; justify-content: flex-end; }

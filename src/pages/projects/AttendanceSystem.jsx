@@ -18,11 +18,14 @@ import { useProject } from "../../store/project/projectsStore";
 import {
   FiUsers,
   FiCalendar,
-  FiDollarSign,
   FiClipboard,
   FiGrid,
   FiArrowLeft,
 } from "react-icons/fi";
+/* Feather has no rupee glyph, so money icons come from Lucide — its
+   successor, drawn on the same grid at the same stroke width, so it sits
+   beside the Fi icons above without looking borrowed. */
+import { LuIndianRupee } from "react-icons/lu";
 
 /* One source of truth for the section: drives the tab strip, the hub
    cards and the active-tab lookup. To add a page, add an entry here and
@@ -55,7 +58,7 @@ export const SECTIONS = [
   {
     slug: "designation-rate",
     label: "Designation Rates",
-    icon: FiDollarSign,
+    icon: LuIndianRupee,
     title: "Designation Rates",
     blurb:
       "The per-role, year-wise rate card. Upload this before importing resources so their rates resolve.",
