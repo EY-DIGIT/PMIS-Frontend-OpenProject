@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
-import { loadMilestonesForProject } from "../../api/milestoneConfigApi";
+import { loadMilestonesForProject, loadActivitiesForMilestone } from "../../api/milestoneConfigApi";
 import {
   readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, notifyActionError,
   parseYear, parseQuarter, parseMonth, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
@@ -1073,6 +1073,25 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     milestones.length === 1 ? String(milestones[0].apiId) : ""
   );
   const milestone = milestones.find((m) => String(m.apiId) === String(milestoneId)) || null;
+  /* Activities under the chosen milestone — loaded fresh each time the
+     milestone changes, so the list always matches the current pick rather
+     than showing a stale unrelated set. Picking one is optional: it just
+     lets the upload carry an activityId alongside the milestoneId. */
+  const [activities, setActivities] = useState([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [activityId, setActivityId] = useState("");
+  useEffect(() => {
+    setActivityId("");
+    if (!milestone?.apiId) { setActivities([]); return; }
+    let active = true;
+    setActivitiesLoading(true);
+    (async () => {
+      const list = await loadActivitiesForMilestone(milestone.apiId);
+      if (active) setActivities(Array.isArray(list) ? list : []);
+      if (active) setActivitiesLoading(false);
+    })();
+    return () => { active = false; };
+  }, [milestone?.apiId]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   /* The organisation whose attendance this is — required by the upload, and
@@ -1294,6 +1313,8 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
       startDate: String(startDate),
       endDate: String(endDate),
     });
+    // Optional — only sent when the user picked one of the milestone's activities.
+    if (activityId) params.set("activityId", activityId);
 
     try {
       setUploading(true);
@@ -1389,6 +1410,32 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                   ))}
                 </select>
                 {fieldErrors.milestone && <span className="att-field-err">{fieldErrors.milestone}</span>}
+              </Field>
+              {/* The activities that belong to the chosen milestone — optional,
+                  so the upload can be tied to a specific activity when one applies. */}
+              <Field label="Activity (optional)">
+                <select
+                  id="upl-activity"
+                  className="att-select att-select--wide"
+                  value={activityId}
+                  disabled={!milestone || activitiesLoading || activities.length === 0}
+                  onChange={(e) => setActivityId(e.target.value)}
+                >
+                  <option value="">
+                    {!milestone
+                      ? "Choose a milestone first"
+                      : activitiesLoading
+                        ? "Loading activities…"
+                        : activities.length === 0
+                          ? "No activities under this milestone"
+                          : "Select an activity…"}
+                  </option>
+                  {activities.map((a) => (
+                    <option key={a.apiId} value={a.apiId}>
+                      {[a.serverDisplayCode || a.id, a.name].filter(Boolean).join(" · ")}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label="Organisation">
                 <select
