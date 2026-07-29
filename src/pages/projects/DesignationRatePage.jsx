@@ -12,6 +12,8 @@ import "../../styles/global.css";
 import { getToken } from "../../api/auth";
 import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
+import { fromApiDate } from "../../api/adapters";
+import { formatDateDisplay } from "../../utils/helpers";
 import {
   readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, isReadableMessage,
 } from "../../utils/apiMessage";
@@ -213,6 +215,21 @@ button.dr-th-btn:hover { color: var(--dr-primary); }
 .dr-summary-cell b { display: block; font-size: 22px; color: var(--dr-ink); font-variant-numeric: tabular-nums; }
 .dr-summary-cell span { font-size: 12px; color: var(--dr-muted); font-weight: 600; }
 
+/* ---- rate-year mapping list (upload result) ---- */
+.dr-years { margin-top: 16px; border: 1px solid var(--dr-line); border-radius: 10px; overflow: hidden; }
+.dr-years-head {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--dr-muted); background: var(--dr-surface-2); padding: 9px 14px;
+  border-bottom: 1px solid var(--dr-line);
+}
+.dr-year-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 14px; font-size: 13px; border-bottom: 1px solid var(--dr-line-2);
+}
+.dr-year-row:last-child { border-bottom: none; }
+.dr-year-name { font-weight: 600; color: var(--dr-ink); }
+.dr-year-range { color: var(--dr-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* ---- toasts ---- */
 .dr-toasts { position: fixed; right: 20px; bottom: 20px; z-index: 1100; display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
 .dr-toast {
@@ -285,6 +302,11 @@ export default function DesignationRatePage() {
   const [orgsLoading, setOrgsLoading] = useState(true);
   const [organisationId, setOrganisationId] = useState("");
 
+  /* The project window the upload is rated against, read from the same
+     GET /projects/{id} that supplies the vendors — the store copy is empty
+     on a deep link, and the upload can't be sent without these. */
+  const [fetchedDates, setFetchedDates] = useState({ start: "", end: "" });
+
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
@@ -314,7 +336,7 @@ export default function DesignationRatePage() {
     return () => clearPageContext();
   }, [project?.projectName]);
 
-  // ---------- organisations: GET /projects/{id} → vendors[] ----------
+  // ---------- organisations + project window: GET /projects/{id} ----------
   useEffect(() => {
     if (!projectId) return;
     let active = true;
@@ -327,12 +349,18 @@ export default function DesignationRatePage() {
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const raw = await res.json().catch(() => ({}));
-        const vendors = (raw?.data ?? raw)?.vendors;
-        const list = (Array.isArray(vendors) ? vendors : [])
+        const body = (raw?.data ?? raw) || {};
+        const list = (Array.isArray(body.vendors) ? body.vendors : [])
           .filter((v) => v && v.id)
           .map((v) => ({ id: v.id, name: v.name || v.id }));
         if (!active) return;
         setOrgs(list);
+        // fromApiDate trims a full timestamp down to the yyyy-MM-dd the
+        // upload expects, and passes a bare date through untouched.
+        setFetchedDates({
+          start: fromApiDate(body.startDate || body.start_date),
+          end: fromApiDate(body.endDate || body.end_date),
+        });
         // Prefer the signed-in user's own organisation when it's on the
         // project; otherwise fall back to the first linked vendor.
         const own =
@@ -382,6 +410,12 @@ export default function DesignationRatePage() {
     loadRates();
   }, [loadRates]);
 
+  /* The fetch above is authoritative; the store is the fallback for the
+     moment before it lands (and if it fails outright). */
+  const projectStartDate = fetchedDates.start || fromApiDate(project?.startDate);
+  const projectEndDate = fetchedDates.end || fromApiDate(project?.endDate);
+  const hasProjectWindow = !!projectStartDate && !!projectEndDate;
+
   // ---------- upload: POST /api/designation-rates/upload ----------
   async function uploadFile(file) {
     if (uploading) return;                    // guards a double-pick
@@ -396,6 +430,17 @@ export default function DesignationRatePage() {
         type: "warn",
         title: "Pick an organisation",
         msg: "Choose the organisation these rates belong to, then upload again.",
+      });
+      return;
+    }
+    /* The server derives the Year-1..Year-N bands from the project window, so
+       an upload without it can't be rated — better to stop here than to send
+       a request that is guaranteed to fail. */
+    if (!hasProjectWindow) {
+      pushToast({
+        type: "warn",
+        title: "Project dates missing",
+        msg: "Set the project's start and end date on the project details page, then upload again.",
       });
       return;
     }
@@ -414,7 +459,12 @@ export default function DesignationRatePage() {
     try {
       const token = getToken();
       const res = await fetch(
-        `${API_BASE}${ENDPOINTS.designationRates.upload(projectId, organisationId)}`,
+        `${API_BASE}${ENDPOINTS.designationRates.upload(
+          projectId,
+          organisationId,
+          projectStartDate,
+          projectEndDate
+        )}`,
         {
           method: "POST",
           headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -451,6 +501,9 @@ export default function DesignationRatePage() {
           rowsParsed: data?.rowsParsed,
           rolesUpserted: data?.rolesUpserted,
         },
+        // What the server made of the project window — the date range each
+        // Year-N column in the sheet now applies to.
+        yearMappings: Array.isArray(data?.yearMappings) ? data.yearMappings : [],
       });
       pushToast({
         type: "ok",
@@ -579,7 +632,13 @@ export default function DesignationRatePage() {
 
   const total = rates.length;
   const orgName = orgs.find((o) => o.id === organisationId)?.name || "";
-  const canUpload = !!projectId && !!organisationId && !uploading;
+  const canUpload =
+    !!projectId && !!organisationId && hasProjectWindow && !uploading;
+  const uploadHint = !organisationId
+    ? "Pick an organisation first"
+    : !hasProjectWindow
+    ? "Set the project's start and end date first"
+    : "Upload a designation rate card (.xlsx)";
 
   return (
     <div
@@ -623,6 +682,13 @@ export default function DesignationRatePage() {
               {orgName}
             </span>
           )}
+          {hasProjectWindow && (
+            // The window the uploaded years get cut from — worth showing
+            // before someone uploads against the wrong one.
+            <span className="dr-stat">
+              {formatDateDisplay(projectStartDate)} → {formatDateDisplay(projectEndDate)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -631,6 +697,16 @@ export default function DesignationRatePage() {
           <span style={{ fontSize: "16px" }}>!</span>
           No organisation is linked to this project yet. Add one on the project
           details page before uploading a designation rate card.
+        </div>
+      )}
+
+      {/* The rate years are cut from the project window, so an upload can't be
+          rated without it. Same shape as the missing-organisation notice. */}
+      {!orgsLoading && !hasProjectWindow && (
+        <div className="dr-inline-warn">
+          <span style={{ fontSize: "16px" }}>!</span>
+          This project has no start and end date set. Add them on the project
+          details page — the rate years are derived from that window.
         </div>
       )}
 
@@ -702,11 +778,7 @@ export default function DesignationRatePage() {
             className="dr-btn dr-btn-primary"
             onClick={() => fileInputRef.current?.click()}
             disabled={!canUpload}
-            title={
-              organisationId
-                ? "Upload a designation rate card (.xlsx)"
-                : "Pick an organisation first"
-            }
+            title={uploadHint}
           >
             <UploadIcon />
             {uploading ? "Uploading…" : "Upload Excel"}
@@ -868,7 +940,7 @@ function ApiResponseModal({ response, onClose }) {
   }, [onClose]);
 
   if (!response) return null;
-  const { title, ok, status, data, message, summary } = response;
+  const { title, ok, status, data, message, summary, yearMappings } = response;
 
   /* Every branch here ends at a sentence. The previous version fell back to
      JSON.stringify(e) for an unrecognised error entry and returned raw
@@ -928,6 +1000,21 @@ function ApiResponseModal({ response, onClose }) {
                     <b>{summary.rolesUpserted ?? "—"}</b>
                     <span>Roles upserted</span>
                   </div>
+                </div>
+              )}
+              {/* The year bands the server cut from the project window — this
+                  is what each Year-N column in the sheet now covers. */}
+              {yearMappings?.length > 0 && (
+                <div className="dr-years">
+                  <div className="dr-years-head">Rate years</div>
+                  {yearMappings.map((y) => (
+                    <div key={y.rateYear} className="dr-year-row">
+                      <span className="dr-year-name">{y.rateYear}</span>
+                      <span className="dr-year-range">
+                        {formatDateDisplay(y.effectiveFrom)} → {formatDateDisplay(y.effectiveTo)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
             </>

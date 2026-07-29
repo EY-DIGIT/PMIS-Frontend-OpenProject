@@ -8,6 +8,7 @@ import {
   parseYear, parseQuarter, parseMonth, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
 } from "../../utils/apiMessage";
 import { getToken } from "../../api/auth";
+import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import "../../styles/global.css";
 
@@ -121,6 +122,18 @@ function buildMetrics(payload, employees) {
     unpaidLeave: null,
   };
 }
+
+/* Total leave for a row. The report zeroes `leaveDays` and sends the real
+   figure as `leaveTaken` (paid + unpaid). Older payloads have neither, so
+   this walks down to whatever they do carry rather than printing a 0 that
+   isn't true. */
+const leaveTakenOf = (e) => {
+  if (e?.leaveTaken != null) return num(e.leaveTaken);
+  if (e?.paidLeaveDays != null || e?.unpaidLeaveDays != null) {
+    return num(e.paidLeaveDays) + num(e.unpaidLeaveDays);
+  }
+  return num(e?.leaveDays);
+};
 
 /* Attendance sheets are small; anything this size is the wrong file. */
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -806,15 +819,17 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
               <th className="att-th att-num">Present</th>
               {/* Half-day column withdrawn — half days already count as 0.5
                   inside Present, so the separate tally was double-reporting. */}
-              {splitLeave ? (
+              {splitLeave && (
                 <>
                   <th className="att-th att-num">Paid Leave</th>
                   <th className="att-th att-num">Unpaid Leave</th>
                 </>
-              ) : (
-                <th className="att-th att-num">Leave Taken</th>
               )}
-              <th className="att-th att-num">Taken Leave</th>
+              {/* The total, alongside its two parts. This column used to be
+                  headed "Taken Leave" while printing absent days — the absent
+                  figure now has its own column below. */}
+              <th className="att-th att-num">Leave Taken</th>
+              <th className="att-th att-num">Absent</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
@@ -840,18 +855,19 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
                 )}
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
-                {splitLeave ? (
+                {splitLeave && (
                   <>
                     <td className="att-td att-num">{num(emp.paidLeaveDays)}</td>
                     <td className={`att-td att-num${num(emp.unpaidLeaveDays) > 0 ? " att-warn" : " att-dim"}`}>
                       {num(emp.unpaidLeaveDays)}
                     </td>
                   </>
-                ) : (
-                  <td className="att-td att-num">{emp.leaveDays}</td>
                 )}
+                <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
+                  {leaveTakenOf(emp)}
+                </td>
                 <td className={`att-td att-num${num(emp.absentDays) > 0 ? " att-danger" : " att-dim"}`}>
-                  {emp.absentDays}
+                  {num(emp.absentDays)}
                 </td>
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
@@ -874,12 +890,13 @@ function AttendanceTable({ period, employees, onRowClick, milestoneName, costByI
           {showCost && (
             <tfoot>
               <tr className="att-row att-foot-row">
-                {/* Everything up to the Cost column is one spanned label. The
-                    count adapts to the two optional columns above so the
+                {/* Everything up to the Cost column is one spanned label. Eight
+                    fixed columns, plus Milestone when the rows differ and the
+                    paid/unpaid pair when the report splits leave — so the
                     total always lands under Cost. */}
                 <td
                   className="att-td att-strong"
-                  colSpan={8 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 1 : 0)}
+                  colSpan={8 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 2 : 0)}
                 >
                   Total for {period}
                 </td>
@@ -990,13 +1007,13 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
     milestones.length === 1 ? String(milestones[0].apiId) : ""
   );
   const milestone = milestones.find((m) => String(m.apiId) === String(milestoneId)) || null;
-  // Monthly is the only type the API supports, and now the only option in the
-  // dropdown — so there's no unsupported value left to block at submit.
-  const [uploadType, setUploadType] = useState("monthly");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [rateYear, setRateYear] = useState("");
-  const [rateYears, setRateYears] = useState([]);
+  /* The organisation whose attendance this is — required by the upload, and
+     picked from the vendors linked to the project. */
+  const [orgs, setOrgs] = useState([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [organisationId, setOrganisationId] = useState("");
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -1010,23 +1027,39 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
 
-  // Fetch rate-year options from the resources service.
+  /* Organisations the attendance can be filed against — the project's linked
+     vendors, from the gateway. This replaced the rate-year lookup that used
+     to sit here: the server now derives the rate year from the upload's date
+     range, so there is nothing left for the user to choose. */
   useEffect(() => {
     if (!projectId) return;
     let active = true;
+    setOrgsLoading(true);
     (async () => {
       try {
-        const token = getToken();
-        const res = await fetch(
-          `${API_BASE}${ENDPOINTS.resources.rateCards(projectId)}`,
-          token ? { headers: { Authorization: `Bearer ${token}` } } : undefined
+        const res = await authorizedFetch(
+          `${GATEWAY_BASE}${ENDPOINTS.projects.get(projectId)}`,
+          { method: "GET", headers: { accept: "application/json" } }
         );
-        if (res.ok) {
-          const data = await res.json();
-          if (active && Array.isArray(data)) setRateYears(data);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.json().catch(() => ({}));
+        const vendors = (raw?.data ?? raw)?.vendors;
+        const list = (Array.isArray(vendors) ? vendors : [])
+          .filter((v) => v && v.id)
+          .map((v) => ({ id: v.id, name: v.name || v.id }));
+        if (!active) return;
+        setOrgs(list);
+        // Prefer the signed-in user's own organisation when it's on the
+        // project; otherwise fall back to the first linked vendor.
+        const own =
+          tokenStore.getUser()?.vendor_id || tokenStore.getUser()?.vendorId || "";
+        const preferred = list.find((o) => o.id === own) || list[0];
+        setOrganisationId(preferred ? preferred.id : "");
       } catch {
-        // non-fatal — dropdown stays empty
+        // Non-fatal here — the picker stays empty and submit explains why.
+        if (active) setOrgs([]);
+      } finally {
+        if (active) setOrgsLoading(false);
       }
     })();
     return () => { active = false; };
@@ -1068,6 +1101,11 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
   const validateForm = () => {
     const errs = {};
     if (!milestone?.apiId) errs.milestone = "Choose a milestone to upload against.";
+    if (!organisationId) {
+      errs.organisation = orgs.length === 0 && !orgsLoading
+        ? "No organisation is linked to this project. Add one on the project details page."
+        : "Choose the organisation this attendance belongs to.";
+    }
     const rangeError = validateRange(startDate, endDate);
     if (rangeError) errs.startDate = rangeError;
     const fileError = validateFile(file);
@@ -1181,16 +1219,15 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
 
     const body = new FormData();
     body.append("file", file);
+    /* No rateYear: the server resolves it from the date range against the
+       project's rate-year bands. */
     const params = new URLSearchParams({
       projectId,
+      organisationId,
       milestoneId: milestone.apiId,
       startDate: String(startDate),
       endDate: String(endDate),
     });
-    // rateYear is optional — the dropdown values are "Year-1" etc; API wants the number.
-    if (rateYear) {
-      params.set("rateYear", rateYear);
-    }
 
     try {
       setUploading(true);
@@ -1287,16 +1324,30 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                 </select>
                 {fieldErrors.milestone && <span className="att-field-err">{fieldErrors.milestone}</span>}
               </Field>
-              {/* Monthly is the only type the API supports. The Quarterly
-                  option is withdrawn rather than shown-and-rejected. */}
-              <Field label="Upload type">
+              <Field label="Organisation">
                 <select
-                  className="att-select"
-                  value={uploadType}
-                  onChange={(e) => { setUploadType(e.target.value); setError(null); setNotice(null); }}
+                  id="upl-organisation"
+                  className={`att-select att-select--wide${fieldErrors.organisation ? " is-bad" : ""}`}
+                  value={organisationId}
+                  disabled={orgsLoading || orgs.length === 0}
+                  aria-invalid={!!fieldErrors.organisation}
+                  onChange={(e) => { setOrganisationId(e.target.value); setError(null); revalidate(); }}
                 >
-                  <option value="monthly">Monthly</option>
+                  {orgsLoading && <option value="">Loading…</option>}
+                  {!orgsLoading && orgs.length === 0 && (
+                    <option value="">No organisation available</option>
+                  )}
+                  {orgs.map((o) => (
+                    <option key={o.id} value={o.id}>{o.name}</option>
+                  ))}
                 </select>
+                {fieldErrors.organisation && <span className="att-field-err">{fieldErrors.organisation}</span>}
+              </Field>
+              {/* Monthly is the only type the API supports, so it's stated
+                  rather than offered — a one-option dropdown asks for a
+                  decision that doesn't exist. */}
+              <Field label="Upload type">
+                <div className="att-static">Monthly</div>
               </Field>
               <Field label="Start date">
                 <input
@@ -1319,17 +1370,19 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
                   onChange={(e) => { setEndDate(e.target.value); setError(null); revalidate(); }}
                 />
               </Field>
-              <Field label="Rate year">
-                <select className="att-select" value={rateYear} onChange={(e) => setRateYear(e.target.value)}>
-                  <option value="">None</option>
-                  {rateYears.map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </Field>
             </div>
 
             {/* The range error covers both date fields, so it sits under the
                 pair rather than being duplicated beneath each one. */}
             {fieldErrors.startDate && <div className="att-field-err">{fieldErrors.startDate}</div>}
+            {/* The rate year used to be picked here. It's now derived from the
+                dates, against the bands set when the rate card was uploaded —
+                so it's explained once the dates are in, not requested. */}
+            {startDate && endDate && !fieldErrors.startDate && (
+              <div className="att-note" role="status">
+                The rate year is matched automatically from these dates.
+              </div>
+            )}
             {outsideMilestone && !fieldErrors.startDate && (
               <div className="att-note att-note--warn" role="status">
                 These dates fall outside the milestone's own range
@@ -1723,6 +1776,11 @@ const ATT_CSS = `
   background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; min-width: 150px;
   outline: none; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease;
   box-shadow: 0 1px 2px rgba(16,32,60,.04); }
+/* A field with one possible value — sized like a control so the row lines
+   up, but flat and inert because there is nothing to pick. */
+.att-static { padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
+  background: ${C.surfaceAlt}; color: ${C.ink2}; font-size: 14px; min-width: 150px;
+  font-weight: 600; }
 .att-select:hover { border-color: ${C.borderStrong}; }
 .att-select:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
 

@@ -403,13 +403,18 @@ export const ENDPOINTS = {
   /* Designation rate cards — the per-role, per-year rate table for a
      project + organisation pair. Served by the same resource service as
      `resources` above (port 8019), NOT the gateway. Both routes need
-     BOTH query params; the upload is multipart with a single `file`
+     BOTH id params; the upload is multipart with a single `file`
      field holding the .xlsx. */
   designationRates: {
     list: (projectId, organisationId) =>
       `/api/designation-rates?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}`,
-    upload: (projectId, organisationId) =>
-      `/api/designation-rates/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}`,
+    /* The project window is required too, as yyyy-MM-dd: the server slices it
+       into the Year-1..Year-N bands the sheet's columns are rated against and
+       returns the resulting `yearMappings`. Without it there is nothing to
+       anchor "Year-1" to. */
+    upload: (projectId, organisationId, projectStartDate, projectEndDate) =>
+      `/api/designation-rates/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}` +
+      `&projectStartDate=${enc(projectStartDate)}&projectEndDate=${enc(projectEndDate)}`,
     // Blank rate-card upload template (.xlsx) — same for every project, so
     // it takes no query params (unlike the attendance template).
     exportTemplate: () => `/api/export/template/designation-rates`,
