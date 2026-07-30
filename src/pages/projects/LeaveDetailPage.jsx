@@ -211,6 +211,31 @@ function buildMonthGrid(year, month) {
   return cells;
 }
 
+/* ── the cost report's own date format ────────────────────────────────
+   Every other endpoint this page touches sends yyyy-MM-dd; the quarterly
+   cost report sends its month bands as dd-MM-yyyy. Parsed explicitly here
+   rather than through dateKey() or `new Date`, both of which get it wrong
+   quietly rather than loudly: V8 reads "07-01-2026" as MM-dd-yyyy and hands
+   back 1 July, not 7 January — a plausible date, off by five months, with
+   nothing to flag it. */
+function formatBandDate(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(s);
+  if (dmy) {
+    const d = Number(dmy[1]);
+    const m = Number(dmy[2]);
+    return MONTH_NAMES[m] ? `${d} ${MONTH_NAMES[m].slice(0, 3)} ${dmy[3]}` : s;
+  }
+  // Tolerated in case the endpoint is normalised to ISO later.
+  const iso = dateKey(s);
+  if (iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return `${d} ${MONTH_NAMES[m].slice(0, 3)} ${y}`;
+  }
+  return s;
+}
+
 /* ── which bucket each half day belongs to ────────────────────────────
    The report used to fold half days into paidLeaveDates / unpaidLeaveDates
    and repeat them in halfDayDates purely as a "counts 0.5" marker. It now
@@ -1431,6 +1456,9 @@ function CostReportSection({ loading, error, report, totals }) {
   }
 
   const months = Array.isArray(report.monthlyBreakdown) ? report.monthlyBreakdown : [];
+  /* Older payloads carry no band on the month rows; two columns of "—" say
+     less than no columns at all, so they appear only when there's data. */
+  const showBand = months.some((m) => m.fromDate || m.toDate);
   const extraEntries = Object.entries(report).filter(([k]) => !COST_KNOWN_KEYS.has(k));
 
   /* The envelope's totals carry the quarter's deduction; without one (older
@@ -1491,18 +1519,38 @@ function CostReportSection({ loading, error, report, totals }) {
                   days against a rate divided by 31, and can't. The band says
                   outright that they don't meet. */}
               <tr className="ld-costtable-grouprow">
-                <th colSpan={2} />
+                {/* Period, the two band dates, Calendar Days and Rate Year —
+                    all of which say WHICH days this row is about, before
+                    either group starts counting them. */}
+                <th colSpan={3 + (showBand ? 2 : 0)} />
                 <th colSpan={3} className="ld-costtable-group">Attendance · working days</th>
-                <th colSpan={5} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
+                <th colSpan={4} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
               </tr>
               <tr>
-                <th title="Calendar month this row covers.">Period</th>
+                <th title="The month this row covers.">Period</th>
+                {showBand && (
+                  <>
+                    {/* The band this month is rated over. Worth a column of its
+                        own because it is NOT always the calendar month: bands
+                        can run 7th-to-6th, and they differ between resources on
+                        the same project — so "January 2026" alone doesn't say
+                        which days were actually charged. */}
+                    <th title="First day of the period this row is rated over.">Start Date</th>
+                    <th title="Last day of the period this row is rated over. Per Day Rate is the monthly rate divided by the number of days between these two dates.">End Date</th>
+                  </>
+                )}
+                {/* Sits with the two dates rather than over in the cost group:
+                    it counts the days between them, so the three read as one
+                    statement of the period. Usually the full span, but fewer
+                    for anyone who joined or left partway through — without
+                    that note a row reading "7 Jan → 6 Feb" beside a 2 looks
+                    like a bug. */}
+                <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
                 <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
                 {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
-                <th className="ld-num" title="Days in the calendar month — the denominator the per-day rate is worked out on.">Calendar Days</th>
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Monthly rate divided by the calendar days in the month — not the working days. January: ₹1,98,434 ÷ 31 = ₹6,401.10.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
@@ -1516,6 +1564,13 @@ function CostReportSection({ loading, error, report, totals }) {
                 return (
                 <tr key={i}>
                   <td className="ld-costtable-period">{show(m.period)}</td>
+                  {showBand && (
+                    <>
+                      <td className="ld-costtable-band">{formatBandDate(m.fromDate) || "—"}</td>
+                      <td className="ld-costtable-band">{formatBandDate(m.toDate) || "—"}</td>
+                    </>
+                  )}
+                  <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
                   <td>{show(m.rateYear)}</td>
                   <td className="ld-num">{show(m.workingDays)}</td>
                   <td className="ld-num">{show(m.presentDays)}</td>
@@ -1536,7 +1591,6 @@ function CostReportSection({ loading, error, report, totals }) {
                       {pct(m.attendancePercentage)}
                     </span>
                   </td> */}
-                  <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
                   <td className="ld-num">{money(m.monthlyRate)}</td>
 
                   <td className="ld-num">{money(m.perDayRate)}</td>
@@ -1551,18 +1605,22 @@ function CostReportSection({ loading, error, report, totals }) {
               })}
             </tbody>
             <tfoot>
-              {/* 9 = the ten body columns minus the Cost column these figures
-                  sit under. Bump it if a column is added — or restored: the
-                  commented-out Attendance % and HalfDay Amount columns each
-                  need a +1 here when they come back. */}
+              {/* Every footer label spans everything up to Cost, so the figure
+                  lands under it: ten fixed body columns minus Cost, plus the
+                  two band columns when they're shown. Derived rather than
+                  written out three times — the Total Cost row had been left at
+                  a stale 8 when Calendar Days was added, which pushed its
+                  figure a column left of the one it totals. Restoring the
+                  commented-out Attendance % / HalfDay Amount columns needs a
+                  +1 each here. */}
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9} className="ld-costtable-totallbl">Subtotal</td>
+                    <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Subtotal</td>
                     <td className="ld-num">{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9} className="ld-costtable-totallbl">
+                    <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -1575,7 +1633,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 </>
               )}
               <tr>
-                <td colSpan={8} className="ld-costtable-totallbl">Total Cost</td>
+                <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
               </tr>
             </tfoot>
@@ -2402,6 +2460,9 @@ const LD_CSS = `
   border-radius: 2px; background: ${C.borderStrong}; }
 .ld-costtable-group--cost::after { background: ${C.primary}; opacity: .35; }
 .ld-costtable-period { font-weight: 600; }
+/* The band dates qualify the Period beside them rather than standing on their
+   own, so they sit a step back from it in weight. */
+.ld-costtable-band { color: ${C.muted}; font-variant-numeric: tabular-nums; }
 /* Calendar days is the denominator behind Per Day Rate, not a headline of
    its own — present so the division is checkable, recessive so it doesn't
    compete with the money columns beside it. */

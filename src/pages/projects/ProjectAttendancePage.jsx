@@ -74,6 +74,27 @@ const reportRows = (payload) =>
 const reportTotals = (payload) =>
   !Array.isArray(payload) && payload?.totals ? payload.totals : null;
 
+/* The attendance report sends joiningDate as dd-MM-yyyy, unlike the ISO dates
+   the rest of this file deals in. Parsed explicitly rather than through
+   `new Date`, which reads "05-02-2026" as MM-dd-yyyy and hands back 2 May
+   instead of 5 February — three months out, and perfectly plausible on screen.
+   ISO is accepted too, in case the endpoint is normalised later. */
+const formatJoiningDate = (raw) => {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(s);
+  if (dmy) {
+    const m = Number(dmy[2]);
+    return MONTH_NAMES[m] ? `${Number(dmy[1])} ${MONTH_NAMES[m].slice(0, 3)} ${dmy[3]}` : s;
+  }
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (iso) {
+    const m = Number(iso[2]);
+    return MONTH_NAMES[m] ? `${Number(iso[3])} ${MONTH_NAMES[m].slice(0, 3)} ${iso[1]}` : s;
+  }
+  return s;
+};
+
 const money = (v) =>
   `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -860,6 +881,9 @@ function AttendanceTable({
   const splitLeave = employees.some(
     (e) => e.paidLeaveDays != null || e.unpaidLeaveDays != null
   );
+  /* Older payloads carry no joining date; a column of "—" says less than no
+     column, so it appears only when at least one row has one. */
+  const showJoined = employees.some((e) => e.joiningDate);
 
   /* Which milestone's upload each row came from. In practice a report is
      usually one upload, so the id repeats down every row — showing it as a
@@ -905,6 +929,12 @@ function AttendanceTable({
               <th className="att-th">ID</th>
               <th className="att-th">Name</th>
               {showMilestoneCol && <th className="att-th">Milestone</th>}
+              {/* Sits immediately left of Working on purpose: a mid-quarter
+                  joiner shows 36 or 14 working days against everyone else's
+                  60, and this is the column that says why. */}
+              {showJoined && (
+                <th className="att-th" title="The date this employee joined the project.">Joined</th>
+              )}
               <th className="att-th att-num">Working</th>
               <th className="att-th att-num">Present</th>
               {/* Half-day column withdrawn — half days already count as 0.5
@@ -948,6 +978,11 @@ function AttendanceTable({
                     {emp.milestoneId ? labelFor(emp.milestoneId) : "—"}
                   </td>
                 )}
+                {showJoined && (
+                  <td className="att-td att-joined">
+                    {formatJoiningDate(emp.joiningDate) || "—"}
+                  </td>
+                )}
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
                 {splitLeave && (
@@ -984,13 +1019,19 @@ function AttendanceTable({
           {showCost && (
             <tfoot>
               <tr className="att-row att-foot-row">
-                {/* Everything up to the Cost column is one spanned label. Seven
-                    fixed columns, plus Milestone when the rows differ and the
-                    paid/unpaid pair when the report splits leave — so the
-                    total always lands under Cost. */}
+                {/* Everything up to the Cost column is one spanned label: seven
+                    fixed columns, plus Milestone when the rows differ, Joined
+                    when the report carries it, and the paid/unpaid pair when
+                    leave is split — so the total always lands under Cost. Every
+                    optional column above needs its term here. */}
                 <td
                   className="att-td att-strong"
-                  colSpan={7 + (showMilestoneCol ? 1 : 0) + (splitLeave ? 2 : 0)}
+                  colSpan={
+                    7 +
+                    (showMilestoneCol ? 1 : 0) +
+                    (showJoined ? 1 : 0) +
+                    (splitLeave ? 2 : 0)
+                  }
                 >
                   Total for {period}
                 </td>
@@ -2058,6 +2099,9 @@ const ATT_CSS = `
 .att-name-cell { white-space: normal; min-width: 190px; max-width: 300px; }
 .att-desig { font-size: 12px; color: ${C.faint}; font-weight: 400; margin-top: 2px;
   line-height: 1.35; }
+/* Joining date — context for the Working count beside it, so it reads a step
+   back from the figures rather than competing with them. */
+.att-joined { color: ${C.muted}; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* attendance strength meter */
 .att-bar { display: inline-flex; align-items: center; gap: 9px; justify-content: flex-end; }
