@@ -74,6 +74,7 @@ import DesignationRatePage from "./pages/projects/DesignationRatePage";
 import AttendanceSystemHub, { AttendanceSystemLayout } from "./pages/projects/AttendanceSystem";
 import SlaSystemHub, { SlaSystemLayout } from "./pages/projects/SlaSystem";
 import SlaSettlementPage from "./pages/projects/SlaSettlementPage";
+import SlaRollupPage from "./pages/projects/SlaRollupPage";
 import ProjectLeaveConfigPage from "./pages/projects/ProjectLeaveConfigPage";
 import LeaveDetailPage from "./pages/projects/LeaveDetailPage";
 import ActivityStartedListPage from "./pages/projects/ActivityStartedListPage";
@@ -450,6 +451,7 @@ function Breadcrumbs() {
         "sla-system": null,
         severity: "Severity & LD Bands",
         "activity-slas": "Activity SLA Mapping",
+        "sla-rollup": "SLA Rollup",
         "sla-settlement": "Settlement & LD",
         "penalty-report": "Penalty Report"
     };
@@ -879,6 +881,7 @@ export default function MainApp() {
                                                     <Route path="/projects/:projectId/sla-system" element={<RequirePermission action="viewProjects"><SlaSystemHub /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/severity" element={<RequirePermission action="viewProjects"><SeverityPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/activity-slas" element={<RequirePermission action="viewProjects"><ActivitySlasPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/sla-rollup" element={<RequirePermission action="viewProjects"><SlaRollupPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/sla-settlement" element={<RequirePermission action="viewProjects"><SlaSettlementPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/penalty-report" element={<RequirePermission action="viewProjects"><PenaltyReportPage /></RequirePermission>} />
                                                 </Route>

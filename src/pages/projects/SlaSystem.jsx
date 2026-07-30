@@ -25,6 +25,7 @@ import {
   FiSliders,
   FiBookOpen,
   FiLink2,
+  FiLayers,
   FiPieChart,
   FiAlertTriangle,
   FiArrowLeft,
@@ -78,6 +79,14 @@ export const SECTIONS = [
     title: "Activity SLA Mapping",
     blurb:
       "Pick an activity, map SLAs onto it, set the effective window, then evaluate a single SLA or all of them at once.",
+  },
+  {
+    slug: "sla-rollup",
+    label: "SLA Rollup",
+    icon: FiLayers,
+    title: "SLA Rollup",
+    blurb:
+      "One contract quarter, grouped by SLA: the activities that breached it, the points after the severity cap, and the LD % it carries.",
   },
   {
     slug: "sla-settlement",

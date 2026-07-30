@@ -140,3 +140,67 @@ export function markSettlementInvoiced(projectId, quarter, invoiceRef) {
         body: { invoiceRef },
     });
 }
+
+/* ───────────────────── Scoring configuration ─────────────────────
+   The severity master (level → points) and the LD band table (points
+   threshold → LD %) are what any client-side rollup has to score
+   against. They are edited on the Severity & LD page, which talks to
+   these paths inline; exposing them here lets the rollup read the same
+   configuration without importing a page component.
+
+   Both 404 on a project that has not been configured yet — that is a
+   normal empty state, not a failure, so both resolve to [] instead of
+   throwing and leave the caller to say "configure this first".        */
+
+function normalizeSeverityLevels(payload) {
+    const raw = payload?.data ?? payload ?? {};
+    const list = raw.levels ?? raw._embedded?.elements ?? raw.elements ?? raw;
+    if (!Array.isArray(list)) return [];
+    return list.map((it, idx) => ({
+        level: Number(it.level ?? it.severity_level ?? it.sl ?? it.severityLevel ?? 0),
+        points: Number(it.points ?? it.point ?? it.value ?? 0),
+        label: String(it.label ?? it.name ?? `Level ${it.level ?? idx}`),
+    }));
+}
+
+function normalizeLdBands(payload) {
+    const raw = payload?.data ?? payload ?? {};
+    const list = raw._embedded?.elements ?? raw.bands ?? raw.elements ?? raw;
+    if (!Array.isArray(list)) return [];
+    return list.map((it, idx) => ({
+        id: it.id ?? it.band_id ?? it.bandId ?? null,
+        points_threshold: Number(it.points_threshold ?? it.pointsThreshold ?? it.points ?? 0),
+        ld_percent: Number(it.ld_percent ?? it.ldPercent ?? it.ld ?? 0),
+        label: String(it.label ?? it.name ?? `Band ${idx}`),
+    }));
+}
+
+// These two live under /contracts/api/v3 (project-scoped masters), not
+// under the sla-compliance tree, so they use authorizedFetch directly
+// rather than call() with CONTRACTS_BASE.
+async function readMaster(path, normalize) {
+    const res = await authorizedFetch(path, { method: "GET", headers: { Accept: "application/json" } });
+    if (res.status === 404) return [];
+    const text = await res.text().catch(() => "");
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    if (!text) return [];
+    try {
+        return normalize(JSON.parse(text));
+    } catch {
+        return [];
+    }
+}
+
+export function getSeverityMaster(projectId) {
+    return readMaster(
+        `/contracts/api/v3/projects/${enc(projectId)}/severity-master`,
+        normalizeSeverityLevels
+    );
+}
+
+export function getLdBands(projectId) {
+    return readMaster(
+        `/contracts/api/v3/projects/${enc(projectId)}/ld-bands`,
+        normalizeLdBands
+    );
+}
