@@ -445,6 +445,15 @@ export const ENDPOINTS = {
     upload: (projectId, organisationId, projectStartDate, projectEndDate) =>
       `/api/designation-rates/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}` +
       `&projectStartDate=${enc(projectStartDate)}&projectEndDate=${enc(projectEndDate)}`,
+    /* The Year-1..Year-N bands the project window is sliced into, as
+       [{ rateYear, effectiveFrom, effectiveTo }] — the same mapping the
+       upload returns, but readable without uploading anything. All four
+       params are required; omitting the dates answers 400, so only call it
+       once the project window is known. The final band is truncated at
+       endDate rather than running a full year. */
+    rateYear: (projectId, organisationId, startDate, endDate) =>
+      `/api/designation-rates/rate-year?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}` +
+      `&startDate=${enc(startDate)}&endDate=${enc(endDate)}`,
     // Blank rate-card upload template (.xlsx) — same for every project, so
     // it takes no query params (unlike the attendance template).
     exportTemplate: () => `/api/export/template/designation-rates`,

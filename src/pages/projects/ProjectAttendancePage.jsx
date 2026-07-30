@@ -299,6 +299,14 @@ export default function ProjectAttendancePage() {
   // Attendance upload modal — the milestone is picked inside it.
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  /* Bumped to re-run the three report fetches without changing any filter.
+     Two things need it: the Refresh buttons beside each table, and a finished
+     upload — the rows the upload just created are exactly the rows on screen,
+     and before this the only way to see them was to change the month or
+     quarter and change it back. */
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = () => setRefreshKey((k) => k + 1);
+
   /* Header template download. The endpoint is built for a date range, and the
      header has no dates of its own, so the range comes from the Year + Month
      controls right below it: a chosen month covers that month, "All months"
@@ -395,9 +403,16 @@ export default function ProjectAttendancePage() {
           year: String(parseYear(year)),
           month: String(parseMonth(selectedMonth)),
         });
+        /* no-store on all three report fetches: the endpoints send no
+           cache-control, so a re-request is at the browser's discretion —
+           and a Refresh button that can be answered from cache isn't one. */
         const res = await fetch(
           `${API_BASE}/api/attendance/report/monthly?${qs}`,
-          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
         );
         if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
         // An empty 200 is a month with nothing logged, not a failure.
@@ -405,13 +420,17 @@ export default function ProjectAttendancePage() {
         if (active) setSummary(data);
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
-        if (active && msg) setSummaryError(msg);
+        /* Drop the previous month's rows on the way out. Keeping them meant a
+           failed month could sit behind its own error message showing another
+           month's numbers — and an aborted request (msg empty, no error shown)
+           left them on screen with nothing to say they were stale. */
+        if (active) { setSummary(null); if (msg) setSummaryError(msg); }
       } finally {
         if (active) setSummaryLoading(false);
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, selectedMonth, paramError]);
+  }, [projectId, year, selectedMonth, paramError, refreshKey]);
 
   // Quarterly leave policy
   useEffect(() => {
@@ -431,20 +450,27 @@ export default function ProjectAttendancePage() {
         });
         const res = await fetch(
           `${API_BASE}/api/attendance/report/quarterly?${qs}`,
-          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
         );
         if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
         const data = await readJsonBody(res, FALLBACK);
         if (active) setQuarterly(data);
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
-        if (active && msg) setQuarterlyError(msg);
+        /* Same as the monthly fetch: a quarter with no data answers 404, and
+           without this the previous quarter's rows stayed in state behind the
+           error — the "it didn't refresh" report. */
+        if (active) { setQuarterly(null); if (msg) setQuarterlyError(msg); }
       } finally {
         if (active) setQuarterlyLoading(false);
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError]);
+  }, [projectId, year, quarter, paramError, refreshKey]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -468,7 +494,11 @@ export default function ProjectAttendancePage() {
         });
         const res = await fetch(
           `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
-          { signal: controller.signal, headers: token ? { Authorization: `Bearer ${token}` } : {} }
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
         );
         if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
         const data = await readJsonBody(res, FALLBACK);
@@ -479,7 +509,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError]);
+  }, [projectId, year, quarter, paramError, refreshKey]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
@@ -702,7 +732,13 @@ export default function ProjectAttendancePage() {
 
       {/* Monthly summary */}
       <section className="att-section">
-        <h2 className="att-section-title">Monthly summary</h2>
+        <div className="att-section-head">
+          <h2 className="att-section-title" style={{ margin: 0 }}>Monthly summary</h2>
+          {/* Hidden on "All months" — there's no month selected to refetch. */}
+          {selectedMonth !== "all" && (
+            <RefreshButton onClick={refresh} busy={summaryLoading} />
+          )}
+        </div>
 
         {selectedMonth === "all" && (
           <EmptyState
@@ -763,6 +799,7 @@ export default function ProjectAttendancePage() {
                 {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
               </select>
             </Field>
+            <RefreshButton onClick={refresh} busy={quarterlyLoading} />
           </div>
         </div>
         {quarterlyLoading && <SkeletonTable rows={5} cols={7} />}
@@ -799,6 +836,7 @@ export default function ProjectAttendancePage() {
         <LeaveUploadModal
           projectId={projectId}
           milestones={uploadableMilestones}
+          onUploaded={refresh}
           onClose={() => setUploadOpen(false)}
         />
       )}
@@ -1051,7 +1089,7 @@ function MetricsRow({ metrics, costTotal }) {
    Leave Management — per-milestone attendance Excel upload.
    POST /api/attendance/upload with projectId, milestoneId, dates + file.
    ===================================================================== */
-function LeaveUploadModal({ projectId, milestones = [], onClose }) {
+function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
   // Milestone is picked here rather than on the page. Preselect when there's
   // only one, so the common case is a single choice fewer.
   const [milestoneId, setMilestoneId] = useState(
@@ -1335,6 +1373,9 @@ function LeaveUploadModal({ projectId, milestones = [], onClose }) {
         )
       );
       setDone(true);
+      /* Refetch behind the success panel, so the new rows are already there
+         when the user closes it rather than a step they have to think of. */
+      onUploaded?.();
     } catch (err) {
       const msg = requestErrorMessage(err, "The upload didn't go through. Please try again.");
       setError(msg);
@@ -1811,6 +1852,33 @@ function UploadIcon() {
     </svg>
   );
 }
+function RefreshIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M20 4v4.5h-4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* Re-runs the fetch for the table it sits beside. Spins while that table is
+   loading, which doubles as the acknowledgement — a refresh that returns the
+   same rows is otherwise indistinguishable from a click that did nothing. */
+function RefreshButton({ onClick, busy, label = "Refresh" }) {
+  return (
+    <button
+      type="button"
+      className="att-refresh"
+      onClick={onClick}
+      disabled={busy}
+      title={busy ? "Refreshing…" : `${label} — fetch the latest data`}
+    >
+      <span className={`att-refresh-ico${busy ? " is-busy" : ""}`}><RefreshIcon /></span>
+      {busy ? "Refreshing…" : label}
+    </button>
+  );
+}
+
 // Mirror of UploadIcon with the arrow reversed.
 function DownloadIcon() {
   return (
@@ -1859,6 +1927,21 @@ const ATT_CSS = `
 .att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; letter-spacing: -0.01em; }
 .att-section-head { display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+
+/* Refresh — a quiet control beside the table it reloads, deliberately lighter
+   than the header's primary actions: it repeats a fetch the page already does
+   on its own, so it shouldn't compete with Upload for attention. */
+.att-refresh { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
+  padding: 8px 14px; border-radius: 9px; border: 1px solid ${C.border};
+  background: #fff; color: ${C.ink2}; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.att-refresh:hover:not(:disabled) { background: ${C.surface}; border-color: ${C.borderStrong}; color: ${C.ink}; }
+.att-refresh:disabled { opacity: .6; cursor: not-allowed; }
+.att-refresh-ico { display: inline-flex; }
+.att-refresh-ico.is-busy { animation: att-spin .8s linear infinite; }
+@keyframes att-spin { to { transform: rotate(360deg); } }
+/* Respect a reduced-motion preference — the label already says "Refreshing…". */
+@media (prefers-reduced-motion: reduce) { .att-refresh-ico.is-busy { animation: none; } }
 
 /* ---- toolbar / controls ---- */
 .att-toolbar { display: flex; align-items: flex-end; justify-content: space-between;

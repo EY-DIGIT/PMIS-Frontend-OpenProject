@@ -163,6 +163,16 @@ const STYLES = `
 /* ---- card + table ---- */
 .dr-card { overflow: hidden; border: 1px solid var(--dr-line); border-radius: 14px; background: var(--dr-surface); box-shadow: var(--dr-shadow-md); }
 .dr-scroll { overflow-x: auto; }
+
+/* ---- rate year card (modal) ---- */
+.dr-yearcard-note { padding: 16px; font-size: 13.5px; color: var(--dr-muted); }
+.dr-yearcard-name { font-weight: 600; }
+/* The band containing today. A quiet pill, not a status colour — it marks
+   position in a sequence, it doesn't say anything is right or wrong. */
+.dr-yearcard-now { display: inline-block; margin-left: 9px; padding: 2px 8px;
+  border-radius: 999px; background: var(--dr-surface-2); border: 1px solid var(--dr-line);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--dr-primary); vertical-align: 1px; }
 .dr-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .dr-th {
   position: sticky; top: 0; background: var(--dr-surface-2); color: var(--dr-muted);
@@ -415,6 +425,55 @@ export default function DesignationRatePage() {
   const projectStartDate = fetchedDates.start || fromApiDate(project?.startDate);
   const projectEndDate = fetchedDates.end || fromApiDate(project?.endDate);
   const hasProjectWindow = !!projectStartDate && !!projectEndDate;
+
+  /* ---------- rate-year bands: GET /api/designation-rates/rate-year ----------
+     The Year-N columns in the table above are just labels; this is what each
+     one actually covers. The upload response carries the same mapping, but
+     only in the moment after an upload — this endpoint makes it readable at
+     any time, so it comes from the server rather than being re-derived here
+     from the project window. */
+  const [rateYears, setRateYears] = useState([]);
+  const [rateYearsLoading, setRateYearsLoading] = useState(false);
+  const [rateYearsError, setRateYearsError] = useState(null);
+  const [rateYearOpen, setRateYearOpen] = useState(false);
+
+  useEffect(() => {
+    // All four params are required — without the dates the endpoint 400s.
+    if (!projectId || !organisationId || !hasProjectWindow) {
+      setRateYears([]);
+      setRateYearsError(null);
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setRateYearsLoading(true);
+    setRateYearsError(null);
+    (async () => {
+      const FALLBACK = "Couldn't load the rate years.";
+      try {
+        const token = getToken();
+        const res = await fetch(
+          `${API_BASE}${ENDPOINTS.designationRates.rateYear(
+            projectId, organisationId, projectStartDate, projectEndDate
+          )}`,
+          {
+            signal: controller.signal,
+            headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          }
+        );
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setRateYears(Array.isArray(data) ? data : []);
+      } catch (e) {
+        const msg = requestErrorMessage(e, FALLBACK);
+        // Clear the old bands too — a stale window's years are worse than none.
+        if (active) { setRateYears([]); if (msg) setRateYearsError(msg); }
+      } finally {
+        if (active) setRateYearsLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, organisationId, projectStartDate, projectEndDate, hasProjectWindow]);
 
   // ---------- upload: POST /api/designation-rates/upload ----------
   async function uploadFile(file) {
@@ -774,6 +833,25 @@ export default function DesignationRatePage() {
             <DownloadIcon />
             {downloading ? "Preparing…" : "Download Template"}
           </button>
+          {/* Needs both an organisation and the project window — the endpoint
+              takes all four as required params, so without them there is
+              nothing to open. Disabled rather than hidden, with the reason in
+              the tooltip, so the action doesn't silently come and go. */}
+          <button
+            className="dr-btn dr-btn-ghost"
+            onClick={() => setRateYearOpen(true)}
+            disabled={!organisationId || !hasProjectWindow}
+            title={
+              !organisationId
+                ? "Pick an organisation to see its rate years"
+                : !hasProjectWindow
+                  ? "Set the project's start and end date to see the rate years"
+                  : "What each Year-N column covers"
+            }
+          >
+            <CalendarIcon />
+            Rate Year Card
+          </button>
           <button
             className="dr-btn dr-btn-primary"
             onClick={() => fileInputRef.current?.click()}
@@ -908,6 +986,20 @@ export default function DesignationRatePage() {
         <ApiResponseModal response={apiResponse} onClose={() => setApiResponse(null)} />
       )}
 
+      {rateYearOpen && (
+        <RateYearModal
+          rows={rateYears}
+          loading={rateYearsLoading}
+          error={rateYearsError}
+          projectWindow={
+            hasProjectWindow
+              ? `${formatDateDisplay(projectStartDate)} → ${formatDateDisplay(projectEndDate)}`
+              : ""
+          }
+          onClose={() => setRateYearOpen(false)}
+        />
+      )}
+
       {/* Toasts */}
       <div className="dr-toasts" role="status" aria-live="polite">
         {toasts.map((t) => (
@@ -924,6 +1016,104 @@ export default function DesignationRatePage() {
             </button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================================
+   Rate Year Card — the Year-1..Year-N bands the project window is cut into.
+
+   The rate table's own headers are bare labels ("Year-3" says nothing about
+   when Year-3 is), and until now the only place the dates appeared was the
+   upload-result modal, which is gone the moment it's closed. Server-supplied
+   rather than derived from the project window here, so the bands on screen
+   are the same ones the rates were actually filed against.
+   ===================================================================== */
+function RateYearModal({ rows, loading, error, projectWindow, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  /* Which band today falls in. Plain string compare — the API sends
+     yyyy-MM-dd, which sorts lexicographically, so this needs no Date parsing
+     and no timezone to get wrong. */
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const isCurrent = (r) =>
+    r.effectiveFrom && r.effectiveTo &&
+    r.effectiveFrom <= todayKey && todayKey <= r.effectiveTo;
+
+  return (
+    <div className="dr dr-modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="dr-modal" role="dialog" aria-modal="true" aria-label="Rate Year Card">
+        <div className="dr-modal-head">
+          <div>
+            <div className="dr-eyebrow" style={{ marginBottom: "4px" }}>
+              {projectWindow || "Project window"}
+            </div>
+            <h2>Rate Year Card</h2>
+          </div>
+          <button className="dr-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="dr-modal-body">
+          <p className="dr-caption" style={{ margin: "0 0 14px" }}>
+            What each <b>Year-N</b> column in the rate table covers.
+          </p>
+
+          {loading ? (
+            <div className="dr-yearcard-note">Loading rate years…</div>
+          ) : error ? (
+            <div className="dr-inline-error">
+              <span style={{ fontSize: "16px" }}>!</span>
+              {error}
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="dr-yearcard-note">
+              No rate years were returned for this project window.
+            </div>
+          ) : (
+            <div className="dr-card">
+              <div className="dr-scroll">
+                <table className="dr-table">
+                  <thead>
+                    <tr>
+                      <th className="dr-th">Rate Year</th>
+                      <th className="dr-th">Start Date</th>
+                      <th className="dr-th">End Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => {
+                      const current = isCurrent(r);
+                      return (
+                        <tr key={r.rateYear} className="dr-row">
+                          <td className="dr-td">
+                            <span className="dr-yearcard-name">{r.rateYear || "—"}</span>
+                            {/* Which rate applies right now is the question
+                                this table gets opened to answer, so it's
+                                marked rather than left to be worked out from
+                                the dates. */}
+                            {current && <span className="dr-yearcard-now">Current</span>}
+                          </td>
+                          <td className="dr-td">{formatDateDisplay(r.effectiveFrom) || "—"}</td>
+                          <td className="dr-td">{formatDateDisplay(r.effectiveTo) || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="dr-modal-foot">
+          <button className="dr-btn dr-btn-primary" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );
@@ -1091,5 +1281,12 @@ const DownloadIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 4v12m0 0 4-4m-4 4-4-4" />
     <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </svg>
+);
+
+const CalendarIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M3 10h18M8 3v4M16 3v4" />
   </svg>
 );

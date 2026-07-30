@@ -211,6 +211,76 @@ function buildMonthGrid(year, month) {
   return cells;
 }
 
+/* ── which bucket each half day belongs to ────────────────────────────
+   The report used to fold half days into paidLeaveDates / unpaidLeaveDates
+   and repeat them in halfDayDates purely as a "counts 0.5" marker. It now
+   sends them as their own disjoint set, present in neither list — so every
+   half day stopped rendering at all: the chip lists iterate paid/unpaid, and
+   the calendar only marks a cell it finds in one of those sets. Two of
+   resource 422's eleven leave dates were simply absent from the page.
+
+   The response doesn't say which bucket a half day belongs to, but the
+   settlement rule this page already explains to the user does: leave is
+   consumed in date order against the paid allowance, and whatever doesn't
+   fit is unpaid. Re-running that over the merged list recovers the split.
+
+   It isn't trusted blind. The same pass re-derives the FULL days, whose
+   buckets the server does state — if those don't come back exactly as sent,
+   the inference is wrong (a changed rule, or a relaxation tier this doesn't
+   model) and `verified` is false, so the caller shows the half days as their
+   own category rather than filing them under a colour that might be a lie.
+
+   Checked against two live Q1-2026 payloads: 422 (halves 1.0 paid / 0
+   unpaid, where a full day is skipped so a later half can take the last
+   0.5) and 430 (1.0 paid / 2.5 unpaid). Both reproduce the server's own
+   paid and unpaid lists exactly. */
+function assignHalfDays(halfDayDates, paidLeaveDates, unpaidLeaveDates, paidLeave) {
+  const half = (halfDayDates || []).map(dateKey).filter(Boolean);
+  const paidFull = (paidLeaveDates || []).map(dateKey).filter(Boolean);
+  const unpaidFull = (unpaidLeaveDates || []).map(dateKey).filter(Boolean);
+  const none = { paidHalves: [], unpaidHalves: [], unassigned: [] };
+  if (!half.length) return none;
+
+  /* Older payloads already fold them in — the dates are in the lists, so the
+     existing rendering works and there is nothing to recover. */
+  const inLists = new Set([...paidFull, ...unpaidFull]);
+  if (half.some((k) => inLists.has(k))) return none;
+
+  const items = [
+    ...half.map((k) => ({ k, w: 0.5 })),
+    ...paidFull.map((k) => ({ k, w: 1 })),
+    ...unpaidFull.map((k) => ({ k, w: 1 })),
+  ].sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+
+  /* Fill the paid allowance in date order. A day that would overrun it is
+     left unpaid and the walk continues — that's what lets a later half day
+     take a remaining 0.5, which is exactly what 422's payload does. */
+  let budget = num(paidLeave);
+  const paid = new Set();
+  for (const it of items) {
+    if (it.w <= budget + 1e-9) { paid.add(it.k); budget -= it.w; }
+  }
+
+  const verified =
+    paidFull.every((k) => paid.has(k)) && unpaidFull.every((k) => !paid.has(k));
+  if (!verified) return { ...none, unassigned: half };
+
+  return {
+    paidHalves: half.filter((k) => paid.has(k)),
+    unpaidHalves: half.filter((k) => !paid.has(k)),
+    unassigned: [],
+  };
+}
+
+// Merge recovered half dates into their bucket, kept in date order.
+function withHalves(dates, halves) {
+  if (!halves.length) return dates;
+  return [...dates, ...halves].sort((a, b) => {
+    const x = dateKey(a), y = dateKey(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+}
+
 /* ── per-month leave, from the cost report ────────────────────────────
    The breakdown carries no "total leave" field, but it now sends both parts
    outright as `paidLeaveDays` / `unpaidLeaveDays`, and `unpaidLeaveDays` is
@@ -507,18 +577,26 @@ export default function LeaveDetailPage() {
 
   const employeeName = d.employeeName || attendanceId || "Employee";
   const unpaidLeave = num(d.unpaidLeave);
-  const paidDates = Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [];
-  const unpaidDates = Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [];
-  /* halfDayDates is an OVERLAY on the two lists above, not a third category —
-     every date in it also appears as paid or unpaid, and marks that day as
-     counting 0.5 instead of 1. Verified against a live Q3-2026 payload: paid
-     had 4 full + 4 half = 6.0 (= paidLeave), unpaid 2 full + 5 half = 4.5,
-     less 1.5 relaxation = 3.0 (= unpaidLeave), totalling leaveTaken 10.5.
-     Rendering it as a separate list would double-count every one of them.
-     sandwichDates, by contrast, IS its own category — non-working days
-     caught between leave days and charged as leave. */
   const halfDayDates = Array.isArray(d.halfDayDates) ? d.halfDayDates : [];
   const sandwichDates = Array.isArray(d.sandwichDates) ? d.sandwichDates : [];
+  /* A half day is a 0.5-weight modifier on a paid or unpaid day, never a
+     category of its own — so each one is folded into the bucket it belongs
+     to and `halfDayDates` stays purely the marker that says "this one counts
+     0.5". Which bucket that is has to be recovered now that the report sends
+     them disjoint from both lists — see assignHalfDays. Once merged, the
+     chip underline and the calendar's half-fill work unchanged.
+
+     sandwichDates, by contrast, IS its own category — non-working days
+     caught between leave days and charged as leave. */
+  const halfSplit = assignHalfDays(
+    halfDayDates, d.paidLeaveDates, d.unpaidLeaveDates, d.paidLeave
+  );
+  const paidDates = withHalves(
+    Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [], halfSplit.paidHalves
+  );
+  const unpaidDates = withHalves(
+    Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [], halfSplit.unpaidHalves
+  );
 
   /* How many relaxation days are already granted this quarter. There is no
      longer a per-quarter cap to show alongside it: the report used to carry
@@ -581,6 +659,10 @@ export default function LeaveDetailPage() {
         <div className="ld-head-main">
           <div className="ld-eyebrow">{project?.projectName || "Project"}</div>
           <h1 className="uidai-pmis-title ld-title">{loading ? "Loading…" : employeeName}</h1>
+          {/* Directly under the name, the way the Attendance table's name cell
+              carries it — it identifies the person, so it belongs with them
+              rather than filed among the quarter's figures below. */}
+          {d.designation && <div className="ld-desig">{d.designation}</div>}
           <p className="uidai-pmis-subtitle ld-subtitle">
             Quarterly leave detail · Attendance ID {show(d.attendanceId || attendanceId)}
             {" · "}Q{show(d.quarter || quarter)} {show(d.year || year)}
@@ -694,11 +776,9 @@ export default function LeaveDetailPage() {
             <div className="uidai-pmis-card ld-card">
               <div className="ld-info">
                 <InfoItem tone="blue" icon={<FiUser />} label="Employee Name" value={show(d.employeeName)} />
-                {/* Only when the payload carries it — this endpoint isn't the
-                    one the attendance report comes from, so it may not. */}
-                {d.designation && (
-                  <InfoItem tone="purple" icon={<FiLayers />} label="Designation" value={show(d.designation)} />
-                )}
+                {/* Designation now sits under the employee name in the header
+                    — it names the person, not the quarter, and repeating it
+                    here would be the same fact in two places on one screen. */}
                 <InfoItem tone="purple" icon={<FiHash />} label="Attendance ID" value={show(d.attendanceId || attendanceId)} />
                 <InfoItem tone="blue" icon={<FiBriefcase />} label="Project Name" value={show(d.projectName || project?.projectName)} />
                 <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={show(d.joiningDate)} />
@@ -714,6 +794,7 @@ export default function LeaveDetailPage() {
             paidDates={paidDates}
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
+            unassignedHalves={halfSplit.unassigned}
             sandwichDates={sandwichDates}
             year={d.year || year}
             quarter={d.quarter || quarter}
@@ -936,7 +1017,7 @@ function DateList({ color, chipBg, title, dates, note, halfSet }) {
    TEMPORARY — the three candidates. Keep one, delete the rest.
    ═══════════════════════════════════════════════════════════════════ */
 
-function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
+function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, halfOnlySet }) {
   const cells = buildMonthGrid(year, month);
   return (
     <div className="ld-cal">
@@ -951,8 +1032,11 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
           const paid = paidSet.has(key);
           const unpaid = unpaidSet.has(key);
           const sandwich = sandwichSet.has(key);
-          // A half day is a modifier on paid/unpaid, never a state of its own.
-          const half = halfSet.has(key) && (paid || unpaid);
+          /* A half day is a modifier on paid/unpaid, never a state of its own
+             — except in the fallback where the report left its bucket
+             unrecoverable, which is the one case it has to stand alone. */
+          const halfOnly = !!halfOnlySet?.has(key) && !paid && !unpaid;
+          const half = (halfSet.has(key) && (paid || unpaid)) || halfOnly;
           // Monday-first grid: indexes 5 and 6 of each week are Sat/Sun.
           const weekend = i % 7 >= 5;
           /* Sandwich is checked before the weekend fallback: a sandwich day IS
@@ -961,11 +1045,13 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
           const cls = paid ? " is-paid"
             : unpaid ? " is-unpaid"
             : sandwich ? " is-sandwich"
+            : halfOnly ? " is-halfonly"
             : weekend ? " is-weekend" : "";
           // "Taken Leave" rather than "Paid Leave", matching the legend below.
           const kind = paid ? "Taken Leave"
             : unpaid ? "Unpaid Leave"
-            : sandwich ? "Sandwich Leave" : "";
+            : sandwich ? "Sandwich Leave"
+            : halfOnly ? "Half day — paid or unpaid not stated" : "";
           const title = kind
             ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}`
             : key;
@@ -982,17 +1068,25 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet }) {
 
 /* Candidate A — quarter calendar. The only view where a weekend caught
    between two unpaid days is visible, which is what sandwich leave is. */
-function QuarterCalendar({ year, quarter, paidDates, unpaidDates, halfDayDates = [], sandwichDates = [] }) {
+function QuarterCalendar({
+  year, quarter, paidDates, unpaidDates,
+  halfDayDates = [], sandwichDates = [], unassignedHalves = [],
+}) {
   const q = Number(quarter) || 1;
   const yr = Number(year) || new Date().getFullYear();
   const paidSet = new Set(paidDates.map(dateKey).filter(Boolean));
   const unpaidSet = new Set(unpaidDates.map(dateKey).filter(Boolean));
   const halfSet = new Set(halfDayDates.map(dateKey).filter(Boolean));
   const sandwichSet = new Set(sandwichDates.map(dateKey).filter(Boolean));
+  /* Half days whose bucket couldn't be recovered still get marked, in a
+     neutral tone — an unclassified leave day is a day the reader needs to
+     see, and leaving the cell blank is the failure this whole change fixes. */
+  const halfOnlySet = new Set(unassignedHalves.map(dateKey).filter(Boolean));
   const months = [0, 1, 2].map((i) => (q - 1) * 3 + 1 + i);
 
-  const matched = paidSet.size + unpaidSet.size + sandwichSet.size;
-  const total = paidDates.length + unpaidDates.length + sandwichDates.length;
+  const matched = paidSet.size + unpaidSet.size + sandwichSet.size + halfOnlySet.size;
+  const total =
+    paidDates.length + unpaidDates.length + sandwichDates.length + unassignedHalves.length;
   const hasHalf = halfSet.size > 0;
 
   return (
@@ -1007,6 +1101,7 @@ function QuarterCalendar({ year, quarter, paidDates, unpaidDates, halfDayDates =
             unpaidSet={unpaidSet}
             halfSet={halfSet}
             sandwichSet={sandwichSet}
+            halfOnlySet={halfOnlySet}
           />
         ))}
       </div>
@@ -1032,7 +1127,9 @@ function QuarterCalendar({ year, quarter, paidDates, unpaidDates, halfDayDates =
 }
 
 /* Candidate B — the current chip lists, foldable. */
-function DateChipLists({ paidDates, unpaidDates, note, halfSet, sandwichDates = [] }) {
+function DateChipLists({
+  paidDates, unpaidDates, note, halfSet, sandwichDates = [], unassignedHalves = [],
+}) {
   return (
     <div className="ld-dates">
       <DateList color="#2a78d6" chipBg="#eaf2fd" title="Paid Leave Dates" dates={paidDates} halfSet={halfSet} />
@@ -1042,6 +1139,19 @@ function DateChipLists({ paidDates, unpaidDates, note, halfSet, sandwichDates = 
       {sandwichDates.length > 0 && (
         <DateList color="#8a6d3b" chipBg="#f8f3ea" title="Sandwich Leave Dates" dates={sandwichDates} />
       )}
+      {/* Only when the paid/unpaid split couldn't be recovered — see
+          assignHalfDays. Neutral on purpose: showing these dates under a
+          colour we'd be guessing at is worse than showing them uncoloured,
+          and dropping them (what happens today) is worse than both. */}
+      {unassignedHalves.length > 0 && (
+        <DateList
+          color={C.muted}
+          chipBg="#eef2f7"
+          title="Half Days (0.5)"
+          dates={unassignedHalves}
+          note="These count 0.5 each. The report didn't say whether they're paid or unpaid."
+        />
+      )}
     </div>
   );
 }
@@ -1050,7 +1160,7 @@ function DateChipLists({ paidDates, unpaidDates, note, halfSet, sandwichDates = 
    it goes when one is picked. */
 function LeaveDatesSection({
   paidDates, unpaidDates, note, year, quarter,
-  halfDayDates = [], sandwichDates = [],
+  halfDayDates = [], sandwichDates = [], unassignedHalves = [],
 }) {
   const [view, setView] = useState("calendar");
   const [open, setOpen] = useState(true);
@@ -1061,7 +1171,8 @@ function LeaveDatesSection({
     () => new Set(halfDayDates.map(dateKey).filter(Boolean)),
     [halfDayDates]
   );
-  const totalDates = paidDates.length + unpaidDates.length + sandwichDates.length;
+  const totalDates =
+    paidDates.length + unpaidDates.length + sandwichDates.length + unassignedHalves.length;
 
   const VIEWS = [
     ["calendar", "A · Calendar"],
@@ -1096,6 +1207,7 @@ function LeaveDatesSection({
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
             sandwichDates={sandwichDates}
+            unassignedHalves={unassignedHalves}
           />
         </div>
       )}
@@ -1120,6 +1232,7 @@ function LeaveDatesSection({
                 paidDates={paidDates}
                 unpaidDates={unpaidDates}
                 sandwichDates={sandwichDates}
+                unassignedHalves={unassignedHalves}
                 halfSet={halfSet}
                 note={note}
               />
@@ -1160,6 +1273,18 @@ function LeaveDatesSection({
                     <>
                       <div style={{ height: 22 }} />
                       <DateList color="#8a6d3b" chipBg="#f8f3ea" title="Sandwich Leave Dates" dates={sandwichDates} />
+                    </>
+                  )}
+                  {unassignedHalves.length > 0 && (
+                    <>
+                      <div style={{ height: 22 }} />
+                      <DateList
+                        color={C.muted}
+                        chipBg="#eef2f7"
+                        title="Half Days (0.5)"
+                        dates={unassignedHalves}
+                        note="These count 0.5 each. The report didn't say whether they're paid or unpaid."
+                      />
                     </>
                   )}
                 </div>
@@ -2000,6 +2125,10 @@ const LD_CSS = `
 .ld-head-main { min-width: 0; }
 .ld-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: ${C.muted}; margin-bottom: 7px; }
 .ld-title { margin: 0 0 5px; letter-spacing: -.022em; }
+/* Matches the Attendance table's .att-desig, so the same fact reads the same
+   on both screens. */
+.ld-desig { font-size: 13px; color: ${C.faint}; font-weight: 400;
+  margin: -2px 0 5px; line-height: 1.35; }
 .ld-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; font-size: 13.5px; }
 .ld-head-actions { display: flex; align-items: center; gap: 10px; }
 .ld-close { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; border: 1px solid ${C.border}; background: #fff; color: ${C.muted}; cursor: pointer; transition: all .15s ease; }
@@ -2168,6 +2297,9 @@ const LD_CSS = `
 }
 .ld-cal-cell.is-half.is-paid { --half-fill: #2a78d6; --half-rest: #e8f0fb; color: ${C.ink}; }
 .ld-cal-cell.is-half.is-unpaid { --half-fill: #e34948; --half-rest: #fdeaea; color: ${C.ink}; }
+/* Bucket unrecoverable — marked, but in the neutral tone, so the day is
+   never lost while the colour still doesn't claim a category. */
+.ld-cal-cell.is-half.is-halfonly { --half-fill: #6b7a90; --half-rest: #eef2f7; color: ${C.ink}; }
 .ld-cal-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px;
   padding-top: 14px; border-top: 1px solid ${C.divider};
   font-size: 12px; color: ${C.muted}; }
