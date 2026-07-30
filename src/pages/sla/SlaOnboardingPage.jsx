@@ -976,6 +976,11 @@ export default function SlaOnboardingPage() {
                 ? CONTRACTS_BASE + "/api/v3/sla-masters/" + editingId
                 : CONTRACTS_BASE + "/api/v3/sla-masters/from-rfp";
             const method = editingId ? "PATCH" : "POST";
+            /* /from-rfp (create) and PATCH /sla-masters/{id} (edit) speak
+               DIFFERENT field names for the same four values. Everything above
+               — validation, the RFP row widgets — works in the internal (edit)
+               names, so translate once, here, only on the create path (#349). */
+            const wire = editingId ? payload : _toFromRfpPayload(payload);
             // The file-picker widget stashes selected files on window.__currentPayload__
             // during _collectPayload() (they can't ride inside the JSON object).
             const files = (window.__currentPayload__ && window.__currentPayload__.__files) || [];
@@ -983,13 +988,13 @@ export default function SlaOnboardingPage() {
                 let resp;
                 if (files.length && !editingId) {
                     const fd = new FormData();
-                    fd.append("payload", JSON.stringify(payload));
+                    fd.append("payload", JSON.stringify(wire));
                     for (const f of files) fd.append("files", f);
                     resp = await authorizedFetch(url, { method, headers: { Accept: "application/json" }, body: fd });
                 } else {
                     resp = await authorizedFetch(url, {
                         method, headers: { "Content-Type": "application/json", Accept: "application/json" },
-                        body: JSON.stringify(payload),
+                        body: JSON.stringify(wire),
                     });
                 }
                 if (!resp.ok) {
@@ -1008,6 +1013,36 @@ export default function SlaOnboardingPage() {
             } catch (e) {
                 toast("Network error", e.message, "error");
             }
+        }
+
+        /* ── internal (edit) names → /from-rfp (create) names ──────────────
+           The create endpoint silently ignores unknown keys, so sending the
+           edit names saved nulls for these four fields. Mapping (#349):
+             description        → definition
+             calculation_method → calculation
+             scope_text         → scope
+             ld_computation_base→ applied_on
+           `applied_on` is always sent explicitly: the backend defaults it to
+           QUARTERLY_PAYMENT, which is wrong for Deliverable Submission (that
+           category is penalised on the deliverable cost = FIXED_AMOUNT). */
+        const _FROM_RFP_RENAMES = {
+            description: "definition",
+            calculation_method: "calculation",
+            scope_text: "scope",
+            ld_computation_base: "applied_on",
+        };
+        function _toFromRfpPayload(payload) {
+            const out = {};
+            Object.keys(payload).forEach((k) => {
+                if (k.startsWith("__")) return;          // local stash keys never go on the wire
+                out[_FROM_RFP_RENAMES[k] || k] = payload[k];
+            });
+            if (!out.applied_on) {
+                out.applied_on = payload.category_code === "DELIVERABLE_SUBMISSION"
+                    ? "FIXED_AMOUNT"
+                    : "QUARTERLY_PAYMENT";
+            }
+            return out;
         }
 
         function _collectPayload() {

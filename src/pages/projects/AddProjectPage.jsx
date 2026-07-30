@@ -42,6 +42,9 @@ function makeEmpty() {
     startDate: "",
     endDate: "",
     actualEndDate: "",
+    // Optional (#321) — the date the contract was signed. Independent of the
+    // expected/actual schedule dates, so it is never validated against them.
+    contractSigningDate: "",
     auditLogs: [],
     milestones: [],
     vendors: [],
@@ -82,6 +85,7 @@ function normalizeFormShape(maybeDraft) {
     startDate: maybeDraft.startDate || "",
     endDate: maybeDraft.endDate || "",
     actualEndDate: maybeDraft.actualEndDate || "",
+    contractSigningDate: maybeDraft.contractSigningDate || "",
     vendors: normalizeVendorNames(maybeDraft.vendors),
     milestones: safeArray(maybeDraft.milestones),
     auditLogs: safeArray(maybeDraft.auditLogs),
@@ -367,6 +371,11 @@ export default function AddProjectPage() {
     fd.append("ownerOther", ownerRequiresOther ? (form.ownerOther || "").trim() : "");
     fd.append("startDate", toIsoStart(form.startDate) || "");
     fd.append("endDate", toIsoEnd(form.endDate) || "");
+    // Optional (#321) — omit the field entirely when blank so a PATCH from the
+    // Back-navigation path can't blank out an already-saved signing date.
+    if (form.contractSigningDate) {
+      fd.append("contractSigningDate", toIsoStart(form.contractSigningDate));
+    }
     fd.append("parentId", "");
     // Backend expects `vendorIds` as a single form field whose value is
     // a JSON-encoded array string (not repeated entries). Empty list →
@@ -614,6 +623,18 @@ export default function AddProjectPage() {
             {errors.endDate && (
               <div className="uidai-field-error">{errors.endDate}</div>
             )}
+          </div>
+
+          {/* Optional (#321). Not tied to the schedule — a contract is often
+              signed before the expected start date, so no min/max here. */}
+          <div className="uidai-field">
+            <label className="uidai-field__label">Contract Signing Date</label>
+            <input
+              className="uidai-input"
+              type="date"
+              value={form.contractSigningDate || ""}
+              onChange={(e) => update({ contractSigningDate: e.target.value })}
+            />
           </div>
 
           <div className="uidai-field">

@@ -227,6 +227,16 @@ export const ENDPOINTS = {
        { code, name, method: phase|milestone|time, variant: evenly|custom,
        position } — the Finance page groups the picker by method × variant. */
     carryForwardMethods: '/master/api/v3/master/carry-forward-methods',
+    /* Designation catalog — the per-org roles a planned-resource row is
+       priced from. Rows are snake_case (this is the /master gateway):
+         { id, code, name, vendor_id, monthly_rate, active }
+       `vendor_id` is the organization (masters.vendors.id), so the list is
+       always fetched per-org; `monthly_rate` is per MONTH and is what the
+       planned-resources cost is computed from. */
+    designations: (vendorId) =>
+      `/master/api/v3/master/designations${vendorId ? `?vendor_id=${enc(vendorId)}` : ''}`,
+    designationCreate: '/master/api/v3/master/designations/create',
+    designationUpdate: (id) => `/master/api/v3/master/designations/${enc(id)}`,
   },
 
   resourceTypes: {
@@ -311,6 +321,26 @@ export const ENDPOINTS = {
     frequency: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/frequency`,
     phaseFrequency: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/frequency`,
     ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
+    /* Planned resources — the per-designation deployment rows a
+       resource-type phase's resource cost is built from, instead of a typed
+       amount. Each row attaches to a `resource_cost` cost item via
+       costItemId; the backend prices it as
+         monthlyRateSnapshot × durationMonths × quantity
+       and returns those plus `computedCost` read-only. Several rows may share
+       a designation — they all accumulate, and the SUM of a cost item's rows
+       IS the phase's resource cost.
+         GET  planned-resources                    → list for the project
+         POST planned-resources { costItemId, designationId, quantity,
+                                  deployStart, deployEnd }  (dates YYYY-MM-DD) */
+    plannedResources: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/planned-resources`,
+  },
+
+  /* PATCH / DELETE on a single planned-resource row — the id is a global
+     UUID, so these are not project-scoped. PATCH accepts any of
+     { designationId, quantity, deployStart, deployEnd }. */
+  plannedResources: {
+    update: (id) => `/projects/api/v3/planned-resources/${enc(id)}`,
+    remove: (id) => `/projects/api/v3/planned-resources/${enc(id)}`,
   },
 
   /* Payment-module endpoints not scoped to a project. Cost-item and

@@ -110,6 +110,9 @@ function mapApiProject(p) {
        general `attachments` list below. */
     actualStartRemarks: p.actualStartRemarks || "",
     actualEndDate: stripTime(p.actualEndDate),
+    /* When the contract was signed (#321). Optional and unrelated to the
+       schedule dates — a contract is usually signed before work starts. */
+    contractSigningDate: stripTime(p.contractSigningDate),
     vendors: Array.isArray(p.vendors) ? p.vendors : [],
     parentId: p.parentId || null,
     /* Leave / attendance configuration bag — surfaced/edited via the
@@ -160,6 +163,7 @@ function mergeIntoStore(mapped) {
           actualStartDate: mapped.actualStartDate,
           actualStartRemarks: mapped.actualStartRemarks,
           actualEndDate: mapped.actualEndDate,
+          contractSigningDate: mapped.contractSigningDate,
           vendors: mapped.vendors,
           parentId: mapped.parentId,
           config: mapped.config,
@@ -484,6 +488,7 @@ export default function ProjectDetailsPage() {
       actualStartDate: project.actualStartDate || "",
       actualStartRemarks: project.actualStartRemarks || "",
       actualEndDate: project.actualEndDate || "",
+      contractSigningDate: project.contractSigningDate || "",
       vendors: vendorsToNames(project.vendors)
     });
     // Reseeding the form means the project just changed — clear any
@@ -495,6 +500,7 @@ export default function ProjectDetailsPage() {
     project && project.actualStartDate,
     project && project.actualStartRemarks,
     project && project.actualEndDate,
+    project && project.contractSigningDate,
     project && project.owner,
     project && project.ownerOther,
     editing
@@ -552,7 +558,9 @@ export default function ProjectDetailsPage() {
       endDate: toIsoDate(form.endDate),
       actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
       actualStartRemarks: (form.actualStartRemarks || "").trim(),
-      actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null
+      actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
+      // #321 — null clears it, which is what an emptied date field should do.
+      contractSigningDate: form.contractSigningDate ? toIsoStartDate(form.contractSigningDate) : null
     };
     if (project.parentId) payload.parent_id = project.parentId;
 
@@ -762,6 +770,7 @@ export default function ProjectDetailsPage() {
       target.ownerOther = ownerRequiresOther ? (form.ownerOther || "").trim() : "";
       target.startDate = form.startDate;
       target.endDate = form.endDate;
+      target.contractSigningDate = form.contractSigningDate || "";
       target.vendors = rebuiltVendors;
       addAudit(target, "Update Project Details", before, deepClone(target));
       try { if (projectsStore.refresh) projectsStore.refresh(); } catch (e) { }
@@ -1407,6 +1416,18 @@ export default function ProjectDetailsPage() {
               type="date"
               value={form.actualEndDate}
               onChange={(e) => setForm((f) => ({ ...f, actualEndDate: e.target.value }))}
+              disabled={!editing}
+            />
+          </div>
+          {/* Contract signing date (#321) — optional, and deliberately not
+              range-checked against the schedule dates. */}
+          <div className="uidai-field">
+            <label className="uidai-field__label">Contract Signing Date</label>
+            <input
+              className="uidai-input"
+              type="date"
+              value={form.contractSigningDate || ""}
+              onChange={(e) => setForm((f) => ({ ...f, contractSigningDate: e.target.value }))}
               disabled={!editing}
             />
           </div>

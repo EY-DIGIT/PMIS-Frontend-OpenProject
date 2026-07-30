@@ -16,10 +16,6 @@ import {
   FiPlay, FiFlag, FiLayers, FiInfo, FiUmbrella,
   FiShield, FiCreditCard, FiPieChart, FiClock, FiUploadCloud, FiDownload,
 } from "react-icons/fi";
-/* Feather has no rupee glyph, so the cost card's icon comes from Lucide —
-   Feather's successor, same grid and stroke width, so it doesn't read as a
-   different icon set next to the Fi icons above. */
-import { LuIndianRupee } from "react-icons/lu";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { getToken } from "../../api/auth";
@@ -215,21 +211,28 @@ function buildMonthGrid(year, month) {
   return cells;
 }
 
-/* ── per-month leave, derived from the cost report ────────────────────
-   The monthly breakdown carries no "total leave" field, but it carries the
-   parts, and they reconcile exactly:
+/* ── per-month leave, from the cost report ────────────────────────────
+   The breakdown carries no "total leave" field, but it now sends both parts
+   outright as `paidLeaveDays` / `unpaidLeaveDays`, and `unpaidLeaveDays` is
+   the very figure the deduction is charged on:
 
-     effectivePaidDays = presentDays + paidLeaveDaysApplied + relaxationDaysApplied
-     unpaid            = workingDays − effectivePaidDays
-     deductedAmount    = unpaid × perDayRate
+     deductedAmount = unpaidLeaveDays × perDayRate
 
-   Verified against a live Q3-2026 payload: July's 0.5 unpaid day × ₹4385.83
-   is exactly its ₹2192.91 deduction, and the same holds for the other two
-   months. So `unpaid` here is not an estimate — it is the very figure the
-   deduction is charged on. */
+   Verified against a live Q1-2026 payload: January's 1 unpaid day × ₹6401.10
+   is exactly its ₹6401.10 deduction, and March matches the same way.
+
+   Older payloads sent neither field and had to be derived from
+   `effectivePaidDays` instead — that path is kept as a fallback. Reading the
+   old names first was silently wrong against the current shape: both resolved
+   to 0, so `unpaid` came out as the month's entire workingDays (21 instead
+   of 1 for January). */
 function monthLeave(m) {
-  const paid = num(m.paidLeaveDaysApplied);
-  const unpaid = Math.max(0, num(m.workingDays) - num(m.effectivePaidDays));
+  const paid =
+    m.paidLeaveDays != null ? num(m.paidLeaveDays) : num(m.paidLeaveDaysApplied);
+  const unpaid =
+    m.unpaidLeaveDays != null
+      ? num(m.unpaidLeaveDays)
+      : Math.max(0, num(m.workingDays) - num(m.effectivePaidDays));
   return { paid, unpaid, total: paid + unpaid };
 }
 
@@ -517,16 +520,13 @@ export default function LeaveDetailPage() {
   const halfDayDates = Array.isArray(d.halfDayDates) ? d.halfDayDates : [];
   const sandwichDates = Array.isArray(d.sandwichDates) ? d.sandwichDates : [];
 
-  // Relaxation is capped per quarter. The cost report carries that cap as
-  // relaxationDaysApplied, stamped on the month it was computed for and 0 on
-  // the rest — so the quarter's cap is the highest value across the months,
-  // not their sum. d.relaxationLeave is how many of those days are used.
-  const relaxCap = Math.max(
-    0,
-    ...(costReport?.monthlyBreakdown || []).map((m) => num(m.relaxationDaysApplied))
-  );
+  /* How many relaxation days are already granted this quarter. There is no
+     longer a per-quarter cap to show alongside it: the report used to carry
+     one as `relaxationDaysApplied`, which the current payload doesn't send at
+     all. The real constraint now lives in the eligible-dates endpoint the
+     modal calls — a date is relaxable or it isn't — so a cap derived here
+     would only ever have read 0. */
   const relaxUsed = num(d.relaxationLeave);
-  const relaxLeft = relaxCap - relaxUsed;
 
   // The image filed with the relaxation request, if one was ever uploaded.
   // Re-fetched after a submit so a freshly attached document appears at once.
@@ -589,7 +589,7 @@ export default function LeaveDetailPage() {
         <div className="ld-head-actions">
           {canRelax && !loading && !error && !paramError && (
             <button className="ld-btn ld-btn--primary" onClick={() => setRelaxOpen(true)}>
-              Relaxation{relaxCap > 0 ? ` (${dayCount(relaxLeft)} left)` : ""}
+              Relaxation
             </button>
           )}
           <button className="ld-close" onClick={() => navigate(-1)} aria-label="Close">
@@ -679,11 +679,6 @@ export default function LeaveDetailPage() {
                   label={c.label}
                   value={show(d[c.key])}
                   hint={HINTS[c.key]}
-                  sub={
-                    c.key === "relaxationLeave" && relaxCap > 0
-                      ? `${relaxUsed} of ${relaxCap} used · ${relaxLeft} left`
-                      : null
-                  }
                 />
               ))}
             </div>
@@ -1180,18 +1175,128 @@ function LeaveDatesSection({
 /* =====================================================================
    Quarterly Cost Report
    GET /api/attendance/cost/quarterly?resourceId=&year=&quarter=
-   Shape: { attendanceId, employeeName, projectId, period, totalCost,
-            monthlyBreakdown: [{ period, workingDays, presentDays,
-              relaxationDaysApplied, attendancePercentage, monthlyRate,
-              cost, rateYear, ... }] }
+   Shape: { attendanceId, employeeName, projectId, period, calendarDays,
+            plannedPeriodCost, perDayCost, unpaidLeaveDays, paidCalendarDays,
+            deductedAmount, periodCost, relaxationDays, relaxationCost,
+            totalCost,
+            monthlyBreakdown: [{ period, rateYear, workingDays, presentDays,
+              halfDays, absentDays, paidLeaveDays, calendarDays,
+              unpaidLeaveDays, paidCalendarDays, monthlyRate, perDayRate,
+              deductedAmount, cost, ... }] }
+
+   The money is charged on CALENDAR days, not working days:
+     perDayCost     = plannedPeriodCost ÷ calendarDays
+     deductedAmount = unpaidLeaveDays × perDayCost
+     totalCost      = plannedPeriodCost − deductedAmount
+   and the same chain per month against monthlyRate ÷ calendarDays. The
+   working-day figures (workingDays / presentDays / absentDays) describe
+   attendance and are on a different denominator — see the grouped headers
+   on the table below.
+
    Falls back to a generic key/value + JSON dump for any extra top-level
    fields the API adds later, so nothing is silently dropped.
    ===================================================================== */
 const COST_KNOWN_KEYS = new Set([
   "attendanceId", "employeeName", "projectId", "period", "totalCost", "monthlyBreakdown",
+  // Surfaced by the cost-chain strip rather than as loose cards.
+  "calendarDays", "plannedPeriodCost", "perDayCost", "unpaidLeaveDays",
+  "paidCalendarDays", "deductedAmount", "periodCost",
   // Rendered as a footer row in the table rather than as loose cards below it.
-  "relaxationAmount", "relaxationDays",
+  // `relaxationCost` is the current name; `relaxationAmount` the older one.
+  "relaxationCost", "relaxationAmount", "relaxationDays",
 ]);
+
+/* ── the quarter's money, as one sentence ─────────────────────────────
+   The payload is a derivation chain, and showing every link at equal weight
+   — four stat cards in a row — left the reader to work out for themselves
+   that Planned minus Deducted is where Total came from. Here the arithmetic
+   runs in the order it happens, and the meter underneath shows how much of
+   the plan survived as billable.
+
+   The working (calendar days, the per-day rate) is what a disputed figure
+   needs and nothing a satisfied reader wants, so it starts closed. Every
+   figure is written out as text either way — the meter is a second reading
+   of numbers already on screen, never the only way to reach one. */
+function ChainTerm({ label, value, total }) {
+  return (
+    <div className={`ld-chain-term${total ? " is-total" : ""}`}>
+      <div className="ld-chain-lbl">{label}</div>
+      <div className="ld-chain-val">{value}</div>
+    </div>
+  );
+}
+
+function CostChain({
+  planned, deducted, relaxation, relaxationDays, total,
+  calendarDays, paidCalendarDays, unpaidDays, perDayCost,
+}) {
+  const billablePct =
+    planned > 0 ? Math.min(100, Math.max(0, (total / planned) * 100)) : 0;
+  // The working only reads as an explanation when both halves of it are real.
+  const showWorking = num(calendarDays) > 0 && num(perDayCost) > 0;
+
+  return (
+    <div className="uidai-pmis-card ld-chain">
+      <div className="ld-chain-row">
+        <ChainTerm label="Planned" value={money(planned)} />
+        <span className="ld-chain-op" aria-hidden="true">−</span>
+        <ChainTerm label="Deducted" value={money(deducted)} />
+        {relaxation > 0 && (
+          <>
+            <span className="ld-chain-op" aria-hidden="true">+</span>
+            <ChainTerm
+              label={
+                relaxationDays > 0
+                  ? `Relaxation · ${dayCount(relaxationDays)} ${relaxationDays === 1 ? "day" : "days"}`
+                  : "Relaxation"
+              }
+              value={money(relaxation)}
+            />
+          </>
+        )}
+        <span className="ld-chain-op" aria-hidden="true">=</span>
+        <ChainTerm label="Billable" value={money(total)} total />
+      </div>
+
+      {/* Meter, not a two-slice pie: this is one ratio against a limit. The
+          track is a lighter step of the fill's own hue, so the whole bar
+          reads as the plan and the fill as the part of it that survived. */}
+      {planned > 0 && (
+        <>
+          <div
+            className="ld-chain-meter"
+            role="img"
+            aria-label={`${billablePct.toFixed(1)}% of the planned cost is billable`}
+          >
+            <div className="ld-chain-meter-fill" style={{ width: `${billablePct}%` }} />
+          </div>
+          <div className="ld-chain-meter-cap">
+            {billablePct.toFixed(1)}% of the planned cost is billable
+          </div>
+        </>
+      )}
+
+      {showWorking && (
+        <details className="ld-chain-working">
+          <summary>How the deduction was worked out</summary>
+          <p>
+            {money(planned)} ÷ {dayCount(calendarDays)} calendar days
+            = <strong>{money(perDayCost)}</strong> a day.
+            {" "}
+            {dayCount(unpaidDays)} unpaid {num(unpaidDays) === 1 ? "day" : "days"}
+            {" "}× {money(perDayCost)} = <strong>{money(deducted)}</strong> withheld,
+            leaving {dayCount(paidCalendarDays)} of {dayCount(calendarDays)} days paid.
+          </p>
+          <p className="ld-chain-working-note">
+            The cost is charged on calendar days. The working-day figures in the
+            table below (working, present, leave) describe attendance and sit on a
+            different denominator — only the unpaid-day count crosses between them.
+          </p>
+        </details>
+      )}
+    </div>
+  );
+}
 
 function CostReportSection({ loading, error, report, totals }) {
   if (loading) return <div className="ld-muted">Loading cost report…</div>;
@@ -1218,25 +1323,36 @@ function CostReportSection({ loading, error, report, totals }) {
      reach the ₹2,88,485.21 Total Cost. Shown as a card beneath the table it
      read as an unrelated statistic and left the total looking wrong; as the
      row directly above the total, the arithmetic closes. */
-  const relaxationAmount = num(report.relaxationAmount);
+  /* Named `relaxationCost` in the current payload, `relaxationAmount` in
+     older ones. Reading only the old name meant these rows silently never
+     rendered — invisible while the figure is 0, but it would have left the
+     Cost column not adding up to Total Cost the moment one was granted. */
+  const relaxationAmount =
+    report.relaxationCost != null ? num(report.relaxationCost) : num(report.relaxationAmount);
   const relaxationDays = num(report.relaxationDays);
   const monthsSubtotal = months.reduce((t, m) => t + num(m.cost), 0);
 
+  /* Older payloads omit plannedPeriodCost; the chain still closes without it
+     because it's whatever the total was worked back from. */
+  const totalCost = num(report.totalCost);
+  const planned =
+    report.plannedPeriodCost != null
+      ? num(report.plannedPeriodCost)
+      : totalCost + totalDeducted - relaxationAmount;
+
   return (
     <>
-      {/* Summary cards */}
-      <div className="ld-grid" style={{ marginBottom: 18 }}>
-        <StatCard tone="blue" icon={<FiCalendar />} label="Period" value={show(report.period)}
-          hint="The quarter this cost report covers." />
-        <StatCard tone="green" icon={<LuIndianRupee />} label="Total Cost" value={money(report.totalCost)}
-          hint="Billable cost for the quarter — the sum of each month's cost after deductions." />
-        <StatCard tone="red" icon={<FiFileText />} label="Total Deducted" value={money(totalDeducted)}
-          hint="Amount withheld across the quarter for absent and unpaid days." />
-        {/* <StatCard tone="purple" icon={<FiLayers />} label="Months Covered" value={show(months.length)}
-          hint="How many months of the quarter are included in the breakdown below." /> */}
-          <StatCard tone="purple" icon={<FiLayers />} label="Planned Period Cost" value={show(report.plannedPeriodCost)}
-          hint="How many months of the quarter are included in the breakdown below." />
-      </div>
+      <CostChain
+        planned={planned}
+        deducted={totalDeducted}
+        relaxation={relaxationAmount}
+        relaxationDays={relaxationDays}
+        total={totalCost}
+        calendarDays={report.calendarDays}
+        paidCalendarDays={report.paidCalendarDays}
+        unpaidDays={report.unpaidLeaveDays}
+        perDayCost={report.perDayCost}
+      />
 
       {/* Monthly breakdown table */}
       {months.length > 0 && (
@@ -1244,6 +1360,16 @@ function CostReportSection({ loading, error, report, totals }) {
           <div className="ld-costtable-wrap">
           <table className="ld-costtable">
             <thead>
+              {/* The two halves of this table count in different units —
+                  attendance in working days, money in calendar days. Left
+                  ungrouped, a reader naturally tries to reconcile 21 working
+                  days against a rate divided by 31, and can't. The band says
+                  outright that they don't meet. */}
+              <tr className="ld-costtable-grouprow">
+                <th colSpan={2} />
+                <th colSpan={3} className="ld-costtable-group">Attendance · working days</th>
+                <th colSpan={5} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
+              </tr>
               <tr>
                 <th title="Calendar month this row covers.">Period</th>
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
@@ -1251,10 +1377,11 @@ function CostReportSection({ loading, error, report, totals }) {
                 <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
                 {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
+                <th className="ld-num" title="Days in the calendar month — the denominator the per-day rate is worked out on.">Calendar Days</th>
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
-                <th className="ld-num" title="Monthly rate divided by the working days in the month.">Per Day Rate</th>
+                <th className="ld-num" title="Monthly rate divided by the calendar days in the month — not the working days. January: ₹1,98,434 ÷ 31 = ₹6,401.10.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
-                <th className="ld-num" title="Amount withheld for absent and unpaid days.">Deducted Amount</th>
+                <th className="ld-num" title="Unpaid days for the month charged at the per-day rate. This is the one figure that crosses from the attendance half of the table into the cost half.">Deducted Amount</th>
                 <th className="ld-num" title="Monthly rate minus the deducted amount — what is billable for the month.">Cost</th>
               </tr>
             </thead>
@@ -1284,29 +1411,33 @@ function CostReportSection({ loading, error, report, totals }) {
                       {pct(m.attendancePercentage)}
                     </span>
                   </td> */}
+                  <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
                   <td className="ld-num">{money(m.monthlyRate)}</td>
 
                   <td className="ld-num">{money(m.perDayRate)}</td>
                   {/* <td className="ld-num ld-costtable-cost">{money(m.halfDayAmount)}</td> */}
-                  <td className="ld-num ld-costtable-cost">{money(m.deductedAmount)}</td>
-                                    <td className="ld-num">{money(m.cost)}</td>
+                  {/* The accent belongs on Cost, the column the Total Cost row
+                      sits under — it was on Deducted Amount, so the emphasised
+                      column and the total it keys off were a column apart. */}
+                  <td className="ld-num">{money(m.deductedAmount)}</td>
+                  <td className="ld-num ld-costtable-cost">{money(m.cost)}</td>
                 </tr>
                 );
               })}
             </tbody>
             <tfoot>
-              {/* 8 = the nine body columns minus the Cost column these figures
+              {/* 9 = the ten body columns minus the Cost column these figures
                   sit under. Bump it if a column is added — or restored: the
                   commented-out Attendance % and HalfDay Amount columns each
                   need a +1 here when they come back. */}
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={8} className="ld-costtable-totallbl">Subtotal</td>
+                    <td colSpan={9} className="ld-costtable-totallbl">Subtotal</td>
                     <td className="ld-num">{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={8} className="ld-costtable-totallbl">
+                    <td colSpan={9} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -2076,6 +2207,48 @@ const LD_CSS = `
 
 /* cost report */
 
+/* ── cost chain ───────────────────────────────────────────────────────
+   Planned − Deducted [+ Relaxation] = Billable, read left to right. The
+   operators are real glyphs at full size: shrinking them to punctuation
+   loses the only cue that says these figures are one calculation and not
+   four unrelated cards. */
+.ld-chain { border: 1px solid ${C.border}; padding: 18px 20px; margin-bottom: 18px; }
+.ld-chain-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 14px; }
+.ld-chain-op { font-size: 19px; font-weight: 400; color: ${C.faint}; line-height: 30px; }
+.ld-chain-term { min-width: 0; }
+.ld-chain-lbl { font-size: 10.5px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: ${C.muted}; margin-bottom: 3px; white-space: nowrap; }
+/* Proportional figures, not tabular — these are standalone display numbers,
+   and equal-width digits make them look loose at this size. */
+.ld-chain-val { font-size: 19px; font-weight: 600; color: ${C.ink}; line-height: 1.15; white-space: nowrap; }
+.ld-chain-term.is-total .ld-chain-val { color: ${C.primary}; font-weight: 700; }
+@media (max-width: 560px) {
+  .ld-chain-row { gap: 6px 10px; }
+  .ld-chain-val { font-size: 16px; }
+  .ld-chain-op { font-size: 16px; line-height: 26px; }
+}
+
+/* Meter, not a two-slice pie — one ratio against a limit. The track is a
+   lighter step of the fill's own hue (ΔE 49 apart, checked, not eyeballed)
+   so the full bar reads as the plan. Square at the baseline, 4px rounded at
+   the data end, per the mark spec. */
+.ld-chain-meter { position: relative; height: 8px; margin: 16px 0 0; border-radius: 999px;
+  background: #c2d2ec; overflow: hidden; }
+.ld-chain-meter-fill { height: 100%; background: ${C.primary}; border-radius: 0 4px 4px 0; }
+.ld-chain-meter-cap { margin-top: 7px; font-size: 12px; color: ${C.muted}; }
+
+/* The working starts closed: it's what a disputed figure needs and nothing
+   a satisfied reader wants. */
+.ld-chain-working { margin-top: 14px; border-top: 1px solid ${C.divider}; padding-top: 12px; }
+.ld-chain-working summary { cursor: pointer; font-size: 12.5px; font-weight: 600;
+  color: ${C.primary}; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.ld-chain-working summary::-webkit-details-marker { display: none; }
+.ld-chain-working summary::before { content: "▸"; font-size: 10px; color: ${C.faint}; transition: transform .15s ease; }
+.ld-chain-working[open] summary::before { transform: rotate(90deg); }
+.ld-chain-working p { margin: 10px 0 0; font-size: 13px; line-height: 1.65; color: ${C.ink}; }
+.ld-chain-working strong { font-weight: 700; }
+.ld-chain-working-note { color: ${C.muted}; font-size: 12.5px; }
+
 /* Outer card carries the house top stripe; the inner div does the scrolling,
    so the stripe stays put when the table is scrolled sideways. */
 .ld-costtable-card { border: 1px solid ${C.border}; padding: 0; margin-bottom: 0; overflow: hidden; }
@@ -2088,7 +2261,19 @@ const LD_CSS = `
 .ld-costtable tbody tr:last-child td { border-bottom: none; }
 .ld-costtable tbody tr:hover { background: ${C.surface}; }
 .ld-costtable .ld-num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Group band — a hairline rule under each label rather than a filled strip,
+   so it separates the two halves without adding a second heavy header. */
+.ld-costtable-grouprow th { padding: 12px 14px 5px; border-bottom: none; background: #fff; }
+.ld-costtable-group { text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: ${C.faint}; }
+.ld-costtable-group::after { content: ""; display: block; height: 2px; margin-top: 5px;
+  border-radius: 2px; background: ${C.borderStrong}; }
+.ld-costtable-group--cost::after { background: ${C.primary}; opacity: .35; }
 .ld-costtable-period { font-weight: 600; }
+/* Calendar days is the denominator behind Per Day Rate, not a headline of
+   its own — present so the division is checkable, recessive so it doesn't
+   compete with the money columns beside it. */
+.ld-costtable .ld-dim { color: ${C.muted}; }
 /* Only the money column that the total keys off is accented. */
 .ld-costtable-cost { font-weight: 700; color: ${C.primary}; }
 .ld-costtable tfoot td { padding: 14px; border-top: 1px solid ${C.border}; background: ${C.surface}; }

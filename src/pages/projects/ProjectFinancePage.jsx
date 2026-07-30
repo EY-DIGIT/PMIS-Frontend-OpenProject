@@ -8,6 +8,8 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
+import { list as listVendors } from "../../api/vendors";
+import PlannedResourcesSection from "../../components/projects/PlannedResourcesSection";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 
 import "../../styles/global.css";
@@ -113,6 +115,13 @@ const sectionHead = {
 };
 
 const muted = { color: "var(--uidai-pmis-muted)" };
+
+/* Readable names for validate checks that come back with an id but no label.
+   `ld-basis-pct` and `pay-le-basis` are the two LD-allotment checks. */
+const CHECK_LABELS = {
+  "ld-basis-pct": "LD Basis % totals 100% per phase",
+  "pay-le-basis": "% of Payment is within each milestone's LD Basis %",
+};
 
 /* Disabled-looking blank cell used in the cost table for One-Time rows
    where Milestone / Phase do not apply. The grey wash + dash makes it
@@ -943,8 +952,16 @@ function CostItemActions({  isLocked, isDeleting, onEdit, onDelete }) {
 /* ──────────────────────────────────────────────────────────────────
    Edit Payment Term modal — opens when a term row's Edit button is
    clicked. Start/End dates and Cycle are read-only (managed at the
-   phase level via Apply Frequency); only % of Payment is editable.
-   Save PATCHes the term and the parent silently re-loads the page.
+   phase level via Apply Frequency); % of Payment and LD Basis % are
+   editable. Save PATCHes the term and the parent silently re-loads.
+
+   The two percentages are different things:
+     % of Payment — what this milestone is PAID this phase.
+     LD Basis %   — the milestone's allotment (its full share of the
+                    phase) and the base penalties / LD are computed on.
+   A milestone may be paid LESS than its LD Basis % (the remainder
+   carries forward) but never MORE — it is still penalised on the full
+   allotment either way. Blank LD Basis % = the even split.
    ────────────────────────────────────────────────────────────────── */
 function EditTermModal({
   open, onClose, term, onSubmit, submitting, milestoneName,
@@ -954,8 +971,22 @@ function EditTermModal({
       ? ""
       : String(term?.percentOfPayment || "")
   );
+  const [ldBasisPercent, setLdBasisPercent] = useState(
+    term?.ldBasisPercent === null || term?.ldBasisPercent === undefined
+      ? ""
+      : String(term.ldBasisPercent)
+  );
 
   if (!open || !term) return null;
+
+  /* Client-side mirror of the backend's `pay-le-basis` check, shown inline so
+     the user sees the problem before saving rather than as a Validate error. */
+  const payNum = percentOfPayment === "" ? null : Number(percentOfPayment);
+  const basisNum = ldBasisPercent === "" ? Number(term.ldBasisPercent) : Number(ldBasisPercent);
+  const payOverBasis =
+    payNum != null && Number.isFinite(payNum) &&
+    Number.isFinite(basisNum) && basisNum > 0 &&
+    payNum - basisNum > 0.001;
 
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
@@ -1001,15 +1032,37 @@ function EditTermModal({
             />
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-            <label>Interval</label>
+            <label>LD Basis %</label>
             <input
-              type="text"
-              value={term.cycleCount == null ? "" : String(term.cycleCount)}
-              disabled
-              title="Set via Apply Frequency"
+              type="number"
+              min="0" max="100" step="0.01"
+              placeholder={term.ldBasisPercent == null ? "Even split" : String(term.ldBasisPercent)}
+              value={ldBasisPercent}
+              onChange={(e) => setLdBasisPercent(e.target.value)}
+              title="The milestone's allotment — penalties / LD are calculated on this %"
             />
+            <div className="uidai-pmis-subtitle" style={{ fontSize: 10.5, marginTop: 4 }}>
+              Penalty base. Blank = even split. Must total 100% per phase.
+            </div>
           </div>
         </div>
+
+        <div className="uidai-pmis-field" style={{ marginTop: 14, marginBottom: 0 }}>
+          <label>Interval</label>
+          <input
+            type="text"
+            value={term.cycleCount == null ? "" : String(term.cycleCount)}
+            disabled
+            title="Set via Apply Frequency"
+          />
+        </div>
+
+        {payOverBasis && (
+          <div className="uidai-pmis-chip is-bad" style={{ marginTop: 14, borderRadius: 8 }}>
+            <span aria-hidden="true">⚠</span>
+            % of Payment ({payNum}%) cannot exceed LD Basis % ({basisNum}%).
+          </div>
+        )}
 
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
           <button
@@ -1024,12 +1077,18 @@ function EditTermModal({
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
-            disabled={submitting}
+            disabled={submitting || payOverBasis}
             onClick={() => onSubmit({
               percentOfPayment:
                 percentOfPayment === "" || percentOfPayment === null
                   ? null
                   : Number(percentOfPayment),
+              /* Blank means "leave it to the even split" — send null so the
+                 backend clears any explicit override instead of storing 0. */
+              ldBasisPercent:
+                ldBasisPercent === "" || ldBasisPercent === null
+                  ? null
+                  : Number(ldBasisPercent),
             })}
           >
             {submitting ? "Saving…" : "Save"}
@@ -1037,6 +1096,75 @@ function EditTermModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   LdBasisCell — the editable "LD Basis %" cell on a payment-term row.
+
+   `term.ldBasisPercent` is always the EFFECTIVE value (the backend fills in
+   the even split, 100 / milestones-in-phase, when it was never set), so the
+   input is seeded from it and clearing the box means "go back to the even
+   split" (committed as null). `term.ldBasisValue` is the ₹ penalty base the
+   backend derived from it and is shown read-only underneath.
+
+   The edit commits on blur or Enter and only when the value actually changed;
+   Escape restores the server value.
+   ────────────────────────────────────────────────────────────────── */
+function LdBasisCell({ term, disabled, busy, onSave }) {
+  const server = term.ldBasisPercent == null ? "" : String(term.ldBasisPercent);
+  /* null = not editing, so the cell renders the server value and a silent
+     reload flows straight through. A string is the user's in-progress edit.
+     Committing (or abandoning) drops back to null = server truth. */
+  const [draft, setDraft] = useState(null);
+  const shown = draft == null ? server : draft;
+
+  const commit = async () => {
+    if (draft == null) return;
+    const raw = draft.trim();
+    const next = raw === "" ? null : Number(raw);
+    setDraft(null);
+    if (next != null && !Number.isFinite(next)) return;
+    if (String(next ?? "") === server) return;
+    await onSave(term, next);
+  };
+
+  const value = Number(term.ldBasisValue);
+  const overpaid = (Number(term.percentOfPayment) || 0) - (Number(term.ldBasisPercent) || 0) > 0.001;
+
+  return (
+    <td style={{ textAlign: "right" }}>
+      <input
+        type="number"
+        min="0" max="100" step="0.01"
+        value={shown}
+        placeholder="Even split"
+        disabled={disabled || busy}
+        title={
+          overpaid
+            ? "This milestone is paid more than its LD Basis % — not allowed"
+            : "The milestone's allotment. Penalties / LD are calculated on this %."
+        }
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          else if (e.key === "Escape") setDraft(null);
+        }}
+        style={{
+          width: 78, textAlign: "right", padding: "3px 6px",
+          border: `1px solid ${overpaid ? "#d32f2f" : "#cfe0f5"}`,
+          borderRadius: 6, fontSize: 12.5, fontWeight: 700,
+          color: overpaid ? "#b3261e" : "#173e77",
+          background: disabled ? "#f5f6f8" : "#fff",
+        }}
+      />
+      {Number.isFinite(value) && value > 0 && (
+        <div style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)", marginTop: 2 }} title={wordsHint(value)}>
+          {inr(value)}
+        </div>
+      )}
+    </td>
   );
 }
 
@@ -1155,6 +1283,25 @@ export default function ProjectFinancePage() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, project]);
+
+  /* Designations are fetched per ORGANIZATION (vendor_id = masters.vendors.id),
+     but the project payload carries vendor NAMES only — so resolve the active
+     tab's name against the vendor master. Failing to resolve just means the
+     Planned Resources picker falls back to the unfiltered designation list. */
+  const [vendorMaster, setVendorMaster] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    listVendors()
+      .then((list) => { if (!cancelled) setVendorMaster(Array.isArray(list) ? list : []); })
+      .catch(() => { /* designations then load unfiltered */ });
+    return () => { cancelled = true; };
+  }, []);
+  const activeOrgName = orgs[activeOrg] || "";
+  const activeOrgId = useMemo(() => {
+    const norm = (s) => String(s || "").trim().toLowerCase();
+    const hit = vendorMaster.find((v) => norm(v.vendorName) === norm(activeOrgName));
+    return hit?.vendorId || "";
+  }, [vendorMaster, activeOrgName]);
 
   // ── Master data ──
   const [costTypes, setCostTypes] = useState([]);
@@ -1379,6 +1526,16 @@ export default function ProjectFinancePage() {
 
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
+  /* Planned-resource rows attach to a resource-cost cost item, so these are
+     the "tabs" the Planned Resources section offers. Ordered by phase so the
+     tabs read in the same order as the phase tabs below. */
+  const resourceCostItems = useMemo(
+    () => (page?.costItems || [])
+      .filter((c) => c.costTypeCode === "resource_cost")
+      .slice()
+      .sort((a, b) => (Number(a.phase) || 0) - (Number(b.phase) || 0)),
+    [page]
+  );
   const validationChecks = Array.isArray(validationResult?.checks) ? validationResult.checks : [];
   const validationAllPass = Boolean(validationResult?.allPass);
   /* Order phases by the backend's authoritative `sequence` (1-based). This
@@ -1521,8 +1678,21 @@ export default function ProjectFinancePage() {
 
   /* Edit Payment Term — invoked from the EditTermModal's Save button.
      Returns true on success so the caller can close the modal. */
-  async function saveTerm(term, { percentOfPayment }) {
+  async function saveTerm(term, { percentOfPayment, ldBasisPercent }) {
     if (!term) return false;
+
+    /* A milestone may be paid less than its allotment (the remainder carries
+       forward) but never more — the backend's `pay-le-basis` check. Catch it
+       here so the PATCH isn't even attempted. */
+    const effectiveBasis = ldBasisPercent == null ? Number(term.ldBasisPercent) : Number(ldBasisPercent);
+    const newPay = Number(percentOfPayment) || 0;
+    if (Number.isFinite(effectiveBasis) && effectiveBasis > 0 && newPay - effectiveBasis > 0.001) {
+      uiStore.showError(
+        `% of Payment (${newPay}%) cannot exceed this milestone's LD Basis % ` +
+        `(${effectiveBasis}%). Raise the LD Basis % first, or pay less.`
+      );
+      return false;
+    }
 
     /* Hard validation: the final milestone of the final phase is the
        balancing term — saving it must bring that phase's scheduled %
@@ -1558,6 +1728,7 @@ export default function ProjectFinancePage() {
         body: JSON.stringify({
           frequencyCode: term.frequencyCode ?? null,
           percentOfPayment,
+          ldBasisPercent,
         }),
       });
       await readJson(res);
@@ -1567,6 +1738,61 @@ export default function ProjectFinancePage() {
     } catch (err) {
       if (handleAuthError(err)) return false;
       uiStore.showError(err?.message || "Failed to update payment term");
+      return false;
+    } finally {
+      setSavingTerm(false);
+    }
+  }
+
+  /* Inline LD Basis % edit from the term table — PATCHes only that field.
+     `value` is a Number, or null to fall back to the even split.
+
+     The allotments must total 100% per phase (the backend's `ld-basis-pct`
+     check), and this milestone's pay % can't exceed its own allotment
+     (`pay-le-basis`). Both are checked here so a bad edit never leaves the
+     page, and the phase total is checked against the OTHER terms' effective
+     values so the arithmetic matches what the user sees. */
+  async function saveTermLdBasis(term, value) {
+    if (!term) return false;
+
+    const pay = Number(term.percentOfPayment) || 0;
+    if (value != null && value > 0 && pay - value > 0.001) {
+      uiStore.showError(
+        `LD Basis % (${value}%) cannot be less than what this milestone is ` +
+        `paid (${pay}%). A milestone may be paid less than its allotment, never more.`
+      );
+      return false;
+    }
+
+    const phase = phases.find((p) => p.phase === term.phase);
+    if (value != null && phase) {
+      const others = (phase.paymentTerms || [])
+        .filter((t) => t.id !== term.id)
+        .reduce((s, t) => s + (Number(t.ldBasisPercent) || 0), 0);
+      const total = Math.round((others + value) * 100) / 100;
+      if (Math.abs(total - 100) > 0.001) {
+        uiStore.showError(
+          `LD Basis % must total 100% for phase ${term.phase}. This makes it ` +
+          `${total}% — set this milestone to ${Math.round((100 - others) * 100) / 100}%.`
+        );
+        return false;
+      }
+    }
+
+    setSavingTerm(true);
+    try {
+      const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.paymentTerms.update(term.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ldBasisPercent: value }),
+      });
+      await readJson(res);
+      await loadPaymentPage({ silent: true });
+      uiStore.showMessage("LD Basis % updated.");
+      return true;
+    } catch (err) {
+      if (handleAuthError(err)) return false;
+      uiStore.showError(err?.message || "Failed to update LD Basis %");
       return false;
     } finally {
       setSavingTerm(false);
@@ -1821,7 +2047,7 @@ export default function ProjectFinancePage() {
                     <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
                       <span style={{ color: check.pass ? "#14804a" : "#c0392b", fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{check.pass ? "✓" : "✕"}</span>
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, color: "#173e77" }}>{check.label || check.id || "Validation check"}</div>
+                        <div style={{ fontWeight: 700, color: "#173e77" }}>{check.label || CHECK_LABELS[check.id] || check.id || "Validation check"}</div>
                         {!check.pass && check.reason ? <div style={{ color: "#c0392b", marginTop: 3, fontSize: 13 }}>{check.reason}</div> : null}
                       </div>
                     </div>
@@ -2056,6 +2282,26 @@ export default function ProjectFinancePage() {
             </div>
           </div>
 
+          {/* Planned Resources — a resource-type phase's resource cost is the
+              SUM of its planned-resource rows (designation × window ×
+              headcount), not a typed amount. Only shown once the project has
+              a resource-cost row for rows to attach to. */}
+          {resourceCostItems.length > 0 && (
+            <div className="uidai-pmis-card">
+              <div style={{ ...sectionHead, marginBottom: 10 }}>
+                <span style={stepBadge}>R</span> Planned Resources
+              </div>
+              <PlannedResourcesSection
+                projectId={projectId}
+                resourceCostItems={resourceCostItems}
+                vendorId={activeOrgId}
+                vendorName={activeOrgName}
+                isLocked={isLocked}
+                onChanged={() => loadPaymentPage({ silent: true })}
+              />
+            </div>
+          )}
+
           {/* Section 2 — Payment Terms. Phases render as tabs (like the org
               tabs above); clicking a tab shows only that phase's panel. */}
           <div className="uidai-pmis-card">
@@ -2117,6 +2363,8 @@ export default function ProjectFinancePage() {
                     projectFrequencyCode={page?.frequencyCode || ""}
                     onEditTerm={(t) => setEditingTerm(t)}
                     onEditActivities={(t) => setEditingActivitiesTerm(t)}
+                    onSaveLdBasis={saveTermLdBasis}
+                    ldBasisBusy={savingTerm}
                     onGenerateInvoice={generateInvoice}
                     onApplyFrequency={applyPhaseFrequency}
                     costItems={costItems}   
@@ -2899,6 +3147,7 @@ function PhasePanel({
   milestoneName = () => "Not Completed",
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onApplyFrequency,
+  onSaveLdBasis, ldBasisBusy = false,
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
   oneTimeTotal = 0, oneTimeAllocatedElsewhere = 0, oneTimeBusy = false, onSetOneTime,
 }) {
@@ -2947,6 +3196,12 @@ function PhasePanel({
   const isSyntheticOnly = realTerms.length === 0 && terms.length > 0;
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
   const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
+  /* Allotment total for the phase — the backend's `ld-basis-pct` check wants
+     exactly 100%. Rounded to 2dp so a 3-way even split (33.33 × 3) doesn't
+     read as unbalanced from float noise. */
+  const totalLdBasis =
+    Math.round(terms.reduce((s, r) => s + (Number(r.ldBasisPercent) || 0), 0) * 100) / 100;
+  const ldBasisBalanced = Math.abs(totalLdBasis - 100) <= 0.02;
   /* Base (100%) the term percentages are taken from = scheduled value
      scaled back up by the scheduled %. Remaining = the still-unscheduled
      part of that base. */
@@ -3349,6 +3604,18 @@ function PhasePanel({
                       (Fixed + One-time)
                     </span>
                   </th>
+                  {/* The milestone's allotment — its full share of the phase,
+                      and the base LD / penalties are computed on. Separate
+                      from what it is actually paid above. */}
+                  <th style={{ width: 120, textAlign: "right" }}>
+                    LD Basis %
+                    <span style={{
+                      display: "block", fontWeight: 500, fontSize: 10.5,
+                      color: "var(--uidai-pmis-muted)", textTransform: "none", letterSpacing: 0,
+                    }}>
+                      (penalty base)
+                    </span>
+                  </th>
                   <th style={{ width: 130, textAlign: "right" }}>Value</th>
                   <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
                   <th style={{ width: 200, textAlign: "center" }}>Action</th>
@@ -3357,7 +3624,7 @@ function PhasePanel({
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={8} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -3377,6 +3644,8 @@ function PhasePanel({
                             ? <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600, border: "1px solid #c4e9d0" }}>{t.cycleCount}</span>
                             : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
                         </td>
+                        <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
+                        {/* Recurring costs carry no % and therefore no LD basis. */}
                         <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                         <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(t.value)}>
                           ₹ {Number(t.value).toLocaleString("en-IN")}
@@ -3449,6 +3718,20 @@ function PhasePanel({
                           ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
+                      {typeof onSaveLdBasis === "function" ? (
+                        <LdBasisCell
+                          term={t}
+                          disabled={isLocked}
+                          busy={ldBasisBusy}
+                          onSave={onSaveLdBasis}
+                        />
+                      ) : (
+                        <td style={{ textAlign: "right" }}>
+                          {t.ldBasisPercent == null
+                            ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
+                            : <strong style={{ color: "#173e77" }}>{Number(t.ldBasisPercent)} %</strong>}
+                        </td>
+                      )}
                       <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(value)}>
                         ₹ {value.toLocaleString("en-IN")}
                       </td>
@@ -3507,6 +3790,9 @@ function PhasePanel({
                           </td>
                           <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                           <td style={{ textAlign: "right" }}><strong style={{ color: "#173e77" }}>{aPct} %</strong></td>
+                          {/* LD basis is a milestone-level allotment — activities
+                              don't carry one of their own. */}
+                          <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                           <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>₹ {aVal.toLocaleString("en-IN")}</td>
                           <td>
                             <span style={{
@@ -3563,6 +3849,21 @@ function PhasePanel({
                     <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
                     </td>
+                    {/* Allotments must total exactly 100% for the phase — flag
+                        the total in red the moment they don't. */}
+                    <td
+                      style={{
+                        fontWeight: 800, textAlign: "right", whiteSpace: "nowrap",
+                        color: ldBasisBalanced ? "#1b7a42" : "#b3261e",
+                      }}
+                      title={
+                        ldBasisBalanced
+                          ? "LD Basis % totals 100% for this phase"
+                          : `LD Basis % must total 100% for this phase — currently ${totalLdBasis}%`
+                      }
+                    >
+                      {totalLdBasis} %
+                    </td>
                     <td style={{ fontWeight: 800, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(totalValue)}>
                       ₹ {totalValue.toLocaleString("en-IN")}
                     </td>
@@ -3605,6 +3906,15 @@ function PhasePanel({
               }`}
             >
               Remaining: {totalPercent < 100 && ` · ${100 - totalPercent}% remaining`}
+            </span>
+            {/* Allotment total — must be exactly 100% per phase, independent of
+                how much of it is actually scheduled for payment. */}
+            <span
+              className={`uidai-pmis-chip${ldBasisBalanced ? " is-good" : " is-bad"}`}
+              title="Penalties / LD are calculated on each milestone's LD Basis %"
+            >
+              LD Basis: {totalLdBasis}%
+              {!ldBasisBalanced && " · must total 100%"}
             </span>
           </div>
           )}

@@ -43,6 +43,8 @@ export function fromApiProject(api) {
     startDate: fromApiDate(api.startDate || api.start_date),
     endDate: fromApiDate(api.endDate || api.end_date),
     actualEndDate: fromApiDate(api.actualEndDate || api.actual_end_date),
+    // Optional contract metadata (#321) — returned on GET /projects/{id}.
+    contractSigningDate: fromApiDate(api.contractSigningDate || api.contract_signing_date),
     vendors: Array.isArray(api.vendors) ? api.vendors.map((v) => v.name || v) : [],
     resources: api.resources || [],
     milestones: (api.milestones || []).map(fromApiMilestone),
@@ -130,7 +132,7 @@ export const mapTypeUiToApi = (t) => TYPE_UI_TO_API[t] || 'standard';
 export const mapTypeApiToUi = (t) => TYPE_API_TO_UI[t] || 'Standard Type';
 
 export function toApiProject(ui) {
-  return {
+  const out = {
     name: ui.projectName,
     description: ui.description || '',
     active: true,
@@ -139,4 +141,8 @@ export function toApiProject(ui) {
     endDate: toApiDate(ui.endDate),
     vendorIds: ui.vendorIds || [],
   };
+  // Optional (#321) — only sent when set, so an update never blanks a
+  // signing date that the form simply didn't carry.
+  if (ui.contractSigningDate) out.contractSigningDate = toApiDate(ui.contractSigningDate);
+  return out;
 }
