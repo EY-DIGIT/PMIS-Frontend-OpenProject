@@ -7,6 +7,7 @@ import {
   readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, notifyActionError,
   parseYear, parseQuarter, parseMonth, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
 } from "../../utils/apiMessage";
+import { rupeesInWords } from "../../utils/moneyWords";
 import { getToken } from "../../api/auth";
 import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
@@ -320,6 +321,16 @@ export default function ProjectAttendancePage() {
   // Attendance upload modal — the milestone is picked inside it.
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  /* Which report is on screen. The two used to stack, so the page opened with
+     two tables, two sets of metrics and two filter groups competing — one is
+     picked here instead, and the toolbar's second filter follows the choice
+     (Month for one, Quarter for the other).
+
+     Quarterly opens by default: it lands on a populated table, where Monthly
+     starts on "All months" and so opens on a "choose a month" prompt with
+     nothing in it. */
+  const [view, setView] = useState("quarterly");
+
   /* Bumped to re-run the three report fetches without changing any filter.
      Two things need it: the Refresh buttons beside each table, and a finished
      upload — the rows the upload just created are exactly the rows on screen,
@@ -404,6 +415,8 @@ export default function ProjectAttendancePage() {
 
   // Monthly summary — fetched per selected month. "All months" shows a prompt instead.
   useEffect(() => {
+    // Nothing to fetch for a report that isn't on screen.
+    if (view !== "monthly") { setSummaryLoading(false); return undefined; }
     if (paramError) { setSummaryLoading(false); return undefined; }
     if (selectedMonth === "all") {
       setSummary(null);
@@ -451,10 +464,11 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, selectedMonth, paramError, refreshKey]);
+  }, [projectId, year, selectedMonth, paramError, refreshKey, view]);
 
   // Quarterly leave policy
   useEffect(() => {
+    if (view !== "quarterly") { setQuarterlyLoading(false); return undefined; }
     if (paramError) { setQuarterlyLoading(false); return undefined; }
     const FALLBACK = "Couldn't load the quarterly attendance.";
     let active = true;
@@ -491,7 +505,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey]);
+  }, [projectId, year, quarter, paramError, refreshKey, view]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -500,7 +514,7 @@ export default function ProjectAttendancePage() {
      Errors are kept out of the main error slot — the Cost column just
      doesn't render. */
   useEffect(() => {
-    if (paramError) return undefined;
+    if (view !== "quarterly" || paramError) return undefined;
     const FALLBACK = "Couldn't load the quarterly cost.";
     let active = true;
     const controller = new AbortController();
@@ -530,7 +544,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey]);
+  }, [projectId, year, quarter, paramError, refreshKey, view]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
@@ -592,13 +606,16 @@ export default function ProjectAttendancePage() {
     };
   }, [year, selectedMonth]);
 
+  /* `activeRange` is declared further down, after quarterRange it depends on.
+     Safe here: this only reads it when the button is clicked, long after
+     render has defined it. */
   async function handleHeaderTemplate() {
-    if (templateBusy || !templateRange) return;
+    if (templateBusy || !activeRange) return;
     setTemplateBusy(true);
     setTemplateMsg(null);
     setTemplateError(null);
     try {
-      const filename = await downloadAttendanceTemplate(templateRange.start, templateRange.end);
+      const filename = await downloadAttendanceTemplate(activeRange.start, activeRange.end);
       setTemplateMsg(`Template downloaded — ${filename}`);
     } catch (err) {
       const msg = requestErrorMessage(err, "Couldn't download the template. Please try again.");
@@ -638,6 +655,11 @@ export default function ProjectAttendancePage() {
       label: `Q${q} ${y}`,
     };
   }, [year, quarter]);
+
+  /* The header's template follows whichever report is on screen — a quarter's
+     sheet while looking at the quarter, a month's while looking at the month.
+     Downloading a January template off a Q3 screen was the old behaviour. */
+  const activeRange = view === "quarterly" ? quarterRange : templateRange;
 
   const monthlyHolidayTitle = useMemo(
     () => buildHolidayTitle(holidays, templateRange),
@@ -685,10 +707,10 @@ export default function ProjectAttendancePage() {
           <button
             className="att-btn-secondary"
             onClick={handleHeaderTemplate}
-            disabled={templateBusy || !templateRange}
+            disabled={templateBusy || !activeRange}
             title={
-              templateRange
-                ? `Download a blank attendance template for ${templateRange.label} (${templateRange.start} → ${templateRange.end})`
+              activeRange
+                ? `Download a blank attendance template for ${activeRange.label} (${activeRange.start} → ${activeRange.end})`
                 : "Fix the filters above first"
             }
           >
@@ -720,9 +742,27 @@ export default function ProjectAttendancePage() {
       {templateError && <div className="att-error" role="alert">{templateError}</div>}
       {templateMsg && <div className="att-note" role="status">{templateMsg}</div>}
 
-      {/* Controls */}
+      {/* Controls — one filter row for the whole page. The period control
+          changes with the view because each report is cut a different way;
+          Year is shared, so it stays put and keeps its value across a switch. */}
       <div className="att-toolbar">
         <div className="att-controls">
+          <Field label="View">
+            <div className="att-seg" role="tablist" aria-label="Attendance view">
+              {[["monthly", "Monthly"], ["quarterly", "Quarterly"]].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === key}
+                  className={`att-seg-btn${view === key ? " is-on" : ""}`}
+                  onClick={() => setView(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Field>
           <Field label="Year">
             <select
               className="att-select"
@@ -732,18 +772,30 @@ export default function ProjectAttendancePage() {
               {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </Field>
-          <Field label="Month">
-            <select
-              className="att-select"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-            >
-              <option value="all">All months</option>
-              {MONTH_NAMES.slice(1).map((name, i) => (
-                <option key={i + 1} value={i + 1}>{name}</option>
-              ))}
-            </select>
-          </Field>
+          {view === "monthly" ? (
+            <Field label="Month">
+              <select
+                className="att-select"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+              >
+                <option value="all">All months</option>
+                {MONTH_NAMES.slice(1).map((name, i) => (
+                  <option key={i + 1} value={i + 1}>{name}</option>
+                ))}
+              </select>
+            </Field>
+          ) : (
+            <Field label="Quarter">
+              <select
+                className="att-select"
+                value={quarter}
+                onChange={(e) => setQuarter(Number(e.target.value))}
+              >
+                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              </select>
+            </Field>
+          )}
         </div>
         <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
           <CalendarIcon />
@@ -752,6 +804,7 @@ export default function ProjectAttendancePage() {
       </div>
 
       {/* Monthly summary */}
+      {view === "monthly" && (
       <section className="att-section">
         <div className="att-section-head">
           <h2 className="att-section-title" style={{ margin: 0 }}>Monthly summary</h2>
@@ -790,36 +843,18 @@ export default function ProjectAttendancePage() {
           </>
         )}
       </section>
+      )}
 
       {/* Quarterly leave */}
+      {view === "quarterly" && (
       <section className="att-section">
         <div className="att-section-head">
           <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly Attendance</h2>
-          {/* Year sits beside Quarter so a quarter can be picked without
-              scrolling back to the toolbar. It's the SAME `year` state the
-              toolbar uses — one source of truth, so the two controls can't
-              disagree about which year the page is showing. Unlike the
-              toolbar's copy this one leaves the month alone: resetting the
-              monthly view from a quarterly control would be a surprise. */}
+          {/* Year and Quarter used to be repeated here because both reports
+              were on screen at once and this one was a scroll away from the
+              toolbar. With the views separated there is one filter row again,
+              so the duplicates are gone and only Refresh remains. */}
           <div className="att-controls att-section-controls">
-            <Field label="Year">
-              <select
-                className="att-select"
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-              >
-                {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </Field>
-            <Field label="Quarter">
-              <select
-                className="att-select"
-                value={quarter}
-                onChange={(e) => setQuarter(Number(e.target.value))}
-              >
-                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
-              </select>
-            </Field>
             <RefreshButton onClick={refresh} busy={quarterlyLoading} />
           </div>
         </div>
@@ -841,6 +876,7 @@ export default function ProjectAttendancePage() {
           />
         )}
       </section>
+      )}
 
       {holidayOpen && (
         <HolidayModal
@@ -929,29 +965,32 @@ function AttendanceTable({
               <th className="att-th">ID</th>
               <th className="att-th">Name</th>
               {showMilestoneCol && <th className="att-th">Milestone</th>}
-              {/* Sits immediately left of Working on purpose: a mid-quarter
-                  joiner shows 36 or 14 working days against everyone else's
-                  60, and this is the column that says why. */}
+              {/* Joined and Holiday lead the counts: both say how much of the
+                  period this row could have been present for, which is what
+                  makes a Working of 36 against everyone else's 60 read
+                  correctly rather than looking like missing data. */}
               {showJoined && (
                 <th className="att-th" title="The date this employee joined the project.">Joined</th>
               )}
+              {/* The dates behind the count sit on both the header and each
+                  cell — whichever the pointer lands on, the answer is there. */}
+              <th className="att-th att-num" title={holidayTitle}>Holiday</th>
               <th className="att-th att-num">Working</th>
               <th className="att-th att-num">Present</th>
               {/* Half-day column withdrawn — half days already count as 0.5
                   inside Present, so the separate tally was double-reporting. */}
+              {/* Total first, then the split it breaks into — "6 taken, of
+                  which 6 paid and 0 unpaid" reads in the order it's spoken. */}
+              <th className="att-th att-num">Leave Taken</th>
               {splitLeave && (
                 <>
                   <th className="att-th att-num">Paid Leave</th>
                   <th className="att-th att-num">Unpaid Leave</th>
                 </>
               )}
-              <th className="att-th att-num">Leave Taken</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
-              {/* The dates behind the count sit on both the header and each
-                  cell — whichever the pointer lands on, the answer is there. */}
-              <th className="att-th att-num" title={holidayTitle}>Holiday</th>
               <th className="att-th att-num att-th-att">Attendance</th>
               {showCost && <th className="att-th att-num">Cost</th>}
             </tr>
@@ -983,8 +1022,14 @@ function AttendanceTable({
                     {formatJoiningDate(emp.joiningDate) || "—"}
                   </td>
                 )}
+                <td className="att-td att-num att-dim" title={holidayTitle}>
+                  {emp.holidayDays}
+                </td>
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
+                <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
+                  {leaveTakenOf(emp)}
+                </td>
                 {splitLeave && (
                   <>
                     <td className="att-td att-num">{num(emp.paidLeaveDays)}</td>
@@ -993,22 +1038,22 @@ function AttendanceTable({
                     </td>
                   </>
                 )}
-                <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
-                  {leaveTakenOf(emp)}
-                </td>
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 */}
-                <td className="att-td att-num att-dim" title={holidayTitle}>
-                  {emp.holidayDays}
-                </td>
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
                 {showCost && (() => {
                   const c = costFor(emp);
                   return (
-                    <td className={`att-td att-num${c ? " att-cost-total" : " att-dim"}`}>
+                    /* The amount in words on hover — at lakh scale a mis-read
+                       digit is easy and expensive, and the whole cell is the
+                       hover target rather than just the text. */
+                    <td
+                      className={`att-td att-num${c ? " att-cost-total" : " att-dim"}`}
+                      title={c ? rupeesInWords(c.totalCost) : undefined}
+                    >
                       {c ? money(c.totalCost) : "—"}
                     </td>
                   );
@@ -1035,7 +1080,10 @@ function AttendanceTable({
                 >
                   Total for {period}
                 </td>
-                <td className="att-td att-num att-strong att-cost-total">
+                <td
+                  className="att-td att-num att-strong att-cost-total"
+                  title={rupeesInWords(costTotal)}
+                >
                   {money(costTotal)}
                 </td>
               </tr>
@@ -1100,7 +1148,10 @@ function MetricsRow({ metrics, costTotal }) {
           value={moneyShort(costTotal)}
           sub="across team"
           tone={C.primary}
-          title={money(costTotal)}
+          /* The card rounds to whole rupees, so the tooltip carries both the
+             exact figure and its words — this is the one place the paise
+             aren't on screen at all. */
+          title={`${money(costTotal)} — ${rupeesInWords(costTotal)}`}
           compact
         />
       )}
@@ -1968,6 +2019,17 @@ const ATT_CSS = `
 .att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; letter-spacing: -0.01em; }
 .att-section-head { display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+
+/* View switch — a segmented control rather than two buttons, so the pair reads
+   as one choice with one answer. Sized to line up with the selects beside it. */
+.att-seg { display: inline-flex; padding: 3px; border-radius: 10px;
+  border: 1px solid ${C.border}; background: ${C.surfaceAlt}; gap: 3px; }
+.att-seg-btn { border: none; background: transparent; cursor: pointer;
+  padding: 6px 16px; border-radius: 7px; font-size: 13.5px; font-weight: 600;
+  color: ${C.muted}; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.att-seg-btn:hover:not(.is-on) { color: ${C.ink}; }
+.att-seg-btn.is-on { background: #fff; color: ${C.primary};
+  box-shadow: 0 1px 2px rgba(16,32,60,.08); }
 
 /* Refresh — a quiet control beside the table it reloads, deliberately lighter
    than the header's primary actions: it repeats a fetch the page already does

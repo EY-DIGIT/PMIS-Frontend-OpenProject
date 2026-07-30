@@ -18,6 +18,7 @@ import {
 } from "react-icons/fi";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
+import { rupeesInWords } from "../../utils/moneyWords";
 import { getToken } from "../../api/auth";
 import { ENDPOINTS } from "../../api/endpoint";
 import {
@@ -1367,11 +1368,14 @@ const COST_KNOWN_KEYS = new Set([
    needs and nothing a satisfied reader wants, so it starts closed. Every
    figure is written out as text either way — the meter is a second reading
    of numbers already on screen, never the only way to reach one. */
-function ChainTerm({ label, value, total }) {
+function ChainTerm({ label, value, amount, total }) {
   return (
     <div className={`ld-chain-term${total ? " is-total" : ""}`}>
       <div className="ld-chain-lbl">{label}</div>
-      <div className="ld-chain-val">{value}</div>
+      {/* The figure spelled out on hover. These are the largest numbers on the
+          page, and the one place a reader is asked to check that the
+          arithmetic closes — so they're the ones worth being sure of. */}
+      <div className="ld-chain-val" title={rupeesInWords(amount)}>{value}</div>
     </div>
   );
 }
@@ -1388,9 +1392,9 @@ function CostChain({
   return (
     <div className="uidai-pmis-card ld-chain">
       <div className="ld-chain-row">
-        <ChainTerm label="Planned" value={money(planned)} />
+        <ChainTerm label="Planned" value={money(planned)} amount={planned} />
         <span className="ld-chain-op" aria-hidden="true">−</span>
-        <ChainTerm label="Deducted" value={money(deducted)} />
+        <ChainTerm label="Deducted" value={money(deducted)} amount={deducted} />
         {relaxation > 0 && (
           <>
             <span className="ld-chain-op" aria-hidden="true">+</span>
@@ -1401,11 +1405,12 @@ function CostChain({
                   : "Relaxation"
               }
               value={money(relaxation)}
+              amount={relaxation}
             />
           </>
         )}
         <span className="ld-chain-op" aria-hidden="true">=</span>
-        <ChainTerm label="Billable" value={money(total)} total />
+        <ChainTerm label="Billable" value={money(total)} amount={total} total />
       </div>
 
       {/* Meter, not a two-slice pie: this is one ratio against a limit. The
@@ -1430,11 +1435,13 @@ function CostChain({
         <details className="ld-chain-working">
           <summary>How the deduction was worked out</summary>
           <p>
-            {money(planned)} ÷ {dayCount(calendarDays)} calendar days
-            = <strong>{money(perDayCost)}</strong> a day.
+            <span title={rupeesInWords(planned)}>{money(planned)}</span> ÷{" "}
+            {dayCount(calendarDays)} calendar days
+            = <strong title={rupeesInWords(perDayCost)}>{money(perDayCost)}</strong> a day.
             {" "}
             {dayCount(unpaidDays)} unpaid {num(unpaidDays) === 1 ? "day" : "days"}
-            {" "}× {money(perDayCost)} = <strong>{money(deducted)}</strong> withheld,
+            {" "}× <span title={rupeesInWords(perDayCost)}>{money(perDayCost)}</span>
+            {" "}= <strong title={rupeesInWords(deducted)}>{money(deducted)}</strong> withheld,
             leaving {dayCount(paidCalendarDays)} of {dayCount(calendarDays)} days paid.
           </p>
           <p className="ld-chain-working-note">
@@ -1548,8 +1555,8 @@ function CostReportSection({ loading, error, report, totals }) {
                 <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
-                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
+                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Monthly rate divided by the calendar days in the month — not the working days. January: ₹1,98,434 ÷ 31 = ₹6,401.10.">Per Day Rate</th>
@@ -1573,13 +1580,13 @@ function CostReportSection({ loading, error, report, totals }) {
                   <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
                   <td>{show(m.rateYear)}</td>
                   <td className="ld-num">{show(m.workingDays)}</td>
-                  <td className="ld-num">{show(m.presentDays)}</td>
                   <td
                     className="ld-num"
                     title={`${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid`}
                   >
                     {dayCount(leave.total)}
                   </td>
+                  <td className="ld-num">{show(m.presentDays)}</td>
                   {/* <td className="ld-num">
                     <span
                       className="ld-attpill"
@@ -1591,15 +1598,18 @@ function CostReportSection({ loading, error, report, totals }) {
                       {pct(m.attendancePercentage)}
                     </span>
                   </td> */}
-                  <td className="ld-num">{money(m.monthlyRate)}</td>
+                  {/* Every money cell spells its own figure out on hover — see
+                      rupeesInWords. The title sits on the cell so the whole
+                      column width is the hover target. */}
+                  <td className="ld-num" title={rupeesInWords(m.monthlyRate)}>{money(m.monthlyRate)}</td>
 
-                  <td className="ld-num">{money(m.perDayRate)}</td>
+                  <td className="ld-num" title={rupeesInWords(m.perDayRate)}>{money(m.perDayRate)}</td>
                   {/* <td className="ld-num ld-costtable-cost">{money(m.halfDayAmount)}</td> */}
                   {/* The accent belongs on Cost, the column the Total Cost row
                       sits under — it was on Deducted Amount, so the emphasised
                       column and the total it keys off were a column apart. */}
-                  <td className="ld-num">{money(m.deductedAmount)}</td>
-                  <td className="ld-num ld-costtable-cost">{money(m.cost)}</td>
+                  <td className="ld-num" title={rupeesInWords(m.deductedAmount)}>{money(m.deductedAmount)}</td>
+                  <td className="ld-num ld-costtable-cost" title={rupeesInWords(m.cost)}>{money(m.cost)}</td>
                 </tr>
                 );
               })}
@@ -1617,7 +1627,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 <>
                   <tr className="ld-costtable-subrow">
                     <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Subtotal</td>
-                    <td className="ld-num">{money(monthsSubtotal)}</td>
+                    <td className="ld-num" title={rupeesInWords(monthsSubtotal)}>{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
                     <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">
@@ -1628,13 +1638,15 @@ function CostReportSection({ loading, error, report, totals }) {
                         </span>
                       )}
                     </td>
-                    <td className="ld-num">+ {money(relaxationAmount)}</td>
+                    <td className="ld-num" title={rupeesInWords(relaxationAmount)}>+ {money(relaxationAmount)}</td>
                   </tr>
                 </>
               )}
               <tr>
                 <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Total Cost</td>
-                <td className="ld-num ld-costtable-cost">{money(report.totalCost)}</td>
+                <td className="ld-num ld-costtable-cost" title={rupeesInWords(report.totalCost)}>
+                  {money(report.totalCost)}
+                </td>
               </tr>
             </tfoot>
           </table>

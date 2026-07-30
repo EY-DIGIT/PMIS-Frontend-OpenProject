@@ -23,7 +23,7 @@ import { getToken } from "../api/auth";
 const PROJECT_WEBHOOK_URL =
   "http://10.1.131.199:5678/webhook/testFlow-sarvam";
 const DOCUMENTS_WEBHOOK_URL =
-  "http://10.1.131.199:5678/webhook/rag-chat";
+  "http://10.1.131.199:5678/webhook/rag-sarvam";
 
 // n8n instance id sent with each chat request (matches the working curl).
 const N8N_INSTANCE_ID =
