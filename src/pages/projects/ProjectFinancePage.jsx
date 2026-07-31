@@ -1284,24 +1284,54 @@ export default function ProjectFinancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, project]);
 
-  /* Designations are fetched per ORGANIZATION (vendor_id = masters.vendors.id),
-     but the project payload carries vendor NAMES only — so resolve the active
-     tab's name against the vendor master. Failing to resolve just means the
-     Planned Resources picker falls back to the unfiltered designation list. */
+  /* Planned Resources needs the active tab's ORGANIZATION ID: the
+     leave-management rate card is keyed on projectId + organisationId.
+
+     The org tabs above are names, because the adapter flattens vendors to
+     names on the way through. So read the ids off the RAW project payload —
+     the same `vendors[].id` the Designation Rates page uploads a card
+     against, which guarantees both pages agree on what an organisation is.
+     The vendor master is only a fallback for when that read fails. */
+  const [rawVendors, setRawVendors] = useState([]);
   const [vendorMaster, setVendorMaster] = useState([]);
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.get(projectId)}`, {
+          method: "GET",
+          headers: { accept: "application/json" },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.json().catch(() => ({}));
+        const body = (raw?.data ?? raw) || {};
+        const list = (Array.isArray(body.vendors) ? body.vendors : [])
+          .filter((v) => v && v.id)
+          .map((v) => ({ id: v.id, name: v.name || v.id }));
+        if (!cancelled) setRawVendors(list);
+      } catch {
+        /* Fall through to the vendor-master name match below. */
+        if (!cancelled) setRawVendors([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
   useEffect(() => {
     let cancelled = false;
     listVendors()
       .then((list) => { if (!cancelled) setVendorMaster(Array.isArray(list) ? list : []); })
-      .catch(() => { /* designations then load unfiltered */ });
+      .catch(() => { /* the raw project vendors above are the primary source */ });
     return () => { cancelled = true; };
   }, []);
   const activeOrgName = orgs[activeOrg] || "";
   const activeOrgId = useMemo(() => {
     const norm = (s) => String(s || "").trim().toLowerCase();
+    const direct = rawVendors.find((v) => norm(v.name) === norm(activeOrgName));
+    if (direct) return direct.id;
     const hit = vendorMaster.find((v) => norm(v.vendorName) === norm(activeOrgName));
     return hit?.vendorId || "";
-  }, [vendorMaster, activeOrgName]);
+  }, [rawVendors, vendorMaster, activeOrgName]);
 
   // ── Master data ──
   const [costTypes, setCostTypes] = useState([]);

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { uiStore } from "../../store/project/uiStore";
 import * as plannedApi from "../../api/plannedResources";
 
@@ -6,23 +7,23 @@ import * as plannedApi from "../../api/plannedResources";
    Planned Resources — resource-type phase costing.
 
    A resource-type phase's resource cost is not a typed amount: it is the
-   SUM of its planned-resource rows. One row = designation + deployment
-   window + headcount, priced by the backend as
+   SUM of its planned-resource rows, and that sum auto-populates the phase's
+   `resource_cost` cost item. One row = role + deployment window + headcount.
 
-       monthlyRateSnapshot × durationMonths × quantity = computedCost
+   Pricing is PER CONTRACT YEAR, not a flat monthly rate. The backend splits
+   the deployment window on the project's contract-year boundaries and, for
+   each year the window touches, charges
 
-   durationMonths is fractional (days / 30.44), so Apr 1 → Jun 30 is ≈ 2.99
-   months, not 3. Several rows may share a designation — they all
-   accumulate.
+       quantity × rateCardByYear["Year-N"] × months-in-that-year
 
-   Rows hang off a `resource_cost` cost item (costItemId), so the phase must
-   have one first; that is why this section renders a tab per resource-cost
-   item rather than per phase. The per-tab total IS that phase's resource
-   cost, which is why every mutation calls onChanged() to re-pull the
-   payment page.
+   The split comes back as `costByYear`, which is why each row can be
+   expanded to show it — a row spanning a rate change is otherwise a single
+   number the user can't reconcile against the rate card.
 
-   Designations come from the /master gateway per ORGANIZATION
-   (vendor_id) and carry the monthly rate shown in the picker.
+   Roles and their rate cards come from leave-management (the same data the
+   Designation Rates page uploads), scoped to project + organization. The
+   payment backend never calls that service, so picking a role here sends
+   both the role and its rateCardByYear.
    ──────────────────────────────────────────────────────────────────── */
 
 const inr = (n) => {
@@ -37,20 +38,28 @@ const fmtMonths = (n) => {
   return Number.isFinite(v) ? v.toFixed(2) : "—";
 };
 
+const EMPTY_DRAFT = { role: "", quantity: "1", deployStart: "", deployEnd: "" };
+
 const cell = {
   width: "100%", padding: "5px 7px", border: "1px solid var(--uidai-pmis-border)",
   borderRadius: 6, background: "#fff", font: "inherit", fontSize: 12.5,
   boxSizing: "border-box",
 };
 
-/* Add-row draft. Module-level so it is a stable reference — it is reset on
-   every successful POST and whenever the active tab changes. */
-const EMPTY_DRAFT = { designationId: "", quantity: "1", deployStart: "", deployEnd: "" };
+/* A compact "₹1.98L → ₹2.12L" summary of a multi-year card, so the picker
+   and the row can show what a role costs without a table. */
+function rateCardSummary(card) {
+  const keys = plannedApi.sortedYearKeys(card);
+  if (keys.length === 0) return "";
+  const first = card[keys[0]];
+  const last = card[keys[keys.length - 1]];
+  if (keys.length === 1 || first === last) return `${inr(first)}/mo`;
+  return `${inr(first)} → ${inr(last)}/mo`;
+}
 
 export default function PlannedResourcesSection({
   projectId,
-  /* Resource-cost cost items for the ACTIVE organization, newest last.
-     Each: { id, phase, lineLabel, cost, total }. */
+  /* Resource-cost cost items for the project. Each: { id, phase, lineLabel }. */
   resourceCostItems = [],
   vendorId = "",
   vendorName = "",
@@ -58,23 +67,16 @@ export default function PlannedResourcesSection({
   onChanged,
 }) {
   const [rows, setRows] = useState([]);
-  const [designations, setDesignations] = useState([]);
-  const [designationError, setDesignationError] = useState("");
-  /* Which pool the options came from — 'vendor' | 'global' | 'all'. Anything
-     other than 'vendor' is worth telling the user about, because the rates
-     they're picking may not be this organization's. */
-  const [designationScope, setDesignationScope] = useState("vendor");
+  const [roles, setRoles] = useState([]);
+  const [roleError, setRoleError] = useState("");
+  const [rolesLoading, setRolesLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [activeItem, setActiveItem] = useState(0);
-  /* Inline "new designation" form. The master has no UI of its own yet, so an
-     empty picker would otherwise be a dead end. */
-  const [newOpen, setNewOpen] = useState(false);
-  const [newRow, setNewRow] = useState({ name: "", code: "", monthlyRate: "" });
-  const [creating, setCreating] = useState(false);
-
   const [draft, setDraft] = useState(EMPTY_DRAFT);
+  /* Rows expanded to show their per-contract-year cost split. */
+  const [expanded, setExpanded] = useState(() => new Set());
 
   const costItem = resourceCostItems[activeItem] || null;
 
@@ -97,33 +99,35 @@ export default function PlannedResourcesSection({
     }
   }
 
+  /* Rate cards are per project + organization, so the picker reloads when the
+     active org tab changes. Failures are surfaced rather than swallowed —
+     an empty dropdown and a failed request are not the same problem. */
+  async function loadRoles() {
+    setRoleError("");
+    if (!vendorId) {
+      setRoles([]);
+      return;
+    }
+    setRolesLoading(true);
+    try {
+      setRoles(await plannedApi.listDesignationRates(projectId, vendorId));
+    } catch (err) {
+      setRoles([]);
+      setRoleError(err?.message || "Failed to load the rate card");
+    } finally {
+      setRolesLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  /* Designations are per-organization, so the picker reloads whenever the
-     active org tab changes. A row's response carries no designation name, so
-     this list is also what labels existing rows — which is why it includes the
-     global (unscoped) designations, not just this org's. */
-  async function loadDesignations() {
-    setDesignationError("");
-    try {
-      const { rows: list, scope } = await plannedApi.listDesignationsForVendor(vendorId);
-      setDesignations(list.filter((d) => d.active));
-      setDesignationScope(scope);
-    } catch (err) {
-      /* Swallowing this is what made an empty picker indistinguishable from a
-         failed request — say which it was. */
-      setDesignations([]);
-      setDesignationError(err?.message || "Failed to load designations");
-    }
-  }
-
   useEffect(() => {
-    loadDesignations();
+    loadRoles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vendorId]);
+  }, [projectId, vendorId]);
 
   const itemRows = useMemo(
     () => (costItem ? rows.filter((r) => r.costItemId === costItem.id) : []),
@@ -131,55 +135,45 @@ export default function PlannedResourcesSection({
   );
   const tabTotal = itemRows.reduce((s, r) => s + (Number(r.computedCost) || 0), 0);
 
-  const designationById = useMemo(() => {
+  /* Roles are keyed by name because that IS the identifier on a saved row —
+     the response carries `role`, not a rate-card id. */
+  const roleByName = useMemo(() => {
     const m = {};
-    designations.forEach((d) => { m[d.id] = d; });
+    roles.forEach((r) => { m[r.role] = r; });
     return m;
-  }, [designations]);
+  }, [roles]);
+
+  /* Every contract year present across this tab's rows — drives the
+     expanded breakdown's ordering. */
+  const yearKeys = useMemo(() => {
+    const set = new Set();
+    itemRows.forEach((r) => {
+      Object.keys(r.costByYear || {}).forEach((k) => set.add(k));
+      Object.keys(r.rateCardSnapshot || {}).forEach((k) => set.add(k));
+    });
+    return [...set].sort(plannedApi.yearKeyOrder);
+  }, [itemRows]);
+
+  const toggleExpand = (id) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   /* Mutations always re-pull both this list and the payment page: the row's
-     computedCost and the phase's resource cost are both backend-derived. */
+     costByYear/computedCost and the phase's resource cost are both
+     backend-derived. */
   async function afterMutation() {
     await loadRows();
     if (typeof onChanged === "function") await onChanged();
   }
 
-  /* The master requires a code matching ^[a-zA-Z0-9_-]+$ — derive one from the
-     name so the user doesn't have to think about it (still editable). */
-  const codeFromName = (name) =>
-    String(name || "").trim().toUpperCase().replace(/[^A-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64);
-
-  async function createDesignation() {
-    const name = newRow.name.trim();
-    const code = (newRow.code.trim() || codeFromName(name));
-    const rate = Number(newRow.monthlyRate);
-    if (!name) { uiStore.showError("Designation name is required."); return; }
-    if (!code) { uiStore.showError("Designation code is required."); return; }
-    if (!Number.isFinite(rate) || rate < 0) { uiStore.showError("Enter a valid monthly rate."); return; }
-
-    setCreating(true);
-    try {
-      /* Created against the ACTIVE org so its rate card stays that org's. With
-         no org resolved it is created global (vendor_id null), which every org
-         can then use. */
-      const created = await plannedApi.createDesignation({
-        code, name, vendorId: vendorId || null, monthlyRate: rate,
-      });
-      await loadDesignations();
-      setNewRow({ name: "", code: "", monthlyRate: "" });
-      setNewOpen(false);
-      if (created?.id) setDraft((d) => ({ ...d, designationId: created.id }));
-      uiStore.showMessage("Designation added.");
-    } catch (err) {
-      uiStore.showError(err?.message || "Failed to add designation");
-    } finally {
-      setCreating(false);
-    }
-  }
-
   async function addRow() {
     if (!costItem) return;
-    if (!draft.designationId) { uiStore.showError("Pick a designation."); return; }
+    const rate = roleByName[draft.role];
+    if (!rate) { uiStore.showError("Pick a role."); return; }
     if (!draft.deployStart || !draft.deployEnd) {
       uiStore.showError("Set both deployment dates.");
       return;
@@ -193,7 +187,17 @@ export default function PlannedResourcesSection({
 
     setBusyId("new");
     try {
-      await plannedApi.createPlannedResource(projectId, { ...draft, costItemId: costItem.id, quantity: qty });
+      await plannedApi.createPlannedResource(projectId, {
+        costItemId: costItem.id,
+        role: rate.role,
+        // The payment backend doesn't read leave-management — the card
+        // travels with the role and is snapshotted on the row.
+        rateCardByYear: rate.rateCardByYear,
+        organisationId: vendorId,
+        quantity: qty,
+        deployStart: draft.deployStart,
+        deployEnd: draft.deployEnd,
+      });
       setDraft(EMPTY_DRAFT);
       await afterMutation();
       uiStore.showMessage("Planned resource added.");
@@ -204,8 +208,9 @@ export default function PlannedResourcesSection({
     }
   }
 
-  /* One field at a time — the BE re-prices the row on every PATCH, so
-     there is nothing to batch. `patch` is already in API field names. */
+  /* One field at a time — the BE re-prices the row on every PATCH, so there
+     is nothing to batch. Changing the role carries its rate card along,
+     otherwise the row would keep the previous role's prices. */
   async function patchRow(row, patch) {
     setBusyId(row.id);
     try {
@@ -219,8 +224,14 @@ export default function PlannedResourcesSection({
     }
   }
 
+  function changeRole(row, roleName) {
+    const rate = roleByName[roleName];
+    if (!rate) return;
+    patchRow(row, { role: rate.role, rateCardByYear: rate.rateCardByYear, organisationId: vendorId });
+  }
+
   async function removeRow(row) {
-    const label = row.designationName || designationById[row.designationId]?.name || "this row";
+    const label = row.role || "this row";
     if (!window.confirm(`Remove ${label} from the planned resources? The phase's resource cost drops by ${inr(row.computedCost)}.`)) return;
     setBusyId(row.id);
     try {
@@ -234,8 +245,8 @@ export default function PlannedResourcesSection({
     }
   }
 
-  /* No resource-cost cost item = nothing rows could attach to. Say so
-     rather than rendering an empty table the user can't use. */
+  /* No resource-cost cost item = nothing rows could attach to. Say so rather
+     than rendering an empty table the user can't use. */
   if (resourceCostItems.length === 0) {
     return (
       <div style={{ padding: 18, textAlign: "center", color: "var(--uidai-pmis-muted)", fontSize: 13 }}>
@@ -244,6 +255,8 @@ export default function PlannedResourcesSection({
       </div>
     );
   }
+
+  const noRoles = !rolesLoading && !roleError && roles.length === 0;
 
   return (
     <div>
@@ -284,8 +297,8 @@ export default function PlannedResourcesSection({
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)" }}>
-          Rates are {vendorName ? <>the <strong>{vendorName}</strong> rate card</> : "per organization"} —
-          cost = monthly rate × duration in months × quantity.
+          Priced from {vendorName ? <><strong>{vendorName}</strong>'s</> : "the organization's"} contract-year
+          rate card — each year of the deployment window is charged at that year's rate.
         </div>
         <div style={{ fontSize: 12, color: "var(--uidai-pmis-muted)" }}>
           Phase {costItem?.phase ?? "—"} resource cost:{" "}
@@ -299,121 +312,47 @@ export default function PlannedResourcesSection({
         </div>
       )}
 
-      {/* Why the designation picker looks the way it does. Without this, an
-          empty dropdown gives the user nothing to act on. */}
-      {(designationError || designations.length === 0 || designationScope !== "vendor") && (
+      {/* Why the role picker looks the way it does. Without this, an empty
+          dropdown gives the user nothing to act on. */}
+      {(roleError || noRoles || !vendorId) && (
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
             flexWrap: "wrap", gap: 10, marginBottom: 10, padding: "9px 12px",
-            border: `1px solid ${designationError ? "#f5c6c6" : "#e2e8f3"}`,
-            background: designationError ? "#fff7f7" : "#f7fbff",
+            border: `1px solid ${roleError ? "#f5c6c6" : "#e2e8f3"}`,
+            background: roleError ? "#fff7f7" : "#f7fbff",
             borderRadius: 8, fontSize: 12.5,
-            color: designationError ? "#b3261e" : "#3d5372",
+            color: roleError ? "#b3261e" : "#3d5372",
           }}
         >
           <span>
-            {designationError
-              ? `Designations could not be loaded — ${designationError}`
-              : designations.length === 0
-                ? "No designations in the master yet. Add one to start planning resources — name and monthly rate is all it needs."
-                : designationScope === "global"
-                  ? `No designations are mapped to ${vendorName || "this organization"} — showing the unscoped (global) rate card.`
-                  : `No designations matched ${vendorName || "this organization"} — showing every designation, so check the rate before adding a row.`}
+            {roleError
+              ? `The rate card could not be loaded — ${roleError}`
+              : !vendorId
+                ? "This organization couldn't be matched to the vendor master, so its rate card can't be looked up."
+                : <>No rate card on file for {vendorName || "this organization"} yet — upload it on the Designation Rates page, then reload here.</>}
           </span>
-          <span style={{ display: "inline-flex", gap: 8 }}>
-            {designationError && (
+          <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+            {roleError && (
               <button
                 type="button"
                 className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
                 style={{ marginTop: 0, padding: "4px 10px" }}
-                onClick={loadDesignations}
+                onClick={loadRoles}
               >
                 Retry
               </button>
             )}
-            {!isLocked && !newOpen && (
-              <button
-                type="button"
+            {projectId && (
+              <Link
+                to={`/projects/${encodeURIComponent(projectId)}/designation-rate`}
                 className="uidai-pmis-btn uidai-pmis-btn-small"
-                style={{ marginTop: 0, padding: "4px 10px" }}
-                onClick={() => setNewOpen(true)}
+                style={{ marginTop: 0, padding: "4px 10px", textDecoration: "none" }}
               >
-                + New designation
-              </button>
+                Designation Rates
+              </Link>
             )}
           </span>
-        </div>
-      )}
-
-      {/* Inline designation master form — the picker's source has no page of
-          its own, so it is created where it is needed. Scoped to the active
-          org (or global when no org resolved). */}
-      {newOpen && (
-        <div
-          style={{
-            display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap",
-            marginBottom: 12, padding: "10px 12px",
-            border: "1px solid var(--uidai-pmis-border)", borderRadius: 8, background: "#fff",
-          }}
-        >
-          <div style={{ flex: "1 1 200px" }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#5b6b82", marginBottom: 3 }}>
-              Designation name
-            </label>
-            <input
-              style={cell}
-              placeholder="e.g. Senior Consultant"
-              value={newRow.name}
-              onChange={(e) => setNewRow((r) => ({ ...r, name: e.target.value }))}
-            />
-          </div>
-          <div style={{ flex: "0 1 150px" }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#5b6b82", marginBottom: 3 }}>
-              Code
-            </label>
-            <input
-              style={cell}
-              placeholder={codeFromName(newRow.name) || "SR_CONSULTANT"}
-              value={newRow.code}
-              onChange={(e) => setNewRow((r) => ({ ...r, code: e.target.value }))}
-              title="Letters, digits, _ and - only. Left blank, it is derived from the name."
-            />
-          </div>
-          <div style={{ flex: "0 1 150px" }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#5b6b82", marginBottom: 3 }}>
-              Monthly rate (₹)
-            </label>
-            <input
-              type="number" min="0" step="0.01" style={{ ...cell, textAlign: "right" }}
-              value={newRow.monthlyRate}
-              onChange={(e) => setNewRow((r) => ({ ...r, monthlyRate: e.target.value }))}
-            />
-          </div>
-          <div style={{ display: "inline-flex", gap: 8 }}>
-            <button
-              type="button"
-              className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
-              style={{ marginTop: 0, padding: "6px 12px" }}
-              disabled={creating}
-              onClick={() => { setNewOpen(false); setNewRow({ name: "", code: "", monthlyRate: "" }); }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="uidai-pmis-btn uidai-pmis-btn-small"
-              style={{ marginTop: 0, padding: "6px 12px" }}
-              disabled={creating}
-              onClick={createDesignation}
-            >
-              {creating ? "Saving…" : "Save designation"}
-            </button>
-          </div>
-          <div style={{ flexBasis: "100%", fontSize: 11.5, color: "var(--uidai-pmis-muted)" }}>
-            Saved to {vendorName ? <strong>{vendorName}</strong> : "the global rate card"}. The rate is per month;
-            rows snapshot it when created, so later changes don't re-price existing rows.
-          </div>
         </div>
       )}
 
@@ -421,13 +360,13 @@ export default function PlannedResourcesSection({
         <table className="uidai-pmis-table uidai-pmis-table-compact">
           <thead>
             <tr>
-              <th style={{ minWidth: 200 }}>Designation</th>
-              <th style={{ width: 130 }}>Monthly Rate</th>
+              <th style={{ minWidth: 200 }}>Role</th>
+              <th style={{ width: 170 }}>Rate Card</th>
               <th style={{ width: 150 }}>Deploy From</th>
               <th style={{ width: 150 }}>Deploy To</th>
               <th style={{ width: 90, textAlign: "right" }}>Qty</th>
               <th style={{ width: 100, textAlign: "right" }}>Months</th>
-              <th style={{ width: 140, textAlign: "right" }}>Cost</th>
+              <th style={{ width: 150, textAlign: "right" }}>Cost</th>
               <th style={{ width: 70, textAlign: "center" }}>Action</th>
             </tr>
           </thead>
@@ -440,84 +379,128 @@ export default function PlannedResourcesSection({
               </td></tr>
             ) : itemRows.map((r) => {
               const busy = busyId === r.id;
-              const name = r.designationName || designationById[r.designationId]?.name || "—";
+              /* A row's rate card is its own snapshot, which can differ from
+                 the current card — show the snapshot, not today's rate. */
+              const summary = rateCardSummary(r.rateCardSnapshot);
+              const hasSplit = Object.keys(r.costByYear || {}).length > 0;
+              const open = expanded.has(r.id);
+              /* A role that has since been removed from the rate card isn't in
+                 the options, so keep it selectable-looking rather than blank. */
+              const roleMissing = r.role && !roleByName[r.role];
               return (
-                <tr key={r.id}>
-                  <td>
-                    {/* Retired designations aren't in the options list, so keep
-                        showing the row's own name as a disabled fallback
-                        instead of rendering an empty select. */}
-                    {designationById[r.designationId] || designations.length ? (
-                      <select
-                        style={cell}
-                        value={r.designationId}
+                <React.Fragment key={r.id}>
+                  <tr style={open ? { background: "#eef5ff" } : undefined}>
+                    <td>
+                      {roles.length === 0 ? (
+                        <span>{r.role || "—"}</span>
+                      ) : (
+                        <select
+                          style={cell}
+                          value={r.role}
+                          disabled={isLocked || busy}
+                          onChange={(e) => changeRole(r, e.target.value)}
+                        >
+                          {roleMissing && <option value={r.role}>{r.role} (not on the current card)</option>}
+                          {roles.map((o) => (
+                            <option key={o.id || o.role} value={o.role}>{o.role}</option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
+                    <td title="Rate card snapshotted when this row was saved">
+                      <span style={{ fontSize: 12 }}>{summary || "—"}</span>
+                    </td>
+                    <td>
+                      <input
+                        type="date" style={cell} value={r.deployStart}
                         disabled={isLocked || busy}
-                        onChange={(e) => patchRow(r, { designationId: e.target.value })}
+                        onChange={(e) => patchRow(r, { deployStart: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="date" style={cell} value={r.deployEnd} min={r.deployStart || undefined}
+                        disabled={isLocked || busy}
+                        onChange={(e) => patchRow(r, { deployEnd: e.target.value })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number" min="1" step="1" style={{ ...cell, textAlign: "right" }}
+                        defaultValue={r.quantity}
+                        key={`qty-${r.id}-${r.quantity}`}
+                        disabled={isLocked || busy}
+                        onBlur={(e) => {
+                          const q = Number(e.target.value);
+                          if (!Number.isFinite(q) || q <= 0) { e.target.value = r.quantity; return; }
+                          if (q === Number(r.quantity)) return;
+                          patchRow(r, { quantity: q });
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                      />
+                    </td>
+                    <td style={{ textAlign: "right" }} title="Total across the whole window (fractional months)">
+                      {fmtMonths(r.durationMonths)}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
+                      {inr(r.computedCost)}
+                      {hasSplit && (
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(r.id)}
+                          aria-expanded={open}
+                          title="Show the per-contract-year split"
+                          style={{
+                            display: "block", marginLeft: "auto", marginTop: 2,
+                            border: "1px solid #cfe0f5", background: "#eef3fb", color: "#0b3c88",
+                            fontSize: 10.5, fontWeight: 700, borderRadius: 999,
+                            padding: "1px 8px", cursor: "pointer",
+                          }}
+                        >
+                          {open ? "▾" : "▸"} {Object.keys(r.costByYear).length} year
+                          {Object.keys(r.costByYear).length === 1 ? "" : "s"}
+                        </button>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        type="button"
+                        className="uidai-pmis-iconbtn is-danger"
+                        title="Remove planned resource"
+                        aria-label={`Remove ${r.role || "row"}`}
+                        disabled={isLocked || busy}
+                        onClick={() => removeRow(r)}
                       >
-                        {!designationById[r.designationId] && (
-                          <option value={r.designationId}>{name} (retired)</option>
-                        )}
-                        {designations.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name} — {inr(d.monthlyRate)}/mo
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span>{name}</span>
-                    )}
-                  </td>
-                  {/* The rate is snapshotted when the row is created, so a later
-                      master-rate change does not silently re-price it. */}
-                  <td title="Rate snapshotted when this row was created">{inr(r.monthlyRateSnapshot)}</td>
-                  <td>
-                    <input
-                      type="date" style={cell} value={r.deployStart}
-                      disabled={isLocked || busy}
-                      onChange={(e) => patchRow(r, { deployStart: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date" style={cell} value={r.deployEnd} min={r.deployStart || undefined}
-                      disabled={isLocked || busy}
-                      onChange={(e) => patchRow(r, { deployEnd: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number" min="1" step="1" style={{ ...cell, textAlign: "right" }}
-                      defaultValue={r.quantity}
-                      key={`qty-${r.id}-${r.quantity}`}
-                      disabled={isLocked || busy}
-                      onBlur={(e) => {
-                        const q = Number(e.target.value);
-                        if (!Number.isFinite(q) || q <= 0) { e.target.value = r.quantity; return; }
-                        if (q === Number(r.quantity)) return;
-                        patchRow(r, { quantity: q });
-                      }}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                    />
-                  </td>
-                  <td style={{ textAlign: "right" }} title="Deployment days ÷ 30.44">
-                    {fmtMonths(r.durationMonths)}
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
-                    {inr(r.computedCost)}
-                  </td>
-                  <td style={{ textAlign: "center" }}>
-                    <button
-                      type="button"
-                      className="uidai-pmis-iconbtn is-danger"
-                      title="Remove planned resource"
-                      aria-label={`Remove ${name}`}
-                      disabled={isLocked || busy}
-                      onClick={() => removeRow(r)}
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+
+                  {/* Per-contract-year split — what the window actually cost in
+                      each year, at that year's rate. */}
+                  {open && hasSplit && (
+                    <tr style={{ background: "#f6faff" }}>
+                      <td style={{ borderLeft: "3px solid #0aa1c0" }} />
+                      <td colSpan={7} style={{ padding: "8px 10px" }}>
+                        <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                          {(yearKeys.length ? yearKeys : plannedApi.sortedYearKeys(r.costByYear))
+                            .filter((y) => r.costByYear[y] != null)
+                            .map((y) => (
+                              <div key={y} style={{ fontSize: 11.5, lineHeight: 1.5 }}>
+                                <div style={{ fontWeight: 800, color: "#0b3c88" }}>{y}</div>
+                                <div style={{ color: "#173e77", fontWeight: 700 }}>{inr(r.costByYear[y])}</div>
+                                {r.rateCardSnapshot[y] != null && (
+                                  <div style={{ color: "var(--uidai-pmis-muted)" }}>
+                                    @ {inr(r.rateCardSnapshot[y])}/mo × {r.quantity}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
 
@@ -528,20 +511,22 @@ export default function PlannedResourcesSection({
                 <td>
                   <select
                     style={cell}
-                    value={draft.designationId}
-                    disabled={designations.length === 0}
-                    onChange={(e) => setDraft((d) => ({ ...d, designationId: e.target.value }))}
+                    value={draft.role}
+                    disabled={roles.length === 0}
+                    onChange={(e) => setDraft((d) => ({ ...d, role: e.target.value }))}
                   >
                     <option value="">
-                      {designations.length === 0 ? "— No designations —" : "— Select designation —"}
+                      {rolesLoading
+                        ? "Loading roles…"
+                        : roles.length === 0 ? "— No rate card —" : "— Select role —"}
                     </option>
-                    {designations.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name} — {inr(d.monthlyRate)}/mo</option>
+                    {roles.map((o) => (
+                      <option key={o.id || o.role} value={o.role}>{o.role}</option>
                     ))}
                   </select>
                 </td>
-                <td style={{ color: "var(--uidai-pmis-muted)" }}>
-                  {draft.designationId ? inr(designationById[draft.designationId]?.monthlyRate) : "—"}
+                <td style={{ color: "var(--uidai-pmis-muted)", fontSize: 12 }}>
+                  {draft.role ? rateCardSummary(roleByName[draft.role]?.rateCardByYear) || "—" : "—"}
                 </td>
                 <td>
                   <input
@@ -562,8 +547,8 @@ export default function PlannedResourcesSection({
                     onChange={(e) => setDraft((d) => ({ ...d, quantity: e.target.value }))}
                   />
                 </td>
-                {/* Months and cost are backend-computed — they appear once the
-                    row is saved. */}
+                {/* Months and the per-year cost are backend-computed — they
+                    appear once the row is saved. */}
                 <td style={{ textAlign: "right", color: "var(--uidai-pmis-muted)" }}>—</td>
                 <td style={{ textAlign: "right", color: "var(--uidai-pmis-muted)" }}>—</td>
                 <td style={{ textAlign: "center" }}>
@@ -571,7 +556,7 @@ export default function PlannedResourcesSection({
                     type="button"
                     className="uidai-pmis-btn uidai-pmis-btn-small"
                     style={{ marginTop: 0, padding: "4px 10px" }}
-                    disabled={busyId === "new"}
+                    disabled={busyId === "new" || roles.length === 0}
                     onClick={addRow}
                   >
                     {busyId === "new" ? "…" : "Add"}
