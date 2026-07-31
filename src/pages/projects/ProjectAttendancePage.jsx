@@ -322,14 +322,47 @@ export default function ProjectAttendancePage() {
   // Attendance upload modal — the milestone is picked inside it.
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  /* Organisation filter. Empty string = every organisation on the project,
+     which is what the page showed before this existed and so stays the
+     default. Kept separate from the upload modal's own organisation picker:
+     that one chooses who an upload is filed against, this one narrows what's
+     displayed, and conflating them would make opening the modal change the
+     table behind it. */
+  const [filterOrgs, setFilterOrgs] = useState([]);
+  const [filterOrgId, setFilterOrgId] = useState("");
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let active = true;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${GATEWAY_BASE}${ENDPOINTS.projects.get(projectId)}`,
+          { method: "GET", headers: { accept: "application/json" } }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.json().catch(() => ({}));
+        const vendors = (raw?.data ?? raw)?.vendors;
+        const list = (Array.isArray(vendors) ? vendors : [])
+          .filter((v) => v && v.id)
+          .map((v) => ({ id: v.id, name: v.name || v.id }));
+        if (active) setFilterOrgs(list);
+      } catch {
+        // Non-fatal: the filter just doesn't appear and the page shows everyone.
+        if (active) setFilterOrgs([]);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+
   /* Which report is on screen. The two used to stack, so the page opened with
      two tables, two sets of metrics and two filter groups competing — one is
      picked here instead, and the toolbar's second filter follows the choice
      (Month for one, Quarter for the other).
 
      Quarterly opens by default: it lands on a populated table, where Monthly
-     starts on "All months" and so opens on a "choose a month" prompt with
-     nothing in it. */
+     starts with no month picked and so opens on a "choose a month" prompt
+     with nothing in it. */
   const [view, setView] = useState("quarterly");
 
   /* Bumped to re-run the three report fetches without changing any filter.
@@ -342,9 +375,10 @@ export default function ProjectAttendancePage() {
 
   /* Header template download. The endpoint is built for a date range, and the
      header has no dates of its own, so the range comes from the Year + Month
-     controls right below it: a chosen month covers that month, "All months"
+     controls right below it: a chosen month covers that month, no month picked
      covers the whole year. The exact range is spelled out in the button's
-     tooltip so it's never a guess. */
+     tooltip so it's never a guess — which matters more now the picker reads
+     "Select Month" rather than announcing the year fallback. */
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateMsg, setTemplateMsg] = useState(null);
   const [templateError, setTemplateError] = useState(null);
@@ -385,6 +419,7 @@ export default function ProjectAttendancePage() {
     [resourceMilestones]
   );
 
+
   /* The report rows now carry the milestoneId whose Excel produced them.
      Resolve it against the milestone list this page already loads, so the
      table can name the source instead of printing a UUID. Built from the
@@ -414,7 +449,22 @@ export default function ProjectAttendancePage() {
     return "";
   }, [projectId, year, selectedMonth, quarter]);
 
-  // Monthly summary — fetched per selected month. "All months" shows a prompt instead.
+  /* Whether an upload can start, and why not when it can't. Derived once
+     because three controls now offer the action — the header button and the
+     two empty states — and three copies of this condition would eventually
+     disagree about when it's allowed. Declared after paramError, which it
+     reads. */
+  const uploadBlocked =
+    milestonesLoading || uploadableMilestones.length === 0 || !!paramError;
+  const uploadHint = paramError
+    ? "Fix the filters above before uploading"
+    : milestonesLoading
+      ? "Loading milestones…"
+      : uploadableMilestones.length === 0
+        ? "No resource-based milestones are ready for upload"
+        : "Upload attendance for a resource-based milestone";
+
+  // Monthly summary — fetched per selected month. No month picked shows a prompt instead.
   useEffect(() => {
     // Nothing to fetch for a report that isn't on screen.
     if (view !== "monthly") { setSummaryLoading(false); return undefined; }
@@ -438,6 +488,11 @@ export default function ProjectAttendancePage() {
           year: String(parseYear(year)),
           month: String(parseMonth(selectedMonth)),
         });
+        /* Sent on all three reports for consistency, but only the quarterly
+           attendance report acts on it today — see the note beside the
+           filter's own control. Harmless where it's ignored, and these start
+           filtering for free once the backend catches up. */
+        if (filterOrgId) qs.set("organisationId", filterOrgId);
         /* no-store on all three report fetches: the endpoints send no
            cache-control, so a re-request is at the browser's discretion —
            and a Refresh button that can be answered from cache isn't one. */
@@ -465,7 +520,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, selectedMonth, paramError, refreshKey, view]);
+  }, [projectId, year, selectedMonth, paramError, refreshKey, view, filterOrgId]);
 
   // Quarterly leave policy
   useEffect(() => {
@@ -484,6 +539,8 @@ export default function ProjectAttendancePage() {
           year: String(parseYear(year)),
           quarter: String(parseQuarter(quarter)),
         });
+        // The one report that genuinely filters on this today.
+        if (filterOrgId) qs.set("organisationId", filterOrgId);
         const res = await fetch(
           `${API_BASE}/api/attendance/report/quarterly?${qs}`,
           {
@@ -506,7 +563,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey, view]);
+  }, [projectId, year, quarter, paramError, refreshKey, view, filterOrgId]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -528,6 +585,7 @@ export default function ProjectAttendancePage() {
           year: String(parseYear(year)),
           quarter: String(parseQuarter(quarter)),
         });
+        if (filterOrgId) qs.set("organisationId", filterOrgId);
         const res = await fetch(
           `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
           {
@@ -545,7 +603,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey, view]);
+  }, [projectId, year, quarter, paramError, refreshKey, view, filterOrgId]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
@@ -681,14 +739,28 @@ export default function ProjectAttendancePage() {
     [quarterlyCost]
   );
   /* Prefer the API's own total; fall back to summing the rows so the footer
-     still adds up if `totals` is ever missing. */
+     still adds up if `totals` is ever missing.
+
+     With an organisation filter on, the envelope total can't be trusted: the
+     cost endpoint ignores organisationId (verified — a nonsense id still
+     returns every resource), so its total covers the whole project while the
+     rows on screen came from the attendance report, which does filter. Taking
+     the envelope figure there would print a total larger than the column above
+     it. So when a filter is active the footer is summed from the rows actually
+     displayed, which is the only figure that can agree with them. */
   const quarterlyCostTotal = useMemo(() => {
+    if (filterOrgId) {
+      return quarterlyRows.reduce(
+        (sum, emp) => sum + num(quarterlyCostById.get(String(emp.attendanceId))?.totalCost),
+        0
+      );
+    }
     const t = reportTotals(quarterlyCost);
     if (t && t.totalCost != null) return num(t.totalCost);
     let sum = 0;
     quarterlyCostById.forEach((r) => { sum += num(r.totalCost); });
     return sum;
-  }, [quarterlyCost, quarterlyCostById]);
+  }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterOrgId]);
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -721,16 +793,8 @@ export default function ProjectAttendancePage() {
           <button
             className="att-btn-primary"
             onClick={() => setUploadOpen(true)}
-            disabled={milestonesLoading || uploadableMilestones.length === 0 || !!paramError}
-            title={
-              paramError
-                ? "Fix the filters above before uploading"
-                : milestonesLoading
-                  ? "Loading milestones…"
-                  : uploadableMilestones.length === 0
-                    ? "No resource-based milestones are ready for upload"
-                    : "Upload attendance for a resource-based milestone"
-            }
+            disabled={uploadBlocked}
+            title={uploadHint}
           >
             <UploadIcon />
             Upload attendance
@@ -773,6 +837,28 @@ export default function ProjectAttendancePage() {
               {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </Field>
+          {/* Only rendered when the project actually has vendors to choose
+              between — a one-option filter asks for a decision that doesn't
+              exist. */}
+          {filterOrgs.length > 1 && (
+            <Field label="Organisation">
+              <select
+                className="att-select att-select--org"
+                value={filterOrgId}
+                onChange={(e) => setFilterOrgId(e.target.value)}
+                title={
+                  view === "monthly" && filterOrgId
+                    ? "The monthly report is not filtered by organisation yet"
+                    : "Narrow the report to one organisation"
+                }
+              >
+                <option value="">All organisations</option>
+                {filterOrgs.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
           {view === "monthly" ? (
             <Field label="Month">
               <select
@@ -780,7 +866,11 @@ export default function ProjectAttendancePage() {
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >
-                <option value="all">All months</option>
+                {/* Reads as the prompt it is. It was labelled "All months",
+                    which promised a whole-year table and delivered a "choose a
+                    month" empty state — the value stays "all" because the
+                    header's template button does use it as the full year. */}
+                <option value="all">Select Month</option>
                 {MONTH_NAMES.slice(1).map((name, i) => (
                   <option key={i + 1} value={i + 1}>{name}</option>
                 ))}
@@ -809,12 +899,22 @@ export default function ProjectAttendancePage() {
       <section className="att-section">
         <div className="att-section-head">
           <h2 className="att-section-title" style={{ margin: 0 }}>Monthly summary</h2>
-          {/* Hidden on "All months" — there's no month selected to refetch. */}
+          {/* Hidden until a month is picked — nothing to refetch yet. */}
           {selectedMonth !== "all" && (
             <RefreshButton onClick={refresh} busy={summaryLoading} />
           )}
         </div>
 
+        {/* Said out loud rather than left to be discovered: the monthly
+            endpoint accepts organisationId and ignores it, so the filter is
+            set but this table is still the whole project. Silently showing
+            everyone under an active filter would be the page lying. */}
+        {filterOrgId && (
+          <div className="att-note" role="status">
+            This monthly report isn’t filtered by organisation yet — it shows the
+            whole project team. The quarterly view does filter.
+          </div>
+        )}
         {selectedMonth === "all" && (
           <EmptyState
             icon={<CalendarIcon />}
@@ -827,8 +927,19 @@ export default function ProjectAttendancePage() {
         {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length === 0 && (
           <EmptyState
             icon={<CalendarIcon />}
-            title="Nothing recorded yet"
-            hint={`No attendance has been logged for ${MONTH_NAMES[Number(selectedMonth)]} ${year}.`}
+            title="No attendance yet"
+            hint={`Upload a spreadsheet to record the team's attendance for ${MONTH_NAMES[Number(selectedMonth)]} ${year} and start tracking leave and cost.`}
+            action={
+              <button
+                className="att-btn-primary"
+                onClick={() => setUploadOpen(true)}
+                disabled={uploadBlocked}
+                title={uploadHint}
+              >
+                <UploadIcon />
+                Upload attendance
+              </button>
+            }
           />
         )}
         {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length > 0 && (
@@ -874,6 +985,9 @@ export default function ProjectAttendancePage() {
             costTotal={quarterlyCostTotal}
             costError={quarterlyCostError}
             onRowClick={(emp) => goLeaveDetail(emp, quarter)}
+            onUpload={() => setUploadOpen(true)}
+            uploadBlocked={uploadBlocked}
+            uploadHint={uploadHint}
           />
         )}
       </section>
@@ -1130,7 +1244,7 @@ function AttendanceTable({
    ===================================================================== */
 function QuarterlyPanel({
   data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
-  costById, costTotal, costError, holidayTitle,
+  costById, costTotal, costError, holidayTitle, onUpload, uploadBlocked, uploadHint,
 }) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
@@ -1139,8 +1253,21 @@ function QuarterlyPanel({
     return (
       <EmptyState
         icon={<CalendarIcon />}
-        title="No leave this quarter"
-        hint={`Nothing has been logged for Q${quarter} ${year} yet.`}
+        title="No attendance yet"
+        hint={`Upload a spreadsheet to record the team's attendance for Q${quarter} ${year} and start tracking leave and cost.`}
+        action={
+          onUpload && (
+            <button
+              className="att-btn-primary"
+              onClick={onUpload}
+              disabled={uploadBlocked}
+              title={uploadHint}
+            >
+              <UploadIcon />
+              Upload attendance
+            </button>
+          )
+        }
       />
     );
   }
@@ -1255,6 +1382,52 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
   // Per-field messages, shown once a submit has been attempted.
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
+
+  /* Which rate year the chosen dates land in. The user doesn't pick this —
+     the server derives it from the range — but that left them uploading
+     against a rate they couldn't see. Read-only, and resolved by the same
+     endpoint the Designation Rate page uses, so what's shown here is the
+     server's own answer rather than a band worked out client-side.
+
+     A range can straddle a boundary and come back with two, which is worth
+     knowing before uploading rather than after. */
+  const [rateYears, setRateYears] = useState([]);
+  const [rateYearsLoading, setRateYearsLoading] = useState(false);
+
+  useEffect(() => {
+    // All four params are required; the endpoint 400s without the dates.
+    if (!projectId || !organisationId || !startDate || !endDate) {
+      setRateYears([]);
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setRateYearsLoading(true);
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(
+          `${API_BASE}${ENDPOINTS.designationRates.rateYear(
+            projectId, organisationId, startDate, endDate
+          )}`,
+          {
+            signal: controller.signal,
+            headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          }
+        );
+        if (!res.ok) throw new Error("unavailable");
+        const data = await res.json().catch(() => null);
+        if (active) setRateYears(Array.isArray(data) ? data : []);
+      } catch {
+        /* Non-fatal: the upload doesn't depend on this, so a failure just
+           falls back to the generic "matched automatically" line. */
+        if (active) setRateYears([]);
+      } finally {
+        if (active) setRateYearsLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, organisationId, startDate, endDate]);
 
   /* Organisations the attendance can be filed against — the project's linked
      vendors, from the gateway. This replaced the rate-year lookup that used
@@ -1635,13 +1808,46 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
             {/* The range error covers both date fields, so it sits under the
                 pair rather than being duplicated beneath each one. */}
             {fieldErrors.startDate && <div className="att-field-err">{fieldErrors.startDate}</div>}
-            {/* The rate year used to be picked here. It's now derived from the
-                dates, against the bands set when the rate card was uploaded —
-                so it's explained once the dates are in, not requested. */}
+            {/* The rate year used to be picked here. It's still not a choice —
+                the server derives it from the range — but it IS named now, so
+                the upload isn't filed against a rate the user can't see. Falls
+                back to the old generic line when the lookup can't answer. */}
             {startDate && endDate && !fieldErrors.startDate && (
-              <div className="att-note" role="status">
-                The rate year is matched automatically from these dates.
-              </div>
+              rateYearsLoading ? (
+                <div className="att-note" role="status">Matching the rate year…</div>
+              ) : rateYears.length > 0 ? (
+                <div
+                  className={`att-note${rateYears.length > 1 ? " att-note--warn" : ""}`}
+                  role="status"
+                >
+                  <div className="att-ry-head">
+                    {rateYears.length > 1
+                      ? "These dates span two rate years"
+                      : "Rate year for these dates"}
+                  </div>
+                  {rateYears.map((y) => (
+                    <div key={y.rateYear} className="att-ry-row">
+                      <span className="att-ry-name">{y.rateYear}</span>
+                      <span className="att-ry-range">
+                        {formatReportDate(y.effectiveFrom)} → {formatReportDate(y.effectiveTo)}
+                      </span>
+                    </div>
+                  ))}
+                  {/* Straddling a boundary means part of the sheet is rated at
+                      one year's card and part at the next — fine, but only if
+                      it was intended. */}
+                  {rateYears.length > 1 && (
+                    <div className="att-ry-note">
+                      Each day is rated against the year it falls in. Split the upload
+                      if you meant it to sit in one.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="att-note" role="status">
+                  The rate year is matched automatically from these dates.
+                </div>
+              )
             )}
             {outsideMilestone && !fieldErrors.startDate && (
               <div className="att-note att-note--warn" role="status">
@@ -1903,12 +2109,18 @@ function AttendanceBar({ value }) {
   );
 }
 
-function EmptyState({ icon, title, hint }) {
+/* An empty table is the most likely place a first-time user lands, so it
+   carries the way out rather than just reporting the absence — the same shape
+   the Resources page uses: icon, what's missing, what to do, and the button
+   that does it. `action` is optional: the "pick a month" prompt is waiting on
+   a choice already on screen, not on an upload. */
+function EmptyState({ icon, title, hint, action }) {
   return (
     <div className="att-empty">
       {icon && <div className="att-empty-icon">{icon}</div>}
       <div className="att-empty-title">{title}</div>
       {hint && <div className="att-empty-hint">{hint}</div>}
+      {action && <div className="att-empty-action">{action}</div>}
     </div>
   );
 }
@@ -2034,6 +2246,16 @@ const ATT_CSS = `
 .att-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
 /* milestone names are long — let that one select take the full modal row */
 .att-select--wide { min-width: 100%; }
+/* Vendor names run long; capped so one doesn't stretch the filter row. */
+.att-select--org { max-width: 230px; }
+
+/* Resolved rate year in the upload modal — sits inside .att-note, so it
+   inherits that block's colour and only needs its own internal rhythm. */
+.att-ry-head { font-weight: 700; margin-bottom: 5px; }
+.att-ry-row { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; }
+.att-ry-name { font-weight: 700; font-variant-numeric: tabular-nums; }
+.att-ry-range { opacity: .85; font-variant-numeric: tabular-nums; }
+.att-ry-note { margin-top: 6px; opacity: .85; }
 
 /* template download row inside the upload modal */
 .att-template-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -2253,12 +2475,17 @@ const ATT_CSS = `
    findable by colour and readable without relying on it. */
 .att-select.is-bad, .att-file.is-bad { border-color: ${C.red}; }
 .att-select.is-bad:focus { border-color: ${C.red}; box-shadow: 0 0 0 3px rgba(214,69,69,.14); }
+/* Roomier than it was, matching the Resources page's empty state — with a
+   button under it the old 34px felt cramped, and this is the first thing a
+   new project shows. */
 .att-empty { display: flex; flex-direction: column; align-items: center; text-align: center;
-  padding: 34px 20px; border: 1px dashed ${C.borderStrong}; border-radius: 14px; background: #fbfcfe; }
+  padding: 56px 24px; border: 1px dashed ${C.borderStrong}; border-radius: 14px; background: #fbfcfe; }
 .att-empty-icon { display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 44px; border-radius: 12px; background: ${C.accentBg}; color: ${C.primary}; margin-bottom: 12px; }
-.att-empty-title { font-size: 15px; font-weight: 700; color: ${C.ink}; }
-.att-empty-hint { font-size: 13px; color: ${C.muted}; margin-top: 5px; max-width: 380px; }
+  width: 52px; height: 52px; border-radius: 14px; background: ${C.accentBg}; color: ${C.primary}; margin-bottom: 14px; }
+.att-empty-icon svg { width: 24px; height: 24px; }
+.att-empty-title { font-size: 16px; font-weight: 700; color: ${C.ink}; }
+.att-empty-hint { font-size: 14px; color: ${C.muted}; margin-top: 8px; max-width: 400px; line-height: 1.5; }
+.att-empty-action { margin-top: 22px; }
 
 /* skeletons */
 .att-skel { background: linear-gradient(90deg, ${C.surfaceAlt} 25%, #e3e9f1 37%, ${C.surfaceAlt} 63%);
