@@ -434,20 +434,35 @@ function useRelaxationAttachment({ resourceId, projectId, year, quarter, refresh
 /* ── which unpaid-leave dates can still be relaxed ────────────────────
    GET /api/attendance/quarterly-relaxation/eligible-dates
        ?resourceId=&projectId=&year=&quarter=
-   → { unpaidLeaveDates, approvedRelaxationDates, eligibleDates, … }
+   → { unpaidFullDayDates, unpaidHalfDayDates, sandwichDates, allUnpaidDates,
+       eligibleDates, approvedRelaxationDates, approvedRelaxationCost }
 
-   `eligibleDates` is the server's own unpaidLeaveDates minus whatever's
-   already been granted this quarter — it's the authoritative list, not a
-   figure to re-derive client-side, so the dropdown is built from it as-is. */
-function useEligibleRelaxationDates({ resourceId, projectId, year, quarter }) {
-  const [dates, setDates] = useState([]);
+   `eligibleDates` is the authoritative pick-list — the unpaid dates minus what
+   has already been granted — so it is used as sent rather than re-derived. The
+   three category lists are what give each date its WEIGHT, which is the whole
+   point of the picker: two days of relaxation buys four half days, or two half
+   days and one full one.
+
+   Sandwich days weigh a full day. Checked against resource 421's Q1-2026:
+   7 full + 4 half + 2 sandwich reconciles to the leave report's
+   totalUnpaidDays of 11.0 only at 1.0 each (7 + 2.0 + 2.0); at 0.5 it would
+   come to 10.0. `unpaidLeave` (9.0) is the same figure with sandwich days
+   left out, which is why the two disagree. */
+const DAY_KINDS = {
+  full: { weight: 1, label: "Full day", short: "1" },
+  half: { weight: 0.5, label: "Half day", short: "0.5" },
+  sandwich: { weight: 1, label: "Sandwich", short: "1" },
+};
+
+function useEligibleRelaxationDates({ resourceId, projectId, year, quarter, refreshKey }) {
+  const [data, setData] = useState({ options: [], approved: [], approvedCost: 0 });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const y = parseYear(year);
     const q = parseQuarter(quarter);
     if (!resourceId || !projectId || y === null || q === null) {
-      setDates([]);
+      setData({ options: [], approved: [], approvedCost: 0 });
       return undefined;
     }
     let active = true;
@@ -463,21 +478,42 @@ function useEligibleRelaxationDates({ resourceId, projectId, year, quarter }) {
           `${API_BASE}/api/attendance/quarterly-relaxation/eligible-dates?${qs}`,
           { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
         );
-        if (!res.ok) { if (active) setDates([]); return; }
+        if (!res.ok) throw new Error("unavailable");
         const json = await res.json().catch(() => ({}));
-        const data = json?.data ?? json;
-        const list = Array.isArray(data?.eligibleDates) ? data.eligibleDates : [];
-        if (active) setDates(list);
+        const raw = json?.data ?? json;
+        const list = (k) => (Array.isArray(raw?.[k]) ? raw[k] : []);
+
+        const half = new Set(list("unpaidHalfDayDates").map(dateKey).filter(Boolean));
+        const sandwich = new Set(list("sandwichDates").map(dateKey).filter(Boolean));
+        /* Anything eligible that isn't flagged half or sandwich is a full day.
+           Derived by exclusion rather than by membership of unpaidFullDayDates
+           so a date the server forgets to categorise still gets a weight
+           instead of silently counting as zero. */
+        const options = list("eligibleDates")
+          .map(dateKey)
+          .filter(Boolean)
+          .map((d) => ({
+            date: d,
+            kind: half.has(d) ? "half" : sandwich.has(d) ? "sandwich" : "full",
+          }));
+
+        if (active) {
+          setData({
+            options,
+            approved: list("approvedRelaxationDates").map(dateKey).filter(Boolean),
+            approvedCost: num(raw?.approvedRelaxationCost),
+          });
+        }
       } catch {
-        if (active) setDates([]);
+        if (active) setData({ options: [], approved: [], approvedCost: 0 });
       } finally {
         if (active) setLoading(false);
       }
     })();
     return () => { active = false; };
-  }, [resourceId, projectId, year, quarter]);
+  }, [resourceId, projectId, year, quarter, refreshKey]);
 
-  return { dates, loading };
+  return { ...data, loading };
 }
 
 export default function LeaveDetailPage() {
@@ -1863,7 +1899,9 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
     projectId: projectId || "",
     year: year || "",
     quarter: Number(quarter) || 1,
-    relaxationDate: "",
+    // Several dates per grant — relaxation is bought in days, and a day buys
+    // two half days, so one pick is rarely the whole story.
+    relaxationDates: [],
     remarks: "",
   });
   const [saving, setSaving] = useState(false);
@@ -1881,22 +1919,45 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
      at a different resource/project/period, since editing Year or Quarter
      here is allowed (see periodChanged below) and each period has its own
      eligible dates. */
-  const { dates: eligibleDates, loading: datesLoading } = useEligibleRelaxationDates({
+  const {
+    options: eligibleOptions,
+    approved: approvedDates,
+    approvedCost,
+    loading: datesLoading,
+  } = useEligibleRelaxationDates({
     resourceId: form.resourceId,
     projectId: form.projectId,
     year: form.year,
     quarter: form.quarter,
   });
 
-  // Drop a stale pick if it fell out of the eligible list (e.g. Year/Quarter
-  // just changed, or the date was granted elsewhere in the meantime).
+  // Drop stale picks that fell out of the eligible list (e.g. Year/Quarter
+  // just changed, or a date was granted elsewhere in the meantime).
   useEffect(() => {
-    setForm((f) =>
-      f.relaxationDate && !eligibleDates.includes(f.relaxationDate)
-        ? { ...f, relaxationDate: "" }
-        : f
-    );
-  }, [eligibleDates]);
+    const live = new Set(eligibleOptions.map((o) => o.date));
+    setForm((f) => {
+      const kept = f.relaxationDates.filter((d) => live.has(d));
+      return kept.length === f.relaxationDates.length ? f : { ...f, relaxationDates: kept };
+    });
+  }, [eligibleOptions]);
+
+  /* What the current selection actually costs. This is the number the whole
+     picker exists for: relaxation is granted in days, and the user is choosing
+     dates that add up to it — four half days and two full days both come to
+     two, and only the running total makes that visible while choosing. */
+  const weightOf = (d) =>
+    DAY_KINDS[eligibleOptions.find((o) => o.date === d)?.kind]?.weight ?? 0;
+  const selectedDays = form.relaxationDates.reduce((t, d) => t + weightOf(d), 0);
+
+  const toggleDate = (d) =>
+    setForm((f) => {
+      const has = f.relaxationDates.includes(d);
+      const next = has
+        ? f.relaxationDates.filter((x) => x !== d)
+        : [...f.relaxationDates, d].sort();
+      if (submitted) setFieldErrors(validate({ ...f, relaxationDates: next }));
+      return { ...f, relaxationDates: next };
+    });
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && !saving && onClose();
@@ -1918,9 +1979,9 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
       errs.year = `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
     }
     if (parseQuarter(f.quarter) === null) errs.quarter = "Choose a quarter from 1 to 4.";
-    if (!String(f.relaxationDate || "").trim()) {
-      errs.relaxationDate = eligibleDates.length
-        ? "Choose the unpaid leave date to relax."
+    if (!f.relaxationDates.length) {
+      errs.relaxationDates = eligibleOptions.length
+        ? "Choose at least one unpaid leave date to relax."
         : "No unpaid leave dates are eligible for relaxation this quarter.";
     }
     if (String(f.remarks || "").length > MAX_REMARKS) {
@@ -1987,7 +2048,11 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
         projectId: String(form.projectId).trim(),
         year: String(parseYear(form.year)),
         quarter: String(parseQuarter(form.quarter)),
-        relaxationDates: form.relaxationDate,
+        /* Comma-separated rather than a repeated key. Spring binds a
+           comma-joined value to either `List<LocalDate>` or a plain `String`
+           param; a repeated key only binds to the List form, so this is the
+           shape that works against both. */
+        relaxationDates: form.relaxationDates.join(","),
       });
       if (form.remarks.trim()) qs.set("remarks", form.remarks.trim().slice(0, MAX_REMARKS));
 
@@ -2087,34 +2152,91 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
                 </select>
                 {fieldErrors.quarter && <span className="ld-field-err">{fieldErrors.quarter}</span>}
               </label>
-              <label className="ld-field">
+              {/* Checkboxes rather than a multiple <select>: a native
+                  multi-select needs ctrl-click to pick a second date and gives
+                  no room for each date's weight, which is the one thing this
+                  list has to show. */}
+              {/* tabIndex -1 so submit's "focus the first bad field" can reach
+                  it — a plain div is not focusable, and the jump would
+                  silently do nothing. */}
+              <div className="ld-field ld-field--full" id="relax-relaxationDates" tabIndex={-1}>
                 <span className="ld-field-lbl">
-                  Unpaid Leave Date
-                  <Hint text="The unpaid leave day being waived. Only dates still eligible for relaxation this quarter are listed." />
+                  Unpaid Leave Dates
+                  <Hint text="The unpaid days being waived. Each is worth a full or a half day, so two days of relaxation covers two full days, four half days, or any mix. Only dates still eligible this quarter are listed." />
                 </span>
-                <select
-                  id="relax-relaxationDate"
-                  className={`ld-input${fieldErrors.relaxationDate ? " is-bad" : ""}`}
-                  value={form.relaxationDate}
-                  disabled={datesLoading || eligibleDates.length === 0}
-                  aria-invalid={!!fieldErrors.relaxationDate}
-                  onChange={(e) => set({ relaxationDate: e.target.value })}
-                >
-                  <option value="">
-                    {datesLoading
-                      ? "Loading eligible dates…"
-                      : eligibleDates.length === 0
-                        ? "No eligible dates this quarter"
-                        : "Select a date…"}
-                  </option>
-                  {eligibleDates.map((dt) => (
-                    <option key={dt} value={dt}>{formatLeaveDate(dt)}</option>
-                  ))}
-                </select>
-                {fieldErrors.relaxationDate && (
-                  <span className="ld-field-err">{fieldErrors.relaxationDate}</span>
+
+                {datesLoading ? (
+                  <div className="ld-daylist-note">Loading eligible dates…</div>
+                ) : eligibleOptions.length === 0 ? (
+                  <div className="ld-daylist-note">
+                    No unpaid leave dates are eligible for relaxation this quarter.
+                  </div>
+                ) : (
+                  <>
+                    <div
+                      className={`ld-daylist${fieldErrors.relaxationDates ? " is-bad" : ""}`}
+                      role="group"
+                      aria-label="Eligible unpaid leave dates"
+                    >
+                      {eligibleOptions.map((o) => {
+                        const kind = DAY_KINDS[o.kind];
+                        const checked = form.relaxationDates.includes(o.date);
+                        return (
+                          <label
+                            key={o.date}
+                            className={`ld-day${checked ? " is-on" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => { toggleDate(o.date); setError(null); }}
+                            />
+                            <span className="ld-day-date">{formatLeaveDate(o.date)}</span>
+                            <span className={`ld-day-kind ld-day-kind--${o.kind}`}>
+                              {kind.label} · {kind.short}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {/* The running total. Without it the user is adding halves
+                        and wholes in their head while clicking. */}
+                    <div className="ld-daysum">
+                      <strong>{dayCount(selectedDays)}</strong>
+                      {selectedDays === 1 ? " day" : " days"} selected
+                      <span className="ld-daysum-sub">
+                        {form.relaxationDates.length} of {eligibleOptions.length} dates
+                      </span>
+                    </div>
+                  </>
                 )}
-              </label>
+                {fieldErrors.relaxationDates && (
+                  <span className="ld-field-err">{fieldErrors.relaxationDates}</span>
+                )}
+              </div>
+
+              {/* Already granted this quarter — read-only, so the user can see
+                  what's been waived before adding more. These dates are absent
+                  from the list above, which would otherwise look like they had
+                  simply gone missing. */}
+              {approvedDates.length > 0 && (
+                <div className="ld-field ld-field--full">
+                  <span className="ld-field-lbl">
+                    Already Relaxed
+                    <Hint text="Relaxation already approved for this quarter. These dates are no longer selectable." />
+                  </span>
+                  <div className="ld-approved">
+                    {approvedDates.map((d) => (
+                      <span key={d} className="ld-approved-chip">{formatLeaveDate(d)}</span>
+                    ))}
+                    {approvedCost > 0 && (
+                      <span className="ld-approved-cost" title={rupeesInWords(approvedCost)}>
+                        {money(approvedCost)} waived
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               <label className="ld-field ld-field--full">
                 <span className="ld-field-lbl">
                   Remarks
@@ -2503,6 +2625,44 @@ const LD_CSS = `
    fought the one accent colour the rest of the page now uses. */
 .ld-btn--primary { border: 1px solid ${C.primary}; color: #fff; background: ${C.primary}; }
 .ld-btn--primary:hover:not(:disabled) { background: ${C.primaryDark}; border-color: ${C.primaryDark}; }
+
+/* ── relaxation date picker ────────────────────────────────────────────
+   A scrolling checkbox list. Capped in height so a quarter with a dozen
+   unpaid days doesn't push Remarks and the attachment off screen. */
+.ld-daylist { display: grid; gap: 4px; max-height: 190px; overflow-y: auto;
+  padding: 6px; border: 1px solid ${C.borderStrong}; border-radius: 10px;
+  background: #fff; }
+.ld-daylist.is-bad { border-color: ${C.red}; }
+.ld-daylist-note { font-size: 13px; color: ${C.muted}; padding: 10px 2px; }
+.ld-day { display: flex; align-items: center; gap: 10px; padding: 7px 9px;
+  border-radius: 8px; cursor: pointer; font-size: 13.5px; transition: background .13s ease; }
+.ld-day:hover { background: ${C.surface}; }
+.ld-day.is-on { background: ${C.accentBg}; }
+.ld-day input { width: 15px; height: 15px; accent-color: ${C.primary};
+  cursor: pointer; flex-shrink: 0; margin: 0; }
+.ld-day-date { font-weight: 600; color: ${C.ink}; font-variant-numeric: tabular-nums; }
+/* The weight, which is the reason this list exists rather than a plain
+   dropdown — half and full are told apart by tone as well as by the word. */
+.ld-day-kind { margin-left: auto; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px;
+  border-radius: 999px; white-space: nowrap; }
+.ld-day-kind--full { background: #eef2f7; color: ${C.muted}; }
+.ld-day-kind--half { background: #fdf4e3; color: #a4650a; }
+.ld-day-kind--sandwich { background: #f8f3ea; color: #8a6d3b; }
+
+/* Running total — the figure the picker is steering towards. */
+.ld-daysum { display: flex; align-items: baseline; gap: 8px; margin-top: 8px;
+  font-size: 13px; color: ${C.ink}; }
+.ld-daysum strong { font-size: 16px; font-weight: 700; color: ${C.primary}; }
+.ld-daysum-sub { margin-left: auto; font-size: 12px; color: ${C.muted}; }
+
+/* Already-approved dates — read-only context, so lighter than the pickable
+   list above and never mistakable for it. */
+.ld-approved { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ld-approved-chip { font-size: 12px; font-weight: 600; padding: 3px 10px;
+  border-radius: 999px; background: #e9f9ef; color: #197a45;
+  font-variant-numeric: tabular-nums; }
+.ld-approved-cost { font-size: 12px; color: ${C.muted}; margin-left: 2px; }
 
 /* relaxation modal */
 .ld-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 1000; }
