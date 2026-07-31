@@ -334,6 +334,16 @@ const STYLES = `
 .mr-row { border-bottom: 1px solid #eef2f7; cursor: pointer; transition: background .16s, box-shadow .16s; }
 .mr-row:last-child { border-bottom: none; }
 .mr-row:hover { background: #f7f9fd; box-shadow: inset 3px 0 0 #0b3c88; }
+
+/* Inactive resource — matches the project Resources table so the same state
+   reads the same on both screens. Neutral, not red: inactive is a state a
+   resource is meant to reach, not a fault, and the pill keeps the word so
+   the meaning never rests on colour alone. */
+.mr-row--off { box-shadow: inset 3px 0 0 #e6ecf3; }
+.mr-row--off .mr-td { color: #64748b; }
+.mr-row--off .mr-name { color: #64748b; font-weight: 500; }
+.mr-row--off .mr-id { color: #94a3b8; }
+.mr-row--off .mr-avatar { filter: grayscale(1); opacity: .5; }
 .mr-td { padding: 12px 16px; vertical-align: middle; color: #0f1c33; }
 .mr-td[data-align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
 .mr-td[data-align="center"] { text-align: center; }
@@ -960,9 +970,13 @@ export default function MasterResources() {
                   return (
                     <tr
                       key={r.id ?? r.resId}
-                      className="mr-row"
+                      className={`mr-row${r.active ? "" : " mr-row--off"}`}
                       onClick={() => setViewingId(r.resId)}
-                      title="View resource details and history"
+                      title={
+                        r.active
+                          ? "View resource details and history"
+                          : "Inactive — view resource details and history"
+                      }
                     >
                       <td className="mr-td"><code className="mr-id">{r.resId}</code></td>
                       <td className="mr-td">

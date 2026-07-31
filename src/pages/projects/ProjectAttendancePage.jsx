@@ -75,12 +75,13 @@ const reportRows = (payload) =>
 const reportTotals = (payload) =>
   !Array.isArray(payload) && payload?.totals ? payload.totals : null;
 
-/* The attendance report sends joiningDate as dd-MM-yyyy, unlike the ISO dates
-   the rest of this file deals in. Parsed explicitly rather than through
-   `new Date`, which reads "05-02-2026" as MM-dd-yyyy and hands back 2 May
-   instead of 5 February — three months out, and perfectly plausible on screen.
-   ISO is accepted too, in case the endpoint is normalised later. */
-const formatJoiningDate = (raw) => {
+/* The attendance report sends its dates — joiningDate, lastWorkingDate — as
+   dd-MM-yyyy, unlike the ISO dates the rest of this file deals in. Parsed
+   explicitly rather than through `new Date`, which reads "05-02-2026" as
+   MM-dd-yyyy and hands back 2 May instead of 5 February — three months out,
+   and perfectly plausible on screen. ISO is accepted too, in case the endpoint
+   is normalised later. */
+const formatReportDate = (raw) => {
   const s = String(raw ?? "").trim();
   if (!s) return "";
   const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(s);
@@ -998,7 +999,9 @@ function AttendanceTable({
           <tbody>
             {employees.map((emp) => (
               <tr
-                className={`att-row${clickable ? " att-row-click" : ""}`}
+                className={`att-row${clickable ? " att-row-click" : ""}${
+                  emp.active === false ? " att-row--off" : ""
+                }`}
                 key={emp.attendanceId}
                 onClick={clickable ? () => onRowClick(emp) : undefined}
                 title={clickable ? "View leave detail" : undefined}
@@ -1011,6 +1014,32 @@ function AttendanceTable({
                       {emp.designation}
                     </div>
                   )}
+                  {/* Under the designation rather than beside the name: as a
+                      chip next to the name it wrapped to its own line in this
+                      column's real width, splitting the name from the job title
+                      and making the row a third taller than its neighbours.
+
+                      Explicitly `=== false` — older payloads carry no `active`
+                      field at all, and a plain `!emp.active` would brand every
+                      row on them as inactive. */}
+                  {emp.active === false && (
+                    <div
+                      className="att-off"
+                      title={
+                        formatReportDate(emp.lastWorkingDate)
+                          ? `No longer on the project — last working day ${formatReportDate(emp.lastWorkingDate)}. The figures on this row cover their time on it.`
+                          : "No longer on the project."
+                      }
+                    >
+                      <span className="att-off-dot" aria-hidden="true" />
+                      Inactive
+                      {formatReportDate(emp.lastWorkingDate) && (
+                        <span className="att-off-date">
+                          · till {formatReportDate(emp.lastWorkingDate)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </td>
                 {showMilestoneCol && (
                   <td className="att-td att-dim" title={emp.milestoneId || ""}>
@@ -1019,7 +1048,7 @@ function AttendanceTable({
                 )}
                 {showJoined && (
                   <td className="att-td att-joined">
-                    {formatJoiningDate(emp.joiningDate) || "—"}
+                    {formatReportDate(emp.joiningDate) || "—"}
                   </td>
                 )}
                 <td className="att-td att-num att-dim" title={holidayTitle}>
@@ -2164,6 +2193,40 @@ const ATT_CSS = `
 /* Joining date — context for the Working count beside it, so it reads a step
    back from the figures rather than competing with them. */
 .att-joined { color: ${C.muted}; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ── inactive employee ──────────────────────────────────────────────────
+   No column of its own: only a handful of rows are ever inactive, so a column
+   would be blank for everyone still on the project — and the same goes for the
+   last working date, which rides on this same line.
+
+   A plain line rather than a pill. As a bordered chip it was the heaviest
+   thing in the table for what is a footnote about one row, and at this
+   column's real width it wrapped and pushed the row taller than its
+   neighbours. The scanning work is done by the rail on the left edge instead,
+   which costs no height at all.
+
+   Neutral, not red. Someone rolling off a project is an ordinary event and
+   their attendance figures are still real — a warning colour would read as
+   "this row is wrong" when it's just "this row ended early". It also explains
+   a Working of 26 against everyone else's 60. */
+/* A tinted pill, on its own line so the colour costs no row height. The text
+   is a DEEPER red than the palette's ${C.red}: that one lands at 3.83:1 on
+   this tint, under the 4.5:1 small-text floor, where #b91c1c reaches 5.66:1.
+   Measured, not eyeballed — at 11.5px the difference is legibility. */
+.att-off { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px;
+  padding: 2px 9px 2px 8px; border-radius: 999px; background: ${C.redBg};
+  font-size: 11px; font-weight: 700; color: #b91c1c; line-height: 1.45;
+  letter-spacing: .01em; }
+.att-off-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: ${C.red}; }
+/* The date is the detail, so it rides at normal weight inside the pill. */
+.att-off-date { font-weight: 500; opacity: .85; font-variant-numeric: tabular-nums; }
+
+/* The rail, in the same red so the two read as one signal. Sits on the first
+   cell because the table collapses its borders, which makes a shadow on the
+   row itself unreliable. Hover only changes the background, so they never
+   fight. */
+.att-row--off .att-td:first-child { box-shadow: inset 3px 0 0 ${C.red}; }
 
 /* attendance strength meter */
 .att-bar { display: inline-flex; align-items: center; gap: 9px; justify-content: flex-end; }

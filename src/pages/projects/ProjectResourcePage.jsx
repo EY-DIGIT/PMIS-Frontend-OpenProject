@@ -296,6 +296,25 @@ button.rp-th-inner:hover { color: var(--rp-primary); }
 .rp-row { border-bottom: 1px solid var(--rp-line-2); cursor: pointer; transition: background .16s, box-shadow .16s; }
 .rp-row:last-child { border-bottom: none; }
 .rp-row:hover { background: var(--rp-surface-2); box-shadow: inset 3px 0 0 var(--rp-primary); }
+
+/* ── inactive resource ──────────────────────────────────────────────────
+   The Status pill already says so, but a reader scanning fifty rows for the
+   people still on the project shouldn't have to read a column to find them.
+   The whole row steps back instead, so the active ones are what the eye
+   lands on: text drops to muted, and the avatar — the loudest thing in the
+   row — loses its colour.
+
+   Deliberately neutral rather than red: inactive is a state a resource is
+   meant to reach, not a fault. The pill keeps carrying the word "Inactive",
+   so the meaning never rests on colour alone.
+
+   The bar is a resting-state marker; hover replaces it with the usual primary
+   one, which is fine — by then the pointer is already on the row. */
+.rp-row--off { box-shadow: inset 3px 0 0 var(--rp-line); }
+.rp-row--off .rp-td { color: var(--rp-muted); }
+.rp-row--off .rp-name { color: var(--rp-muted); font-weight: 500; }
+.rp-row--off .rp-id { color: var(--rp-faint); }
+.rp-row--off .rp-avatar { filter: grayscale(1); opacity: .5; }
 .rp-td { padding: 12px 16px; vertical-align: middle; color: var(--rp-ink); }
 .rp-td[data-align="right"] { text-align: right; font-variant-numeric: tabular-nums; }
 .rp-td[data-align="center"] { text-align: center; }
@@ -1131,9 +1150,9 @@ function closeApiResponse() {
                   return (
                     <tr
                       key={r.resId}
-                      className="rp-row"
+                      className={`rp-row${r.active ? "" : " rp-row--off"}`}
                       onClick={() => setViewingId(r.resId)}
-                      title="View resource details"
+                      title={r.active ? "View resource details" : "Inactive — view resource details"}
                     >
                       <td className="rp-td" data-align="left">
                         <code className="rp-id">{r.resId}</code>
