@@ -99,25 +99,90 @@ export function contractQuarterFor(quarters, on = new Date()) {
     return quarters.find((q) => target >= q.start && target <= q.end) || null;
 }
 
-/* NPQP is served per CALENDAR quarter, so a contract quarter has to be
-   mapped onto one to fetch the payment base. The midpoint is used because
-   it is the calendar quarter the contract quarter overlaps most. When the
-   contract starts on a calendar boundary the two coincide exactly and
-   `aligned` is true; otherwise the caller should say so on screen rather
-   than presenting an approximate base as exact. */
-export function calendarQuarterFor(window) {
+/* Every calendar quarter a contract quarter touches, with the share of
+   the contract quarter's days that falls in each.
+
+   `calendarQuarterFor` above picks ONE quarter by midpoint, which is an
+   admitted approximation: a contract quarter of equal length straddling
+   two calendar quarters is charged entirely against whichever one holds
+   its middle day. Since NPQP is only published per calendar quarter and
+   the RFP measures everything from T0, the honest answer is to take
+   both and weight them by actual day overlap:
+
+       Y2-Q1 = 15 Feb → 14 May (89 days)
+         2026-Q1  45 days  50.6%
+         2026-Q2  44 days  49.4%
+       NPQP = 0.506 × NPQP(2026-Q1) + 0.494 × NPQP(2026-Q2)
+
+   A contract quarter spans at most four months, so it can touch at most
+   two calendar quarters — but the loop is written generally rather than
+   assuming that, because a project with a badly-set end date can
+   produce longer windows and silently dropping the tail would understate
+   the base. When the quarters align exactly, one entry comes back with
+   weight 1 and the result is exact rather than blended.               */
+export function overlappingCalendarQuarters(window) {
     const start = parseISO(window?.start);
     const end = parseISO(window?.end);
-    if (!start || !end) return null;
-    const mid = new Date((start.getTime() + end.getTime()) / 2);
-    const q = Math.floor(mid.getMonth() / 3) + 1;
-    const calStart = new Date(mid.getFullYear(), (q - 1) * 3, 1);
-    const calEnd = new Date(mid.getFullYear(), q * 3, 0);
+    if (!start || !end || end < start) return [];
+
+    const DAY = 24 * 60 * 60 * 1000;
+    // Inclusive of both ends: 1 Jan → 1 Jan is one day, not zero.
+    const totalDays = Math.round((end - start) / DAY) + 1;
+    if (totalDays <= 0) return [];
+
+    const out = [];
+    let cursorYear = start.getFullYear();
+    let cursorQ = Math.floor(start.getMonth() / 3) + 1;
+
+    for (let guard = 0; guard < 24; guard += 1) {
+        const qStart = new Date(cursorYear, (cursorQ - 1) * 3, 1);
+        const qEnd = new Date(cursorYear, cursorQ * 3, 0);
+        if (qStart > end) break;
+
+        const from = qStart > start ? qStart : start;
+        const to = qEnd < end ? qEnd : end;
+        const days = Math.round((to - from) / DAY) + 1;
+        if (days > 0) {
+            out.push({
+                key: `${cursorYear}-Q${cursorQ}`,
+                start: isoOf(qStart),
+                end: isoOf(qEnd),
+                overlapStart: isoOf(from),
+                overlapEnd: isoOf(to),
+                days,
+                weight: days / totalDays,
+            });
+        }
+        cursorQ += 1;
+        if (cursorQ === 5) { cursorQ = 1; cursorYear += 1; }
+    }
+
+    return out;
+}
+
+/* Blend per-quarter NPQP figures by day weight. `values` maps a calendar
+   quarter key to its NPQP.
+
+   A quarter whose NPQP could not be read is NOT treated as zero — that
+   would quietly halve the base and understate every LD on the screen.
+   The blend is instead reported as incomplete, with the missing keys
+   named, and the caller decides whether to show a number at all.      */
+export function blendNpqp(overlaps, values) {
+    const list = Array.isArray(overlaps) ? overlaps : [];
+    if (!list.length) return { npqp: null, complete: false, missing: [], parts: [] };
+
+    const parts = list.map((o) => ({ ...o, npqp: Number(values?.[o.key]) }));
+    const missing = parts.filter((p) => !Number.isFinite(p.npqp) || p.npqp <= 0);
+    const usable = parts.filter((p) => Number.isFinite(p.npqp) && p.npqp > 0);
+
     return {
-        key: `${mid.getFullYear()}-Q${q}`,
-        start: isoOf(calStart),
-        end: isoOf(calEnd),
-        aligned: isoOf(calStart) === window.start && isoOf(calEnd) === window.end,
+        parts,
+        missing: missing.map((p) => p.key),
+        complete: missing.length === 0,
+        exact: list.length === 1,
+        npqp: missing.length === 0
+            ? usable.reduce((n, p) => n + p.npqp * p.weight, 0)
+            : null,
     };
 }
 
@@ -468,6 +533,56 @@ export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } =
         npqp: hasBase ? base : null,
         ldAmount: hasBase ? (base * cappedLdPercent) / 100 : null,
         ldAmountUncapped: hasBase ? (base * sumLdPercent) / 100 : null,
+    };
+}
+
+/* ─── the two tracks meeting in one quarter (§5.27.6) ────────────────
+   §5.27.6 says "the cumulative liquidated damages for each quarter
+   shall under no circumstances exceed 10% of the Net Planned Quarterly
+   Payment". `quarterTotals` applies that ceiling to the quarterly track
+   only, on the reasoning documented in deliverablePayable.js: SLA
+   001/002 apply to D1–D8, i.e. Phase 1, where neither F (staff cost,
+   from D9 per §5.25.2) nor QGR (§5.23.2, Phase 2–3) exists, so there is
+   no NPQP for a 10% of it to bite on.
+
+   That reasoning holds only while the phases do not overlap. A D1–D8
+   deliverable that slips into a quarter where Phase 2 is already
+   running produces BOTH kinds of LD in one quarter, and the literal
+   reading of "cumulative liquidated damages for each quarter" then
+   covers the combined figure.
+
+   This does not resolve the ambiguity — it detects the one situation in
+   which it becomes a live question, and reports the numbers on both
+   readings so a human can decide before the invoice is raised.       */
+export function combinedCapCheck(totals, dTotals) {
+    const quarterly = Number(totals?.ldAmount);
+    const deliverable = Number(dTotals?.totalLdAmount);
+    const hasQuarterly = Number.isFinite(quarterly) && quarterly > 0;
+    const hasDeliverable = Number.isFinite(deliverable) && deliverable > 0;
+
+    // Only interesting when both regimes actually charged something in the
+    // same quarter. One track alone is unambiguous.
+    if (!hasQuarterly || !hasDeliverable) {
+        return { applies: false, bothTracksCharged: false };
+    }
+
+    const npqp = Number(totals?.npqp);
+    const capPercent = Number(totals?.quarterCapPercent ?? 10);
+    const ceiling = Number.isFinite(npqp) && npqp > 0 ? (npqp * capPercent) / 100 : null;
+    const combined = quarterly + deliverable;
+
+    return {
+        applies: true,
+        bothTracksCharged: true,
+        quarterlyLd: quarterly,
+        deliverableLd: deliverable,
+        combined,
+        ceiling,
+        capPercent,
+        // Under the strict reading the combined total is already over the
+        // ceiling, so the two readings give materially different invoices.
+        exceedsIfCombined: ceiling !== null && combined > ceiling,
+        excess: ceiling !== null ? Math.max(0, combined - ceiling) : null,
     };
 }
 

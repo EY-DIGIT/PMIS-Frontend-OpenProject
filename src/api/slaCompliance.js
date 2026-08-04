@@ -212,7 +212,63 @@ export function getLdBands(projectId) {
    QUARTERLY_PAYMENT). Evaluation results normally carry the same facts
    as `formulaType` / `ldBaseKind`, so this list is used for titles and
    as a fallback when a result arrives without them — never as the sole
-   source, since a project can hold SLAs it has never evaluated.        */
+   source, since a project can hold SLAs it has never evaluated.
+
+   It ALSO carries the four fields the rollup needs to check the RFP's
+   own scoring rules rather than take the backend's word for them:
+
+     · measurement_interval / reporting_interval (§5.28.1.a). When
+       measurement is finer than reporting, points must not simply be
+       summed — SLA 007 reports "quarterly, based on AVERAGE monthly
+       availability", so three monthly scores collapse to one severity.
+     · target_rows — the SLA's own severity table
+       ({severity, input_variable, from_value excl, to_value incl}),
+       which is what an averaged or counted value has to be read against.
+     · linear_escalation — {rate_per_unit_percent, unit, grace_units},
+       which is how "0.5% per week or part thereof" is actually stored.
+
+   All four are optional: an SLA library that predates them simply
+   yields no cross-check, which the rollup reports as "not verifiable"
+   rather than as agreement.                                            */
+
+/* The onboarding widget writes `target_rows`, but older records saved
+   the same array as `bands` / `condition_bands` — the masters detail
+   page already reads all three, so this mirrors it. */
+function pickTargetRows(s) {
+    const raw = s.target_rows ?? s.targetRows ?? s.bands ?? s.condition_bands ?? s.conditionBands;
+    if (!Array.isArray(raw)) return [];
+    return raw
+        .map((r) => ({
+            severity: Number(r.severity ?? r.severity_level ?? r.severityLevel),
+            inputVariable: r.input_variable ?? r.inputVariable ?? null,
+            thresholdLabel: r.threshold_label ?? r.thresholdLabel ?? "",
+            // from is EXCLUSIVE, to is INCLUSIVE — the widget labels them
+            // that way and the RFP bands read the same ("> 21 days & <= 28").
+            // null means unbounded on that side.
+            fromValue: numOrNull(r.from_value ?? r.fromValue),
+            toValue: numOrNull(r.to_value ?? r.toValue),
+        }))
+        .filter((r) => Number.isFinite(r.severity));
+}
+
+function pickLinearEscalation(s) {
+    const raw = s.linear_escalation ?? s.linearEscalation;
+    if (!raw || typeof raw !== "object") return null;
+    const rate = numOrNull(raw.rate_per_unit_percent ?? raw.ratePerUnitPercent);
+    if (rate === null) return null;
+    return {
+        ratePerUnitPercent: rate,
+        unit: String(raw.unit ?? "week").toLowerCase(),
+        graceUnits: numOrNull(raw.grace_units ?? raw.graceUnits) ?? 0,
+    };
+}
+
+function numOrNull(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
 export function listSlaMasters(projectId, { pageSize = 200 } = {}) {
     const qs = new URLSearchParams({ offset: "1", pageSize: String(pageSize) });
     if (projectId) qs.set("project_id", projectId);
@@ -231,6 +287,16 @@ export function listSlaMasters(projectId, { pageSize = 200 } = {}) {
             categoryCode: s.category_code ?? s.category ?? null,
             appliedOn: s.applied_on ?? s.ld_computation_base ?? null,
             formulaType: s.formula_type ?? s.formulaType ?? null,
+            // Cadence and scoring tables — see the block comment above.
+            measurementInterval: s.measurement_interval ?? s.measurementInterval ?? null,
+            reportingInterval: s.reporting_interval ?? s.reportingInterval ?? null,
+            targetRows: pickTargetRows(s),
+            linearEscalation: pickLinearEscalation(s),
+            // "based on average monthly availability…" lives in the reporting
+            // interval's free text on some records; the recheck reads it to
+            // confirm averaging is what the SLA actually asks for.
+            calculationMethod: s.calculation_method ?? s.calculationMethod ?? "",
+            assumptions: s.assumptions ?? "",
         }));
     });
 }
