@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -55,8 +55,10 @@ const CURRENT_QUARTER = Math.floor(now.getMonth() / 3) + 1;
 /* The Quarterly Attendance section opens on Q1 rather than on whichever
    quarter today falls in. Fixed on purpose — swap back to CURRENT_QUARTER
    to have it follow the calendar again. */
+/* Both are fallbacks only, used before a milestone is chosen — the period now
+   comes from the selected milestone's window (see slicePeriods). The Year
+   dropdown that used to need a list of options is gone with it. */
 const DEFAULT_QUARTER = 1;
-const YEAR_OPTIONS = [CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2];
 
 // ---------- helpers ----------
 const pad2 = (n) => String(n).padStart(2, "0");
@@ -74,6 +76,134 @@ const reportRows = (payload) =>
 
 const reportTotals = (payload) =>
   !Array.isArray(payload) && payload?.totals ? payload.totals : null;
+
+/* ── the reporting period, derived from the milestone ──────────────────
+   Year and Quarter are no longer asked for. The reports are still keyed on
+   them — /report/quarterly answers 400 without both, and no date-range or
+   milestone-scoped variant exists — so the period is taken from the selected
+   milestone's own window instead. A milestone IS a date range; it just has to
+   be sliced into the periods the API understands.
+
+   Parsed by regex rather than `new Date`, which would apply a timezone offset
+   and can push a 1st-of-month back into the previous month. */
+function slicePeriods(startISO, endISO) {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(endISO || ""));
+  if (!a || !b) return { quarters: [], months: [] };
+  let y = Number(a[1]);
+  let m = Number(a[2]);
+  const endY = Number(b[1]);
+  const endM = Number(b[2]);
+  if (endY < y || (endY === y && endM < m)) return { quarters: [], months: [] };
+
+  const months = [];
+  const quarters = [];
+  const seen = new Set();
+  // Guard against a malformed span running away; 10 years of months is plenty.
+  for (let i = 0; i < 120 && (y < endY || (y === endY && m <= endM)); i++) {
+    months.push({ year: y, month: m });
+    const q = Math.ceil(m / 3);
+    const key = `${y}-${q}`;
+    if (!seen.has(key)) { seen.add(key); quarters.push({ year: y, quarter: q }); }
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return { quarters, months };
+}
+
+/* ── the activity's window, cut into whole months ─────────────────────
+   An upload covers one month of an activity, measured from the activity's own
+   start day rather than the calendar: 10 Jan → 6 Apr gives
+     10 Jan – 9 Feb,  10 Feb – 9 Mar,  10 Mar – 6 Apr
+   with the last band clipped to the activity's end date.
+
+   A start day that some months don't have (29th–31st) clamps to that month's
+   last day, and the ANCHOR is kept for later months rather than drifting: a
+   31 Jan start gives 31 Jan, 28 Feb, 31 Mar, 30 Apr — not 28 Feb, 28 Mar,
+   28 Apr, which is what carrying the clamped day forward would produce. */
+function monthlyBands(startISO, endISO) {
+  const a = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO || ""));
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(endISO || ""));
+  if (!a || !b) return [];
+  const anchor = Number(a[3]);
+  const [sy, sm] = [Number(a[1]), Number(a[2])];
+  const [ey, em, ed] = [Number(b[1]), Number(b[2]), Number(b[3])];
+  // Day 0 of month m+1 is the last day of month m.
+  const lastOf = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const iso = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+  const after = (y1, m1, d1, y2, m2, d2) =>
+    y1 > y2 || (y1 === y2 && (m1 > m2 || (m1 === m2 && d1 > d2)));
+
+  const out = [];
+  let y = sy;
+  let m = sm;
+  // 240 is a runaway guard, not a real limit — 20 years of months.
+  for (let i = 0; i < 240; i++) {
+    const startD = Math.min(anchor, lastOf(y, m));
+    if (after(y, m, startD, ey, em, ed)) break;
+    let ny = y;
+    let nm = m + 1;
+    if (nm > 12) { nm = 1; ny += 1; }
+    const nextD = Math.min(anchor, lastOf(ny, nm));
+    // This band ends the day before the next one starts.
+    let by = ny;
+    let bm = nm;
+    let bd = nextD - 1;
+    if (bd < 1) {
+      bm -= 1;
+      if (bm < 1) { bm = 12; by -= 1; }
+      bd = lastOf(by, bm);
+    }
+    const clipped = after(by, bm, bd, ey, em, ed);
+    out.push({ start: iso(y, m, startD), end: clipped ? iso(ey, em, ed) : iso(by, bm, bd) });
+    if (clipped) break;
+    y = ny;
+    m = nm;
+  }
+  return out;
+}
+
+/* Per-resource day counts that add up across periods. Everything else on a row
+   either describes the person (name, designation, joining date) or is derived,
+   so it's carried from the first period rather than summed. */
+const SUMMABLE_DAY_FIELDS = [
+  "workingDays", "presentDays", "halfDays", "leaveDays", "absentDays",
+  "weekOffDays", "holidayDays", "wfhDays", "leaveTaken",
+  "paidLeaveDays", "unpaidLeaveDays",
+];
+
+/* Fold several quarters' reports into one row per resource. A milestone can
+   span more than one quarter and the endpoint only answers for one at a time,
+   so the alternative would be the same person appearing three times.
+
+   attendancePercentage is RECOMPUTED, never averaged: averaging three
+   percentages over unequal working days is simply wrong, where
+   present ÷ working over the summed totals is right by construction. */
+function mergeReports(payloads) {
+  const byId = new Map();
+  for (const p of payloads) {
+    for (const r of reportRows(p)) {
+      const key = String(r?.attendanceId ?? "");
+      if (!key) continue;
+      const prev = byId.get(key);
+      if (!prev) { byId.set(key, { ...r }); continue; }
+      for (const f of SUMMABLE_DAY_FIELDS) prev[f] = num(prev[f]) + num(r[f]);
+      /* Someone can leave partway through the span, so the last working date
+         is whichever period saw it — and `active` is false if it's false in
+         any of them. */
+      if (r.lastWorkingDate) prev.lastWorkingDate = r.lastWorkingDate;
+      if (r.active === false) prev.active = false;
+      if (!prev.milestoneId && r.milestoneId) prev.milestoneId = r.milestoneId;
+      if (!prev.activityId && r.activityId) prev.activityId = r.activityId;
+    }
+  }
+  const rows = [...byId.values()];
+  for (const r of rows) {
+    const w = num(r.workingDays);
+    r.attendancePercentage = w > 0 ? Math.round((num(r.presentDays) / w) * 10000) / 100 : 0;
+  }
+  return rows;
+}
 
 /* The attendance report sends its dates — joiningDate, lastWorkingDate — as
    dd-MM-yyyy, unlike the ISO dates the rest of this file deals in. Parsed
@@ -290,9 +420,10 @@ export default function ProjectAttendancePage() {
   const navigate = useNavigate();
   const project = useProject(projectId);
 
-  const [year, setYear] = useState(CURRENT_YEAR);
+  /* "all" | "YYYY-MM". The month carries its own year now: the milestone's
+     window can cross a year boundary, so a bare month number would be
+     ambiguous once Year is no longer a control. */
   const [selectedMonth, setSelectedMonth] = useState("all");
-  const [quarter, setQuarter] = useState(DEFAULT_QUARTER);
 
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -419,6 +550,123 @@ export default function ProjectAttendancePage() {
     [resourceMilestones]
   );
 
+  /* ── milestone → activity filter ──────────────────────────────────────
+     Applied to the rows after they arrive, not to the request: the report
+     endpoints accept milestoneId and activityId and ignore both (verified — a
+     nonsense id returns every row unchanged), and every row carries the two
+     fields, so the filtering happens here. It narrows what is displayed; it
+     does not reduce what is fetched.
+
+     "" = no filter. UNASSIGNED is its own selectable value because a large
+     share of rows genuinely have no milestone — 7 of 14 in January — and
+     folding them into "all" or hiding them silently both misrepresent the
+     data. */
+  const UNASSIGNED = "__none__";
+  const [filterMilestoneId, setFilterMilestoneId] = useState("");
+  const [filterActivityId, setFilterActivityId] = useState("");
+  const [filterActivities, setFilterActivities] = useState([]);
+  const [filterActivitiesLoading, setFilterActivitiesLoading] = useState(false);
+
+  /* Activities of the chosen milestone. Reloaded on every change so the second
+     dropdown can only ever offer activities that belong to the first — the
+     same cascade the upload modal uses. */
+  useEffect(() => {
+    setFilterActivityId("");
+    if (!filterMilestoneId || filterMilestoneId === UNASSIGNED) {
+      setFilterActivities([]);
+      return undefined;
+    }
+    let active = true;
+    setFilterActivitiesLoading(true);
+    (async () => {
+      const list = await loadActivitiesForMilestone(filterMilestoneId);
+      if (!active) return;
+      setFilterActivities(Array.isArray(list) ? list : []);
+      setFilterActivitiesLoading(false);
+    })();
+    return () => { active = false; };
+  }, [filterMilestoneId]);
+
+  /* ── the period, taken from the milestone rather than asked for ───────
+     Year and Quarter are gone as controls. The milestone's own window says
+     which quarters and months the reports should cover; a span crossing more
+     than one quarter is fetched in full and merged, since the endpoint only
+     answers one quarter at a time.
+
+     `year` / `quarter` survive as the FIRST period in the span. They still key
+     the holiday calendar, the labels and the leave-detail link, none of which
+     take a range. */
+  const selectedMilestone = useMemo(
+    () => uploadableMilestones.find((m) => String(m.apiId) === String(filterMilestoneId)) || null,
+    [uploadableMilestones, filterMilestoneId]
+  );
+  const spanPeriods = useMemo(
+    () =>
+      selectedMilestone
+        ? slicePeriods(selectedMilestone.startDate, selectedMilestone.endDate)
+        : { quarters: [], months: [] },
+    [selectedMilestone]
+  );
+  const year = spanPeriods.quarters[0]?.year ?? CURRENT_YEAR;
+  const quarter = spanPeriods.quarters[0]?.quarter ?? DEFAULT_QUARTER;
+
+  // The month picker's value carries its own year — see selectedMonth above.
+  const monthPick = /^(\d{4})-(\d{2})$/.exec(selectedMonth);
+  const monthYear = monthPick ? Number(monthPick[1]) : year;
+  const monthNum = monthPick ? Number(monthPick[2]) : null;
+
+  // A picked month that isn't in the new milestone's window has to go.
+  useEffect(() => {
+    if (selectedMonth === "all") return;
+    const ok = spanPeriods.months.some(
+      (p) => p.year === monthYear && p.month === monthNum
+    );
+    if (!ok) setSelectedMonth("all");
+  }, [spanPeriods, selectedMonth, monthYear, monthNum]);
+
+  const filterActive = !!filterMilestoneId;
+
+  /* Nothing is shown until a milestone AND an activity have been chosen — the
+     tables are a view onto one activity's team, not a project-wide dump you
+     then narrow. Two exceptions, both cases where asking for an activity would
+     be a dead end rather than a step:
+       · "No milestone" — those rows have no activity to pick either.
+       · a milestone with no activities at all — otherwise unreachable. */
+  const milestoneHasNoActivities =
+    !!filterMilestoneId &&
+    filterMilestoneId !== UNASSIGNED &&
+    !filterActivitiesLoading &&
+    filterActivities.length === 0;
+  const selectionComplete =
+    filterMilestoneId === UNASSIGNED ||
+    milestoneHasNoActivities ||
+    (!!filterMilestoneId && !!filterActivityId);
+
+  /* What's still missing, as the prompt the tables show in place of data. */
+  const selectionPrompt = !filterMilestoneId
+    ? {
+        title: "Select a milestone to begin",
+        hint: "Pick a milestone above, then the activity within it, and the team's attendance loads here.",
+      }
+    : {
+        title: "Now select an activity",
+        hint: filterActivitiesLoading
+          ? "Loading the activities for this milestone…"
+          : "Choose one of this milestone's activities above to see its team's attendance.",
+      };
+  /* One predicate for both tables, so monthly and quarterly can't drift on
+     what "matching" means. */
+  const matchesFilter = useCallback(
+    (r) => {
+      if (!filterMilestoneId) return true;
+      if (filterMilestoneId === UNASSIGNED) return !r.milestoneId;
+      if (String(r.milestoneId || "") !== String(filterMilestoneId)) return false;
+      if (!filterActivityId) return true;
+      return String(r.activityId || "") === String(filterActivityId);
+    },
+    [filterMilestoneId, filterActivityId]
+  );
+
 
   /* The report rows now carry the milestoneId whose Excel produced them.
      Resolve it against the milestone list this page already loads, so the
@@ -435,19 +683,23 @@ export default function ProjectAttendancePage() {
   }, [milestones]);
   const milestoneName = (id) => milestoneNameById.get(String(id)) || "";
 
-  /* Year, month and quarter drive three API calls, so they're checked before
-     a request is built rather than after the backend rejects one. They come
-     from selects today, but a stale bookmark or a future URL-driven filter
-     would put anything here — and "(400)" tells the user nothing. */
+  /* The period drives three API calls, so it's checked before a request is
+     built rather than after the backend rejects one. It now comes from the
+     milestone's stored dates rather than from selects — which is MORE reason
+     to check it, not less: a milestone saved with a malformed or inverted
+     window would otherwise turn into three 400s reading "(400)". */
   const paramError = useMemo(() => {
     if (!projectId) return "No project was specified in the link.";
+    if (selectedMilestone && spanPeriods.quarters.length === 0) {
+      return `"${selectedMilestone.name || "This milestone"}" has no usable start and end date, so there's no period to report on.`;
+    }
     if (parseYear(year) === null) return `"${year}" isn't a valid year (${MIN_YEAR}–${MAX_YEAR}).`;
-    if (selectedMonth !== "all" && parseMonth(selectedMonth) === null) {
+    if (selectedMonth !== "all" && (monthNum === null || parseMonth(monthNum) === null)) {
       return `"${selectedMonth}" isn't a valid month.`;
     }
     if (parseQuarter(quarter) === null) return `"${quarter}" isn't a valid quarter — it must be 1 to 4.`;
     return "";
-  }, [projectId, year, selectedMonth, quarter]);
+  }, [projectId, year, selectedMonth, monthNum, quarter, selectedMilestone, spanPeriods]);
 
   /* Whether an upload can start, and why not when it can't. Derived once
      because three controls now offer the action — the header button and the
@@ -484,9 +736,10 @@ export default function ProjectAttendancePage() {
       try {
         const token = getToken();
         const qs = new URLSearchParams({
+          // The month carries its own year — the milestone window can cross one.
           projectId,
-          year: String(parseYear(year)),
-          month: String(parseMonth(selectedMonth)),
+          year: String(monthYear),
+          month: String(monthNum),
         });
         /* Sent on all three reports for consistency, but only the quarterly
            attendance report acts on it today — see the note beside the
@@ -520,7 +773,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, selectedMonth, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, monthYear, monthNum, selectedMonth, paramError, refreshKey, view, filterOrgId]);
 
   // Quarterly leave policy
   useEffect(() => {
@@ -534,24 +787,49 @@ export default function ProjectAttendancePage() {
       setQuarterlyError(null);
       try {
         const token = getToken();
-        const qs = new URLSearchParams({
-          projectId,
-          year: String(parseYear(year)),
-          quarter: String(parseQuarter(quarter)),
-        });
-        // The one report that genuinely filters on this today.
-        if (filterOrgId) qs.set("organisationId", filterOrgId);
-        const res = await fetch(
-          `${API_BASE}/api/attendance/report/quarterly?${qs}`,
-          {
-            signal: controller.signal,
-            cache: "no-store",
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-          }
+        /* One request per quarter the milestone spans, merged into a single
+           row per resource. The endpoint answers for exactly one quarter, so a
+           milestone running Jan–Aug needs three — and without the merge the
+           same person would appear three times. */
+        const periods = spanPeriods.quarters.length
+          ? spanPeriods.quarters
+          : [{ year, quarter }];
+        const payloads = await Promise.all(
+          periods.map(async (p) => {
+            const qs = new URLSearchParams({
+              projectId,
+              year: String(p.year),
+              quarter: String(p.quarter),
+            });
+            // The one report that genuinely filters on this today.
+            if (filterOrgId) qs.set("organisationId", filterOrgId);
+            const res = await fetch(
+              `${API_BASE}/api/attendance/report/quarterly?${qs}`,
+              {
+                signal: controller.signal,
+                cache: "no-store",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              }
+            );
+            /* A quarter with nothing logged answers 404. Across a multi-quarter
+               span that's ordinary — the milestone simply had no attendance
+               that quarter — so it contributes no rows rather than failing the
+               whole span. */
+            if (res.status === 404) return null;
+            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+            return readJsonBody(res, FALLBACK);
+          })
         );
-        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-        const data = await readJsonBody(res, FALLBACK);
-        if (active) setQuarterly(data);
+        const kept = payloads.filter(Boolean);
+        if (active) {
+          /* Merged rows only — the envelope `totals` describe one quarter and
+             would understate a multi-quarter span, so metrics are derived from
+             the rows (see buildMetrics being passed null under a filter). */
+          setQuarterly(kept.length ? { resources: mergeReports(kept) } : null);
+          if (!kept.length) {
+            setQuarterlyError("No attendance has been logged for this milestone's period.");
+          }
+        }
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
         /* Same as the monthly fetch: a quarter with no data answers 404, and
@@ -563,7 +841,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view, filterOrgId]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -580,30 +858,56 @@ export default function ProjectAttendancePage() {
       setQuarterlyCostError(null);
       try {
         const token = getToken();
-        const qs = new URLSearchParams({
-          projectId,
-          year: String(parseYear(year)),
-          quarter: String(parseQuarter(quarter)),
-        });
-        if (filterOrgId) qs.set("organisationId", filterOrgId);
-        const res = await fetch(
-          `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
-          {
-            signal: controller.signal,
-            cache: "no-store",
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-          }
+        // Same span as the attendance report above, so the two agree on period.
+        const periods = spanPeriods.quarters.length
+          ? spanPeriods.quarters
+          : [{ year, quarter }];
+        const payloads = await Promise.all(
+          periods.map(async (p) => {
+            const qs = new URLSearchParams({
+              projectId,
+              year: String(p.year),
+              quarter: String(p.quarter),
+            });
+            if (filterOrgId) qs.set("organisationId", filterOrgId);
+            const res = await fetch(
+              `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
+              {
+                signal: controller.signal,
+                cache: "no-store",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+              }
+            );
+            if (res.status === 404) return null;
+            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+            return readJsonBody(res, FALLBACK);
+          })
         );
-        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-        const data = await readJsonBody(res, FALLBACK);
-        if (active) setQuarterlyCost(data);
+        const kept = payloads.filter(Boolean);
+        if (active) {
+          /* Costs add across quarters, so one row per resource with totalCost
+             summed. The envelope totals are dropped for the same reason as the
+             attendance report — they describe a single quarter. */
+          if (!kept.length) { setQuarterlyCost(null); return; }
+          const byId = new Map();
+          for (const p of kept) {
+            for (const r of reportRows(p)) {
+              const k = String(r?.attendanceId ?? "");
+              if (!k) continue;
+              const prev = byId.get(k);
+              if (!prev) byId.set(k, { ...r });
+              else prev.totalCost = num(prev.totalCost) + num(r.totalCost);
+            }
+          }
+          setQuarterlyCost({ resources: [...byId.values()] });
+        }
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
         if (active) { setQuarterlyCost(null); if (msg) setQuarterlyCostError(msg); }
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view, filterOrgId]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
@@ -656,7 +960,7 @@ export default function ProjectAttendancePage() {
   const templateRange = useMemo(() => {
     const y = parseYear(year);
     if (y === null) return null;
-    const m = selectedMonth === "all" ? null : parseMonth(selectedMonth);
+    const m = monthNum;
     if (m === null) return { start: `${y}-01-01`, end: `${y}-12-31`, label: String(y) };
     return {
       start: `${y}-${pad2(m)}-01`,
@@ -686,19 +990,35 @@ export default function ProjectAttendancePage() {
   }
 
   // Row click → open the full-page leave detail (year + quarter in the URL).
-  const goLeaveDetail = (emp, quarterNum) =>
+  /* The leave detail page takes one year+quarter, so the caller passes the one
+     the clicked row belongs to. From the monthly table that's the month's own
+     quarter; from the quarterly table it's the first of the milestone's span,
+     which is the only single quarter available when a milestone covers
+     several. */
+  const goLeaveDetail = (emp, quarterNum, yearNum = year) =>
     navigate(
-      `/projects/${encodeURIComponent(projectId)}/attendance/leave/${encodeURIComponent(emp.attendanceId)}?year=${year}&quarter=${quarterNum}`
+      `/projects/${encodeURIComponent(projectId)}/attendance/leave/${encodeURIComponent(emp.attendanceId)}?year=${yearNum}&quarter=${quarterNum}`
     );
 
-  const employees = useMemo(() => reportRows(summary), [summary]);
+  const employees = useMemo(
+    () => reportRows(summary).filter(matchesFilter),
+    [summary, matchesFilter]
+  );
   const period =
     summary?.period ||
     employees[0]?.period ||
-    (selectedMonth !== "all" ? `${MONTH_NAMES[Number(selectedMonth)]} ${year}` : "");
+    (monthNum ? `${MONTH_NAMES[monthNum]} ${monthYear}` : "");
 
   // At-a-glance metrics for the selected month.
-  const metrics = useMemo(() => buildMetrics(summary, employees), [summary, employees]);
+  /* `summary` is passed only when nothing is filtered out. buildMetrics prefers
+     the payload's own `totals` block, which always describes the WHOLE report —
+     under a filter that would print "22 employees" and a project-wide average
+     above a four-row table. Passing null forces it to derive from the rows
+     actually on screen. */
+  const metrics = useMemo(
+    () => buildMetrics(filterActive ? null : summary, employees),
+    [summary, employees, filterActive]
+  );
 
   /* Which holidays each table's Holiday column is counting. The monthly view
      reuses the template's range (the selected month, or the whole year when
@@ -729,10 +1049,14 @@ export default function ProjectAttendancePage() {
     [holidays, quarterRange]
   );
 
-  const quarterlyRows = useMemo(() => reportRows(quarterly), [quarterly]);
+  const quarterlyRows = useMemo(
+    () => reportRows(quarterly).filter(matchesFilter),
+    [quarterly, matchesFilter]
+  );
+  // Same reason as the monthly metrics above.
   const quarterlyMetrics = useMemo(
-    () => buildMetrics(quarterly, quarterlyRows),
-    [quarterly, quarterlyRows]
+    () => buildMetrics(filterActive ? null : quarterly, quarterlyRows),
+    [quarterly, quarterlyRows, filterActive]
   );
   const quarterlyCostById = useMemo(
     () => indexCostByResource(quarterlyCost),
@@ -749,7 +1073,7 @@ export default function ProjectAttendancePage() {
      it. So when a filter is active the footer is summed from the rows actually
      displayed, which is the only figure that can agree with them. */
   const quarterlyCostTotal = useMemo(() => {
-    if (filterOrgId) {
+    if (filterOrgId || filterActive) {
       return quarterlyRows.reduce(
         (sum, emp) => sum + num(quarterlyCostById.get(String(emp.attendanceId))?.totalCost),
         0
@@ -760,7 +1084,7 @@ export default function ProjectAttendancePage() {
     let sum = 0;
     quarterlyCostById.forEach((r) => { sum += num(r.totalCost); });
     return sum;
-  }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterOrgId]);
+  }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterOrgId, filterActive]);
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -828,15 +1152,68 @@ export default function ProjectAttendancePage() {
               ))}
             </div>
           </Field>
-          <Field label="Year">
-            <select
-              className="att-select"
-              value={year}
-              onChange={(e) => { setYear(Number(e.target.value)); setSelectedMonth("all"); }}
-            >
-              {YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </Field>
+          {/* Milestone first, then the activities belonging to it — Activity
+              stays disabled until a milestone is chosen, because an activity
+              means nothing without one.
+
+              The same resource-based list the upload modal offers, and for the
+              same reason: attendance can only be filed against a resource-based
+              milestone, so every milestone that appears in this data is one.
+              Listing the rest would offer filters guaranteed to match nothing. */}
+          {uploadableMilestones.length > 0 && (
+            <Field label="Milestone">
+              <select
+                className="att-select att-select--org"
+                value={filterMilestoneId}
+                onChange={(e) => setFilterMilestoneId(e.target.value)}
+                title="Show only rows uploaded against one milestone"
+              >
+                {/* Not "All milestones" — nothing loads until one is picked,
+                    so the placeholder has to read as the prompt it is. */}
+                <option value="">Select Milestone</option>
+                {uploadableMilestones.map((m) => (
+                  <option key={m.apiId} value={m.apiId}>
+                    {[m.serverDisplayCode || m.id, m.name].filter(Boolean).join(" · ")}
+                  </option>
+                ))}
+                {/* Its own option rather than a silent omission — a lot of rows
+                    carry no milestone, and they have to be reachable. */}
+                <option value={UNASSIGNED}>No milestone</option>
+              </select>
+            </Field>
+          )}
+          {uploadableMilestones.length > 0 && (
+            <Field label="Activity">
+              <select
+                className="att-select att-select--org"
+                value={filterActivityId}
+                disabled={
+                  !filterMilestoneId ||
+                  filterMilestoneId === UNASSIGNED ||
+                  filterActivitiesLoading ||
+                  filterActivities.length === 0
+                }
+                onChange={(e) => setFilterActivityId(e.target.value)}
+              >
+                <option value="">
+                  {!filterMilestoneId
+                    ? "Choose a milestone first"
+                    : filterMilestoneId === UNASSIGNED
+                      ? "Not applicable"
+                      : filterActivitiesLoading
+                        ? "Loading activities…"
+                        : filterActivities.length === 0
+                          ? "No activities"
+                          : "Select Activity"}
+                </option>
+                {filterActivities.map((a) => (
+                  <option key={a.apiId} value={a.apiId}>
+                    {[a.serverDisplayCode || a.id, a.name].filter(Boolean).join(" · ")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           {/* Only rendered when the project actually has vendors to choose
               between — a one-option filter asks for a decision that doesn't
               exist. */}
@@ -852,38 +1229,37 @@ export default function ProjectAttendancePage() {
                     : "Narrow the report to one organisation"
                 }
               >
-                <option value="">All organisations</option>
+                {/* Reads like the Milestone and Activity placeholders beside
+                    it. Unlike those two it doesn't gate anything — leaving it
+                    unset still reports every organisation on the project. */}
+                <option value="">Select Organisation</option>
                 {filterOrgs.map((o) => (
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
             </Field>
           )}
-          {view === "monthly" ? (
+          {/* Month is the only period control left, and it offers just the
+              months inside the chosen milestone's window — the value carries
+              the year with it, because that window can cross one. The
+              quarterly view has no period control at all: it reports the whole
+              milestone. */}
+          {view === "monthly" && (
             <Field label="Month">
               <select
-                className="att-select"
+                className="att-select att-select--org"
                 value={selectedMonth}
+                disabled={spanPeriods.months.length === 0}
                 onChange={(e) => setSelectedMonth(e.target.value)}
               >
-                {/* Reads as the prompt it is. It was labelled "All months",
-                    which promised a whole-year table and delivered a "choose a
-                    month" empty state — the value stays "all" because the
-                    header's template button does use it as the full year. */}
-                <option value="all">Select Month</option>
-                {MONTH_NAMES.slice(1).map((name, i) => (
-                  <option key={i + 1} value={i + 1}>{name}</option>
+                <option value="all">
+                  {spanPeriods.months.length === 0 ? "Select a milestone first" : "Select Month"}
+                </option>
+                {spanPeriods.months.map((p) => (
+                  <option key={`${p.year}-${pad2(p.month)}`} value={`${p.year}-${pad2(p.month)}`}>
+                    {MONTH_NAMES[p.month]} {p.year}
+                  </option>
                 ))}
-              </select>
-            </Field>
-          ) : (
-            <Field label="Quarter">
-              <select
-                className="att-select"
-                value={quarter}
-                onChange={(e) => setQuarter(Number(e.target.value))}
-              >
-                {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
               </select>
             </Field>
           )}
@@ -915,20 +1291,30 @@ export default function ProjectAttendancePage() {
             whole project team. The quarterly view does filter.
           </div>
         )}
-        {selectedMonth === "all" && (
+        {/* The milestone/activity choice gates everything, so it's asked for
+            before the month — picking a month first would load a table that
+            the very next control empties again. */}
+        {!selectionComplete && (
+          <EmptyState icon={<LayersIcon />} title={selectionPrompt.title} hint={selectionPrompt.hint} />
+        )}
+        {selectionComplete && selectedMonth === "all" && (
           <EmptyState
             icon={<CalendarIcon />}
             title="Choose a month to begin"
             hint="Pick a month above and the team's attendance summary loads here."
           />
         )}
-        {selectedMonth !== "all" && summaryLoading && <SkeletonTable rows={5} cols={7} withMetrics />}
-        {selectedMonth !== "all" && summaryError && <div className="att-error">{summaryError}</div>}
-        {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length === 0 && (
+        {selectionComplete && selectedMonth !== "all" && summaryLoading && <SkeletonTable rows={5} cols={7} withMetrics />}
+        {selectionComplete && selectedMonth !== "all" && summaryError && <div className="att-error">{summaryError}</div>}
+        {selectionComplete && selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length === 0 && (
           <EmptyState
             icon={<CalendarIcon />}
-            title="No attendance yet"
-            hint={`Upload a spreadsheet to record the team's attendance for ${MONTH_NAMES[Number(selectedMonth)]} ${year} and start tracking leave and cost.`}
+            title={filterActive ? "Nothing matches this filter" : "No attendance yet"}
+            hint={
+              filterActive
+                ? `No ${MONTH_NAMES[monthNum]} ${monthYear} attendance was uploaded against the selected activity.`
+                : `Upload a spreadsheet to record the team's attendance for ${MONTH_NAMES[monthNum]} ${monthYear} and start tracking leave and cost.`
+            }
             action={
               <button
                 className="att-btn-primary"
@@ -942,7 +1328,7 @@ export default function ProjectAttendancePage() {
             }
           />
         )}
-        {selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length > 0 && (
+        {selectionComplete && selectedMonth !== "all" && !summaryLoading && !summaryError && employees.length > 0 && (
           <>
             <MetricsRow metrics={metrics} />
             <AttendanceTable
@@ -950,7 +1336,7 @@ export default function ProjectAttendancePage() {
               employees={employees}
               milestoneName={milestoneName}
               holidayTitle={monthlyHolidayTitle}
-              onRowClick={(emp) => goLeaveDetail(emp, Math.ceil(Number(selectedMonth) / 3))}
+              onRowClick={(emp) => goLeaveDetail(emp, Math.ceil(monthNum / 3), monthYear)}
             />
           </>
         )}
@@ -970,9 +1356,12 @@ export default function ProjectAttendancePage() {
             <RefreshButton onClick={refresh} busy={quarterlyLoading} />
           </div>
         </div>
-        {quarterlyLoading && <SkeletonTable rows={5} cols={7} />}
-        {quarterlyError && <div className="att-error">{quarterlyError}</div>}
-        {!quarterlyLoading && !quarterlyError && (
+        {!selectionComplete && (
+          <EmptyState icon={<LayersIcon />} title={selectionPrompt.title} hint={selectionPrompt.hint} />
+        )}
+        {selectionComplete && quarterlyLoading && <SkeletonTable rows={5} cols={7} />}
+        {selectionComplete && quarterlyError && <div className="att-error">{quarterlyError}</div>}
+        {selectionComplete && !quarterlyLoading && !quarterlyError && (
           <QuarterlyPanel
             data={quarterlyRows}
             metrics={quarterlyMetrics}
@@ -988,6 +1377,7 @@ export default function ProjectAttendancePage() {
             onUpload={() => setUploadOpen(true)}
             uploadBlocked={uploadBlocked}
             uploadHint={uploadHint}
+            filterActive={filterActive}
           />
         )}
       </section>
@@ -1245,6 +1635,7 @@ function AttendanceTable({
 function QuarterlyPanel({
   data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
   costById, costTotal, costError, holidayTitle, onUpload, uploadBlocked, uploadHint,
+  filterActive,
 }) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
@@ -1253,10 +1644,14 @@ function QuarterlyPanel({
     return (
       <EmptyState
         icon={<CalendarIcon />}
-        title="No attendance yet"
-        hint={`Upload a spreadsheet to record the team's attendance for Q${quarter} ${year} and start tracking leave and cost.`}
+        title={filterActive ? "Nothing matches this filter" : "No attendance yet"}
+        hint={
+          filterActive
+            ? `No Q${quarter} ${year} attendance was uploaded against the selected milestone. Clear the milestone filter to see the whole team.`
+            : `Upload a spreadsheet to record the team's attendance for Q${quarter} ${year} and start tracking leave and cost.`
+        }
         action={
-          onUpload && (
+          !filterActive && onUpload && (
             <button
               className="att-btn-primary"
               onClick={onUpload}
@@ -1363,8 +1758,23 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
     })();
     return () => { active = false; };
   }, [milestone?.apiId]);
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  /* The period is chosen as one of the activity's own months rather than typed
+     into two calendars: an upload covers exactly one of those months, so the
+     pickers only ever offered ways to get it wrong. `period` holds the picked
+     band's "start|end"; startDate/endDate stay as the derived pair because
+     everything downstream — the template download, the rate-year lookup, the
+     outside-milestone check, the POST — already speaks in them. */
+  const activity = activities.find((a) => String(a.apiId) === String(activityId)) || null;
+  const periodOptions = useMemo(
+    () => (activity ? monthlyBands(activity.startDate, activity.endDate) : []),
+    [activity]
+  );
+  const [period, setPeriod] = useState("");
+  const [startDate, endDate] = period ? period.split("|") : ["", ""];
+
+  // A period from a previously-chosen activity can't survive a new one.
+  useEffect(() => { setPeriod(""); }, [activityId]);
+
   /* The organisation whose attendance this is — required by the upload, and
      picked from the vendors linked to the project. */
   const [orgs, setOrgs] = useState([]);
@@ -1503,13 +1913,27 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
   const validateForm = () => {
     const errs = {};
     if (!milestone?.apiId) errs.milestone = "Choose a milestone to upload against.";
+    /* Required now that the period comes from it — without an activity there
+       are no months to choose between. */
+    if (!activityId) {
+      errs.activity = activities.length === 0 && !activitiesLoading
+        ? "This milestone has no activities, so there's nothing to upload against."
+        : "Choose the activity this attendance belongs to.";
+    } else if (!periodOptions.length) {
+      errs.activity = "This activity has no start and end date, so there are no months to upload for.";
+    }
     if (!organisationId) {
       errs.organisation = orgs.length === 0 && !orgsLoading
         ? "No organisation is linked to this project. Add one on the project details page."
         : "Choose the organisation this attendance belongs to.";
     }
-    const rangeError = validateRange(startDate, endDate);
-    if (rangeError) errs.startDate = rangeError;
+    if (!period) {
+      errs.period = "Choose the month this attendance covers.";
+    } else {
+      // The band comes from a fixed list, so this only catches a corrupt value.
+      const rangeError = validateRange(startDate, endDate);
+      if (rangeError) errs.period = rangeError;
+    }
     const fileError = validateFile(file);
     if (fileError) errs.file = fileError;
     return errs;
@@ -1731,15 +2155,17 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
                 </select>
                 {fieldErrors.milestone && <span className="att-field-err">{fieldErrors.milestone}</span>}
               </Field>
-              {/* The activities that belong to the chosen milestone — optional,
-                  so the upload can be tied to a specific activity when one applies. */}
-              <Field label="Activity (optional)">
+              {/* Required, not optional: the upload's period is one of this
+                  activity's own months, so without it there is nothing to
+                  choose from below. */}
+              <Field label="Activity">
                 <select
                   id="upl-activity"
-                  className="att-select att-select--wide"
+                  className={`att-select att-select--wide${fieldErrors.activity ? " is-bad" : ""}`}
                   value={activityId}
                   disabled={!milestone || activitiesLoading || activities.length === 0}
-                  onChange={(e) => setActivityId(e.target.value)}
+                  aria-invalid={!!fieldErrors.activity}
+                  onChange={(e) => { setActivityId(e.target.value); setError(null); revalidate(); }}
                 >
                   <option value="">
                     {!milestone
@@ -1756,6 +2182,7 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
                     </option>
                   ))}
                 </select>
+                {fieldErrors.activity && <span className="att-field-err">{fieldErrors.activity}</span>}
               </Field>
               <Field label="Organisation">
                 <select
@@ -1782,37 +2209,39 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
               <Field label="Upload type">
                 <div className="att-static">Monthly</div>
               </Field>
-              <Field label="Start date">
-                <input
-                  id="upl-startDate"
-                  type="date"
-                  className={`att-select${fieldErrors.startDate ? " is-bad" : ""}`}
-                  value={startDate}
-                  max={endDate || undefined}
-                  aria-invalid={!!fieldErrors.startDate}
-                  onChange={(e) => { setStartDate(e.target.value); setError(null); revalidate(); }}
-                />
-              </Field>
-              <Field label="End date">
-                <input
-                  id="upl-endDate"
-                  type="date"
-                  className={`att-select${fieldErrors.startDate ? " is-bad" : ""}`}
-                  value={endDate}
-                  min={startDate || undefined}
-                  onChange={(e) => { setEndDate(e.target.value); setError(null); revalidate(); }}
-                />
+              {/* One dropdown of the activity's own months, in place of two
+                  calendars. An upload covers exactly one of these, so free
+                  date entry only ever offered ways to miss a boundary. */}
+              <Field label="Period">
+                <select
+                  id="upl-period"
+                  className={`att-select att-select--wide${fieldErrors.period ? " is-bad" : ""}`}
+                  value={period}
+                  disabled={!activityId || periodOptions.length === 0}
+                  aria-invalid={!!fieldErrors.period}
+                  onChange={(e) => { setPeriod(e.target.value); setError(null); revalidate(); }}
+                >
+                  <option value="">
+                    {!activityId
+                      ? "Choose an activity first"
+                      : periodOptions.length === 0
+                        ? "This activity has no dates set"
+                        : "Select a month…"}
+                  </option>
+                  {periodOptions.map((b) => (
+                    <option key={`${b.start}|${b.end}`} value={`${b.start}|${b.end}`}>
+                      {formatReportDate(b.start)} → {formatReportDate(b.end)}
+                    </option>
+                  ))}
+                </select>
+                {fieldErrors.period && <span className="att-field-err">{fieldErrors.period}</span>}
               </Field>
             </div>
-
-            {/* The range error covers both date fields, so it sits under the
-                pair rather than being duplicated beneath each one. */}
-            {fieldErrors.startDate && <div className="att-field-err">{fieldErrors.startDate}</div>}
             {/* The rate year used to be picked here. It's still not a choice —
                 the server derives it from the range — but it IS named now, so
                 the upload isn't filed against a rate the user can't see. Falls
                 back to the old generic line when the lookup can't answer. */}
-            {startDate && endDate && !fieldErrors.startDate && (
+            {startDate && endDate && !fieldErrors.period && (
               rateYearsLoading ? (
                 <div className="att-note" role="status">Matching the rate year…</div>
               ) : rateYears.length > 0 ? (
@@ -1849,7 +2278,7 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
                 </div>
               )
             )}
-            {outsideMilestone && !fieldErrors.startDate && (
+            {outsideMilestone && !fieldErrors.period && (
               <div className="att-note att-note--warn" role="status">
                 These dates fall outside the milestone's own range
                 ({milestone.startDate || "—"} → {milestone.endDate || "—"}). You can still
@@ -2185,6 +2614,18 @@ function UploadIcon() {
     </svg>
   );
 }
+/* Stacked layers — the milestone/activity prompt, distinct from the calendar
+   the period prompts use, so the two empty states aren't mistaken for each
+   other while stepping through them. */
+function LayersIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3 3 7.5l9 4.5 9-4.5L12 3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="m3 12.5 9 4.5 9-4.5M3 17l9 4.5 9-4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function RefreshIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">

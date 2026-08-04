@@ -314,33 +314,11 @@ export const ENDPOINTS = {
     frequency: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/frequency`,
     phaseFrequency: (uuid, phase) => `/projects/api/v3/projects/${enc(uuid)}/phases/${enc(phase)}/frequency`,
     ccnCap: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/ccn-cap`,
-    /* Planned resources — the per-role deployment rows a resource-type
-       phase's resource cost is built from, instead of a typed amount. Each
-       row attaches to a `resource_cost` cost item via costItemId, and the
-       row SUM auto-populates that cost item.
-
-       Pricing is PER CONTRACT YEAR (years anchored on the project start
-       date): for each year the deployment window spans,
-         quantity × rateCardByYear["Year-N"] × months-in-that-year
-       A window running past the card's last year is clamped to that year's
-       rate. The backend does not call leave-management, so the FE sends the
-       chosen role together with its rate card:
-         GET  planned-resources        → list for the project
-         POST planned-resources { costItemId, role, rateCardByYear,
-                                  organisationId, quantity,
-                                  deployStart, deployEnd }  (dates YYYY-MM-DD)
-       Responses are snake_case and carry rate_card_snapshot, cost_by_year,
-       duration_months and computed_cost read-only. */
-    plannedResources: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/planned-resources`,
-  },
-
-  /* PATCH / DELETE on a single planned-resource row — the id is a global
-     UUID, so these are not project-scoped. PATCH accepts any of
-     { role, rateCardByYear, organisationId, quantity, deployStart,
-     deployEnd } — changing the role means sending its rate card with it. */
-  plannedResources: {
-    update: (id) => `/projects/api/v3/planned-resources/${enc(id)}`,
-    remove: (id) => `/projects/api/v3/planned-resources/${enc(id)}`,
+    /* NOTE: the project-level /planned-resources routes are GONE. Resource
+       costing now lives on the ACTIVITY — a resource-based activity carries
+       a `resources` allocation array on its create/update body (see the
+       activity endpoints), and the finance page reads the resulting cost off
+       each payment term's activities[].value. */
   },
 
   /* Payment-module endpoints not scoped to a project. Cost-item and

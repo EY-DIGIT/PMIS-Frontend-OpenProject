@@ -897,6 +897,13 @@ export default function MilestoneConfigPage({ mode }) {
             newNode.divisionApprovals = safeArray(formData.divisionApprovals).slice();
             newNode.ownerApproval = formData.ownerApproval || null;
             newNode.lastRejection = formData.lastRejection || null;
+            /* Resource allocation (resource-based milestones only). Kept on
+               the local node so re-opening the activity before the tree
+               refetch still shows what was just entered — the server's
+               resolved rate/cost arrives with the rehydrate. */
+            if (Array.isArray(formData.resources)) {
+              newNode.resources = formData.resources.map((r) => ({ ...r }));
+            }
           } else {
             // Task / Subtask carry assignedTo instead of vendorId.
             newNode.assignedTo = formData.assignedTo || "";
@@ -1005,6 +1012,12 @@ export default function MilestoneConfigPage({ mode }) {
             node.divisionApprovals = safeArray(formData.divisionApprovals).slice();
             node.ownerApproval = formData.ownerApproval || null;
             node.lastRejection = formData.lastRejection || null;
+            /* See the add branch: only mirrored when the form actually
+               carried an allocation, so a non-resource activity never wipes
+               one that exists server-side. */
+            if (Array.isArray(formData.resources)) {
+              node.resources = formData.resources.map((r) => ({ ...r }));
+            }
           } else {
             node.assignedTo = formData.assignedTo || "";
             node.priority = formData.priority || "";

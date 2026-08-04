@@ -204,3 +204,33 @@ export function getLdBands(projectId) {
         normalizeLdBands
     );
 }
+
+/* ───────────────────── SLA master library ─────────────────────────
+   The library carries the two fields that decide how an SLA is scored:
+   `category_code` (DELIVERABLE_SUBMISSION, RESOURCE_MANAGEMENT, …) and
+   `applied_on` / `ld_computation_base` (FIXED_AMOUNT vs
+   QUARTERLY_PAYMENT). Evaluation results normally carry the same facts
+   as `formulaType` / `ldBaseKind`, so this list is used for titles and
+   as a fallback when a result arrives without them — never as the sole
+   source, since a project can hold SLAs it has never evaluated.        */
+export function listSlaMasters(projectId, { pageSize = 200 } = {}) {
+    const qs = new URLSearchParams({ offset: "1", pageSize: String(pageSize) });
+    if (projectId) qs.set("project_id", projectId);
+    // Deliberately NOT caught here. A library that fails to load degrades
+    // classification silently, which is indistinguishable from a project
+    // that genuinely has no deliverable SLAs — the caller has to be able
+    // to tell those apart, so the rejection is left to propagate.
+    return call(`/api/v3/sla-masters?${qs.toString()}`).then((payload) => {
+        const list =
+            payload?._embedded?.elements ?? payload?.elements ??
+            (Array.isArray(payload) ? payload : payload?.items) ?? [];
+        return (Array.isArray(list) ? list : []).map((s) => ({
+            slaId: s.id ?? s.sla_id ?? null,
+            slaRef: s.sla_ref ?? s.slaRef ?? "",
+            title: s.title ?? s.name ?? "",
+            categoryCode: s.category_code ?? s.category ?? null,
+            appliedOn: s.applied_on ?? s.ld_computation_base ?? null,
+            formulaType: s.formula_type ?? s.formulaType ?? null,
+        }));
+    });
+}

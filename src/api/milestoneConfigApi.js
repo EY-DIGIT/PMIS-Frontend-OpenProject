@@ -641,24 +641,52 @@ export async function loadActivityById(activityApiId) {
   return a && (a.id || a.uuid || a.name) ? mapApiActivityToNode(a) : null;
 }
 
+/* Resource allocation rows on a resource-based activity. The wire item is
+   exactly { designation, quantity, duration } — the endpoint rejects unknown
+   keys, so the read-only monthlyRate / computedCost the server echoes back
+   must be stripped before they're sent again on the next save.
+
+   `duration` is a flat number of MONTHS in [0, 3] (an activity is one
+   quarter); there are no deployment dates. Rows without a designation are
+   dropped — they're half-filled UI rows, not allocations.
+
+   Returns undefined when the form carries no allocation array at all, which
+   is how "leave the saved set untouched" is expressed on PATCH. An empty
+   array is meaningful (it clears the set) and is preserved. */
+function serializeActivityResources(formData) {
+  if (!Array.isArray(formData?.resources)) return undefined;
+  return formData.resources
+    .filter((r) => r && String(r.designation || "").trim())
+    .map((r) => ({
+      designation: String(r.designation).trim(),
+      quantity: Math.max(1, parseInt(r.quantity, 10) || 1),
+      duration: Number(Number(r.duration || 0).toFixed(2))
+    }));
+}
+
 /* Activity create body now carries the design-level fields (ownerDivision /
    vendorId / concernedDivision / dependsOn) so a single POST persists them
    on first save — no follow-up PATCH on add. */
 export async function createActivityApi(milestoneApiId, formData, project) {
+  const body = {
+    name: formData.name.trim(),
+    description: (formData.description || "").trim(),
+    startDate: toMilestoneIsoStart(formData.startDate),
+    endDate: toMilestoneIsoEnd(formData.endDate),
+    ownerDivision: formData.ownerDivision || null,
+    vendorId: formData.vendorId || null,
+    priority: formData.priority || null,
+    concernedDivision: serializeConcernedDivision(formData.concernedDivision),
+    dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
+  };
+  /* Only ever sent for activities under a resource-based milestone — the
+     server 422s the field anywhere else, so an absent array stays absent. */
+  const resources = serializeActivityResources(formData);
+  if (resources !== undefined) body.resources = resources;
   const created = await apiSend(
     "POST",
     ENDPOINTS.milestones.activityCreate(milestoneApiId),
-    {
-      name: formData.name.trim(),
-      description: (formData.description || "").trim(),
-      startDate: toMilestoneIsoStart(formData.startDate),
-      endDate: toMilestoneIsoEnd(formData.endDate),
-      ownerDivision: formData.ownerDivision || null,
-      vendorId: formData.vendorId || null,
-      priority: formData.priority || null,
-      concernedDivision: serializeConcernedDivision(formData.concernedDivision),
-      dependsOn: resolveDepDisplayIds(project, formData.dependsOn)
-    }
+    body
   );
   return postCommentAndAttachmentsAfterCreate(ENDPOINTS.activities.comments, created, formData);
 }
@@ -676,6 +704,11 @@ function buildActivityPatchBody(project, formData) {
     body.priority = formData.priority || null;
   if (formData.concernedDivision !== undefined)
     body.concernedDivision = serializeConcernedDivision(formData.concernedDivision);
+  /* Replace-set: sending `resources` overwrites the whole allocation, and []
+     clears it. Omitted when the form has no array (a non-resource activity),
+     which leaves whatever is saved untouched. */
+  const resources = serializeActivityResources(formData);
+  if (resources !== undefined) body.resources = resources;
   return body;
 }
 

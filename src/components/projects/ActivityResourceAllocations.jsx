@@ -1,0 +1,309 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import * as ratesApi from "../../api/designationRates";
+
+/* ────────────────────────────────────────────────────────────────────
+   Resource allocation on a resource-based activity.
+
+   A resource-based milestone's activities carry their own allocation rows:
+   designation (a role from the organisation's rate card) + headcount +
+   duration. The activity's resource cost is the sum of those rows, and the
+   finance page reads it back as the activity's share of the payment term.
+
+   `duration` is a flat number of MONTHS in [0, 3] — an activity is one
+   quarter, so there are no deployment dates to pick.
+
+   The backend resolves each row's monthly rate itself when the activity is
+   saved (from leave-management, for the activity's contract year) and echoes
+   back monthlyRate + computedCost. So the rate shown here is:
+     • the saved monthlyRate/computedCost when the row came back from a save
+     • otherwise an estimate from the rate card, clearly marked "est." —
+       because a client-side guess at the contract year must never be
+       mistaken for the figure that was actually stored.
+   ──────────────────────────────────────────────────────────────────── */
+
+const inr = (n) => {
+  const v = Number(n);
+  return Number.isFinite(v) ? `₹ ${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—";
+};
+
+const MAX_DURATION = 3;
+
+const cellStyle = {
+  width: "100%", padding: "6px 8px", border: "1px solid var(--uidai-pmis-border)",
+  borderRadius: 6, background: "#fff", font: "inherit", fontSize: 13,
+  boxSizing: "border-box",
+};
+
+const headStyle = {
+  textAlign: "left", fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
+  textTransform: "uppercase", color: "#5b6b82", padding: "0 6px 6px 0",
+};
+
+export default function ActivityResourceAllocations({
+  rows = [],
+  onChange,
+  projectId,
+  projectStartDate = "",
+  /* The activity's organisation — the rate card is keyed on it. */
+  organisationId = "",
+  /* Anchors the contract year for the cost estimate. */
+  activityStartDate = "",
+  disabled = false,
+}) {
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function loadRoles() {
+    setError("");
+    if (!projectId || !organisationId) {
+      setRoles([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      setRoles(await ratesApi.listDesignationRates(projectId, organisationId));
+    } catch (err) {
+      setRoles([]);
+      setError(err?.message || "Failed to load the rate card");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadRoles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, organisationId]);
+
+  const roleByName = useMemo(() => {
+    const m = {};
+    roles.forEach((r) => { m[r.role] = r; });
+    return m;
+  }, [roles]);
+
+  /* What a row costs. Prefer the server's own numbers; fall back to an
+     estimate at the rate for the activity's contract year. */
+  function priceOf(row) {
+    if (row.computedCost != null && row.monthlyRate != null) {
+      return { rate: row.monthlyRate, cost: row.computedCost, estimated: false };
+    }
+    const card = roleByName[row.designation]?.rateCardByYear;
+    const rate = card ? ratesApi.rateForDate(card, projectStartDate, activityStartDate) : null;
+    if (rate == null) return { rate: null, cost: null, estimated: true };
+    const qty = Math.max(1, parseInt(row.quantity, 10) || 1);
+    const months = Number(row.duration) || 0;
+    return { rate, cost: rate * qty * months, estimated: true };
+  }
+
+  const total = rows.reduce((sum, r) => {
+    const { cost } = priceOf(r);
+    return sum + (Number(cost) || 0);
+  }, 0);
+  const anyEstimated = rows.some((r) => r.designation && priceOf(r).estimated);
+
+  function patchRow(idx, patch) {
+    onChange(rows.map((r, i) => {
+      if (i !== idx) return r;
+      const next = { ...r, ...patch };
+      /* Any edit invalidates the server's snapshot for this row — drop it so
+         the table falls back to an estimate rather than showing a stale cost
+         next to changed inputs. */
+      if ("designation" in patch || "quantity" in patch || "duration" in patch) {
+        next.monthlyRate = null;
+        next.computedCost = null;
+      }
+      return next;
+    }));
+  }
+
+  const addRow = () =>
+    onChange([...rows, { designation: "", quantity: 1, duration: "", monthlyRate: null, computedCost: null }]);
+
+  const removeRow = (idx) => onChange(rows.filter((_, i) => i !== idx));
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--uidai-pmis-border)", borderRadius: 10,
+        padding: "12px 14px", background: "#fbfdff",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "#5b6b82" }}>
+          One row per role. Duration is in <strong>months (0–{MAX_DURATION})</strong> —
+          an activity covers a single quarter.
+        </div>
+        <div style={{ fontSize: 12, color: "#5b6b82" }}>
+          Resource cost:{" "}
+          <strong style={{ color: "#173e77", fontSize: 14 }}>{inr(total)}</strong>
+          {anyEstimated && <span style={{ fontSize: 11 }}> (est.)</span>}
+        </div>
+      </div>
+
+      {/* Why the role picker is empty, when it is. */}
+      {(error || (!organisationId) || (!loading && roles.length === 0 && organisationId)) && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            flexWrap: "wrap", gap: 10, marginBottom: 10, padding: "8px 11px",
+            border: `1px solid ${error ? "#f5c6c6" : "#e2e8f3"}`,
+            background: error ? "#fff7f7" : "#f2f7ff", borderRadius: 8,
+            fontSize: 12.5, color: error ? "#b3261e" : "#3d5372",
+          }}
+        >
+          <span>
+            {error
+              ? `The rate card could not be loaded — ${error}`
+              : !organisationId
+                ? "Pick this activity's Organization first — roles and rates come from that organisation's rate card."
+                : "No rate card on file for this organisation yet — upload it on the Designation Rates page."}
+          </span>
+          <span style={{ display: "inline-flex", gap: 8 }}>
+            {error && (
+              <button
+                type="button"
+                className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                style={{ marginTop: 0, padding: "3px 10px" }}
+                onClick={loadRoles}
+              >
+                Retry
+              </button>
+            )}
+            {projectId && organisationId && !error && (
+              <Link
+                to={`/projects/${encodeURIComponent(projectId)}/designation-rate`}
+                className="uidai-pmis-btn uidai-pmis-btn-small"
+                style={{ marginTop: 0, padding: "3px 10px", textDecoration: "none" }}
+              >
+                Designation Rates
+              </Link>
+            )}
+          </span>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th style={{ ...headStyle, minWidth: 190 }}>Designation</th>
+                <th style={{ ...headStyle, width: 90 }}>Qty</th>
+                <th style={{ ...headStyle, width: 110 }}>Duration (mo)</th>
+                <th style={{ ...headStyle, width: 130 }}>Monthly Rate</th>
+                <th style={{ ...headStyle, width: 130 }}>Cost</th>
+                <th style={{ ...headStyle, width: 40 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, idx) => {
+                const { rate, cost, estimated } = priceOf(row);
+                const missingRole = row.designation && !roleByName[row.designation];
+                const durationNum = Number(row.duration);
+                const durationBad =
+                  row.duration !== "" &&
+                  (!Number.isFinite(durationNum) || durationNum < 0 || durationNum > MAX_DURATION);
+                return (
+                  <tr key={idx}>
+                    <td style={{ padding: "0 6px 6px 0" }}>
+                      <select
+                        style={cellStyle}
+                        value={row.designation}
+                        disabled={disabled || roles.length === 0}
+                        onChange={(e) => patchRow(idx, { designation: e.target.value })}
+                      >
+                        <option value="">
+                          {loading ? "Loading roles…" : roles.length === 0 ? "— No rate card —" : "— Select role —"}
+                        </option>
+                        {/* A role dropped from the card since this was saved
+                            still has to render, or the row looks empty. */}
+                        {missingRole && (
+                          <option value={row.designation}>{row.designation} (not on the current card)</option>
+                        )}
+                        {roles.map((r) => (
+                          <option key={r.id || r.role} value={r.role}>{r.role}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={{ padding: "0 6px 6px 0" }}>
+                      <input
+                        type="number" min="1" step="1" style={{ ...cellStyle, textAlign: "right" }}
+                        value={row.quantity}
+                        disabled={disabled}
+                        onChange={(e) => patchRow(idx, { quantity: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ padding: "0 6px 6px 0" }}>
+                      <input
+                        type="number" min="0" max={MAX_DURATION} step="0.01"
+                        style={{
+                          ...cellStyle, textAlign: "right",
+                          borderColor: durationBad ? "#d32f2f" : "var(--uidai-pmis-border)",
+                        }}
+                        value={row.duration}
+                        disabled={disabled}
+                        placeholder="0.00"
+                        title={`Months, 0 to ${MAX_DURATION}`}
+                        onChange={(e) => patchRow(idx, { duration: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82" }}>
+                      {rate == null ? "—" : inr(rate)}
+                    </td>
+                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, fontWeight: 700, color: "#173e77" }}>
+                      {cost == null ? "—" : inr(cost)}
+                      {cost != null && estimated && (
+                        <span style={{ fontWeight: 500, fontSize: 11, color: "#5b6b82" }}> est.</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "0 0 6px 0", textAlign: "center" }}>
+                      <button
+                        type="button"
+                        title="Remove this allocation"
+                        aria-label={`Remove allocation ${idx + 1}`}
+                        disabled={disabled}
+                        onClick={() => removeRow(idx)}
+                        style={{
+                          border: "1px solid #e6b4b4", background: "#fff", color: "#b3261e",
+                          borderRadius: 6, width: 28, height: 30, cursor: disabled ? "not-allowed" : "pointer",
+                          fontSize: 13, lineHeight: 1,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {rows.length === 0 && (
+        <div style={{ fontSize: 12.5, color: "#5b6b82", padding: "6px 0 10px" }}>
+          No resources allocated to this activity yet.
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="uidai-pmis-btn uidai-pmis-btn-small"
+        style={{ marginTop: 4, padding: "5px 12px" }}
+        disabled={disabled}
+        onClick={addRow}
+      >
+        + Add resource
+      </button>
+
+      {anyEstimated && rows.length > 0 && (
+        <div style={{ fontSize: 11.5, color: "#5b6b82", marginTop: 8 }}>
+          Costs marked “est.” are calculated here from the rate card. The saved figure is
+          resolved by the server when you save the activity.
+        </div>
+      )}
+    </div>
+  );
+}

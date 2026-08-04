@@ -8,8 +8,6 @@ import { ENDPOINTS } from "../../api/endpoint";
 import { getToken, logout } from "../../api/auth";
 import { fromApiNodeStatus } from "../../api/adapters";
 import { get as getProjectById } from "../../api/projects";
-import { list as listVendors } from "../../api/vendors";
-import PlannedResourcesSection from "../../components/projects/PlannedResourcesSection";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 
 import "../../styles/global.css";
@@ -1284,55 +1282,6 @@ export default function ProjectFinancePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, project]);
 
-  /* Planned Resources needs the active tab's ORGANIZATION ID: the
-     leave-management rate card is keyed on projectId + organisationId.
-
-     The org tabs above are names, because the adapter flattens vendors to
-     names on the way through. So read the ids off the RAW project payload —
-     the same `vendors[].id` the Designation Rates page uploads a card
-     against, which guarantees both pages agree on what an organisation is.
-     The vendor master is only a fallback for when that read fails. */
-  const [rawVendors, setRawVendors] = useState([]);
-  const [vendorMaster, setVendorMaster] = useState([]);
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authorizedFetch(`${API_BASE}${ENDPOINTS.projects.get(projectId)}`, {
-          method: "GET",
-          headers: { accept: "application/json" },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const raw = await res.json().catch(() => ({}));
-        const body = (raw?.data ?? raw) || {};
-        const list = (Array.isArray(body.vendors) ? body.vendors : [])
-          .filter((v) => v && v.id)
-          .map((v) => ({ id: v.id, name: v.name || v.id }));
-        if (!cancelled) setRawVendors(list);
-      } catch {
-        /* Fall through to the vendor-master name match below. */
-        if (!cancelled) setRawVendors([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [projectId]);
-  useEffect(() => {
-    let cancelled = false;
-    listVendors()
-      .then((list) => { if (!cancelled) setVendorMaster(Array.isArray(list) ? list : []); })
-      .catch(() => { /* the raw project vendors above are the primary source */ });
-    return () => { cancelled = true; };
-  }, []);
-  const activeOrgName = orgs[activeOrg] || "";
-  const activeOrgId = useMemo(() => {
-    const norm = (s) => String(s || "").trim().toLowerCase();
-    const direct = rawVendors.find((v) => norm(v.name) === norm(activeOrgName));
-    if (direct) return direct.id;
-    const hit = vendorMaster.find((v) => norm(v.vendorName) === norm(activeOrgName));
-    return hit?.vendorId || "";
-  }, [rawVendors, vendorMaster, activeOrgName]);
-
   // ── Master data ──
   const [costTypes, setCostTypes] = useState([]);
   const [frequencies, setFrequencies] = useState([]);
@@ -1556,16 +1505,18 @@ export default function ProjectFinancePage() {
 
   // ── Derived ──────────────────────────────────────────────────────
   const costItems = page?.costItems || [];
-  /* Planned-resource rows attach to a resource-cost cost item, so these are
-     the "tabs" the Planned Resources section offers. Ordered by phase so the
-     tabs read in the same order as the phase tabs below. */
-  const resourceCostItems = useMemo(
-    () => (page?.costItems || [])
-      .filter((c) => c.costTypeCode === "resource_cost")
-      .slice()
-      .sort((a, b) => (Number(a.phase) || 0) - (Number(b.phase) || 0)),
-    [page]
-  );
+  /* Which cost items are resource costs. A payment term pointing at one is a
+     RESOURCE-BASED milestone: its activities' `value`s are the resource costs
+     snapshotted when each activity was saved (allocation rows live on the
+     activity now), and its split is cost-driven — the manual per-activity
+     split endpoint rejects these terms outright. */
+  const resourceCostItemIds = useMemo(() => {
+    const set = new Set();
+    (page?.costItems || []).forEach((c) => {
+      if (c.costTypeCode === "resource_cost" && c.id) set.add(c.id);
+    });
+    return set;
+  }, [page]);
   const validationChecks = Array.isArray(validationResult?.checks) ? validationResult.checks : [];
   const validationAllPass = Boolean(validationResult?.allPass);
   /* Order phases by the backend's authoritative `sequence` (1-based). This
@@ -2312,26 +2263,6 @@ export default function ProjectFinancePage() {
             </div>
           </div>
 
-          {/* Planned Resources — a resource-type phase's resource cost is the
-              SUM of its planned-resource rows (designation × window ×
-              headcount), not a typed amount. Only shown once the project has
-              a resource-cost row for rows to attach to. */}
-          {resourceCostItems.length > 0 && (
-            <div className="uidai-pmis-card">
-              <div style={{ ...sectionHead, marginBottom: 10 }}>
-                <span style={stepBadge}>R</span> Planned Resources
-              </div>
-              <PlannedResourcesSection
-                projectId={projectId}
-                resourceCostItems={resourceCostItems}
-                vendorId={activeOrgId}
-                vendorName={activeOrgName}
-                isLocked={isLocked}
-                onChanged={() => loadPaymentPage({ silent: true })}
-              />
-            </div>
-          )}
-
           {/* Section 2 — Payment Terms. Phases render as tabs (like the org
               tabs above); clicking a tab shows only that phase's panel. */}
           <div className="uidai-pmis-card">
@@ -2395,6 +2326,7 @@ export default function ProjectFinancePage() {
                     onEditActivities={(t) => setEditingActivitiesTerm(t)}
                     onSaveLdBasis={saveTermLdBasis}
                     ldBasisBusy={savingTerm}
+                    resourceCostItemIds={resourceCostItemIds}
                     onGenerateInvoice={generateInvoice}
                     onApplyFrequency={applyPhaseFrequency}
                     costItems={costItems}   
@@ -3178,6 +3110,9 @@ function PhasePanel({
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onApplyFrequency,
   onSaveLdBasis, ldBasisBusy = false,
+  /* Ids of the resource-cost cost items — a term pointing at one is a
+     resource-based milestone (see the note where this is built). */
+  resourceCostItemIds = new Set(),
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
   oneTimeTotal = 0, oneTimeAllocatedElsewhere = 0, oneTimeBusy = false, onSetOneTime,
 }) {
@@ -3702,6 +3637,13 @@ function PhasePanel({
                      single source of truth for whether the row expands. */
                   const acts = Array.isArray(t.activities) ? t.activities : [];
                   const showActivities = acts.length > 0;
+                  /* Resource-based milestone: each activity's `value` is the
+                     resource cost snapshotted when that activity was saved
+                     (from its allocation rows), and `percentOfPayment` is
+                     merely derived from it. The split is therefore
+                     cost-driven and can't be edited here — the manual split
+                     endpoint rejects these terms. */
+                  const isResourceTerm = resourceCostItemIds.has(t.costItemId);
                   return (
                     <React.Fragment key={t.id}>
                     <tr style={expandedTerms.has(t.id) ? { background: "#eef5ff" } : undefined}>
@@ -3819,19 +3761,51 @@ function PhasePanel({
                             </span>
                           </td>
                           <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                          <td style={{ textAlign: "right" }}><strong style={{ color: "#173e77" }}>{aPct} %</strong></td>
+                          <td style={{ textAlign: "right" }}>
+                            <strong style={{ color: "#173e77" }}>{aPct} %</strong>
+                            {/* On a resource milestone this % is derived from
+                                the cost, not set — say so rather than letting
+                                it read as an editable weightage. */}
+                            {isResourceTerm && (
+                              <span style={{ display: "block", fontSize: 10, color: "var(--uidai-pmis-muted)" }}>
+                                derived
+                              </span>
+                            )}
+                          </td>
                           {/* LD basis is a milestone-level allotment — activities
                               don't carry one of their own. */}
                           <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                          <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}>₹ {aVal.toLocaleString("en-IN")}</td>
+                          <td
+                            style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }}
+                            title={isResourceTerm
+                              ? "Resource cost of this activity — the total of its resource allocation, snapshotted when the activity was saved"
+                              : wordsHint(aVal)}
+                          >
+                            ₹ {aVal.toLocaleString("en-IN")}
+                          </td>
                           <td>
                             <span style={{
                               display: "inline-block", padding: "1px 8px", borderRadius: 999,
-                              background: "#e6f6fa", color: "#067a93", fontSize: 10.5, fontWeight: 700,
-                              border: "1px solid #bfe7ef",
-                            }}>Activity-wise</span>
+                              background: isResourceTerm ? "#eef9f0" : "#e6f6fa",
+                              color: isResourceTerm ? "#1b7a42" : "#067a93",
+                              fontSize: 10.5, fontWeight: 700,
+                              border: `1px solid ${isResourceTerm ? "#c4e9d0" : "#bfe7ef"}`,
+                            }}>
+                              {isResourceTerm ? "Resource cost" : "Activity-wise"}
+                            </span>
                           </td>
                           <td style={{ textAlign: "center" }}>
+                            {isResourceTerm ? (
+                              /* The split here is the resource cost itself, so
+                                 there is nothing to weight — it changes by
+                                 editing the activity's resource allocation. */
+                              <span
+                                style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)" }}
+                                title="Set on the activity's Resource Allocation, not here"
+                              >
+                                From allocation
+                              </span>
+                            ) : (
                             <button
                               type="button"
                               title="Edit activity split"
@@ -3867,6 +3841,7 @@ function PhasePanel({
                                 <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                               </svg>
                             </button>
+                            )}
                           </td>
                         </tr>
                       );

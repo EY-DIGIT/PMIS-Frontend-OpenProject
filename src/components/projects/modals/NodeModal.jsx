@@ -6,6 +6,7 @@ import ChipControl from "../ChipControl";
 import ApprovalPanel from "./ApprovalPanel";
 import ActivityAuditTrail from "./ActivityAuditTrail";
 import StartActivityBanner from "./StartActivityBanner";
+import ActivityResourceAllocations from "../ActivityResourceAllocations";
 import {
   getProcessInstances,
   getActivityWorkflowAuditLogs,
@@ -235,6 +236,13 @@ function makeDefaultForm(kind, node, mode, parentNode) {
       divisionOther: "",
       ...(n.resourceCount || {})
     },
+    /* Activity-only: the resource allocation rows (designation / quantity /
+       duration in months) on an activity under a resource-based milestone.
+       Left undefined for every other kind so the save path can tell "no
+       allocation to send" apart from "an allocation that is now empty" —
+       sending [] would clear a saved set. */
+    resources:
+      kind === "activity" ? safeArray(n.resources).map((r) => ({ ...r })) : undefined,
     comments: safeArray(n.comments).slice()
   };
 }
@@ -269,6 +277,28 @@ export default function NodeModal({
     return loc ? loc.node : null;
   }, [open, parentUid, project]);
   const parentTypeIsResource = parentNode?.type === "Resource Type";
+
+  /* For an Activity: the milestone it sits under — on add that's the parent,
+     on edit it's the first milestone in the located node's chain. Only
+     activities under a RESOURCE-BASED milestone may carry resource
+     allocations (the server 422s the field anywhere else), so this is what
+     decides whether that section renders. */
+  const enclosingMilestone = useMemo(() => {
+    if (!open || !project || kind !== "activity") return null;
+    if (mode === "add") return parentUid ? (locateNode(project, parentUid)?.node || null) : null;
+    if (!nodeUid) return null;
+    const loc = locateNode(project, nodeUid);
+    if (!loc) return null;
+    for (const step of (loc.chain || [])) {
+      if (step && step.kind === "milestone") return step.node;
+    }
+    /* The chain shape has varied across loaders — fall back to finding the
+       milestone that owns this activity. */
+    return (project.milestones || []).find((m) =>
+      safeArray(m.activities).some((a) => a && a.uid === nodeUid)
+    ) || null;
+  }, [open, project, kind, mode, nodeUid, parentUid]);
+  const milestoneIsResourceBased = enclosingMilestone?.isResourceBased === true;
 
   /* For Task / Subtask: walk the project tree from this node (or its
      parent in add mode) up to the enclosing Activity. Used to scope
@@ -807,10 +837,47 @@ export default function NodeModal({
         setSaveError("Please specify the concerned division.");
         return;
       }
+
+      if (milestoneIsResourceBased) {
+        const rows = safeArray(form.resources);
+        const filled = rows.filter((r) => String(r?.designation || "").trim());
+        /* A half-filled row is almost always an accident, and the server
+           would reject it — catch it here where the row is visible. */
+        if (rows.length !== filled.length) {
+          setSaveError("Pick a designation for every resource row, or remove the empty ones.");
+          return;
+        }
+        for (const r of filled) {
+          const qty = parseInt(r.quantity, 10);
+          if (!Number.isFinite(qty) || qty < 1) {
+            setSaveError(`Quantity for "${r.designation}" must be at least 1.`);
+            return;
+          }
+          const months = Number(r.duration);
+          if (r.duration === "" || !Number.isFinite(months) || months < 0 || months > 3) {
+            setSaveError(`Duration for "${r.designation}" must be between 0 and 3 months.`);
+            return;
+          }
+        }
+      }
     }
     setSaveError("");
 
     const payload = { ...form, bounds };
+    /* `resources` is only valid on an activity under a resource-based
+       milestone — sending it (even as []) anywhere else is a 422, so it is
+       dropped from the payload rather than sent empty.
+
+       The exception is an activity that already HAS allocation rows: those
+       can only exist on a resource-based milestone, so if the flag didn't
+       resolve (a partially-loaded tree, say) trust the rows over the flag —
+       dropping them would silently wipe a saved allocation. */
+    const hasAllocationRows = safeArray(form.resources).some((r) =>
+      String(r?.designation || "").trim()
+    );
+    if (kind !== "activity" || (!milestoneIsResourceBased && !hasAllocationRows)) {
+      delete payload.resources;
+    }
     const body = commentText.trim();
     if (body) payload.body = body;
     if (commentFiles.length) payload.files = commentFiles;
@@ -1507,6 +1574,29 @@ export default function NodeModal({
                   No assignable users found for this activity's vendor.
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Resource allocation — only on an activity under a resource-based
+              milestone. Its total IS this activity's resource cost, which the
+              finance page shows as the activity's share of the payment term. */}
+          {kind === "activity" && milestoneIsResourceBased && (
+            <div className="uidai-field uidai-grid__full">
+              <label className="uidai-field__label">
+                Resource Allocation
+                <span style={{ fontWeight: 500, color: "#66788f", marginLeft: 6, fontSize: 12 }}>
+                  — {enclosingMilestone?.name || "this milestone"} is resource based
+                </span>
+              </label>
+              <ActivityResourceAllocations
+                rows={safeArray(form.resources)}
+                onChange={(next) => updateField({ resources: next })}
+                projectId={project.projectId}
+                projectStartDate={project.startDate}
+                organisationId={form.vendorId}
+                activityStartDate={form.startDate}
+                disabled={dis}
+              />
             </div>
           )}
 

@@ -205,6 +205,15 @@ export function mapApiMilestoneToNode(m) {
   };
 }
 
+/* Money and duration fields on the activity resource rows come back as
+   strings ("595302.00"); null/"" must stay null rather than becoming 0, so a
+   missing rate reads as "not resolved" instead of "free". */
+function toNumberOrNull(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /* Shared builder for activity/task/subtask node shape (they share the same
    API schema). kindLetter is the one-char prefix for generated uids, and
    childrenKey decides whether the node holds `tasks` or `subtasks`. */
@@ -279,6 +288,23 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
       ? a.concernedDivision.slice()
       : (a.concernedDivision ? [a.concernedDivision] : []),
     concernedDivisionOther: a.concernedDivisionOther || a.concerned_division_other || "",
+    /* Resource allocation on a resource-based activity: one row per
+       designation. designation/quantity/duration are what the FE sends;
+       monthlyRate + computedCost are resolved by the backend at save time
+       (from the leave-management rate card for the activity's contract year)
+       and are read-only here. Responses are snake_case, and the money +
+       duration fields come back as strings. */
+    resources: Array.isArray(a.resources)
+      ? a.resources.map((r) => ({
+          designation: r?.designation || "",
+          quantity: Number(r?.quantity) || 1,
+          duration: r?.duration == null ? "" : String(r.duration),
+          monthlyRate: toNumberOrNull(r?.monthlyRate ?? r?.monthly_rate),
+          computedCost: toNumberOrNull(r?.computedCost ?? r?.computed_cost)
+        }))
+      : [],
+    resourceCostTotal:
+      toNumberOrNull(a.resourceCostTotal ?? a.resource_cost_total) ?? 0,
     comments: [],
     attachments: [],
     position: typeof a.position === "number" ? a.position : 0

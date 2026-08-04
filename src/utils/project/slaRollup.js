@@ -171,15 +171,107 @@ export function topBandThreshold(ldBands) {
     return list.length ? Math.max(...list) : null;
 }
 
+/* ─── SLA classification ─────────────────────────────────────────────
+   The RFP runs TWO distinct LD regimes, and they must never be added
+   together — they are charged against different money.
+
+   §5.28.2 (Phase 1, deliverables D1–D8). SLA 001 deducts 0.5% and SLA
+   002 deducts 1% "of the total cost of that deliverable" per week of
+   delay. No severity, no points, no NPQP. §5.28.2.a is explicit that
+   resource-based SLAs do not apply in this phase at all.
+
+   §5.28.3–5.28.4 (Phase 2/3 and the governance tool). Severity →
+   points → LD band → a percentage of NPQP, accumulated over a quarter.
+
+   §5.28.3.a (SLA 003) is the hybrid that forces two axes rather than
+   one: it escalates linearly (0.1% per day, no points) but is charged
+   against NPQP. So the TRACK is decided by what the LD is charged on,
+   and the SCORING by how the percentage is derived.
+
+   Both facts already travel on every evaluation result — `ldBaseKind`
+   is the SLA master's `applied_on`, `formulaType` its category's
+   formula — so none of this needs a backend change.                   */
+
+export const TRACK = { DELIVERABLE: "deliverable", QUARTERLY: "quarterly" };
+export const SCORING = { POINTS: "points", LINEAR: "linear" };
+
+/* Categories charged on a single deliverable's cost.
+
+   The category catalog stores a `code` (DELIVERABLE_SUBMISSION) next to
+   a `display_name` ("Deliverable Submission"), and the onboarding form
+   already carries a fallback for records that saved the display name
+   instead of the code — so both forms are in the data. Comparing raw
+   strings would match one and silently drop the other into the
+   quarterly track, so everything is folded to a single shape first:
+   upper-cased with every run of non-alphanumerics collapsed to "_".  */
+export function normalizeCategory(value) {
+    return String(value ?? "")
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+}
+
+const DELIVERABLE_CATEGORIES = new Set(["DELIVERABLE_SUBMISSION"]);
+
+/* `basis` records WHY an SLA landed where it did. Without it the default
+   branch is invisible: a project whose results carry no LD base at all
+   would silently show every SLA as quarterly and an empty deliverable
+   section, which reads exactly like "this project has no deliverable
+   SLAs". Those two situations need telling apart, so the basis is
+   returned and surfaced rather than swallowed. */
+export function classifyResult(result) {
+    const base = normalizeCategory(result?.ldBaseKind ?? result?.appliedOn);
+    const formula = String(result?.formulaType ?? "").toLowerCase();
+    const category = normalizeCategory(result?.categoryCode ?? result?.category);
+
+    /* CATEGORY WINS over the stated LD base, and that ordering is load-
+       bearing. The contracts service defaults `applied_on` to
+       QUARTERLY_PAYMENT whenever it is not sent explicitly — the SLA
+       onboarding form documents this and works around it by always
+       sending the field. Any SLA created another way (seeded, imported,
+       or before that workaround) therefore arrives claiming a quarterly
+       base even when its category is DELIVERABLE_SUBMISSION, and
+       trusting the base first silently files SLA 001/002 as resource
+       SLAs.
+
+       The category is the safer authority because it DERIVES the base:
+       DELIVERABLE_SUBMISSION is charged on the deliverable's cost, and
+       every other category on NPQP. The base is only consulted when no
+       category came through at all.                                    */
+    let track;
+    let basis;
+    if (DELIVERABLE_CATEGORIES.has(category)) { track = TRACK.DELIVERABLE; basis = "category"; }
+    else if (category) { track = TRACK.QUARTERLY; basis = "category"; }
+    else if (base === "FIXED_AMOUNT") { track = TRACK.DELIVERABLE; basis = "ldBaseKind"; }
+    else if (base === "QUARTERLY_PAYMENT") { track = TRACK.QUARTERLY; basis = "ldBaseKind"; }
+    // Nothing to go on. Default to the quarterly track, because that is where
+    // the §5.27.6 ceiling lives: better contained than uncapped.
+    else { track = TRACK.QUARTERLY; basis = "default"; }
+
+    /* A category that contradicts the stated base is a data defect worth
+       reporting — it is exactly the backend-default bug above, and the
+       person configuring the SLA library is the one who can fix it. */
+    const expectedBase = track === TRACK.DELIVERABLE ? "FIXED_AMOUNT" : "QUARTERLY_PAYMENT";
+    const baseConflict = basis === "category" && !!base && base !== expectedBase;
+
+    let scoring;
+    if (formula === "fixed_escalation") scoring = SCORING.LINEAR;
+    else if (formula === "point_accumulation") scoring = SCORING.POINTS;
+    else scoring = track === TRACK.DELIVERABLE ? SCORING.LINEAR : SCORING.POINTS;
+
+    return { track, scoring, basis, baseConflict, category, base };
+}
+
 /* ─── the rollup ─────────────────────────────────────────────────── */
 
 /* One evaluation result becomes one scored occurrence.
 
    `severityLevel` is the measurement's raw score; `cappedLevel` is it
-   after the SLA Cap. `points` is always derived from the CAPPED level —
-   that is the whole point of the cap, and reporting the uncapped figure
-   would overstate the quarter. `capApplied` is surfaced so the screen can
-   show the cap doing its job rather than silently swallowing severity. */
+   after the §5.28.1.b SLA Cap. Points always derive from the CAPPED
+   level — that is the whole purpose of the cap — while `capApplied` is
+   surfaced so the screen can show the cap working rather than silently
+   swallowing severity. */
 function scoreOccurrence(result, scale) {
     const raw = Number(result.severityLevel);
     const hasLevel = Number.isFinite(raw);
@@ -196,11 +288,22 @@ function scoreOccurrence(result, scale) {
     };
 }
 
-/* Group evaluation results by SLA and score each group for one quarter.
+function statusCounts(occurrences) {
+    return {
+        breached: occurrences.filter((o) => o.status === "breached").length,
+        met: occurrences.filter((o) => o.status === "met").length,
+        pending: occurrences.filter((o) => o.status === "pending").length,
+    };
+}
 
-   Occurrences with no severity contribute nothing to the points total but
-   are still listed: a `pending` SLA that was never scored is exactly the
-   thing a reviewer needs to see, and dropping it would make the quarter
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const byDate = (a, b) => String(a.evaluatedOn || "").localeCompare(String(b.evaluatedOn || ""));
+
+/* Group evaluation results by SLA, splitting the two regimes.
+
+   Occurrences with no severity contribute nothing to a points total but
+   are still listed: a `pending` SLA that was never scored is exactly
+   what a reviewer needs to see, and hiding it would make the quarter
    look cleaner than it is. */
 export function rollupBySla(results, { severityMaster, ldBands } = {}) {
     const scale = severityScale(severityMaster);
@@ -213,58 +316,137 @@ export function rollupBySla(results, { severityMaster, ldBands } = {}) {
             groups.set(ref, {
                 slaRef: ref,
                 slaId: r.slaId || null,
+                slaTitle: r.slaTitle || null,
                 formulaType: r.formulaType || null,
+                categoryCode: r.categoryCode || null,
+                ...classifyResult(r),
                 occurrences: [],
             });
         }
         const g = groups.get(ref);
         if (!g.formulaType && r.formulaType) g.formulaType = r.formulaType;
-        g.occurrences.push(scoreOccurrence(r, scale));
+        if (!g.slaTitle && r.slaTitle) g.slaTitle = r.slaTitle;
+        g.occurrences.push(r);
     }
 
-    const items = [...groups.values()].map((g) => {
-        const occurrences = g.occurrences.slice().sort((a, b) =>
-            String(a.evaluatedOn || "").localeCompare(String(b.evaluatedOn || ""))
-        );
-        const scored = occurrences.filter((o) => Number.isFinite(o.points));
-        const accumulatedPoints = scored.reduce((n, o) => n + o.points, 0);
+    const deliverableItems = [];
+    const quarterlyItems = [];
+
+    for (const g of groups.values()) {
+        const occurrences = g.occurrences.slice().sort(byDate);
+        const counts = statusCounts(occurrences);
+        const totalDelayDays = occurrences.reduce((n, o) => n + (num(o.delayDays) ?? 0), 0);
+
+        /* ── Deliverable track (§5.28.2) ──────────────────────────────
+           Each occurrence is charged on ITS OWN deliverable's cost, so
+           percentages taken against different deliverables are not
+           comparable and are deliberately never summed. Only the rupee
+           amounts aggregate. */
+        if (g.track === TRACK.DELIVERABLE) {
+            const priced = occurrences.filter((o) => num(o.ldAmount) !== null);
+            deliverableItems.push({
+                ...g,
+                occurrences,
+                ...counts,
+                totalDelayDays,
+                totalLdAmount: priced.reduce((n, o) => n + num(o.ldAmount), 0),
+                unpricedCount: occurrences.length - priced.length,
+                maxLdPercent: occurrences.reduce((m, o) => Math.max(m, num(o.ldPercent) ?? 0), 0),
+            });
+            continue;
+        }
+
+        /* ── Quarterly track, linear scoring (§5.28.3.a — SLA 003) ────
+           A per-day escalation charged on NPQP. No severity and no band,
+           so the quarter's LD % is simply what its occurrences reached. */
+        if (g.scoring === SCORING.LINEAR) {
+            const scored = occurrences.filter((o) => num(o.ldPercent) !== null);
+            quarterlyItems.push({
+                ...g,
+                occurrences,
+                ...counts,
+                totalDelayDays,
+                scoredCount: scored.length,
+                unscoredCount: occurrences.length - scored.length,
+                capHits: 0,
+                accumulatedPoints: null,
+                pointsCapped: false,
+                excessPoints: 0,
+                band: null,
+                ldPercent: scored.length ? scored.reduce((n, o) => n + num(o.ldPercent), 0) : null,
+            });
+            continue;
+        }
+
+        /* ── Quarterly track, points scoring (§5.28.1) ────────────────
+           Severity capped per measurement, points accumulated across the
+           reporting interval, then the band table read. That band table
+           IS the per-SLA LD ceiling §5.28.1.b requires — points past the
+           top threshold earn nothing further. */
+        const scored = occurrences.map((o) => scoreOccurrence(o, scale));
+        const contributing = scored.filter((o) => Number.isFinite(o.points));
+        const accumulatedPoints = contributing.reduce((n, o) => n + o.points, 0);
         const band = scale.configured ? ldBandFor(accumulatedPoints, ldBands) : null;
 
-        return {
+        quarterlyItems.push({
             ...g,
-            occurrences,
-            breached: occurrences.filter((o) => o.status === "breached").length,
-            met: occurrences.filter((o) => o.status === "met").length,
-            pending: occurrences.filter((o) => o.status === "pending").length,
-            scoredCount: scored.length,
-            unscoredCount: occurrences.length - scored.length,
-            capHits: occurrences.filter((o) => o.capApplied).length,
+            occurrences: scored,
+            ...counts,
+            totalDelayDays,
+            scoredCount: contributing.length,
+            unscoredCount: scored.length - contributing.length,
+            capHits: scored.filter((o) => o.capApplied).length,
             accumulatedPoints,
-            // Points beyond the top band earn nothing further — the LD per
-            // SLA is capped for the reporting interval (§5.28.1.b/c).
             pointsCapped: topThreshold != null && accumulatedPoints > topThreshold,
             excessPoints: topThreshold != null ? Math.max(0, accumulatedPoints - topThreshold) : 0,
             band,
             ldPercent: band ? band.ld_percent : null,
-        };
-    });
+        });
+    }
 
     // Worst first: the SLAs actually costing money should not need scrolling to.
-    items.sort(
-        (a, b) =>
-            (b.ldPercent ?? -1) - (a.ldPercent ?? -1) ||
-            b.accumulatedPoints - a.accumulatedPoints ||
-            String(a.slaRef).localeCompare(String(b.slaRef))
-    );
+    const worstFirst = (key) => (a, b) =>
+        (b[key] ?? -1) - (a[key] ?? -1) || String(a.slaRef).localeCompare(String(b.slaRef));
+    quarterlyItems.sort(worstFirst("ldPercent"));
+    deliverableItems.sort(worstFirst("totalLdAmount"));
 
-    return { items, scale, topThreshold };
+    /* How the split was actually decided, so the screen can distinguish
+       "no deliverable SLAs exist" from "nothing said which track to use". */
+    const all = [...deliverableItems, ...quarterlyItems];
+    const conflicted = all.filter((i) => i.baseConflict);
+    const classification = {
+        total: all.length,
+        byLdBaseKind: all.filter((i) => i.basis === "ldBaseKind").length,
+        /* Placed by applied_on because no category came through at all.
+           This is the quiet failure: applied_on defaults to
+           QUARTERLY_PAYMENT server-side, so a missing category does not
+           look like missing data — it looks like a confident answer of
+           "quarterly". Named so it can be reported rather than trusted. */
+        byLdBaseKindRefs: all.filter((i) => i.basis === "ldBaseKind").map((i) => i.slaRef),
+        byCategory: all.filter((i) => i.basis === "category").length,
+        defaulted: all.filter((i) => i.basis === "default").length,
+        defaultedRefs: all.filter((i) => i.basis === "default").map((i) => i.slaRef),
+        // SLAs whose stored applied_on disagrees with their category.
+        conflictCount: conflicted.length,
+        conflicts: conflicted.map((i) => ({
+            slaRef: i.slaRef, category: i.category, storedBase: i.base,
+        })),
+    };
+
+    return { deliverableItems, quarterlyItems, scale, topThreshold, classification };
 }
 
-/* Quarter totals. `quarterCapPercent` is the §5.27.6 ceiling on cumulative
-   LD (10% of NPQP by default). NPQP may legitimately be absent — the base
-   comes from leave-management and that service can be down — so the LD
-   amount stays null rather than being reported as zero. */
-export function quarterTotals(items, { npqp, quarterCapPercent = 10 } = {}) {
+/* ─── quarter totals (§5.28.1.d and §5.27.6) ─────────────────────────
+   The RFP sums every SLA's LD % for the quarter and multiplies that sum
+   by NPQP once. It never apportions the ceiling back onto individual
+   SLAs, so neither does this: the only two ceilings are the per-SLA
+   band (applied in the rollup) and the §5.27.6 cumulative 10% of NPQP
+   applied here.
+
+   NPQP may legitimately be absent — its F component comes from leave
+   management — so the amount stays null rather than reporting zero.   */
+export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } = {}) {
+    const items = Array.isArray(quarterlyItems) ? quarterlyItems : [];
     const contributing = items.filter((i) => Number.isFinite(i.ldPercent));
     const sumLdPercent = contributing.reduce((n, i) => n + i.ldPercent, 0);
     const cappedLdPercent = Math.min(sumLdPercent, quarterCapPercent);
@@ -276,7 +458,9 @@ export function quarterTotals(items, { npqp, quarterCapPercent = 10 } = {}) {
         contributingCount: contributing.filter((i) => i.ldPercent > 0).length,
         totalOccurrences: items.reduce((n, i) => n + i.occurrences.length, 0),
         totalBreaches: items.reduce((n, i) => n + i.breached, 0),
-        totalPoints: items.reduce((n, i) => n + i.accumulatedPoints, 0),
+        totalPoints: items.reduce(
+            (n, i) => n + (Number.isFinite(i.accumulatedPoints) ? i.accumulatedPoints : 0), 0
+        ),
         sumLdPercent,
         cappedLdPercent,
         capApplied: sumLdPercent > quarterCapPercent,
@@ -286,3 +470,22 @@ export function quarterTotals(items, { npqp, quarterCapPercent = 10 } = {}) {
         ldAmountUncapped: hasBase ? (base * sumLdPercent) / 100 : null,
     };
 }
+
+/* Deliverable-track totals (§5.28.2). Each SLA here is charged on its
+   own deliverable's cost, so only rupee amounts aggregate — summing
+   percentages taken against different bases would be meaningless — and
+   the §5.27.6 NPQP ceiling does not reach this track. */
+export function deliverableTotals(deliverableItems) {
+    const items = Array.isArray(deliverableItems) ? deliverableItems : [];
+    return {
+        slaCount: items.length,
+        totalOccurrences: items.reduce((n, i) => n + i.occurrences.length, 0),
+        totalBreaches: items.reduce((n, i) => n + i.breached, 0),
+        totalLdAmount: items.reduce((n, i) => n + i.totalLdAmount, 0),
+        unpricedCount: items.reduce((n, i) => n + i.unpricedCount, 0),
+        affectedActivities: new Set(
+            items.flatMap((i) => i.occurrences.map((o) => o.activityId).filter(Boolean))
+        ).size,
+    };
+}
+
