@@ -269,6 +269,71 @@ function numOrNull(v) {
     return Number.isFinite(n) ? n : null;
 }
 
+/* GET /api/v3/sla-masters/{id} — the RFP-shape record.
+
+   The LIST endpoint returns summaries. `target_rows`, `linear_escalation`
+   and the cadence fields only come back on the single-record fetch —
+   SlaMastersPage reads them exactly this way, and only in detail mode.
+   Without them the whole conformance re-check degrades to "could not be
+   checked" on every SLA, which looks like agreement and is not.
+
+   Shaped identically to a `listSlaMasters` row so the two are
+   interchangeable and a failed detail call can fall back to the list. */
+export function getSlaMaster(slaId) {
+    return call(`/api/v3/sla-masters/${enc(slaId)}`).then((s) => ({
+        slaId: s.id ?? s.sla_id ?? slaId,
+        slaRef: s.sla_ref ?? s.slaRef ?? "",
+        title: s.title ?? s.name ?? "",
+        categoryCode: s.category ?? s.category_code ?? null,
+        appliedOn: s.applied_on ?? s.ld_computation_base ?? null,
+        formulaType: s.formula_type ?? s.formulaType ?? null,
+        measurementInterval: s.measurement_interval ?? s.measurementInterval ?? null,
+        reportingInterval: s.reporting_interval ?? s.reportingInterval ?? null,
+        targetRows: pickTargetRows(s),
+        linearEscalation: pickLinearEscalation(s),
+        calculationMethod: s.calculation ?? s.calculation_method ?? "",
+        assumptions: s.assumptions ?? "",
+    }));
+}
+
+/* Fill in the scoring detail the list omits, a few at a time.
+
+   Only SLAs the caller actually needs are fetched, and a failure keeps
+   the list row rather than dropping the SLA — a missing target table
+   costs a cross-check, not the SLA's own figures. */
+export async function hydrateSlaMasters(masters, { concurrency = 5 } = {}) {
+    const list = Array.isArray(masters) ? masters : [];
+    const out = list.slice();
+    let cursor = 0;
+
+    async function worker() {
+        for (;;) {
+            const i = cursor;
+            cursor += 1;
+            if (i >= out.length) return;
+            const m = out[i];
+            // Already complete — nothing the detail call would add.
+            if (!m?.slaId || (m.targetRows?.length && m.measurementInterval)) continue;
+            try {
+                const full = await getSlaMaster(m.slaId);
+                // List values win where the detail is blank, never the reverse.
+                out[i] = {
+                    ...m,
+                    ...Object.fromEntries(
+                        Object.entries(full).filter(([, v]) =>
+                            v !== null && v !== "" && !(Array.isArray(v) && v.length === 0))
+                    ),
+                };
+            } catch {
+                /* keep the list row */
+            }
+        }
+    }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, out.length || 1) }, worker));
+    return out;
+}
+
 export function listSlaMasters(projectId, { pageSize = 200 } = {}) {
     const qs = new URLSearchParams({ offset: "1", pageSize: String(pageSize) });
     if (projectId) qs.set("project_id", projectId);

@@ -48,6 +48,8 @@
    Number.isFinite(0) is true, so testing only for finiteness turns "no
    cap configured" into "cap of 0%" and "not priced yet" into "priced at
    nothing" — both silently wrong in the direction that hides money. */
+import { normalizeStatus, STATUS } from "./slaRollup";
+
 const num = (v) => {
     if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
@@ -191,14 +193,14 @@ export function buildDeliverablePayables({
             const s = bySla.get(c.slaRef);
             s.ldPercent += c.ldPercent ?? 0;
             s.occurrences += 1;
-            if (c.status === "breached") s.breaches += 1;
+            if (normalizeStatus(c.status) === STATUS.BREACHED) s.breaches += 1;
         }
 
         return {
             ...row,
             slas: [...bySla.values()].sort((a, b) => b.ldPercent - a.ldPercent),
             occurrenceCount: row.contributions.length,
-            breachCount: row.contributions.filter((c) => c.status === "breached").length,
+            breachCount: row.contributions.filter((c) => normalizeStatus(c.status) === STATUS.BREACHED).length,
             unscoredCount: row.contributions.length - scored.length,
             ldPercent,
             ldPercentCapped,

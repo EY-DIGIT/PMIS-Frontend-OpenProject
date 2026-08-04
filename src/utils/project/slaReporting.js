@@ -73,7 +73,7 @@
    Pure functions, no React, no fetching.
    ══════════════════════════════════════════════════════════════════ */
 
-import { ldBandFor, parseISO } from "./slaRollup";
+import { ldBandFor, parseISO, normalizeStatus, STATUS } from "./slaRollup";
 
 const num = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -364,7 +364,7 @@ export function recheckSla(item, master, { severityScale: scale, ldBands, period
         // The RFP counts events that happened — an incorrect recommendation,
         // a failure, a replacement — not measurements taken. A met result is
         // a measurement with no event in it.
-        const count = (item.occurrences || []).filter((o) => o.status === "breached").length;
+        const count = (item.occurrences || []).filter((o) => normalizeStatus(o.status) === STATUS.BREACHED).length;
         const { severity, reason } = severityForValue(count, master.targetRows);
         if (severity === null) {
             return { ...base, method: METHOD.UNVERIFIABLE, note: `count-driven SLA, but ${reason}` };
@@ -526,7 +526,7 @@ export function detectCarryForward({ allResults, period, mastersByRef } = {}) {
 
         // The most recent statement made before this quarter opened.
         const last = before[before.length - 1];
-        if (last.status !== "breached") continue;
+        if (normalizeStatus(last.status) !== STATUS.BREACHED) continue;
 
         // Already re-scored inside this quarter — the backend is emitting the
         // recurring row, so there is nothing missing to report.

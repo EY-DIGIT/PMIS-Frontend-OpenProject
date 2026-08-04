@@ -21,6 +21,7 @@
    and counts QGR instalments — not calendar or financial quarters.
    ══════════════════════════════════════════════════════════════════ */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { loadProjectTree } from "../../../api/milestoneConfigApi";
 import {
     getActivityCompliance,
@@ -28,6 +29,7 @@ import {
     getSeverityMaster,
     getLdBands,
     listSlaMasters,
+    hydrateSlaMasters,
     getQuarterlyAggregate,
     listSettlements,
 } from "../../../api/slaCompliance";
@@ -44,8 +46,13 @@ import {
     combinedCapCheck,
     TRACK,
     SCORING,
+    STATUS,
+    normalizeStatus,
 } from "../../../utils/project/slaRollup";
-import { recheckSla, detectCarryForward, METHOD } from "../../../utils/project/slaReporting";
+import { recheckSla, detectCarryForward, severityForValue, METHOD } from "../../../utils/project/slaReporting";
+import {
+    listDrafts, saveDraft, removeDraft, clearDrafts, applyDrafts, observationKey,
+} from "../../../utils/project/localObservations";
 import {
     collectResourceActivities,
     deriveQuarterlyResourcePlan,
@@ -93,11 +100,43 @@ function severityAccent(level) {
     if (n === 2) return AMBER;
     return GREEN;
 }
+/* Keyed on the NORMALIZED status, not the raw backend string. The wire
+   values are enum names — `pending_observation`, `excluded` — and
+   matching them literally is what made an activity with two unread SLAs
+   report zero of everything. */
 const RESULT_BADGE = {
-    breached: "uidai-pmis-badge-red",
-    met: "uidai-pmis-badge-green",
-    pending: "uidai-pmis-badge-orange",
+    [STATUS.BREACHED]: "uidai-pmis-badge-red",
+    [STATUS.MET]: "uidai-pmis-badge-green",
+    [STATUS.PENDING]: "uidai-pmis-badge-orange",
+    [STATUS.EXCLUDED]: "uidai-pmis-badge-grey",
 };
+
+/* What the status means to a reader, rather than its enum name.
+   `pending_observation` in particular is not "we are waiting for time to
+   pass" — it is "somebody has to go and type in what was observed". */
+const STATUS_LABEL = {
+    [STATUS.BREACHED]: "breached",
+    [STATUS.MET]: "met",
+    [STATUS.PENDING]: "awaiting observation",
+    [STATUS.EXCLUDED]: "excluded",
+    [STATUS.UNKNOWN]: "unknown",
+};
+
+function StatusBadge({ status }) {
+    const kind = normalizeStatus(status);
+    return (
+        <span
+            className={`uidai-pmis-badge ${RESULT_BADGE[kind] || "uidai-pmis-badge-orange"}`}
+            title={kind === STATUS.PENDING
+                ? "The evaluation ran but this SLA is not date-derivable — enter the observed value on Activity SLA Mapping."
+                : kind === STATUS.EXCLUDED
+                    ? "Deliberately outside the calculation — e.g. a resource whose replacement UIDAI initiated (SLA 007 Note). Scores no points."
+                    : status || undefined}
+        >
+            {STATUS_LABEL[kind] || status || "—"}
+        </span>
+    );
+}
 
 function Banner({ text, kind }) {
     if (!text) return null;
@@ -239,9 +278,7 @@ function PayableRow({ row, open, onToggle }) {
                     <td>
                         <span style={{ fontFamily: "monospace", fontSize: 11.5, fontWeight: 700, color: INK }}>{c.slaRef}</span>
                         {c.status && (
-                            <span className={`uidai-pmis-badge ${RESULT_BADGE[c.status] || ""}`} style={{ marginLeft: 6, fontSize: 10 }}>
-                                {c.status}
-                            </span>
+                            <span style={{ marginLeft: 6, fontSize: 10 }}><StatusBadge status={c.status} /></span>
                         )}
                     </td>
                     <td style={{ textAlign: "right", fontSize: 11.5, ...muted }}>
@@ -302,6 +339,81 @@ function Metric({ label, value, accent, flag, flagTitle }) {
     );
 }
 
+/* ─── local observation entry ─────────────────────────────────────
+   A value box on a `pending_observation` row.
+
+   This exists because the backend has no route for a manual reading
+   yet — `/sla-evaluate` computes one and returns it, but nothing
+   persists it, so the row stays pending forever. The value typed here
+   is parked in localStorage and the severity is derived from the SLA's
+   own target table, exactly as the backend would.
+
+   Styled as a draft on purpose, and never presented as saved. The
+   moment observations persist server-side this control has nothing
+   left to do. */
+function ObservationCell({ occurrence, targetRows, onSave, onClear }) {
+    const [value, setValue] = useState(
+        occurrence.draftValue === undefined || occurrence.draftValue === null ? "" : String(occurrence.draftValue)
+    );
+    const [touched, setTouched] = useState(false);
+
+    // What the typed value would score, shown live so the effect of a
+    // reading is visible before it is committed to the quarter.
+    const preview = useMemo(() => {
+        if (value === "") return null;
+        if (!targetRows?.length) return { severity: null, reason: "no target table on this SLA" };
+        return severityForValue(Number(value), targetRows);
+    }, [value, targetRows]);
+
+    const dirty = touched && String(occurrence.draftValue ?? "") !== value;
+
+    return (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <input
+                type="number"
+                step="any"
+                value={value}
+                placeholder="observed"
+                onChange={(e) => { setValue(e.target.value); setTouched(true); }}
+                style={{
+                    width: 78, padding: "3px 6px", fontSize: 12,
+                    border: `1px solid ${dirty ? AMBER : "var(--uidai-pmis-border)"}`,
+                    borderRadius: 5, textAlign: "right",
+                }}
+                aria-label={`Observed value for ${occurrence.slaRef}`}
+            />
+            {dirty && (
+                <button
+                    type="button"
+                    className="uidai-pmis-btn uidai-pmis-btn-small"
+                    style={{ marginTop: 0, padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => { onSave(value); setTouched(false); }}
+                >
+                    Save
+                </button>
+            )}
+            {occurrence.isLocalDraft && !dirty && (
+                <button
+                    type="button"
+                    className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                    style={{ marginTop: 0, padding: "2px 8px", fontSize: 11 }}
+                    onClick={() => { onClear(); setValue(""); setTouched(false); }}
+                    title="Remove this local draft"
+                >
+                    Clear
+                </button>
+            )}
+            {preview && (
+                <span style={{ fontSize: 10.5, ...muted }}>
+                    {preview.severity === null
+                        ? <span style={{ color: AMBER }}>⚠ {preview.reason}</span>
+                        : <>→ severity <b style={{ color: severityAccent(preview.severity) }}>{preview.severity}</b></>}
+                </span>
+            )}
+        </div>
+    );
+}
+
 /* ─── plain-language summary ──────────────────────────────────────
    The answer, before the evidence. Someone opening this page wants
    three numbers: how bad was the quarter, what did it cost, what do we
@@ -311,8 +423,12 @@ function Metric({ label, value, accent, flag, flagTitle }) {
    Deliberately free of acronyms — NPQP, PA and AQP are defined in the
    glossary and used from the sections downward, but the headline says
    "you pay" because that is what it means. */
-function Headline({ period, breaches, measured, ldPercent, ldAmount, deliverableLd, finalPayment, pending }) {
-    const clean = !breaches;
+function Headline({ period, breaches, measured, awaiting, ldPercent, ldAmount, deliverableLd, finalPayment, pending }) {
+    /* "No breaches" is only true if everything was actually read. With SLAs
+       still awaiting a manual observation the quarter is unmeasured, not
+       clean — and every resource SLA needs a manual reading, so this is the
+       normal state of an open quarter rather than an edge case. */
+    const clean = !breaches && !awaiting;
     const totalPenalty = (Number(ldAmount) || 0) + (Number(deliverableLd) || 0);
 
     return (
@@ -334,11 +450,22 @@ function Headline({ period, breaches, measured, ldPercent, ldAmount, deliverable
                 gap: 2, padding: "6px 16px 15px",
             }}>
                 <div>
-                    <div style={{ fontSize: 26, fontWeight: 800, color: clean ? GREEN : RED, lineHeight: 1.1 }}>
-                        {clean ? "No breaches" : `${breaches} breach${breaches === 1 ? "" : "es"}`}
+                    <div style={{
+                        fontSize: 26, fontWeight: 800, lineHeight: 1.1,
+                        color: breaches ? RED : awaiting ? AMBER : GREEN,
+                    }}>
+                        {breaches
+                            ? `${breaches} breach${breaches === 1 ? "" : "es"}`
+                            : awaiting ? "Not measured yet" : "No breaches"}
                     </div>
                     <div style={{ fontSize: 11.5, ...muted, marginTop: 3 }}>
-                        {measured > 0 ? `across ${measured} SLA${measured === 1 ? "" : "s"} measured` : "nothing measured yet"}
+                        {awaiting > 0 ? (
+                            <span style={{ color: AMBER, fontWeight: 600 }}>
+                                {awaiting} SLA{awaiting === 1 ? "" : "s"} awaiting a manual observation
+                            </span>
+                        ) : measured > 0
+                            ? `across ${measured} SLA${measured === 1 ? "" : "s"} measured`
+                            : "nothing measured yet"}
                     </div>
                 </div>
                 <div>
@@ -464,6 +591,25 @@ function IssuePanel({ issues, open, onToggle }) {
                                 {it.title}
                             </b>
                             <div style={{ color: "#334155" }}>{it.detail}</div>
+                            {/* An issue that names its own fix beats one that
+                                describes where the fix lives. */}
+                            {it.actions?.length > 0 && (
+                                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                                    {it.actions.map((a) => (
+                                        <Link
+                                            key={a.to}
+                                            to={a.to}
+                                            className="uidai-pmis-btn uidai-pmis-btn-small"
+                                            style={{ marginTop: 0, textDecoration: "none", padding: "3px 10px", fontSize: 11 }}
+                                        >
+                                            {a.label} →
+                                        </Link>
+                                    ))}
+                                </div>
+                            )}
+                            {it.hint && (
+                                <div style={{ ...muted, marginTop: 4, fontSize: 11 }}>{it.hint}</div>
+                            )}
                         </div>
                     ))}
                 </div>
@@ -724,7 +870,7 @@ function RecheckNote({ recheck }) {
    One component serves both regimes because the shell is identical; only
    the header figures and the occurrence columns differ, and splitting it
    in two would duplicate the badges, the chrome and the empty states. */
-function SlaGroup({ item, recheck, defaultOpen }) {
+function SlaGroup({ item, recheck, defaultOpen, targetRows, onSaveDraft, onClearDraft }) {
     const [open, setOpen] = useState(!!defaultOpen);
 
     const isDeliverable = item.track === TRACK.DELIVERABLE;
@@ -776,7 +922,18 @@ function SlaGroup({ item, recheck, defaultOpen }) {
                         {item.breached} breach{item.breached === 1 ? "" : "es"}
                     </span>
                     {item.met > 0 && <span className="uidai-pmis-badge uidai-pmis-badge-green">{item.met} met</span>}
-                    {item.pending > 0 && <span className="uidai-pmis-badge uidai-pmis-badge-orange">{item.pending} pending</span>}
+                    {item.pending > 0 && (
+                        <span className="uidai-pmis-badge uidai-pmis-badge-orange"
+                              title="Evaluated, but the observed value has not been entered yet — these score nothing.">
+                            {item.pending} awaiting observation
+                        </span>
+                    )}
+                    {item.excluded > 0 && (
+                        <span className="uidai-pmis-badge uidai-pmis-badge-grey"
+                              title="Excluded from the calculation by the RFP — e.g. SLA 007's Note on UIDAI-initiated replacements. Scores no points.">
+                            {item.excluded} excluded
+                        </span>
+                    )}
                     {item.capHits > 0 && (
                         <span
                             className="uidai-pmis-badge uidai-pmis-badge-orange"
@@ -875,6 +1032,7 @@ function SlaGroup({ item, recheck, defaultOpen }) {
                                     <th>{isDeliverable ? "Deliverable / Activity" : "Activity"}</th>
                                     <th>Milestone</th>
                                     <th>Status</th>
+                                    <th>Observed</th>
                                     {isPoints && <th style={{ textAlign: "right" }}>Severity</th>}
                                     {isPoints && <th style={{ textAlign: "right" }}>Points</th>}
                                     <th style={{ textAlign: "right" }}>Target</th>
@@ -894,9 +1052,31 @@ function SlaGroup({ item, recheck, defaultOpen }) {
                                         </td>
                                         <td style={{ fontSize: 12, ...muted }}>{o.milestoneName || "—"}</td>
                                         <td>
-                                            <span className={`uidai-pmis-badge ${RESULT_BADGE[o.status] || "uidai-pmis-badge-orange"}`}>
-                                                {o.status || "—"}
-                                            </span>
+                                            <StatusBadge status={o.status} />
+                                            {o.isLocalDraft && (
+                                                <span
+                                                    className="uidai-pmis-badge uidai-pmis-badge-orange"
+                                                    style={{ marginLeft: 5, fontSize: 9.5 }}
+                                                    title={`Scored from a local draft entered on this page${o.draftSavedAt ? ` on ${new Date(o.draftSavedAt).toLocaleString("en-IN")}` : ""}. Not saved to the server.`}
+                                                >
+                                                    draft
+                                                </span>
+                                            )}
+                                        </td>
+                                        {/* Only pending rows are editable. A row the
+                                            backend actually scored is shown, never
+                                            overwritten from here. */}
+                                        <td>
+                                            {o.normalizedStatus === STATUS.PENDING || o.isLocalDraft ? (
+                                                <ObservationCell
+                                                    occurrence={{ ...o, slaRef: item.slaRef }}
+                                                    targetRows={targetRows}
+                                                    onSave={(v) => onSaveDraft(o, v)}
+                                                    onClear={() => onClearDraft(o)}
+                                                />
+                                            ) : (
+                                                <span style={{ ...muted, fontSize: 11.5 }}>—</span>
+                                            )}
                                         </td>
                                         {isPoints && (
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: severityAccent(o.cappedLevel) }}>
@@ -989,6 +1169,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     // The library answering with zero rows is a different diagnosis from it
     // failing, and it is the one that leaves classification with nothing.
     const [slaLibraryEmpty, setSlaLibraryEmpty] = useState(false);
+    /* How many SLAs came back with no target table and no escalation rule
+       even after hydrating from the detail endpoint. Those cannot be
+       cross-checked at all, and saying so beats a silent "✓ nothing to
+       report" that only means nothing could be examined. */
+    const [mastersIncomplete, setMastersIncomplete] = useState(0);
 
     /* Finance side of the deliverable report. `financeDenied` is kept apart
        from `financeError` because a 403 here is an ordinary outcome — plenty
@@ -1114,12 +1299,24 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             if (mastersRes.status === "fulfilled") {
                 setMastersError("");
                 setSlaLibraryEmpty(mastersRes.value.length === 0);
-                for (const m of mastersRes.value) {
+
+                /* The list is a summary — target_rows, linear_escalation and
+                   the cadence fields only exist on the single-record fetch.
+                   Without them every conformance check reports "could not be
+                   checked", which reads like agreement. So the rows are
+                   hydrated from the detail endpoint before anything uses them.
+                   A detail failure keeps the list row: a missing target table
+                   costs a cross-check, not the SLA's own figures. */
+                const full = await hydrateSlaMasters(mastersRes.value);
+                for (const m of full) {
                     if (m.slaRef) masters.set(String(m.slaRef), m);
                     if (m.slaId) masters.set(String(m.slaId), m);
                 }
+                const unscorable = full.filter((m) => !m.targetRows?.length && !m.linearEscalation).length;
+                setMastersIncomplete(unscorable);
             } else {
                 setSlaLibraryEmpty(false);
+                setMastersIncomplete(0);
                 setMastersError(mastersRes.reason?.message || "request failed");
             }
             setMastersByRef(masters);
@@ -1280,9 +1477,77 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         [allResults, period]
     );
 
+    /* ── local observation drafts ─────────────────────────────────────
+       Fills `pending_observation` rows with a value typed on this page,
+       so a quarter can be worked through while the backend has no route
+       for manual readings. The severity is DERIVED here from the SLA's
+       own target table rather than stored, so it tracks the project's
+       current configuration instead of freezing yesterday's.
+
+       `draftTick` exists because localStorage is not reactive — saving a
+       draft has to tell React something changed. */
+    const [draftTick, setDraftTick] = useState(0);
+    /* draftTick is the point of this dependency: localStorage is not
+       reactive, so saving a draft has no other way to tell React to
+       recompute. eslint reads it as unused because it is only a counter. */
+    const drafts = useMemo(
+        () => (projectId ? listDrafts(projectId) : {}),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [projectId, draftTick]
+    );
+
+    const scored = useMemo(() => {
+        if (!period) return { results: [], appliedCount: 0 };
+        // The period travels on each row so a draft is keyed to the quarter
+        // it was observed for — the same SLA is measured again next quarter.
+        const tagged = inQuarter.map((r) => ({ ...r, __periodKey: period.key }));
+        return applyDrafts(tagged, {
+            drafts,
+            isPending: (r) => normalizeStatus(r.status) === STATUS.PENDING,
+            deriveSeverity: (value, row) => {
+                const master = mastersByRef.get(String(row.slaRef))
+                    || (row.slaId ? mastersByRef.get(String(row.slaId)) : null);
+                if (!master?.targetRows?.length) {
+                    return { severity: null, reason: "this SLA has no target table on the SLA Library" };
+                }
+                return severityForValue(value, master.targetRows);
+            },
+        });
+    }, [inQuarter, drafts, period, mastersByRef]);
+
+    const draftCount = scored.appliedCount;
+
+    const saveObservationDraft = useCallback((occurrence, value) => {
+        if (!projectId || !period) return;
+        saveDraft(projectId, {
+            activityId: occurrence.activityId,
+            activityCode: occurrence.activityCode,
+            slaRef: occurrence.slaRef,
+            periodKey: period.key,
+            value: value === "" ? null : Number(value),
+        });
+        setDraftTick((n) => n + 1);
+    }, [projectId, period]);
+
+    const clearObservationDraft = useCallback((occurrence) => {
+        if (!projectId || !period) return;
+        removeDraft(projectId, observationKey({
+            activityId: occurrence.activityId,
+            slaRef: occurrence.slaRef,
+            periodKey: period.key,
+        }));
+        setDraftTick((n) => n + 1);
+    }, [projectId, period]);
+
+    const clearAllDrafts = useCallback(() => {
+        if (!projectId || !period) return;
+        clearDrafts(projectId, period.key);
+        setDraftTick((n) => n + 1);
+    }, [projectId, period]);
+
     const { deliverableItems, quarterlyItems, scale, classification } = useMemo(
-        () => rollupBySla(inQuarter, { severityMaster, ldBands }),
-        [inQuarter, severityMaster, ldBands]
+        () => rollupBySla(scored.results, { severityMaster, ldBands }),
+        [scored.results, severityMaster, ldBands]
     );
 
     /* The NPQP endpoint answers 200 even when it could not compute a base,
@@ -1530,6 +1795,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        counted as zero: a quarter whose PA has not been resolved yet
        would otherwise show a confident "due" that is short by the whole
        resource payment. */
+    /* The chain falls back to this page's own Σ LD % when a quarter has not
+       been settled — so on an OPEN quarter a draft does reach the payment
+       figures. On a settled quarter the backend's row wins and drafts cannot
+       touch it. Both are fine; conflating them would not be. */
+    const draftAffectsPayment = draftCount > 0 && !settlementRow;
+
     const statement = useMemo(() => {
         const deliverableNet = Number.isFinite(payables.totals.totalNetPayable)
             ? payables.totals.totalNetPayable : null;
@@ -1551,6 +1822,40 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             tax: taxBreakdown(grossDue),
         };
     }, [payables.totals.totalNetPayable, chain.aqp, deliverableItems.length, quarterlyItems.length]);
+
+    /* Occurrences that were evaluated but never read. Every resource SLA
+       (005–009) is manual by definition — the backend cannot derive
+       attendance — so these do not resolve by waiting.
+
+       The activity is captured alongside the SLA ref because the fix is
+       per-activity: Activity SLA Mapping is reached with an `activityId`
+       in the query string, so knowing which activities are waiting turns
+       "go and find it" into a link. */
+    const awaiting = useMemo(() => {
+        const rows = [];
+        for (const item of [...quarterlyItems, ...deliverableItems]) {
+            for (const o of item.occurrences || []) {
+                if (normalizeStatus(o.status) !== STATUS.PENDING) continue;
+                rows.push({
+                    slaRef: item.slaRef,
+                    activityId: o.activityId || null,
+                    activityCode: o.activityCode || null,
+                    activityName: o.activityName || null,
+                });
+            }
+        }
+        const byActivity = new Map();
+        for (const r of rows) {
+            const key = String(r.activityId ?? r.activityCode ?? "—");
+            if (!byActivity.has(key)) {
+                byActivity.set(key, { ...r, slaRefs: [] });
+            }
+            byActivity.get(key).slaRefs.push(r.slaRef);
+        }
+        return { rows, count: rows.length, activities: [...byActivity.values()] };
+    }, [quarterlyItems, deliverableItems]);
+
+    const awaitingObservation = awaiting.count;
 
     const needsScale = quarterlyItems.some((i) => i.scoring === SCORING.POINTS);
     const unconfigured = needsScale && (!scale.configured || !ldBands.length);
@@ -1636,10 +1941,33 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         if (undated > 0) {
             add("info", `${undated} result(s) have no evaluation date`, "They appear in no period at all, so no quarter counts them.");
         }
+        if (awaitingObservation > 0) {
+            out.push({
+                level: "blocking",
+                title: `${awaitingObservation} SLA result(s) are awaiting a manual observation`,
+                detail: "The evaluation ran and created these rows, but the SLA is not date-derivable so the backend "
+                    + "could not score it. Every resource SLA (005–009) is manual — it reads from the biometric "
+                    + "attendance system — so waiting will not resolve them. Until they are entered these score "
+                    + "nothing, and this quarter is understated rather than clean.",
+                // Rendered as links straight to the activity that needs the input.
+                actions: awaiting.activities.map((a) => ({
+                    label: `${a.activityCode || a.activityId} — ${a.slaRefs.join(", ")}`,
+                    to: `/projects/${encodeURIComponent(projectId)}/activity-slas`
+                        + `?activityId=${encodeURIComponent(a.activityId || "")}`
+                        + (a.activityCode ? `&activityCode=${encodeURIComponent(a.activityCode)}` : ""),
+                })).filter((a) => a.to.includes("activityId=") && !a.to.endsWith("activityId=")),
+                hint: "Open the activity, then press Evaluate on the SLA's mapping row.",
+            });
+        }
+        if (mastersIncomplete > 0) {
+            add("info", `${mastersIncomplete} SLA(s) have no target table or escalation rule`,
+                "Their severity thresholds and per-week rates are not filled in on the SLA Library, so their scoring "
+                + "could not be cross-checked against the RFP. The figures shown are the backend's, unverified.");
+        }
         return out;
     }, [loadedOnce, classification, mastersError, slaLibraryEmpty, unconfigured, scale.configured,
         ldBands.length, aggregateCheck, alignedQuarterKey, recheckIssues, quarterlyItems.length,
-        overlaps.length, aggregateError, undated]);
+        overlaps.length, aggregateError, undated, mastersIncomplete, awaitingObservation, awaiting.activities, projectId]);
 
     const blockingCount = issues.filter((i) => i.level === "blocking").length;
 
@@ -1766,6 +2094,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         period={period}
                         breaches={totals.totalBreaches + dTotals.totalBreaches}
                         measured={quarterlyItems.length + deliverableItems.length}
+                        awaiting={awaitingObservation}
                         ldPercent={totals.cappedLdPercent}
                         ldAmount={totals.ldAmount}
                         deliverableLd={dTotals.totalLdAmount}
@@ -1773,6 +2102,38 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         pending={statement.pending}
                     />
                     <Glossary open={showGlossary} onToggle={() => setShowGlossary((v) => !v)} />
+                    {draftCount > 0 && (
+                        <div style={{
+                            marginTop: 10, borderRadius: 10, padding: "10px 13px",
+                            background: "#fffaf0", border: "1px solid #e8d9b0",
+                            fontSize: 11.5, lineHeight: 1.6, color: "#334155",
+                            display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap",
+                        }}>
+                            <div style={{ flex: 1, minWidth: 260 }}>
+                                <b style={{ color: AMBER }}>
+                                    ⚠ {draftCount} figure{draftCount === 1 ? "" : "s"} on this page come from local drafts
+                                </b>
+                                <div>
+                                    Values typed here are stored <b>in this browser only</b> — they are not saved to the
+                                    server, nobody else can see them, and clearing your browser data removes them. They
+                                    are a stopgap while manual observations have no route to the backend.
+                                    Once a quarter is closed on the Settlement page, the server&rsquo;s figures take over
+                                    and drafts can no longer affect the payment. Until then the payment statement below
+                                    falls back to this page&rsquo;s own total, so it reflects them too &mdash; it is marked
+                                    where it does.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                                style={{ marginTop: 0, padding: "3px 10px", fontSize: 11 }}
+                                onClick={clearAllDrafts}
+                            >
+                                Clear this quarter&rsquo;s drafts
+                            </button>
+                        </div>
+                    )}
+
                 </>
             )}
 
@@ -1880,6 +2241,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             item={it}
                                             recheck={rechecks.get(String(it.slaRef))}
                                             defaultOpen={expandAll}
+                                            targetRows={mastersByRef.get(String(it.slaRef))?.targetRows}
+                                            onSaveDraft={saveObservationDraft}
+                                            onClearDraft={clearObservationDraft}
                                         />
                                     ))}
                                 </>
@@ -2239,6 +2603,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             item={it}
                                             recheck={rechecks.get(String(it.slaRef))}
                                             defaultOpen={expandAll}
+                                            targetRows={mastersByRef.get(String(it.slaRef))?.targetRows}
+                                            onSaveDraft={saveObservationDraft}
+                                            onClearDraft={clearObservationDraft}
                                         />
                                     ))}
                                 </>
@@ -2875,6 +3242,19 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     What is due and what will actually be paid. The two LD regimes are computed
                                     separately and never mixed, but they are invoiced together.
                                 </div>
+                                {draftAffectsPayment && (
+                                    <div style={{
+                                        marginTop: 8, padding: "8px 11px", borderRadius: 8,
+                                        background: "#fffaf0", border: "1px solid #e8d9b0",
+                                        fontSize: 11.5, lineHeight: 1.6,
+                                    }}>
+                                        <b style={{ color: AMBER }}>⚠ Includes local drafts.</b>{" "}
+                                        This quarter has not been closed, so the penalty below falls back to this
+                                        page&rsquo;s own total &mdash; which includes {draftCount} value
+                                        {draftCount === 1 ? "" : "s"} typed here and never saved to the server. Close the
+                                        quarter on Settlement &amp; LD for figures that can be invoiced.
+                                    </div>
+                                )}
 
                                 <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 620, marginTop: 12 }}>
                                     <tbody>

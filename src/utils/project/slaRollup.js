@@ -338,26 +338,81 @@ export function classifyResult(result) {
    surfaced so the screen can show the cap working rather than silently
    swallowing severity. */
 function scoreOccurrence(result, scale) {
+    const status = normalizeStatus(result.status);
     const raw = Number(result.severityLevel);
     const hasLevel = Number.isFinite(raw);
     const capLevel = scale.capLevel;
     const cappedLevel = hasLevel && capLevel != null ? Math.min(raw, capLevel) : raw;
-    const points = hasLevel ? scale.points.get(cappedLevel) : undefined;
+
+    /* An excluded occurrence scores nothing even if a severity came back
+       on it. SLA 007's Note removes such resources from the calculation
+       outright, so letting a stale severity through would charge LD for
+       precisely the case the clause exempts. */
+    const excluded = status === STATUS.EXCLUDED;
+    const points = hasLevel && !excluded ? scale.points.get(cappedLevel) : undefined;
+
     return {
         ...result,
+        normalizedStatus: status,
+        excluded,
         severityLevel: hasLevel ? raw : null,
         cappedLevel: hasLevel ? cappedLevel : null,
-        capApplied: hasLevel && capLevel != null && raw > capLevel,
+        capApplied: !excluded && hasLevel && capLevel != null && raw > capLevel,
         points: Number.isFinite(points) ? points : null,
-        pointsUnknown: hasLevel && !Number.isFinite(points),
+        // Only a genuine gap — a level with no row in the severity master.
+        // An excluded row is not "unknown", it is deliberately unscored.
+        pointsUnknown: hasLevel && !excluded && !Number.isFinite(points),
     };
 }
 
+/* ─── result status ──────────────────────────────────────────────────
+   The backend's status vocabulary is wider than the three values this
+   module originally matched, and the extra ones are not cosmetic:
+
+     · `pending_observation` — the evaluation ran and made a row, but the
+       SLA is not date-derivable so it is waiting on a manual reading.
+       Every resource SLA (005–009) lands here permanently; the backend
+       cannot derive attendance. Matching only the bare string "pending"
+       counted these as zero of everything, so an activity with two
+       unread SLAs reported a clean quarter.
+
+     · `excluded` — the occurrence is deliberately outside the
+       calculation. SLA 007's Note is the case the RFP spells out:
+       "Any of the above-mentioned resources for whom replacement is
+       initiated by UIDAI will be excluded from this calculation."
+       An excluded row must contribute NO points — counting it would
+       penalise exactly the resource the clause protects.
+
+   Matched by prefix rather than equality, because these are backend
+   enum names and a new variant (`pending_input`, `excluded_by_uidai`)
+   should degrade to the right bucket instead of silently becoming
+   "unknown" and dropping out of every count.                          */
+export const STATUS = {
+    MET: "met",
+    BREACHED: "breached",
+    PENDING: "pending",
+    EXCLUDED: "excluded",
+    UNKNOWN: "unknown",
+};
+
+export function normalizeStatus(value) {
+    const s = String(value ?? "").trim().toLowerCase();
+    if (!s) return STATUS.UNKNOWN;
+    if (s.startsWith("pending") || s.startsWith("awaiting")) return STATUS.PENDING;
+    if (s.startsWith("exclud") || s.startsWith("not_applicable") || s === "n/a" || s === "na") return STATUS.EXCLUDED;
+    if (s.startsWith("breach") || s.startsWith("fail") || s.startsWith("violat")) return STATUS.BREACHED;
+    if (s === "met" || s.startsWith("complian") || s.startsWith("pass") || s.startsWith("achiev")) return STATUS.MET;
+    return STATUS.UNKNOWN;
+}
+
 function statusCounts(occurrences) {
+    const of = (kind) => occurrences.filter((o) => normalizeStatus(o.status) === kind).length;
     return {
-        breached: occurrences.filter((o) => o.status === "breached").length,
-        met: occurrences.filter((o) => o.status === "met").length,
-        pending: occurrences.filter((o) => o.status === "pending").length,
+        breached: of(STATUS.BREACHED),
+        met: of(STATUS.MET),
+        pending: of(STATUS.PENDING),
+        excluded: of(STATUS.EXCLUDED),
+        unknownStatus: of(STATUS.UNKNOWN),
     };
 }
 

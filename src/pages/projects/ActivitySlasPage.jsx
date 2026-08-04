@@ -1914,7 +1914,14 @@ export default function ActivitySlasPage() {
                                                     <span style={{ display: "inline-flex", gap: 6 }}>
                                                         <button type="button" className="uidai-pm-icon-btn" title="View SLA image" aria-label={`View SLA image for ${m.sla_ref || "mapping"}`} onClick={() => openImagePreview(m)}>👁</button>
                                                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" aria-label={`Edit mapping ${m.sla_ref || ""}`} onClick={() => startEdit(m)}>Edit</button>
-                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} aria-label={`Test ${m.sla_ref || "mapping"}`} onClick={() => openSingleEval(m)}>Test</button>
+                                                        {/* Labelled "Test" until now, but it POSTs to
+                                                            /sla-evaluate/{sla_ref} with no dry-run flag — the
+                                                            result is persisted and flows straight into the
+                                                            rollup and the quarter's settlement. "Test" invited
+                                                            people to try it out; it is also the only way to
+                                                            record a manual observation, which is what the
+                                                            compliance panel points people here to do. */}
+                                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} title="Record the observed value and score this SLA. The result is saved." aria-label={`Evaluate ${m.sla_ref || "mapping"}`} onClick={() => openSingleEval(m)}>Evaluate</button>
                                                     </span>
                                                 )}
                                             </td>

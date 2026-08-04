@@ -1782,7 +1782,6 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
   const [organisationId, setOrganisationId] = useState("");
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [done, setDone] = useState(false);
@@ -2003,32 +2002,8 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
     return messageFromBody(raw, status, "The upload didn't go through. Please try again.");
   };
 
-  // Blank sheet for the chosen range — see downloadAttendanceTemplate.
-  const downloadTemplate = async () => {
-    if (downloading || uploading) return;
-    setError(null);
-    setNotice(null);
-    // The template is built for the range, so the range rules apply here too.
-    const rangeError = validateRange(startDate, endDate);
-    if (rangeError) { setError(rangeError); return; }
-
-    try {
-      setDownloading(true);
-      const filename = await downloadAttendanceTemplate(startDate, endDate);
-      setNotice(`Template downloaded — ${filename}`);
-    } catch (err) {
-      /* Action outcome → the app's shared popup. The inline line is kept in
-         step so the reason survives dismissing the popup. */
-      const msg = requestErrorMessage(err, "Couldn't download the template. Please try again.");
-      setError(msg);
-      notifyActionError("Download failed", msg);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   const upload = async () => {
-    if (uploading || downloading) return;     // guards a double-click
+    if (uploading) return;                    // guards a double-click
     setError(null);
     setNotice(null);
     setSubmitted(true);
@@ -2286,27 +2261,10 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
               </div>
             )}
 
-            {/* Template is built for the range above, so it sits between the
-                dates and the file picker — download, fill, then upload. */}
-            <div className="att-template-row">
-              <button
-                className="att-btn-secondary"
-                onClick={downloadTemplate}
-                disabled={downloading || uploading || !startDate || !endDate}
-                title={
-                  startDate && endDate
-                    ? "Download a blank template for this date range"
-                    : "Set both dates first"
-                }
-              >
-                <DownloadIcon />
-                {downloading ? "Preparing…" : "Download template"}
-              </button>
-              <span className="att-template-hint">
-                Blank sheet covering the selected dates — fill it in, then upload it below.
-              </span>
-            </div>
-
+            {/* The template download lives on the page header, not here. Two
+                buttons for one action, each scoped to a different range, meant
+                the sheet you downloaded need not match the period you then
+                uploaded against. */}
             <Field label="Attendance file">
               <label className={`att-file${fieldErrors.file ? " is-bad" : ""}`}>
                 <input
@@ -2338,7 +2296,7 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
 
             <div className="att-modal-actions">
               <button className="att-btn-secondary" onClick={onClose} disabled={uploading}>Cancel</button>
-              <button className="att-btn-primary" onClick={upload} disabled={uploading || downloading}>
+              <button className="att-btn-primary" onClick={upload} disabled={uploading}>
                 {uploading ? "Uploading…" : "Upload attendance"}
               </button>
             </div>
@@ -2697,12 +2655,6 @@ const ATT_CSS = `
 .att-ry-name { font-weight: 700; font-variant-numeric: tabular-nums; }
 .att-ry-range { opacity: .85; font-variant-numeric: tabular-nums; }
 .att-ry-note { margin-top: 6px; opacity: .85; }
-
-/* template download row inside the upload modal */
-.att-template-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 12px 14px; margin-bottom: 14px; background: ${C.surface};
-  border: 1px solid ${C.border}; border-radius: 10px; }
-.att-template-hint { font-size: 12.5px; color: ${C.muted}; line-height: 1.45; flex: 1 1 200px; }
 
 .att-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
   text-transform: uppercase; color: ${C.primary}; margin-bottom: 8px; }

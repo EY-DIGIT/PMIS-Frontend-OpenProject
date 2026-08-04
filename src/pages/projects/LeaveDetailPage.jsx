@@ -1168,8 +1168,11 @@ function QuarterCalendar({
         ))}
       </div>
       <div className="ld-cal-legend">
-        <span><i className="ld-cal-key is-paid" /> Taken Leave</span>
-        <span><i className="ld-cal-key is-unpaid" /> Unpaid Leave</span>
+        {/* One key, because paid and unpaid days now share one colour. Two
+            entries with identical swatches would ask the reader to tell them
+            apart by a difference that isn't there. Which days were unpaid is
+            still on each cell's tooltip and in the lists below. */}
+        <span><i className="ld-cal-key is-leave" /> Leave Taken</span>
         {/* Keys for categories the quarter doesn't contain are omitted —
             a legend entry with nothing to point at is just noise. */}
         {hasHalf && <span><i className="ld-cal-key is-halfkey" /> Half Day (0.5)</span>}
@@ -2469,8 +2472,11 @@ const LD_CSS = `
   border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
 .ld-cal-cell.is-blank { visibility: hidden; }
 .ld-cal-cell.is-weekend { color: ${C.faint}; background: ${C.surface}; }
-/* Same two hues as the donut segments, so a day and its slice read as one. */
-.ld-cal-cell.is-paid { background: #2a78d6; color: #fff; font-weight: 700; }
+/* One red for every leave day, paid or unpaid. The calendar's job is "which
+   days were taken"; whether a day was paid is a payroll question the donut,
+   the chip lists and each cell's own tooltip still answer. Two hues here made
+   the grid read as two kinds of event when it only ever showed one. */
+.ld-cal-cell.is-paid,
 .ld-cal-cell.is-unpaid { background: #e34948; color: #fff; font-weight: 700; }
 /* Sandwich — a non-working day charged as leave. Hatched rather than given a
    fourth hue: the stripes read as "weekend, but counted", and a pattern still
@@ -2487,7 +2493,7 @@ const LD_CSS = `
   align-content: start;
   padding-top: 2px;
 }
-.ld-cal-cell.is-half.is-paid { --half-fill: #2a78d6; --half-rest: #e8f0fb; color: ${C.ink}; }
+.ld-cal-cell.is-half.is-paid,
 .ld-cal-cell.is-half.is-unpaid { --half-fill: #e34948; --half-rest: #fdeaea; color: ${C.ink}; }
 /* Bucket unrecoverable — marked, but in the neutral tone, so the day is
    never lost while the colour still doesn't claim a category. */
@@ -2497,8 +2503,7 @@ const LD_CSS = `
   font-size: 12px; color: ${C.muted}; }
 .ld-cal-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .ld-cal-key { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
-.ld-cal-key.is-paid { background: #2a78d6; }
-.ld-cal-key.is-unpaid { background: #e34948; }
+.ld-cal-key.is-leave { background: #e34948; }
 .ld-cal-key.is-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
 .ld-cal-key.is-sandwich { background: repeating-linear-gradient(135deg, #f3e6cd 0 3px, ${C.surface} 3px 6px);
   border: 1px solid ${C.border}; }
