@@ -977,15 +977,6 @@ function EditTermModal({
 
   if (!open || !term) return null;
 
-  /* Client-side mirror of the backend's `pay-le-basis` check, shown inline so
-     the user sees the problem before saving rather than as a Validate error. */
-  const payNum = percentOfPayment === "" ? null : Number(percentOfPayment);
-  const basisNum = ldBasisPercent === "" ? Number(term.ldBasisPercent) : Number(ldBasisPercent);
-  const payOverBasis =
-    payNum != null && Number.isFinite(payNum) &&
-    Number.isFinite(basisNum) && basisNum > 0 &&
-    payNum - basisNum > 0.001;
-
   return (
     <div className="uidai-modal" role="dialog" aria-modal="true">
       <div className="uidai-modal__box" style={{ width: "min(520px, 100%)" }}>
@@ -1055,13 +1046,6 @@ function EditTermModal({
           />
         </div>
 
-        {payOverBasis && (
-          <div className="uidai-pmis-chip is-bad" style={{ marginTop: 14, borderRadius: 8 }}>
-            <span aria-hidden="true">⚠</span>
-            % of Payment ({payNum}%) cannot exceed LD Basis % ({basisNum}%).
-          </div>
-        )}
-
         <div className="uidai-modal__actions" style={{ justifyContent: "flex-end" }}>
           <button
             type="button"
@@ -1075,7 +1059,7 @@ function EditTermModal({
             type="button"
             className="uidai-pmis-btn uidai-pmis-btn-small"
             style={{ marginTop: 0 }}
-            disabled={submitting || payOverBasis}
+            disabled={submitting}
             onClick={() => onSubmit({
               percentOfPayment:
                 percentOfPayment === "" || percentOfPayment === null
@@ -1662,18 +1646,12 @@ export default function ProjectFinancePage() {
   async function saveTerm(term, { percentOfPayment, ldBasisPercent }) {
     if (!term) return false;
 
-    /* A milestone may be paid less than its allotment (the remainder carries
-       forward) but never more — the backend's `pay-le-basis` check. Catch it
-       here so the PATCH isn't even attempted. */
-    const effectiveBasis = ldBasisPercent == null ? Number(term.ldBasisPercent) : Number(ldBasisPercent);
-    const newPay = Number(percentOfPayment) || 0;
-    if (Number.isFinite(effectiveBasis) && effectiveBasis > 0 && newPay - effectiveBasis > 0.001) {
-      uiStore.showError(
-        `% of Payment (${newPay}%) cannot exceed this milestone's LD Basis % ` +
-        `(${effectiveBasis}%). Raise the LD Basis % first, or pay less.`
-      );
-      return false;
-    }
+    /* No client-side pay-vs-LD-basis check: the two percentages are edited
+       in different places and one is often changed before the other, so
+       blocking here just stopped legitimate edits. The backend's
+       `pay-le-basis` check and the Validate button still enforce it.
+
+       (The last-phase 100% rule below is a pre-existing guard, untouched.) */
 
     /* Hard validation: the final milestone of the final phase is the
        balancing term — saving it must bring that phase's scheduled %
@@ -1728,37 +1706,15 @@ export default function ProjectFinancePage() {
   /* Inline LD Basis % edit from the term table — PATCHes only that field.
      `value` is a Number, or null to fall back to the even split.
 
-     The allotments must total 100% per phase (the backend's `ld-basis-pct`
-     check), and this milestone's pay % can't exceed its own allotment
-     (`pay-le-basis`). Both are checked here so a bad edit never leaves the
-     page, and the phase total is checked against the OTHER terms' effective
-     values so the arithmetic matches what the user sees. */
+     Deliberately NOT validated client-side. Rebalancing a phase means
+     editing one row at a time, and every intermediate state breaks the
+     "allotments total 100%" rule — blocking on it here made the column
+     impossible to edit at all. The backend still enforces `ld-basis-pct`
+     and `pay-le-basis`, and the Validate button reports both, so an
+     unbalanced phase is caught before publish rather than mid-edit. The
+     running total in the footer stays red until it balances. */
   async function saveTermLdBasis(term, value) {
     if (!term) return false;
-
-    const pay = Number(term.percentOfPayment) || 0;
-    if (value != null && value > 0 && pay - value > 0.001) {
-      uiStore.showError(
-        `LD Basis % (${value}%) cannot be less than what this milestone is ` +
-        `paid (${pay}%). A milestone may be paid less than its allotment, never more.`
-      );
-      return false;
-    }
-
-    const phase = phases.find((p) => p.phase === term.phase);
-    if (value != null && phase) {
-      const others = (phase.paymentTerms || [])
-        .filter((t) => t.id !== term.id)
-        .reduce((s, t) => s + (Number(t.ldBasisPercent) || 0), 0);
-      const total = Math.round((others + value) * 100) / 100;
-      if (Math.abs(total - 100) > 0.001) {
-        uiStore.showError(
-          `LD Basis % must total 100% for phase ${term.phase}. This makes it ` +
-          `${total}% — set this milestone to ${Math.round((100 - others) * 100) / 100}%.`
-        );
-        return false;
-      }
-    }
 
     setSavingTerm(true);
     try {

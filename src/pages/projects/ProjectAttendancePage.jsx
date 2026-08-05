@@ -80,11 +80,11 @@ const reportTotals = (payload) =>
   !Array.isArray(payload) && payload?.totals ? payload.totals : null;
 
 /* ── the reporting period, derived from the milestone ──────────────────
-   Year and Quarter are no longer asked for. The reports are still keyed on
-   them — /report/quarterly answers 400 without both, and no date-range or
-   milestone-scoped variant exists — so the period is taken from the selected
-   milestone's own window instead. A milestone IS a date range; it just has to
-   be sliced into the periods the API understands.
+   Only the MONTHLY view needs this now. Its endpoint is still keyed on year +
+   month, so the months on offer are cut from the selected milestone's own
+   window rather than asked for. The activity view outgrew it: /report/activity
+   takes the milestone and activity directly and covers the whole of it, which
+   is why the quarter-by-quarter fan-out and its row merge are gone.
 
    Parsed by regex rather than `new Date`, which would apply a timezone offset
    and can push a 1st-of-month back into the previous month. */
@@ -165,47 +165,6 @@ function monthlyBands(startISO, endISO) {
   return out;
 }
 
-/* Per-resource day counts that add up across periods. Everything else on a row
-   either describes the person (name, designation, joining date) or is derived,
-   so it's carried from the first period rather than summed. */
-const SUMMABLE_DAY_FIELDS = [
-  "workingDays", "presentDays", "halfDays", "leaveDays", "absentDays",
-  "weekOffDays", "holidayDays", "wfhDays", "leaveTaken",
-  "paidLeaveDays", "unpaidLeaveDays",
-];
-
-/* Fold several quarters' reports into one row per resource. A milestone can
-   span more than one quarter and the endpoint only answers for one at a time,
-   so the alternative would be the same person appearing three times.
-
-   attendancePercentage is RECOMPUTED, never averaged: averaging three
-   percentages over unequal working days is simply wrong, where
-   present ÷ working over the summed totals is right by construction. */
-function mergeReports(payloads) {
-  const byId = new Map();
-  for (const p of payloads) {
-    for (const r of reportRows(p)) {
-      const key = String(r?.attendanceId ?? "");
-      if (!key) continue;
-      const prev = byId.get(key);
-      if (!prev) { byId.set(key, { ...r }); continue; }
-      for (const f of SUMMABLE_DAY_FIELDS) prev[f] = num(prev[f]) + num(r[f]);
-      /* Someone can leave partway through the span, so the last working date
-         is whichever period saw it — and `active` is false if it's false in
-         any of them. */
-      if (r.lastWorkingDate) prev.lastWorkingDate = r.lastWorkingDate;
-      if (r.active === false) prev.active = false;
-      if (!prev.milestoneId && r.milestoneId) prev.milestoneId = r.milestoneId;
-      if (!prev.activityId && r.activityId) prev.activityId = r.activityId;
-    }
-  }
-  const rows = [...byId.values()];
-  for (const r of rows) {
-    const w = num(r.workingDays);
-    r.attendancePercentage = w > 0 ? Math.round((num(r.presentDays) / w) * 10000) / 100 : 0;
-  }
-  return rows;
-}
 
 /* The attendance report sends its dates — joiningDate, lastWorkingDate — as
    dd-MM-yyyy, unlike the ISO dates the rest of this file deals in. Parsed
@@ -579,6 +538,20 @@ export default function ProjectAttendancePage() {
   const year = spanPeriods.quarters[0]?.year ?? CURRENT_YEAR;
   const quarter = spanPeriods.quarters[0]?.quarter ?? DEFAULT_QUARTER;
 
+  /* The milestone's window as the range the period reports are fetched over.
+     Null until a milestone with usable dates is chosen, which is what gates
+     those two calls.
+
+     Memoised because both fetch effects take it as a dependency: a fresh
+     object literal every render would make them refetch on every render. */
+  const milestoneRange = useMemo(
+    () =>
+      selectedMilestone?.startDate && selectedMilestone?.endDate
+        ? { start: selectedMilestone.startDate, end: selectedMilestone.endDate }
+        : null,
+    [selectedMilestone?.startDate, selectedMilestone?.endDate]
+  );
+
   // The month picker's value carries its own year — see selectedMonth above.
   const monthPick = /^(\d{4})-(\d{2})$/.exec(selectedMonth);
   const monthYear = monthPick ? Number(monthPick[1]) : year;
@@ -743,7 +716,15 @@ export default function ProjectAttendancePage() {
   useEffect(() => {
     if (view !== "quarterly") { setQuarterlyLoading(false); return undefined; }
     if (paramError) { setQuarterlyLoading(false); return undefined; }
-    const FALLBACK = "Couldn't load the quarterly attendance.";
+    /* Both calls below are keyed on the milestone's window, so without one
+       there is nothing to request. */
+    if (!milestoneRange) {
+      setQuarterly(null);
+      setQuarterlyError(null);
+      setQuarterlyLoading(false);
+      return undefined;
+    }
+    const FALLBACK = "Couldn't load the attendance for this milestone.";
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -751,59 +732,48 @@ export default function ProjectAttendancePage() {
       setQuarterlyError(null);
       try {
         const token = getToken();
-        /* One request per quarter the milestone spans, merged into a single
-           row per resource. The endpoint answers for exactly one quarter, so a
-           milestone running Jan–Aug needs three — and without the merge the
-           same person would appear three times. */
-        const periods = spanPeriods.quarters.length
-          ? spanPeriods.quarters
-          : [{ year, quarter }];
-        const payloads = await Promise.all(
-          periods.map(async (p) => {
-            const qs = new URLSearchParams({
-              projectId,
-              year: String(p.year),
-              quarter: String(p.quarter),
-            });
-            const res = await fetch(
-              `${API_BASE}/api/attendance/report/quarterly?${qs}`,
-              {
-                signal: controller.signal,
-                cache: "no-store",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              }
-            );
-            /* A quarter with nothing logged answers 404. Across a multi-quarter
-               span that's ordinary — the milestone simply had no attendance
-               that quarter — so it contributes no rows rather than failing the
-               whole span. */
-            if (res.status === 404) return null;
-            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-            return readJsonBody(res, FALLBACK);
-          })
-        );
-        const kept = payloads.filter(Boolean);
-        if (active) {
-          /* Merged rows only — the envelope `totals` describe one quarter and
-             would understate a multi-quarter span, so metrics are derived from
-             the rows (see buildMetrics being passed null under a filter). */
-          setQuarterly(kept.length ? { resources: mergeReports(kept) } : null);
-          if (!kept.length) {
-            setQuarterlyError("No attendance has been logged for this milestone's period.");
+        /* A date range, spanning the whole milestone in one call — which is
+           what removed the old quarter-by-quarter fan-out and its row merge.
+
+           NOT the activity-scoped endpoints. /report/activity,
+           /report/activity/replacements and /cost/activity all answer 404 "No
+           activity found" even for the activityId carried by the attendance
+           rows themselves, so nothing could be loaded through them. The range
+           pair works and returns the same envelope, and the activity filter is
+           applied to the rows afterwards as before. */
+        const qs = new URLSearchParams({
+          projectId,
+          startDate: milestoneRange.start,
+          endDate: milestoneRange.end,
+        });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/report/period?${qs}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
           }
+        );
+        // A period with nothing logged is an ordinary state, not a failure.
+        if (res.status === 404) {
+          if (active) { setQuarterly(null); setQuarterlyError(null); }
+          return;
         }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setQuarterly(data);
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
-        /* Same as the monthly fetch: a quarter with no data answers 404, and
-           without this the previous quarter's rows stayed in state behind the
-           error — the "it didn't refresh" report. */
+        /* Drop the previous activity's rows on the way out — keeping them
+           meant a failed load could sit behind its own error showing another
+           activity's numbers. */
         if (active) { setQuarterly(null); if (msg) setQuarterlyError(msg); }
       } finally {
         if (active) setQuarterlyLoading(false);
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view]);
+  }, [projectId, milestoneRange, paramError, refreshKey, view]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -813,6 +783,8 @@ export default function ProjectAttendancePage() {
      doesn't render. */
   useEffect(() => {
     if (view !== "quarterly" || paramError) return undefined;
+    // Same reason as the report above — no milestone window, no request.
+    if (!milestoneRange) { setQuarterlyCost(null); return undefined; }
     const FALLBACK = "Couldn't load the quarterly cost.";
     let active = true;
     const controller = new AbortController();
@@ -820,55 +792,34 @@ export default function ProjectAttendancePage() {
       setQuarterlyCostError(null);
       try {
         const token = getToken();
-        // Same span as the attendance report above, so the two agree on period.
-        const periods = spanPeriods.quarters.length
-          ? spanPeriods.quarters
-          : [{ year, quarter }];
-        const payloads = await Promise.all(
-          periods.map(async (p) => {
-            const qs = new URLSearchParams({
-              projectId,
-              year: String(p.year),
-              quarter: String(p.quarter),
-            });
-            const res = await fetch(
-              `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
-              {
-                signal: controller.signal,
-                cache: "no-store",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              }
-            );
-            if (res.status === 404) return null;
-            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-            return readJsonBody(res, FALLBACK);
-          })
-        );
-        const kept = payloads.filter(Boolean);
-        if (active) {
-          /* Costs add across quarters, so one row per resource with totalCost
-             summed. The envelope totals are dropped for the same reason as the
-             attendance report — they describe a single quarter. */
-          if (!kept.length) { setQuarterlyCost(null); return; }
-          const byId = new Map();
-          for (const p of kept) {
-            for (const r of reportRows(p)) {
-              const k = String(r?.attendanceId ?? "");
-              if (!k) continue;
-              const prev = byId.get(k);
-              if (!prev) byId.set(k, { ...r });
-              else prev.totalCost = num(prev.totalCost) + num(r.totalCost);
-            }
+        /* The same window as the report above, so the rows and their costs
+           can't describe different periods. Same envelope as cost/quarterly —
+           totals plus a resource list carrying monthlyBreakdown — so nothing
+           downstream changes. */
+        const qs = new URLSearchParams({
+          projectId,
+          startDate: milestoneRange.start,
+          endDate: milestoneRange.end,
+        });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/cost/period?${qs}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
           }
-          setQuarterlyCost({ resources: [...byId.values()] });
-        }
+        );
+        if (res.status === 404) { if (active) setQuarterlyCost(null); return; }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setQuarterlyCost(data);
       } catch (err) {
         const msg = requestErrorMessage(err, FALLBACK);
         if (active) { setQuarterlyCost(null); if (msg) setQuarterlyCostError(msg); }
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view]);
+  }, [projectId, milestoneRange, paramError, refreshKey, view]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
