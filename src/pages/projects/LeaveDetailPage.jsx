@@ -274,9 +274,9 @@ function monthLeave(m) {
   return { paid, unpaid, total: paid + unpaid };
 }
 
-/* Every calendar month a window touches, as {year, month}. The cost endpoint
-   is keyed on year + month, so a window of 07-01 → 06-04 needs January through
-   April — four calls — even though it spans three activity months.
+/* Every calendar month a window touches, as {year, month} — the grids the
+   leave calendar has to draw. A window of 07-01 → 06-04 touches January
+   through April, so drawing a fixed three would hide April's leave entirely.
 
    Parsed by regex rather than `new Date`, which applies a timezone offset and
    can push a 1st-of-month back into the month before. */
@@ -559,23 +559,17 @@ export default function LeaveDetailPage() {
 
   /* Cost across the leave window, assembled a month at a time.
 
-     /api/attendance/cost/quarterly is gone (404). Its replacement,
-     /api/attendance/cost/employee, takes resourceId + year + month ONLY —
-     no activity, no date range (both answer 400) — and returns a FLAT single
-     month rather than the {resources, totals} envelope this page renders.
+     Note it needs the bearer token: without one the service can't resolve the
+     activity and answers 404. */
+  /* Cost across the activity, in one call.
 
-     So each calendar month of the window is fetched and the envelope is built
-     here. A flat row already IS a monthlyBreakdown entry, and the summary
-     chain is the sum of its parts — verified against January 2026:
-     ₹1,36,064 monthlyRate − ₹13,167.48 deducted = ₹1,22,896.52 cost, and
-     3 unpaid × ₹4,389.16 per day is exactly that deduction. */
-  const costMonths = useMemo(
-    () => calendarMonthsBetween(d.windowStart, d.windowEnd),
-    [d.windowStart, d.windowEnd]
-  );
-
+     /api/attendance/cost/activity?projectId&activityId returns the full
+     envelope — { period, totals, resources: [ …one per resource, each with its
+     own monthlyBreakdown… ] } — so this page just picks its own resource out
+     of it. That replaced a fan-out over /cost/employee, which answered one
+     calendar month at a time and forced the envelope to be assembled here. */
   useEffect(() => {
-    if (paramError || !resourceId || costMonths.length === 0) return undefined;
+    if (paramError || !resourceId || !projectId || !activityId) return undefined;
     const FALLBACK = "Couldn't load the cost report.";
     let active = true;
     const controller = new AbortController();
@@ -584,60 +578,30 @@ export default function LeaveDetailPage() {
       setCostError(null);
       try {
         const token = getToken();
-        const rows = await Promise.all(
-          costMonths.map(async (m) => {
-            const qs = new URLSearchParams({
-              resourceId: String(resourceId),
-              year: String(m.year),
-              month: String(m.month),
-            });
-            const res = await fetch(`${API_BASE}/api/attendance/cost/employee?${qs}`, {
-              signal: controller.signal,
-              headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            });
-            // A month the resource wasn't costed in is ordinary, not an error.
-            if (res.status === 404) return null;
-            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-            return readJsonBody(res, FALLBACK);
-          })
-        );
-        const months = rows.filter((r) => r && typeof r === "object");
-        if (!active) return;
-        if (months.length === 0) { setCostReport({}); setCostTotals(null); return; }
-
-        const sum = (f) => months.reduce((t, m) => t + num(m[f]), 0);
-        /* plannedPeriodCost is the sum of the monthly rates — what the period
-           would have cost with nothing deducted — which is the figure the
-           cost-chain strip works back from. */
-        const report = {
-          attendanceId: months[0].attendanceId,
-          employeeName: months[0].employeeName,
-          projectId: months[0].projectId,
-          period: `${months[0].period} – ${months[months.length - 1].period}`,
-          calendarDays: sum("calendarDays"),
-          paidCalendarDays: sum("paidCalendarDays"),
-          unpaidLeaveDays: sum("unpaidLeaveDays"),
-          plannedPeriodCost: sum("monthlyRate"),
-          deductedAmount: sum("deductedAmount"),
-          periodCost: sum("cost"),
-          totalCost: sum("cost"),
-          relaxationCost: 0,
-          relaxationDays: 0,
-          monthlyBreakdown: months,
-        };
-        /* perDayCost is a rate, so it's re-derived from the totals rather than
-           summed — adding four per-day rates would be meaningless. */
-        report.perDayCost =
-          report.calendarDays > 0
-            ? Math.round((report.plannedPeriodCost / report.calendarDays) * 100) / 100
-            : 0;
-        setCostReport(report);
-        setCostTotals({
-          resourceCount: 1,
-          totalCost: report.totalCost,
-          totalDeductedAmount: report.deductedAmount,
-          totalRelaxationAmount: 0,
+        const qs = new URLSearchParams({ projectId, activityId });
+        const res = await fetch(`${API_BASE}/api/attendance/cost/activity?${qs}`, {
+          signal: controller.signal,
+          headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         });
+        // An activity with nothing costed yet is a real answer, not a failure.
+        if (res.status === 404) {
+          if (active) { setCostReport({}); setCostTotals(null); }
+          return;
+        }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const json = await readJsonBody(res, FALLBACK);
+        const payload = json?.data ?? json;
+        /* Matched by attendanceId rather than taken positionally — the list
+           covers the whole activity team, and this page is about one of them.
+           No fallback to resources[0]: showing another employee's cost under
+           this employee's name would be worse than showing none. */
+        const rows = Array.isArray(payload?.resources) ? payload.resources : [];
+        const mine = rows.find((r) => String(r?.attendanceId) === String(resourceId));
+        if (!active) return;
+        setCostReport(mine || {});
+        setCostTotals(mine ? { resourceCount: 1, totalCost: num(mine.totalCost),
+          totalDeductedAmount: num(mine.deductedAmount),
+          totalRelaxationAmount: num(mine.relaxationCost) } : null);
       } catch (e) {
         const msg = requestErrorMessage(e, FALLBACK);
         if (active && msg) setCostError(msg);
@@ -646,7 +610,7 @@ export default function LeaveDetailPage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [resourceId, costMonths, refreshKey, paramError]);
+  }, [resourceId, projectId, activityId, refreshKey, paramError]);
 
   const employeeName = d.employeeName || attendanceId || "Employee";
   const unpaidLeave = num(d.unpaidLeave);
@@ -1390,7 +1354,7 @@ function LeaveDatesSection({
 
 /* =====================================================================
    Quarterly Cost Report
-   Built from /api/attendance/cost/employee, one call per calendar month
+   GET /api/attendance/cost/activity?projectId=&activityId=
    Shape: { attendanceId, employeeName, projectId, period, calendarDays,
             plannedPeriodCost, perDayCost, unpaidLeaveDays, paidCalendarDays,
             deductedAmount, periodCost, relaxationDays, relaxationCost,
