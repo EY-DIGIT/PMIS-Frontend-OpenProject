@@ -1,5 +1,5 @@
 // ============================================================
-// LeaveDetailPage.jsx — full-page quarterly leave detail for one
+// LeaveDetailPage.jsx — full-page leave detail for one
 // employee. Opened by clicking a row in the Attendance page's
 // monthly / quarterly tables (no longer a modal).
 //
@@ -54,13 +54,16 @@ const TONES = {
   red: { bg: "#fdecec", fg: "#dc2626" },
 };
 
-// Quarter context — dates and the quarter number aren't counts, so they sit
-// with the employee details rather than in the metric grid. Labelled "From"
-// and "To" rather than "Quarter Start/End": the quarter is already named in
-// the page subtitle, so what these add is the span itself.
+/* The window this page reports over — the activity's own span, not a calendar
+   quarter. The report used to send quarterStart/quarterEnd; it now sends
+   windowStart/windowEnd, and the two are not the same thing: this employee's
+   window runs 7 Jan → 6 Apr, which no quarter matches.
+
+   Dates aren't counts, so they sit with the employee details rather than in
+   the metric grid. */
 const CONTEXT_CARDS = [
-  { key: "quarterStart", label: "From Date", tone: "purple", icon: <FiPlay /> },
-  { key: "quarterEnd", label: "To Date", tone: "orange", icon: <FiFlag /> },
+  { key: "windowStart", label: "From Date", tone: "purple", icon: <FiPlay /> },
+  { key: "windowEnd", label: "To Date", tone: "orange", icon: <FiFlag /> },
 ];
 
 /* Every label on this page is the term the RFP uses (§5.24 Leave Policy,
@@ -124,13 +127,13 @@ const SUMMARY_CARDS = [
 // (an allowance vs. what was used vs. what's left over), so every card carries
 // its meaning rather than leaving the reader to infer it.
 const HINTS = {
-  permissibleLeave: "Paid leave allowed for this quarter. Leave within this limit costs the employee nothing.",
+  permissibleLeave: "Paid leave allowed for this period. Leave within this limit costs the employee nothing.",
   leaveTaken: "Total days of leave taken in the quarter, before any of it is classified as paid or unpaid.",
   paidLeave: "Days covered by the permissible allowance. No salary is deducted for these.",
   unpaidLeave: "Days left over after the paid allowance and any relaxation are applied. Salary is deducted for these.",
   relaxationLeave: "Extra days granted as an exception, on top of the paid allowance. Each quarter has a fixed limit.",
   sandwichDays: "Weekends or holidays falling between leave days, counted as leave.",
-  totalUnpaidDays: "Every day being deducted this quarter — unpaid leave plus sandwich days.",
+  totalUnpaidDays: "Every day being deducted in this period — unpaid leave plus sandwich days.",
   lapsedLeave: "Allowance that went unused and has expired. It does not carry into the next quarter.",
 };
 
@@ -304,7 +307,7 @@ function calendarMonthsBetween(startISO, endISO) {
    linked to directly because the endpoint sits behind the same bearer token
    as the rest of the API, and a plain <a href> can't carry that header.
 
-   A non-2xx here means "no document was ever uploaded for this quarter",
+   A non-2xx here means "no document was ever uploaded for this activity",
    which is an ordinary state, not a failure — so it resolves to null and
    the card simply doesn't render. */
 const CD_EXT = {
@@ -676,7 +679,7 @@ export default function LeaveDetailPage() {
     Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [], unpaidHalfDates
   );
 
-  /* How many relaxation days are already granted this quarter. There is no
+  /* How many relaxation days are already granted for this activity. There is no
      longer a per-quarter cap to show alongside it: the report used to carry
      one as `relaxationDaysApplied`, which the current payload doesn't send at
      all. The real constraint now lives in the eligible-dates endpoint the
@@ -740,9 +743,16 @@ export default function LeaveDetailPage() {
               carries it — it identifies the person, so it belongs with them
               rather than filed among the quarter's figures below. */}
           {d.designation && <div className="ld-desig">{d.designation}</div>}
+          {/* Named by its window, not by a quarter — the report covers the
+              activity's span, which need not line up with one. */}
           <p className="uidai-pmis-subtitle ld-subtitle">
-            Quarterly leave detail · Attendance ID {show(d.attendanceId || attendanceId)}
-            {" · "}Q{show(d.quarter || quarter)} {show(d.year || year)}
+            Leave detail · Attendance ID {show(d.attendanceId || attendanceId)}
+            {d.windowStart && d.windowEnd && (
+              <>
+                {" · "}
+                {formatLeaveDate(d.windowStart)} → {formatLeaveDate(d.windowEnd)}
+              </>
+            )}
           </p>
         </div>
         <div className="ld-head-actions">
@@ -872,8 +882,8 @@ export default function LeaveDetailPage() {
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
             sandwichDates={sandwichDates}
-            year={d.year || year}
-            quarter={d.quarter || quarter}
+            windowStart={d.windowStart}
+            windowEnd={d.windowEnd}
             note={
               unpaidDates.length > 0 && unpaidLeave === 0
                 ? relaxUsed > 0
@@ -1146,11 +1156,9 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
 /* Candidate A — quarter calendar. The only view where a weekend caught
    between two unpaid days is visible, which is what sandwich leave is. */
 function QuarterCalendar({
-  year, quarter, paidDates, unpaidDates,
+  windowStart, windowEnd, paidDates, unpaidDates,
   halfDayDates = [], sandwichDates = [], unassignedHalves = [],
 }) {
-  const q = Number(quarter) || 1;
-  const yr = Number(year) || new Date().getFullYear();
   const paidSet = new Set(paidDates.map(dateKey).filter(Boolean));
   const unpaidSet = new Set(unpaidDates.map(dateKey).filter(Boolean));
   const halfSet = new Set(halfDayDates.map(dateKey).filter(Boolean));
@@ -1159,7 +1167,10 @@ function QuarterCalendar({
      neutral tone — an unclassified leave day is a day the reader needs to
      see, and leaving the cell blank is the failure this whole change fixes. */
   const halfOnlySet = new Set(unassignedHalves.map(dateKey).filter(Boolean));
-  const months = [0, 1, 2].map((i) => (q - 1) * 3 + 1 + i);
+  /* Every calendar month the window touches, rather than a fixed three. The
+     window is the activity's span — 7 Jan → 6 Apr covers FOUR months, and
+     drawing only Jan–Mar would hide April's leave entirely. */
+  const months = calendarMonthsBetween(windowStart, windowEnd);
 
   const matched = paidSet.size + unpaidSet.size + sandwichSet.size + halfOnlySet.size;
   const total =
@@ -1171,9 +1182,9 @@ function QuarterCalendar({
       <div className="ld-cal-wrap">
         {months.map((m) => (
           <MonthGrid
-            key={m}
-            year={yr}
-            month={m}
+            key={`${m.year}-${m.month}`}
+            year={m.year}
+            month={m.month}
             paidSet={paidSet}
             unpaidSet={unpaidSet}
             halfSet={halfSet}
@@ -1239,7 +1250,7 @@ function DateChipLists({
 /* Hosts all three so they can be compared. The switcher is scaffolding —
    it goes when one is picked. */
 function LeaveDatesSection({
-  paidDates, unpaidDates, note, year, quarter,
+  paidDates, unpaidDates, note, windowStart, windowEnd,
   halfDayDates = [], sandwichDates = [], unassignedHalves = [],
 }) {
   const [view, setView] = useState("calendar");
@@ -1281,8 +1292,8 @@ function LeaveDatesSection({
       {view === "calendar" && (
         <div className="uidai-pmis-card ld-card">
           <QuarterCalendar
-            year={year}
-            quarter={quarter}
+            windowStart={windowStart}
+            windowEnd={windowEnd}
             paidDates={paidDates}
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
@@ -1329,7 +1340,7 @@ function LeaveDatesSection({
                 <div className="ld-drawer-teaser-num">
                   {totalDates}
                 </div>
-                <div className="ld-drawer-teaser-cap">leave dates this quarter</div>
+                <div className="ld-drawer-teaser-cap">leave dates in this period</div>
               </div>
               <button className="ld-btn ld-btn--ghost" onClick={() => setDrawer(true)}>
                 View leave dates →
@@ -1583,8 +1594,8 @@ function CostReportSection({ loading, error, report, totals }) {
                 {/* Period, the two band dates, Calendar Days and Rate Year —
                     all of which say WHICH days this row is about, before
                     either group starts counting them. */}
-                <th colSpan={3 + (showBand ? 2 : 0)} />
-                <th colSpan={3} className="ld-costtable-group">Attendance · working days</th>
+                <th colSpan={4 + (showBand ? 2 : 0)} />
+                <th colSpan={5} className="ld-costtable-group">Attendance · working days</th>
                 <th colSpan={4} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
               </tr>
               <tr>
@@ -1607,9 +1618,15 @@ function CostReportSection({ loading, error, report, totals }) {
                     that note a row reading "7 Jan → 6 Feb" beside a 2 looks
                     like a bug. */}
                 <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
+                {/* The days actually charged. Sent by the server as
+                    billableDays; it equals calendar days less unpaid leave,
+                    and is the day-count counterpart of Deducted Amount. */}
+                <th className="ld-num" title="Days actually billed for this period — calendar days less unpaid leave.">Billable Days</th>
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
+                <th className="ld-num" title="Leave within the permissible allowance — nothing is deducted for these days.">Paid Leave</th>
+                <th className="ld-num" title="Leave beyond the allowance. These are the days Deducted Amount is charged on.">Unpaid Leave</th>
                 <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
                 {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
@@ -1632,6 +1649,8 @@ function CostReportSection({ loading, error, report, totals }) {
                     </>
                   )}
                   <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
+                  {/* Sent by the server as billableDays — not derived here. */}
+                  <td className="ld-num">{dayCount(m.billableDays)}</td>
                   <td>{show(m.rateYear)}</td>
                   <td className="ld-num">{show(m.workingDays)}</td>
                   <td
@@ -1639,6 +1658,13 @@ function CostReportSection({ loading, error, report, totals }) {
                     title={`${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid`}
                   >
                     {dayCount(leave.total)}
+                  </td>
+                  {/* The two halves of Total Leave, each sent outright. Unpaid
+                      is the one that costs money, so it carries the warning
+                      tone the attendance table uses for the same figure. */}
+                  <td className="ld-num">{dayCount(m.paidLeaveDays)}</td>
+                  <td className={`ld-num${num(m.unpaidLeaveDays) > 0 ? " ld-unpaid" : " ld-dim"}`}>
+                    {dayCount(m.unpaidLeaveDays)}
                   </td>
                   <td className="ld-num">{show(m.presentDays)}</td>
                   {/* <td className="ld-num">
@@ -1680,11 +1706,11 @@ function CostReportSection({ loading, error, report, totals }) {
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Subtotal</td>
+                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Subtotal</td>
                     <td className="ld-num" title={rupeesInWords(monthsSubtotal)}>{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">
+                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -1697,7 +1723,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 </>
               )}
               <tr>
-                <td colSpan={9 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Total Cost</td>
+                <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Total Cost</td>
                 <td className="ld-num ld-costtable-cost" title={rupeesInWords(report.totalCost)}>
                   {money(report.totalCost)}
                 </td>
@@ -1830,7 +1856,7 @@ function AttachmentField({ file, onPick, onClear, error, disabled, replacing }) 
       {error && <div className="ld-field-err">{error}</div>}
       {replacing && !error && (
         <div className="ld-field-note">
-          A document is already on file for this quarter — uploading one replaces it.
+          A document is already on file for this activity — uploading one replaces it.
         </div>
       )}
     </div>
@@ -2575,6 +2601,9 @@ const LD_CSS = `
    its own — present so the division is checkable, recessive so it doesn't
    compete with the money columns beside it. */
 .ld-costtable .ld-dim { color: ${C.muted}; }
+/* Unpaid leave is the figure the deduction is charged on, so it's marked the
+   same amber the Attendance table uses for it — and only when there is any. */
+.ld-costtable .ld-unpaid { color: #c07d0a; font-weight: 600; }
 /* Only the money column that the total keys off is accented. */
 .ld-costtable-cost { font-weight: 700; color: ${C.primary}; }
 .ld-costtable tfoot td { padding: 14px; border-top: 1px solid ${C.border}; background: ${C.surface}; }
