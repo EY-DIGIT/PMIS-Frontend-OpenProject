@@ -1068,7 +1068,7 @@ function DateList({ color, chipBg, title, dates, note, halfSet }) {
    TEMPORARY — the three candidates. Keep one, delete the rest.
    ═══════════════════════════════════════════════════════════════════ */
 
-function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, halfOnlySet }) {
+function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, halfOnlySet, from, to }) {
   const cells = buildMonthGrid(year, month);
   return (
     <div className="ld-cal">
@@ -1080,6 +1080,14 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
         {cells.map((day, i) => {
           if (!day) return <span key={i} className="ld-cal-cell is-blank" />;
           const key = `${year}-${pad2(month)}-${pad2(day)}`;
+          /* Days the grid has to draw to complete a month, but which fall
+             outside the reporting window — 1–6 January when the window opens
+             on the 7th. Left visible so the month reads as a month, but
+             greyed right back and labelled: rendered as ordinary days they
+             would say "no leave here", which is a claim about a period this
+             report doesn't cover. yyyy-MM-dd compares lexicographically, so
+             no Date parsing is needed. */
+          const outside = (from && key < from) || (to && key > to);
           const paid = paidSet.has(key);
           const unpaid = unpaidSet.has(key);
           const sandwich = sandwichSet.has(key);
@@ -1093,7 +1101,8 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
           /* Sandwich is checked before the weekend fallback: a sandwich day IS
              normally a weekend, and the fact that it's being charged as leave
              outranks the fact that it's a Saturday. */
-          const cls = paid ? " is-paid"
+          const cls = outside ? " is-outside"
+            : paid ? " is-paid"
             : unpaid ? " is-unpaid"
             : sandwich ? " is-sandwich"
             : halfOnly ? " is-halfonly"
@@ -1103,11 +1112,17 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
             : unpaid ? "Unpaid Leave"
             : sandwich ? "Sandwich Leave"
             : halfOnly ? "Half day — paid or unpaid not stated" : "";
-          const title = kind
-            ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}`
-            : key;
+          const title = outside
+            ? `${key} · outside this period`
+            : kind
+              ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}`
+              : key;
           return (
-            <span key={i} className={`ld-cal-cell${cls}${half ? " is-half" : ""}`} title={title}>
+            <span
+              key={i}
+              className={`ld-cal-cell${cls}${half && !outside ? " is-half" : ""}`}
+              title={title}
+            >
               {day}
             </span>
           );
@@ -1131,6 +1146,9 @@ function QuarterCalendar({
      neutral tone — an unclassified leave day is a day the reader needs to
      see, and leaving the cell blank is the failure this whole change fixes. */
   const halfOnlySet = new Set(unassignedHalves.map(dateKey).filter(Boolean));
+  // Normalised once — every cell compares against these.
+  const winFrom = dateKey(windowStart);
+  const winTo = dateKey(windowEnd);
   /* Every calendar month the window touches, rather than a fixed three. The
      window is the activity's span — 7 Jan → 6 Apr covers FOUR months, and
      drawing only Jan–Mar would hide April's leave entirely. */
@@ -1154,6 +1172,8 @@ function QuarterCalendar({
             halfSet={halfSet}
             sandwichSet={sandwichSet}
             halfOnlySet={halfOnlySet}
+            from={winFrom}
+            to={winTo}
           />
         ))}
       </div>
@@ -1555,12 +1575,16 @@ function CostReportSection({ loading, error, report, totals }) {
                   days against a rate divided by 31, and can't. The band says
                   outright that they don't meet. */}
               <tr className="ld-costtable-grouprow">
-                {/* Period, the two band dates, Calendar Days and Rate Year —
-                    all of which say WHICH days this row is about, before
-                    either group starts counting them. */}
-                <th colSpan={4 + (showBand ? 2 : 0)} />
+                {/* Period, the two band dates and Calendar Days — all of which
+                    say WHICH days this row is about, before either group
+                    starts counting them. */}
+                <th colSpan={2 + (showBand ? 2 : 0)} />
                 <th colSpan={5} className="ld-costtable-group">Attendance · working days</th>
-                <th colSpan={4} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
+                {/* Rate Year and Billable Days sit on this side: one picks the
+                    monthly rate, the other is the day-count counterpart of
+                    Deducted Amount. Both are inputs to the money, not to the
+                    attendance count. */}
+                <th colSpan={6} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
               </tr>
               <tr>
                 <th title="The month this row covers.">Period</th>
@@ -1582,17 +1606,20 @@ function CostReportSection({ loading, error, report, totals }) {
                     that note a row reading "7 Jan → 6 Feb" beside a 2 looks
                     like a bug. */}
                 <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
+                <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
+                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
+                <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
+                {/* The two halves of Total Leave. Unpaid leads because it is
+                    the one that costs money — it reads straight across into
+                    Billable Days and Deducted Amount. */}
+                <th className="ld-num" title="Leave beyond the allowance. These are the days Deducted Amount is charged on.">Unpaid Leave</th>
+                <th className="ld-num" title="Leave within the permissible allowance — nothing is deducted for these days.">Paid Leave</th>
+                {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
+                <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 {/* The days actually charged. Sent by the server as
                     billableDays; it equals calendar days less unpaid leave,
                     and is the day-count counterpart of Deducted Amount. */}
                 <th className="ld-num" title="Days actually billed for this period — calendar days less unpaid leave.">Billable Days</th>
-                <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
-                <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
-                <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
-                <th className="ld-num" title="Leave within the permissible allowance — nothing is deducted for these days.">Paid Leave</th>
-                <th className="ld-num" title="Leave beyond the allowance. These are the days Deducted Amount is charged on.">Unpaid Leave</th>
-                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
-                {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Monthly rate divided by the calendar days in the month — not the working days. January: ₹1,98,434 ÷ 31 = ₹6,401.10.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
@@ -1613,10 +1640,8 @@ function CostReportSection({ loading, error, report, totals }) {
                     </>
                   )}
                   <td className="ld-num ld-dim">{show(m.calendarDays)}</td>
-                  {/* Sent by the server as billableDays — not derived here. */}
-                  <td className="ld-num">{dayCount(m.billableDays)}</td>
-                  <td>{show(m.rateYear)}</td>
                   <td className="ld-num">{show(m.workingDays)}</td>
+                  <td className="ld-num">{show(m.presentDays)}</td>
                   <td
                     className="ld-num"
                     title={`${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid`}
@@ -1626,11 +1651,13 @@ function CostReportSection({ loading, error, report, totals }) {
                   {/* The two halves of Total Leave, each sent outright. Unpaid
                       is the one that costs money, so it carries the warning
                       tone the attendance table uses for the same figure. */}
-                  <td className="ld-num">{dayCount(m.paidLeaveDays)}</td>
                   <td className={`ld-num${num(m.unpaidLeaveDays) > 0 ? " ld-unpaid" : " ld-dim"}`}>
                     {dayCount(m.unpaidLeaveDays)}
                   </td>
-                  <td className="ld-num">{show(m.presentDays)}</td>
+                  <td className="ld-num">{dayCount(m.paidLeaveDays)}</td>
+                  <td>{show(m.rateYear)}</td>
+                  {/* Sent by the server as billableDays — not derived here. */}
+                  <td className="ld-num">{dayCount(m.billableDays)}</td>
                   {/* <td className="ld-num">
                     <span
                       className="ld-attpill"
@@ -2418,10 +2445,23 @@ const LD_CSS = `
 .ld-switch-btn.is-on { background: #fff; color: ${C.primary};
   box-shadow: 0 1px 2px rgba(16,32,60,.10); }
 
-/* A — quarter calendar */
-.ld-cal-wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
-@media (max-width: 860px) { .ld-cal-wrap { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px) { .ld-cal-wrap { grid-template-columns: 1fr; } }
+/* A — the window calendar.
+
+   One row, however many months the window spans. It was a fixed 3 columns,
+   from when a quarter was always exactly three — a 7 Jan → 6 Apr window
+   touches four, and the fourth wrapped onto its own line, reading as a
+   separate block rather than the tail of one continuous period.
+
+   grid-auto-flow: column keeps them in a single track; the 168px floor stops
+   the day cells collapsing, and the row scrolls sideways instead when a long
+   activity brings more months than fit.
+
+   (No backticks in this comment — the whole block is a template literal.) */
+.ld-cal-wrap { display: grid; grid-auto-flow: column;
+  grid-auto-columns: minmax(168px, 1fr); gap: 22px;
+  overflow-x: auto; padding-bottom: 4px; }
+/* Narrow screens: let it scroll rather than squeezing below legibility. */
+@media (max-width: 560px) { .ld-cal-wrap { grid-auto-columns: minmax(150px, 1fr); gap: 16px; } }
 .ld-cal-title { font-size: 11px; font-weight: 700; letter-spacing: .07em;
   text-transform: uppercase; color: ${C.muted}; margin-bottom: 10px; }
 .ld-cal-dow, .ld-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
@@ -2431,6 +2471,11 @@ const LD_CSS = `
   border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
 .ld-cal-cell.is-blank { visibility: hidden; }
 .ld-cal-cell.is-weekend { color: ${C.faint}; background: ${C.surface}; }
+/* Outside the reporting window — drawn only so the month keeps its shape.
+   Faded well past the weekend tone so it reads as "not part of this", not as
+   "a quiet day": the window opens on the 7th, and 1–6 January are days this
+   report says nothing about. */
+.ld-cal-cell.is-outside { color: #cbd5e1; background: transparent; }
 /* One red for every leave day, paid or unpaid. The calendar's job is "which
    days were taken"; whether a day was paid is a payroll question the donut,
    the chip lists and each cell's own tooltip still answer. Two hues here made

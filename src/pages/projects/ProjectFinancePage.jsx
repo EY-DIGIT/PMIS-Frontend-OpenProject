@@ -1324,6 +1324,53 @@ export default function ProjectFinancePage() {
      arrow. The collapse/expand control is a vertically-centered handle on
      the panel's edge. */
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+
+  /* Clicking a phase's "Scheduled: n%" chip in Payment Terms opens the
+     Financial Summary and jumps to that phase's card in it. `tick` bumps on
+     every click so clicking the same chip twice re-runs the scroll+highlight
+     (the phase alone wouldn't change, so the effect wouldn't fire again). */
+  const [summaryFocus, setSummaryFocus] = useState({ phase: "", tick: 0 });
+  const revealPhaseInSummary = (phaseKey) => {
+    setSummaryCollapsed(false);
+    setSummaryFocus((f) => ({ phase: String(phaseKey ?? ""), tick: f.tick + 1 }));
+  };
+
+  /* The sticky summary has to fit exactly inside the app's scroll container
+     (.pmis-content) — too tall and its bottom edge sits permanently below
+     the fold; too short and it scrolls internally far more than it needs to.
+     That container's height isn't constant (the header's accessibility strip
+     collapses on scroll, the window resizes), so measure it and publish the
+     usable height as --fin-summary-h for the CSS to consume. Element ref is
+     held in state so the effect re-runs whenever the grid mounts. */
+  const [financeGridEl, setFinanceGridEl] = useState(null);
+  useEffect(() => {
+    if (!financeGridEl) return undefined;
+    /* Nearest scrollable ancestor — .pmis-content in the app shell. */
+    let scroller = financeGridEl.parentElement;
+    while (scroller && scroller !== document.body) {
+      const oy = window.getComputedStyle(scroller).overflowY;
+      if (oy === "auto" || oy === "scroll") break;
+      scroller = scroller.parentElement;
+    }
+    if (!scroller || scroller === document.body) return undefined;
+
+    const STICKY_TOP = 4;   /* matches `top` on .uidai-pmis-finance-summary */
+    const BOTTOM_GAP = 12;  /* breathing room above the container's edge */
+    const sync = () => {
+      const h = Math.max(240, scroller.clientHeight - STICKY_TOP - BOTTOM_GAP);
+      financeGridEl.style.setProperty("--fin-summary-h", `${h}px`);
+    };
+    sync();
+
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+    if (ro) ro.observe(scroller);
+    window.addEventListener("resize", sync);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", sync);
+    };
+  }, [financeGridEl]);
+
   /* Payment Terms: phases render as tabs (like the org tabs at the top);
      only the selected phase's panel is shown. */
   const [activePhaseIdx, setActivePhaseIdx] = useState(0);
@@ -2112,7 +2159,10 @@ export default function ProjectFinancePage() {
       {/* Page-wide 2-column grid: every editable section sits on the
           left; the Summary panel sits on the right and sticks while
           the user scrolls through the long left column. */}
-      <div className={`uidai-pmis-finance-grid${summaryCollapsed ? " is-summary-collapsed" : ""}`}>
+      <div
+        ref={setFinanceGridEl}
+        className={`uidai-pmis-finance-grid${summaryCollapsed ? " is-summary-collapsed" : ""}`}
+      >
         <div className="uidai-pmis-finance-main">
           {/* Section 1 — Project Cost */}
           <div className="uidai-pmis-card">
@@ -2297,6 +2347,7 @@ export default function ProjectFinancePage() {
                     }
                     oneTimeBusy={oneTimeSaving}
                     onSetOneTime={setOneTimeForPhase}
+                    onShowInSummary={revealPhaseInSummary}
                   />
                 )}
               </>
@@ -2414,7 +2465,13 @@ export default function ProjectFinancePage() {
                 background: "var(--uidai-pmis-border)",
                 margin: "0 16px",
               }} />
-              <CarryForwardSummarySection phases={phases} totals={totals} carryMethods={carryMethods} />
+              <CarryForwardSummarySection
+                phases={phases}
+                totals={totals}
+                carryMethods={carryMethods}
+                costItems={costItems}
+                focus={summaryFocus}
+              />
             </div>
           </div>
         )}
@@ -3071,6 +3128,9 @@ function PhasePanel({
   resourceCostItemIds = new Set(),
   isLocked, isLastPhase, carryLocked, carryBusy, onSetCarryForward,
   oneTimeTotal = 0, oneTimeAllocatedElsewhere = 0, oneTimeBusy = false, onSetOneTime,
+  /* Opens the Financial Summary on this phase's card — wired to the
+     "Scheduled: n%" chip below the terms table. */
+  onShowInSummary,
 }) {
   /* Which payment-term rows are expanded to reveal their activity-wise
      breakdown (partial-payment milestones). */
@@ -3854,13 +3914,29 @@ function PhasePanel({
                   : ` (${totalPercent - 100}% over)`}
               </span>
             ) : <span />}
-            <span
-              className={`uidai-pmis-chip${
-                totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
-              }`}
-            >
-              Scheduled: {totalPercent}%{totalPercent > 100 && " · over 100%"}
-            </span>
+            {/* Doubles as the jump-to-summary control: opens the Financial
+                Summary panel and scrolls it to this phase's breakup. */}
+            {typeof onShowInSummary === "function" ? (
+              <button
+                type="button"
+                className={`uidai-pmis-chip is-link${
+                  totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
+                }`}
+                onClick={() => onShowInSummary(phase.phase)}
+                title={`Show Phase ${phase.phase} in the Financial Summary`}
+              >
+                Scheduled: {totalPercent}%{totalPercent > 100 && " · over 100%"}
+                <span aria-hidden="true" style={{ fontSize: 10, opacity: 0.75 }}>▸</span>
+              </button>
+            ) : (
+              <span
+                className={`uidai-pmis-chip${
+                  totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
+                }`}
+              >
+                Scheduled: {totalPercent}%{totalPercent > 100 && " · over 100%"}
+              </span>
+            )}
             <span
               className={`uidai-pmis-chip${
                 totalPercent > 100 ? " is-bad" : totalPercent === 100 ? " is-good" : ""
@@ -3991,10 +4067,55 @@ function PhasePanel({
    CarryForwardSummarySection — read-only per-phase roll-up in the right
    column below the Summary card. The on/off toggle + mode picker live in
    each phase's collapsible header on the left; this panel reports, for
-   every phase: scheduled %, delivery cost, and (from phase.carryForward)
-   the leftover carried out and the amount received from earlier phases.
+   every phase, the full money story as a running sum:
+
+     Deliverable Cost + Tax          = Deliverable Total
+     + Carry Forward Received          (when the backend folded it in)
+     + Out of Pocket Expense         = Phase Total Cost
+     then how that total is split: Scheduled % / ₹ vs the leftover that
+     is carried forward (with its method).
+
+   Every line is an addend of the line below it, so the card can be read
+   top-to-bottom without cross-referencing the tables on the left.
+
+   `focus` ({ phase, tick }) is set when a phase's "Scheduled: n%" chip is
+   clicked on the left: the matching card is scrolled into view inside the
+   panel and briefly highlighted.
    ────────────────────────────────────────────────────────────────── */
-function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
+function CarryForwardSummarySection({
+  phases, totals, carryMethods = [], costItems = [], focus = null,
+}) {
+  /* Card nodes by phase key, so the focus effect can find the one to
+     scroll to. Hooks run before the empty-phases bail-out below. */
+  const cardRefs = useRef(new Map());
+  const focusPhase = focus?.phase || "";
+  const focusTick = focus?.tick || 0;
+
+  useEffect(() => {
+    if (!focusPhase) return undefined;
+    const card = cardRefs.current.get(String(focusPhase));
+    if (!card) return undefined;
+    /* Scroll the panel's own scroll box rather than calling scrollIntoView,
+       which would also scroll the page behind it. */
+    const scroller = card.closest(".uidai-pmis-finance-summary-body");
+    if (scroller) {
+      const top =
+        card.getBoundingClientRect().top
+        - scroller.getBoundingClientRect().top
+        + scroller.scrollTop
+        - 8;
+      scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    }
+    /* The pulse is a class on the node rather than React state: re-adding it
+       after a forced reflow restarts the keyframes, so clicking the same chip
+       twice highlights twice. */
+    card.classList.remove("is-focused");
+    void card.offsetWidth;
+    card.classList.add("is-focused");
+    const t = setTimeout(() => card.classList.remove("is-focused"), 1800);
+    return () => clearTimeout(t);
+  }, [focusPhase, focusTick]);
+
   if (!phases || phases.length === 0) return null;
 
   /* Remaining balance = Total Contract Cost minus everything already
@@ -4008,14 +4129,42 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
   );
   const totalRemaining = totalContractCost - totalScheduled;
 
+  /* One label/value line. `op` prints the arithmetic sign ahead of the
+     amount so the column reads as a sum; `rule` marks the line as a
+     sub-total (heavier top border + darker label). */
   const stat = (label, value, opts = {}) => (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
-      fontSize: 12, padding: "5px 0",
-      borderTop: opts.first ? "none" : "1px solid #eef1f6",
+      fontSize: 12, padding: opts.rule ? "7px 0 5px" : "5px 0",
+      borderTop: opts.first
+        ? "none"
+        : opts.rule ? "1px solid #c9d6e8" : "1px solid #eef1f6",
     }}>
-      <span style={muted}>{label}</span>
-      <strong style={{ color: opts.color || "#173e77", fontVariantNumeric: "tabular-nums" }}>{value}</strong>
+      <span style={opts.rule ? { fontWeight: 700, color: "#173e77" } : muted}>{label}</span>
+      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3, whiteSpace: "nowrap" }}>
+        {opts.op ? <span style={{ color: "#93a2b8", fontWeight: 700 }}>{opts.op}</span> : null}
+        <strong
+          title={opts.hint || undefined}
+          style={{
+            color: opts.color || "#173e77",
+            fontVariantNumeric: "tabular-nums",
+            fontSize: opts.rule ? 13 : 12,
+          }}
+        >
+          {value}
+        </strong>
+      </span>
+    </div>
+  );
+
+  /* Small caps divider that separates the cost build-up from the way that
+     cost is scheduled out. */
+  const groupHead = (label) => (
+    <div style={{
+      fontSize: 10, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase",
+      color: "#93a2b8", marginTop: 12, marginBottom: 2,
+    }}>
+      {label}
     </div>
   );
 
@@ -4036,8 +4185,14 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
           const isLast = i === phases.length - 1;
           const terms = p.paymentTerms || [];
           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
-          const phaseTotal = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
-          const phaseFixed = Number(p.effectivePhaseTotal || p.phaseFixedTotal || 0);
+          const scheduledAmount = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
+          /* baseTotal = the phase's own delivery cost (cost + tax on its cost
+             rows). effectivePhaseTotal is the backend's authoritative phase
+             total and is already INCLUSIVE — it folds in the Out of Pocket
+             Expense share (and any carry-forward received), which is why the
+             payment terms take their percentages from it. So it's used as-is;
+             adding the parts again would double-count them. */
+          const baseTotal = Number(p.phaseFixedTotal) || Number(p.effectivePhaseTotal) || 0;
           const oneTimeAllocated = Number(p.oneTimeAllocated) || 0;
           const cf = p.carryForward || {};
           const yes = !!cf.enabled;
@@ -4045,9 +4200,51 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
             carryMethods.find((m) => m.code === cf.methodCode)?.name || cf.methodCode || "";
           const carriedOut = Number(cf.carriedOut) || 0;
           const received = (Number(cf.received) || 0) + (Number(cf.receivedMilestone) || 0);
+          const declared = Number(p.effectivePhaseTotal);
+          const phaseTotalCost = Number.isFinite(declared) && declared > 0
+            ? declared
+            : baseTotal + oneTimeAllocated;
+
+          /* Work out which addends the declared total is actually made of, so
+             only the lines that genuinely sum to it get a "+" in front. What
+             the total doesn't contain is reported below it instead — the
+             column always has to add up. */
+          const gap = Math.round((phaseTotalCost - baseTotal) * 100) / 100;
+          const near = (a, b) => Math.abs(a - b) <= 1;
+          const opeInTotal = oneTimeAllocated > 0
+            && (near(gap, oneTimeAllocated) || near(gap, oneTimeAllocated + received));
+          const receivedInTotal = received > 0
+            && (near(gap, received) || near(gap, oneTimeAllocated + received));
+          /* True when Deliverable Total + the flagged addends land exactly on
+             the declared total; if not, the signs are dropped and the lines
+             read as plain facts rather than a sum that doesn't work out. */
+          const ladderOk = near(
+            gap,
+            (opeInTotal ? oneTimeAllocated : 0) + (receivedInTotal ? received : 0)
+          );
+
+          /* Cost/tax split for the ladder's first two lines, summed from this
+             phase's cost rows (one-time is a project-level pool, not a phase
+             row). Shown only when it reconciles with the backend's phase
+             total — a split that doesn't add up is worse than none. */
+          const rows = (costItems || []).filter(
+            (c) => c.costTypeCode !== "one_time" && String(c.phase ?? "") === String(p.phase)
+          );
+          const rowCost = rows.reduce((s, c) => s + (Number(c.cost) || 0), 0);
+          const rowTax = rows.reduce((s, c) => {
+            if (c.taxAmount != null) return s + (Number(c.taxAmount) || 0);
+            if (c.taxPercent != null) return s + ((Number(c.cost) || 0) * (Number(c.taxPercent) || 0)) / 100;
+            return s;
+          }, 0);
+          const splitOk = rows.length > 0 && Math.abs(rowCost + rowTax - baseTotal) <= 1;
           return (
             <div
               key={p.phase}
+              ref={(el) => {
+                if (el) cardRefs.current.set(String(p.phase), el);
+                else cardRefs.current.delete(String(p.phase));
+              }}
+              className="uidai-pmis-phase-card"
               style={{
                 border: yes ? "1px solid #1b7a42" : "1px solid var(--uidai-pmis-border)",
                 background: yes ? "#f1faf4" : "#fff",
@@ -4056,6 +4253,7 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                 boxShadow: yes
                   ? "0 2px 6px rgba(27, 122, 66, 0.10)"
                   : "0 1px 2px rgba(20, 50, 110, 0.04)",
+                scrollMarginTop: 8,
               }}
             >
               <div style={{
@@ -4069,23 +4267,62 @@ function CarryForwardSummarySection({ phases, totals, carryMethods = [] }) {
                 </span>
               </div>
 
+              {/* Cost build-up — each line adds into the one below it. */}
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {stat("Scheduled", `${totalPercent}%`,
-                  { first: true, color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77" })}
-                {stat("Total Cost", inr(phaseFixed))}
+                {splitOk ? (
+                  <>
+                    {stat("Deliverable Cost", inr(rowCost), { first: true, hint: wordsHint(rowCost) })}
+                    {stat("Tax", inr(rowTax), { op: "+", hint: wordsHint(rowTax) })}
+                    {stat("Deliverable Total", inr(baseTotal), { rule: true, hint: wordsHint(baseTotal) })}
+                  </>
+                ) : (
+                  stat("Deliverable Total", inr(baseTotal), { first: true, hint: wordsHint(baseTotal) })
+                )}
 
-                {oneTimeAllocated > 0 && stat(
+                {receivedInTotal && stat("Carry Forward Received", inr(received), {
+                  op: ladderOk ? "+" : "", color: "#1b7a42", hint: wordsHint(received),
+                })}
+
+                {opeInTotal && stat(
                   isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
                   inr(oneTimeAllocated),
-                  { color: "#0b6b8f" }
+                  { op: ladderOk ? "+" : "", color: "#0b6b8f", hint: wordsHint(oneTimeAllocated) }
                 )}
-                {stat("Carried Forward",
-                  yes ? inr(carriedOut) : "—",
-                  { color: yes ? "#1b7a42" : "#a3afc1" })}
+
+                {stat("Phase Total Cost", inr(phaseTotalCost), {
+                  rule: true, hint: wordsHint(phaseTotalCost),
+                })}
+                {opeInTotal && (
+                  <div style={{ fontSize: 10, color: "#93a2b8", textAlign: "right", marginTop: -2 }}>
+                    including Out of Pocket Expense
+                  </div>
+                )}
+              </div>
+
+              {/* How that total is split across payment terms vs carried out. */}
+              {groupHead("Payment Schedule")}
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {stat("Scheduled", `${totalPercent}%`, {
+                  first: true,
+                  color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
+                })}
+                {stat("Scheduled Amount", inr(scheduledAmount), { hint: wordsHint(scheduledAmount) })}
+                {stat("Carried Forward", yes ? inr(carriedOut) : "—", {
+                  op: yes ? "+" : "",
+                  color: yes ? "#1b7a42" : "#a3afc1",
+                  hint: yes ? wordsHint(carriedOut) : "",
+                })}
                 {cfMethodName && yes ? stat("Type", cfMethodName, { color: "#0b6b8f" }) : null}
-                {stat("Carry Forward Received",
+                {/* Anything the phase total didn't already account for is
+                    reported here, so no allocated figure goes missing. */}
+                {oneTimeAllocated > 0 && !opeInTotal && stat(
+                  isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
+                  inr(oneTimeAllocated),
+                  { color: "#0b6b8f", hint: wordsHint(oneTimeAllocated) }
+                )}
+                {!receivedInTotal && stat("Carry Forward Received",
                   received > 0 ? inr(received) : "—",
-                  { color: received > 0 ? "#173e77" : "#a3afc1" })}
+                  { color: received > 0 ? "#173e77" : "#a3afc1", hint: received > 0 ? wordsHint(received) : "" })}
               </div>
             </div>
           );

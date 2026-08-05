@@ -23,10 +23,8 @@ export default function SlaRollupPage() {
         <div className="uidai-pmis-content">
             <div className="uidai-pmis-title">SLA Rollup</div>
             <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
-                Pick a contract year and quarter to see every SLA for{" "}
-                {project?.projectName || "this project"} — the breaches behind it, the
-                points it accumulated after the severity cap, and the LD % it carries
-                into the quarter&rsquo;s settlement.
+                Service levels, penalties and payment by contract quarter
+                {project?.projectName ? ` — ${project.projectName}` : ""}.
             </div>
 
             {projectId ? (

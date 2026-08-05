@@ -682,11 +682,11 @@
 /* ---------- Project Finance page ---------- */
 /* Two-column working area: editable sections on the left, the Summary +
    carry-forward panel on the right. The summary is fixed in view (sticky)
-   and scrolls within itself when its content is taller than the viewport.
-   `overscroll-behavior: contain` keeps that wheel scroll INSIDE the panel —
-   hovering the summary scrolls only the summary (it never chains to the
-   page, and the page never bleeds into it). It can be collapsed via its
-   header. Collapses to a single column on narrower viewports. */
+   and only scrolls within itself when its content is taller than the space
+   it has. Scroll chaining is deliberately LEFT ON: once the summary reaches
+   its top/bottom the wheel carries on scrolling the page, so the pointer is
+   never "parked" over a dead zone. It can be collapsed via its header.
+   Collapses to a single column on narrower viewports. */
 .uidai-pmis-finance-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -701,20 +701,39 @@
   border: 1px solid var(--uidai-pmis-border);
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(20, 50, 110, 0.06);
-  /* Fit within the scrollable content area (viewport minus the app header,
-     navbar, footer and the content padding) so the whole panel is visible
-     without scrolling to the bottom. The body scrolls if the summary is
-     taller than this. */
-  max-height: calc(100vh - 210px);
+  /* Fit within the app's scroll container. ProjectFinancePage measures that
+     container and publishes its usable height as --fin-summary-h; the vh
+     fallback only applies before the first measurement. Measuring matters
+     because the header's accessibility strip collapses on scroll, which a
+     hard-coded offset can't track — when the guess was too tall the bottom
+     of the panel sat below the fold and could never be reached. */
+  max-height: var(--fin-summary-h, calc(100vh - 210px));
   /* visible so the toggle can hang into the gap between the panels */
   overflow: visible;
 }
 .uidai-pmis-finance-summary-body {
-  max-height: calc(100vh - 210px);
+  /* less the panel's 1px top/bottom border, so the body can't spill past
+     the rounded frame (the frame keeps overflow visible for the toggle). */
+  max-height: calc(var(--fin-summary-h, calc(100vh - 210px)) - 2px);
   overflow-y: auto;
-  overscroll-behavior: contain;
+  /* `auto` (not `contain`): when the summary bottoms out, the wheel keeps
+     going on the page underneath instead of stopping dead. */
+  overscroll-behavior: auto;
   border-radius: 12px;
+  /* Slim scrollbar so it doesn't read as a second page scrollbar sitting
+     next to the real one. */
+  scrollbar-width: thin;
+  scrollbar-color: #cdd9e8 transparent;
 }
+.uidai-pmis-finance-summary-body::-webkit-scrollbar { width: 8px; }
+.uidai-pmis-finance-summary-body::-webkit-scrollbar-track { background: transparent; }
+.uidai-pmis-finance-summary-body::-webkit-scrollbar-thumb {
+  background: #cdd9e8;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.uidai-pmis-finance-summary-body::-webkit-scrollbar-thumb:hover { background: #adbdd2; background-clip: content-box; }
 /* Small floating toggle that sits in the gap between the two panels,
    vertically centered — like a little popup tab. Straddles the summary's
    left edge (half in the gap). */
@@ -910,6 +929,37 @@
 .uidai-pmis-chip.is-good { background: #eef9f0; color: #1b7a42; border-color: #c4e9d0; }
 .uidai-pmis-chip.is-warn { background: #fff5e9; color: #b54708; border-color: #f5d9b5; }
 .uidai-pmis-chip.is-bad  { background: #fdecec; color: #b42318; border-color: #f5c2c2; }
+/* Chip rendered as a <button> — the Scheduled % chip jumps to the phase's
+   card in the Financial Summary, so it needs to read as clickable. */
+.uidai-pmis-chip.is-link {
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .15s, border-color .15s, box-shadow .15s, transform .12s;
+}
+.uidai-pmis-chip.is-link:hover {
+  border-color: #0aa1c0;
+  box-shadow: 0 2px 8px rgba(10, 161, 192, 0.18);
+  transform: translateY(-1px);
+}
+.uidai-pmis-chip.is-link:focus-visible {
+  outline: 2px solid #0aa1c0;
+  outline-offset: 2px;
+}
+
+/* Phase card in the Financial Summary, pulsed after a jump so the eye lands
+   on the card that was asked for. */
+.uidai-pmis-phase-card { transition: box-shadow .2s ease; }
+.uidai-pmis-phase-card.is-focused {
+  animation: uidai-pmis-phase-pulse 1.8s ease-out 1;
+}
+@keyframes uidai-pmis-phase-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(10, 161, 192, 0.55); }
+  25%  { box-shadow: 0 0 0 4px rgba(10, 161, 192, 0.28); }
+  100% { box-shadow: 0 0 0 0 rgba(10, 161, 192, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .uidai-pmis-phase-card.is-focused { animation: none; box-shadow: 0 0 0 3px rgba(10, 161, 192, 0.35); }
+}
 
 /* =====================================================================
    Role / Permissions assignment — inline card + modal.

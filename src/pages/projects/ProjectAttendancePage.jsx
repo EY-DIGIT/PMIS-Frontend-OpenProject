@@ -481,6 +481,80 @@ export default function ProjectAttendancePage() {
   const year = startParts ? Number(startParts[1]) : CURRENT_YEAR;
   const quarter = startParts ? Math.ceil(Number(startParts[2]) / 3) : DEFAULT_QUARTER;
 
+  /* The holiday calendar is the one thing here that isn't tied to the
+     milestone — holidays belong to the project's whole life, and someone
+     checking them usually wants a year the current milestone doesn't touch.
+     So it gets its own year, offered across the project's span rather than
+     pinned to whichever year the selected milestone happens to start in.
+
+     Declared after `year` above, which it seeds from. */
+
+  /* The project's own window, from GET /projects/{id}. The store copy is
+     empty on a deep link — landing straight on this URL never runs the
+     projects list that fills it — so the store is only the fallback here.
+     (LeaveUploadModal reads the same endpoint for the vendor list, but it
+     only mounts once the upload dialog is opened.) */
+  const [projectWindow, setProjectWindow] = useState({ start: "", end: "" });
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let active = true;
+    (async () => {
+      try {
+        const res = await authorizedFetch(
+          `${GATEWAY_BASE}${ENDPOINTS.projects.get(projectId)}`,
+          { method: "GET", headers: { accept: "application/json" } }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const raw = await res.json().catch(() => ({}));
+        const body = (raw?.data ?? raw) || {};
+        if (!active) return;
+        setProjectWindow({
+          start: String(body.startDate || body.start_date || ""),
+          end: String(body.endDate || body.end_date || ""),
+        });
+      } catch {
+        /* Non-fatal: the year picker just falls back to the store, and to
+           the milestone's single year if that's empty too. */
+        if (active) setProjectWindow({ start: "", end: "" });
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId]);
+
+  const projectYears = useMemo(() => {
+    const a = /^(\d{4})/.exec(String(projectWindow.start || project?.startDate || ""));
+    const b = /^(\d{4})/.exec(String(projectWindow.end || project?.endDate || ""));
+    if (!a || !b) return [];
+    const from = Number(a[1]);
+    const to = Number(b[1]);
+    if (to < from || to - from > 50) return [];
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  }, [projectWindow.start, projectWindow.end, project?.startDate, project?.endDate]);
+
+  const [holidayYear, setHolidayYear] = useState(null);
+  /* Defaults to the milestone's year, but only once and only if the project
+     actually covers it — after that it's the user's to change. */
+  useEffect(() => {
+    if (holidayYear !== null) return;
+    const y = parseYear(year);
+    if (y === null) return;
+    if (projectYears.length && !projectYears.includes(y)) {
+      setHolidayYear(projectYears.includes(CURRENT_YEAR) ? CURRENT_YEAR : projectYears[0]);
+      return;
+    }
+    setHolidayYear(y);
+  }, [holidayYear, year, projectYears]);
+  /* The project loads asynchronously, so a year picked before its span was
+     known can end up outside the options list — a <select> showing a value it
+     doesn't offer. Pull it back in when the span finally arrives. */
+  useEffect(() => {
+    if (holidayYear === null || !projectYears.length) return;
+    if (projectYears.includes(holidayYear)) return;
+    setHolidayYear(projectYears.includes(CURRENT_YEAR) ? CURRENT_YEAR : projectYears[0]);
+  }, [holidayYear, projectYears]);
+
+  const activeHolidayYear = holidayYear ?? parseYear(year) ?? CURRENT_YEAR;
+
   /* The milestone's window as the range the period reports are fetched over.
      Null until a milestone with usable dates is chosen, which is what gates
      those two calls.
@@ -704,8 +778,8 @@ export default function ProjectAttendancePage() {
       setHolidayError(null);
       try {
         const token = getToken();
-        const safeYear = parseYear(year);
-        if (safeYear === null) throw new Error(`"${year}" isn't a valid year.`);
+        const safeYear = parseYear(activeHolidayYear);
+        if (safeYear === null) throw new Error(`"${activeHolidayYear}" isn't a valid year.`);
         const opts = {
           signal: controller.signal,
           headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -737,7 +811,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [year]);
+  }, [activeHolidayYear]);
 
   /* Range for the header's template button, derived from Year + Month. */
   /* The header's blank template covers the milestone's own window, which is
@@ -986,7 +1060,9 @@ export default function ProjectAttendancePage() {
 
       {holidayOpen && (
         <HolidayModal
-          year={year}
+          year={activeHolidayYear}
+          years={projectYears}
+          onYearChange={setHolidayYear}
           holidays={holidays}
           calendar={calendar}
           loading={holidayLoading}
@@ -1925,7 +2001,7 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
 /* =====================================================================
    Holiday modal — calendar mode
    ===================================================================== */
-function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
+function HolidayModal({ year, years, onYearChange, holidays, calendar, loading, error, onClose }) {
   const today = new Date();
   const initialMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
   const [viewMonth, setViewMonth] = useState(initialMonth);
@@ -1960,7 +2036,25 @@ function HolidayModal({ year, holidays, calendar, loading, error, onClose }) {
             <div className="att-eyebrow" style={{ marginBottom: 4 }}>Calendar</div>
             <h2 className="att-modal-title">Holidays · {year}</h2>
           </div>
-          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+          <div className="att-modal-head-actions">
+            {/* Only worth a control when there's somewhere else to go. */}
+            {(years?.length ?? 0) > 1 && (
+              <label className="att-year-pick">
+                <span className="att-year-pick-label">Year</span>
+                <select
+                  className="att-select"
+                  value={year}
+                  onChange={(e) => onYearChange(Number(e.target.value))}
+                  aria-label="Holiday year"
+                >
+                  {years.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+          </div>
         </div>
 
         {loading && <div className="att-muted">Loading holidays…</div>}
@@ -2515,6 +2609,10 @@ const ATT_CSS = `
 .att-modal-title { margin: 0; font-size: 20px; font-weight: 700; color: ${C.ink}; letter-spacing: -0.01em; }
 .att-modal-sub { color: ${C.muted}; font-size: 14px; margin-bottom: 16px; }
 .att-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.att-modal-head-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.att-year-pick { display: flex; align-items: center; gap: 7px; }
+.att-year-pick-label { font-size: 12px; font-weight: 600; color: ${C.muted};
+  text-transform: uppercase; letter-spacing: .04em; }
 .att-close { border: none; background: ${C.surfaceAlt}; color: ${C.muted};
   width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 15px; line-height: 1;
   transition: background .18s ease, color .18s ease; flex: 0 0 auto; }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getToken } from "../../api/auth";
+import * as projectsApi from "../../api/projects";
 import { FiUploadCloud, FiCalendar } from "react-icons/fi";
 
 const API_BASE = "http://10.1.131.199:8019";
@@ -132,11 +133,47 @@ const CAL_STYLES = `
 
 export default function MasterHolidays() {
   const currentYear = new Date().getFullYear();
-  const years = useMemo(() => [
-    currentYear,
-    ...Array.from({ length: 20 }, (_, i) => currentYear + i + 1),
-    ...Array.from({ length: currentYear - 2000 }, (_, i) => currentYear - (i + 1)),
-  ], [currentYear]);
+
+  /* The years anyone can actually file holidays against — the span the
+     projects cover, not an arbitrary window. This listed 2000 through
+     currentYear + 20: forty-six options, almost none of them real.
+
+     Holidays are global, so this page has no single project to read from; the
+     bound is every project's window taken together. Falls back to the old wide
+     list only if the projects can't be loaded, so the page never ends up with
+     an empty picker. */
+  const [projectSpan, setProjectSpan] = useState(null);
+  const [spanFailed, setSpanFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    projectsApi
+      .listAll()
+      .then((list) => {
+        if (!active) return;
+        const yrs = (Array.isArray(list) ? list : [])
+          .flatMap((p) => [p?.startDate, p?.endDate])
+          .map((d) => Number(String(d || "").slice(0, 4)))
+          .filter((y) => Number.isFinite(y) && y > 1900);
+        setProjectSpan(yrs.length ? { min: Math.min(...yrs), max: Math.max(...yrs) } : null);
+      })
+      .catch(() => { if (active) setSpanFailed(true); });
+    return () => { active = false; };
+  }, []);
+
+  const years = useMemo(() => {
+    if (projectSpan) {
+      const out = [];
+      for (let y = projectSpan.min; y <= projectSpan.max; y++) out.push(y);
+      return out;
+    }
+    if (!spanFailed) return [];             // still loading — see the placeholder
+    return [
+      currentYear,
+      ...Array.from({ length: 20 }, (_, i) => currentYear + i + 1),
+      ...Array.from({ length: currentYear - 2000 }, (_, i) => currentYear - (i + 1)),
+    ];
+  }, [projectSpan, spanFailed, currentYear]);
 
   const [year, setYear] = useState("");
   const [file, setFile] = useState(null);
@@ -145,6 +182,18 @@ export default function MasterHolidays() {
 
   // calendar state
   const [calYear, setCalYear] = useState(String(currentYear));
+
+  /* Snap the viewer into the project span once it's known. It starts on the
+     current year, which need not be inside — a select whose value isn't one of
+     its options renders blank in some browsers and shows a year the list
+     doesn't offer in others. Clamped rather than reset, so a span in the past
+     lands on its last year and one in the future on its first. */
+  useEffect(() => {
+    if (!projectSpan) return;
+    const y = Number(calYear);
+    if (y >= projectSpan.min && y <= projectSpan.max) return;
+    setCalYear(String(Math.min(Math.max(y || currentYear, projectSpan.min), projectSpan.max)));
+  }, [projectSpan, calYear, currentYear]);
   const [holidays, setHolidays] = useState([]);
   const [calLoading, setCalLoading] = useState(false);
   const [calError, setCalError] = useState(null);
@@ -241,7 +290,9 @@ export default function MasterHolidays() {
               <div className="mh-field">
                 <span className="mh-field-label">Year</span>
                 <select value={year} onChange={(e) => setYear(e.target.value)}>
-                  <option value="" disabled>Select year</option>
+                  <option value="" disabled>
+                    {years.length === 0 ? "Loading project years…" : "Select year"}
+                  </option>
                   {years.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
