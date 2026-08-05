@@ -3,11 +3,11 @@
 // employee. Opened by clicking a row in the Attendance page's
 // monthly / quarterly tables (no longer a modal).
 //
-//   GET /api/reports/leave/{attendanceId}?year=&quarter=&projectId=
-//   GET /api/attendance/cost/quarterly?resourceId=&year=&quarter=
+//   GET /api/attendance/leave-dates?resourceId=&activityId=
+//   GET /api/attendance/cost/employee?resourceId=&year=&month=  (per month)
 //
 // When the employee has unpaid leave, a "Relaxation" action opens a
-// small form that POSTs to /api/attendance/quarterly-relaxation.
+// small form that POSTs to /api/attendance/relaxation.
 // ============================================================
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
@@ -237,67 +237,6 @@ function formatBandDate(raw) {
   return s;
 }
 
-/* ── which bucket each half day belongs to ────────────────────────────
-   The report used to fold half days into paidLeaveDates / unpaidLeaveDates
-   and repeat them in halfDayDates purely as a "counts 0.5" marker. It now
-   sends them as their own disjoint set, present in neither list — so every
-   half day stopped rendering at all: the chip lists iterate paid/unpaid, and
-   the calendar only marks a cell it finds in one of those sets. Two of
-   resource 422's eleven leave dates were simply absent from the page.
-
-   The response doesn't say which bucket a half day belongs to, but the
-   settlement rule this page already explains to the user does: leave is
-   consumed in date order against the paid allowance, and whatever doesn't
-   fit is unpaid. Re-running that over the merged list recovers the split.
-
-   It isn't trusted blind. The same pass re-derives the FULL days, whose
-   buckets the server does state — if those don't come back exactly as sent,
-   the inference is wrong (a changed rule, or a relaxation tier this doesn't
-   model) and `verified` is false, so the caller shows the half days as their
-   own category rather than filing them under a colour that might be a lie.
-
-   Checked against two live Q1-2026 payloads: 422 (halves 1.0 paid / 0
-   unpaid, where a full day is skipped so a later half can take the last
-   0.5) and 430 (1.0 paid / 2.5 unpaid). Both reproduce the server's own
-   paid and unpaid lists exactly. */
-function assignHalfDays(halfDayDates, paidLeaveDates, unpaidLeaveDates, paidLeave) {
-  const half = (halfDayDates || []).map(dateKey).filter(Boolean);
-  const paidFull = (paidLeaveDates || []).map(dateKey).filter(Boolean);
-  const unpaidFull = (unpaidLeaveDates || []).map(dateKey).filter(Boolean);
-  const none = { paidHalves: [], unpaidHalves: [], unassigned: [] };
-  if (!half.length) return none;
-
-  /* Older payloads already fold them in — the dates are in the lists, so the
-     existing rendering works and there is nothing to recover. */
-  const inLists = new Set([...paidFull, ...unpaidFull]);
-  if (half.some((k) => inLists.has(k))) return none;
-
-  const items = [
-    ...half.map((k) => ({ k, w: 0.5 })),
-    ...paidFull.map((k) => ({ k, w: 1 })),
-    ...unpaidFull.map((k) => ({ k, w: 1 })),
-  ].sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
-
-  /* Fill the paid allowance in date order. A day that would overrun it is
-     left unpaid and the walk continues — that's what lets a later half day
-     take a remaining 0.5, which is exactly what 422's payload does. */
-  let budget = num(paidLeave);
-  const paid = new Set();
-  for (const it of items) {
-    if (it.w <= budget + 1e-9) { paid.add(it.k); budget -= it.w; }
-  }
-
-  const verified =
-    paidFull.every((k) => paid.has(k)) && unpaidFull.every((k) => !paid.has(k));
-  if (!verified) return { ...none, unassigned: half };
-
-  return {
-    paidHalves: half.filter((k) => paid.has(k)),
-    unpaidHalves: half.filter((k) => !paid.has(k)),
-    unassigned: [],
-  };
-}
-
 // Merge recovered half dates into their bucket, kept in date order.
 function withHalves(dates, halves) {
   if (!halves.length) return dates;
@@ -332,31 +271,33 @@ function monthLeave(m) {
   return { paid, unpaid, total: paid + unpaid };
 }
 
-/* ── cost report envelope ─────────────────────────────────────────────
-   /api/attendance/cost/quarterly now answers with
-     { period, resourceCount, totals, resources: [ …one per resource… ] }
-   where each resource carries its own totalCost + monthlyBreakdown. Older
-   builds returned that single report object directly, or wrapped in an
-   array, so all three shapes are unwrapped here. Returns the one resource
-   this page is about, plus the envelope's totals for the summary cards. */
-function unwrapCostReport(json, resourceId) {
-  let payload = json && json.data && typeof json.data === "object" ? json.data : json;
-  if (Array.isArray(payload)) return { report: payload[0] || {}, totals: null };
-  if (!payload || typeof payload !== "object") return { report: {}, totals: null };
+/* Every calendar month a window touches, as {year, month}. The cost endpoint
+   is keyed on year + month, so a window of 07-01 → 06-04 needs January through
+   April — four calls — even though it spans three activity months.
 
-  const rows = Array.isArray(payload.resources) ? payload.resources : null;
-  if (!rows) return { report: payload, totals: null };
-
-  const match =
-    rows.find((r) => String(r.attendanceId) === String(resourceId)) || rows[0] || {};
-  return {
-    report: { ...match, period: match.period || payload.period },
-    totals: payload.totals || null,
-  };
+   Parsed by regex rather than `new Date`, which applies a timezone offset and
+   can push a 1st-of-month back into the month before. */
+function calendarMonthsBetween(startISO, endISO) {
+  const a = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(startISO || ""));
+  const b = /^(\d{4})-(\d{2})-\d{2}$/.exec(String(endISO || ""));
+  if (!a || !b) return [];
+  let y = Number(a[1]);
+  let m = Number(a[2]);
+  const ey = Number(b[1]);
+  const em = Number(b[2]);
+  if (ey < y || (ey === y && em < m)) return [];
+  const out = [];
+  // 120 is a runaway guard, not a real limit.
+  for (let i = 0; i < 120 && (y < ey || (y === ey && m <= em)); i++) {
+    out.push({ year: y, month: m });
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
 }
 
 /* ── the relaxation's supporting document ─────────────────────────────
-   GET /api/attendance/quarterly-relaxation/attachment
+   GET /api/attendance/relaxation/attachment
        ?resourceId=&projectId=&year=&quarter=
 
    Answers with the raw file. The response is fetched as a blob rather than
@@ -383,24 +324,22 @@ function filenameFromDisposition(cd) {
   return plain ? plain[1].trim() : "";
 }
 
-function useRelaxationAttachment({ resourceId, projectId, year, quarter, refreshKey, enabled = true }) {
+function useRelaxationAttachment({ resourceId, projectId, activityId, refreshKey, enabled = true }) {
   const [file, setFile] = useState(null);
 
   useEffect(() => {
     // `enabled` is false when the page's own params are invalid — no point
     // asking for an attachment keyed on a year the server will reject.
     if (!enabled) return undefined;
-    if (!resourceId || !projectId || parseYear(year) === null || parseQuarter(quarter) === null) {
-      return undefined;
-    }
+    if (!resourceId || !projectId || !activityId) return undefined;
     let active = true;
     let objectUrl = "";
     (async () => {
       try {
         const token = getToken();
-        const qs = new URLSearchParams({ resourceId, projectId, year, quarter });
+        const qs = new URLSearchParams({ resourceId, projectId, activityId });
         const res = await fetch(
-          `${API_BASE}/api/attendance/quarterly-relaxation/attachment?${qs}`,
+          `${API_BASE}/api/attendance/relaxation/attachment?${qs}`,
           { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
         );
         if (!res.ok) { if (active) setFile(null); return; }
@@ -416,7 +355,7 @@ function useRelaxationAttachment({ resourceId, projectId, year, quarter, refresh
           size: blob.size,
           name:
             filenameFromDisposition(res.headers.get("content-disposition")) ||
-            `relaxation-Q${quarter}-${year}.${CD_EXT[type.toLowerCase()] || "bin"}`,
+            `relaxation-${String(activityId).slice(0, 8)}.${CD_EXT[type.toLowerCase()] || "bin"}`,
         });
       } catch {
         if (active) setFile(null);
@@ -426,13 +365,13 @@ function useRelaxationAttachment({ resourceId, projectId, year, quarter, refresh
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [resourceId, projectId, year, quarter, refreshKey, enabled]);
+  }, [resourceId, projectId, activityId, refreshKey, enabled]);
 
   return file;
 }
 
 /* ── which unpaid-leave dates can still be relaxed ────────────────────
-   GET /api/attendance/quarterly-relaxation/eligible-dates
+   GET /api/attendance/relaxation/eligible-dates
        ?resourceId=&projectId=&year=&quarter=
    → { unpaidFullDayDates, unpaidHalfDayDates, sandwichDates, allUnpaidDates,
        eligibleDates, approvedRelaxationDates, approvedRelaxationCost }
@@ -454,14 +393,12 @@ const DAY_KINDS = {
   sandwich: { weight: 1, label: "Sandwich", short: "1" },
 };
 
-function useEligibleRelaxationDates({ resourceId, projectId, year, quarter, refreshKey }) {
+function useEligibleRelaxationDates({ resourceId, projectId, activityId, refreshKey }) {
   const [data, setData] = useState({ options: [], approved: [], approvedCost: 0 });
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const y = parseYear(year);
-    const q = parseQuarter(quarter);
-    if (!resourceId || !projectId || y === null || q === null) {
+    if (!resourceId || !projectId || !activityId) {
       setData({ options: [], approved: [], approvedCost: 0 });
       return undefined;
     }
@@ -471,11 +408,12 @@ function useEligibleRelaxationDates({ resourceId, projectId, year, quarter, refr
       try {
         const token = getToken();
         const qs = new URLSearchParams({
-          resourceId: String(resourceId), projectId: String(projectId),
-          year: String(y), quarter: String(q),
+          resourceId: String(resourceId),
+          projectId: String(projectId),
+          activityId: String(activityId),
         });
         const res = await fetch(
-          `${API_BASE}/api/attendance/quarterly-relaxation/eligible-dates?${qs}`,
+          `${API_BASE}/api/attendance/relaxation/eligible-dates?${qs}`,
           { headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
         );
         if (!res.ok) throw new Error("unavailable");
@@ -511,7 +449,7 @@ function useEligibleRelaxationDates({ resourceId, projectId, year, quarter, refr
       }
     })();
     return () => { active = false; };
-  }, [resourceId, projectId, year, quarter, refreshKey]);
+  }, [resourceId, projectId, activityId, refreshKey]);
 
   return { ...data, loading };
 }
@@ -524,6 +462,10 @@ export default function LeaveDetailPage() {
 
   const year = params.get("year") || "";
   const quarter = params.get("quarter") || "";
+  /* The leave report is scoped to the resource's activity now. Year and
+     quarter are still read because the cost report and the relaxation
+     workflow below remain quarter-keyed. */
+  const activityId = params.get("activityId") || "";
 
   /* The URL is user-editable, so nothing is trusted from it. An invalid
      year/quarter is caught here instead of being echoed into three API
@@ -531,6 +473,10 @@ export default function LeaveDetailPage() {
   const paramError = useMemo(() => {
     if (!attendanceId) return "No employee was specified in the link.";
     if (!projectId) return "No project was specified in the link.";
+    // The leave report can't be fetched without it — see the fetch below.
+    if (!activityId) {
+      return "The link is missing an activity. Open this page from the Attendance table.";
+    }
     if (parseYear(year) === null) {
       return year
         ? `"${year}" isn't a valid year. Open this page from the Attendance table.`
@@ -542,7 +488,7 @@ export default function LeaveDetailPage() {
         : "The link is missing a quarter. Open this page from the Attendance table.";
     }
     return "";
-  }, [attendanceId, projectId, year, quarter]);
+  }, [attendanceId, projectId, activityId, year, quarter]);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -577,9 +523,14 @@ export default function LeaveDetailPage() {
       setError(null);
       try {
         const token = getToken();
-        const qs = new URLSearchParams({ year, quarter, projectId });
+        /* Scoped to the resource's activity, not to a quarter. The old
+           /api/reports/leave/{id}?year&quarter&projectId answers 400 for every
+           parameter shape now; this is its replacement, and it reports over
+           the activity's own window (windowStart..windowEnd) rather than a
+           calendar quarter. */
+        const qs = new URLSearchParams({ resourceId: attendanceId, activityId });
         const res = await fetch(
-          `${API_BASE}${ENDPOINTS.resources.leaveReport(attendanceId)}?${qs}`,
+          `${API_BASE}/api/attendance/leave-dates?${qs}`,
           {
             signal: controller.signal,
             headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -603,11 +554,26 @@ export default function LeaveDetailPage() {
   const d = data || {};
   const resourceId = d.resourceId || d.attendanceId || attendanceId;
 
-  // Fetch the quarterly cost report once we know the resourceId (comes back
-  // from the leave-detail payload) and have a year/quarter to query with.
+  /* Cost across the leave window, assembled a month at a time.
+
+     /api/attendance/cost/quarterly is gone (404). Its replacement,
+     /api/attendance/cost/employee, takes resourceId + year + month ONLY —
+     no activity, no date range (both answer 400) — and returns a FLAT single
+     month rather than the {resources, totals} envelope this page renders.
+
+     So each calendar month of the window is fetched and the envelope is built
+     here. A flat row already IS a monthlyBreakdown entry, and the summary
+     chain is the sum of its parts — verified against January 2026:
+     ₹1,36,064 monthlyRate − ₹13,167.48 deducted = ₹1,22,896.52 cost, and
+     3 unpaid × ₹4,389.16 per day is exactly that deduction. */
+  const costMonths = useMemo(
+    () => calendarMonthsBetween(d.windowStart, d.windowEnd),
+    [d.windowStart, d.windowEnd]
+  );
+
   useEffect(() => {
-    if (paramError || !resourceId) return undefined;
-    const FALLBACK = "Couldn't load the quarterly cost report.";
+    if (paramError || !resourceId || costMonths.length === 0) return undefined;
+    const FALLBACK = "Couldn't load the cost report.";
     let active = true;
     const controller = new AbortController();
     (async () => {
@@ -615,18 +581,60 @@ export default function LeaveDetailPage() {
       setCostError(null);
       try {
         const token = getToken();
-        const qs = new URLSearchParams({ resourceId, year, quarter });
-        const res = await fetch(`${API_BASE}/api/attendance/cost/quarterly?${qs}`, {
-          signal: controller.signal,
-          headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        const rows = await Promise.all(
+          costMonths.map(async (m) => {
+            const qs = new URLSearchParams({
+              resourceId: String(resourceId),
+              year: String(m.year),
+              month: String(m.month),
+            });
+            const res = await fetch(`${API_BASE}/api/attendance/cost/employee?${qs}`, {
+              signal: controller.signal,
+              headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            });
+            // A month the resource wasn't costed in is ordinary, not an error.
+            if (res.status === 404) return null;
+            if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+            return readJsonBody(res, FALLBACK);
+          })
+        );
+        const months = rows.filter((r) => r && typeof r === "object");
+        if (!active) return;
+        if (months.length === 0) { setCostReport({}); setCostTotals(null); return; }
+
+        const sum = (f) => months.reduce((t, m) => t + num(m[f]), 0);
+        /* plannedPeriodCost is the sum of the monthly rates — what the period
+           would have cost with nothing deducted — which is the figure the
+           cost-chain strip works back from. */
+        const report = {
+          attendanceId: months[0].attendanceId,
+          employeeName: months[0].employeeName,
+          projectId: months[0].projectId,
+          period: `${months[0].period} – ${months[months.length - 1].period}`,
+          calendarDays: sum("calendarDays"),
+          paidCalendarDays: sum("paidCalendarDays"),
+          unpaidLeaveDays: sum("unpaidLeaveDays"),
+          plannedPeriodCost: sum("monthlyRate"),
+          deductedAmount: sum("deductedAmount"),
+          periodCost: sum("cost"),
+          totalCost: sum("cost"),
+          relaxationCost: 0,
+          relaxationDays: 0,
+          monthlyBreakdown: months,
+        };
+        /* perDayCost is a rate, so it's re-derived from the totals rather than
+           summed — adding four per-day rates would be meaningless. */
+        report.perDayCost =
+          report.calendarDays > 0
+            ? Math.round((report.plannedPeriodCost / report.calendarDays) * 100) / 100
+            : 0;
+        setCostReport(report);
+        setCostTotals({
+          resourceCount: 1,
+          totalCost: report.totalCost,
+          totalDeductedAmount: report.deductedAmount,
+          totalRelaxationAmount: 0,
         });
-        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
-        const json = await readJsonBody(res, FALLBACK);
-        const { report, totals } = unwrapCostReport(json, resourceId);
-        if (active) {
-          setCostReport(report || {});
-          setCostTotals(totals);
-        }
       } catch (e) {
         const msg = requestErrorMessage(e, FALLBACK);
         if (active && msg) setCostError(msg);
@@ -635,29 +643,37 @@ export default function LeaveDetailPage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [resourceId, year, quarter, refreshKey, paramError]);
+  }, [resourceId, costMonths, refreshKey, paramError]);
 
   const employeeName = d.employeeName || attendanceId || "Employee";
   const unpaidLeave = num(d.unpaidLeave);
   const halfDayDates = Array.isArray(d.halfDayDates) ? d.halfDayDates : [];
   const sandwichDates = Array.isArray(d.sandwichDates) ? d.sandwichDates : [];
   /* A half day is a 0.5-weight modifier on a paid or unpaid day, never a
-     category of its own — so each one is folded into the bucket it belongs
-     to and `halfDayDates` stays purely the marker that says "this one counts
-     0.5". Which bucket that is has to be recovered now that the report sends
-     them disjoint from both lists — see assignHalfDays. Once merged, the
-     chip underline and the calendar's half-fill work unchanged.
+     category of its own — so each one is folded into the bucket it belongs to
+     and `halfDayDates` stays purely the marker that says "this one counts 0.5".
+     Once merged, the chip underline and the calendar's half-fill work unchanged.
 
-     sandwichDates, by contrast, IS its own category — non-working days
-     caught between leave days and charged as leave. */
-  const halfSplit = assignHalfDays(
-    halfDayDates, d.paidLeaveDates, d.unpaidLeaveDates, d.paidLeave
-  );
+     Which bucket each one belongs to is now STATED: `unpaidHalfDayDates` is the
+     unpaid subset, so the paid halves are simply the remainder. This used to be
+     recovered by re-running the settlement rule client-side (assignHalfDays,
+     now gone) because the response didn't say — an inference that had to
+     self-check against the full-day lists to be trusted at all.
+
+     Verified against resource 427: 4 paid full days + 4 halves at 0.5 = 6.0,
+     exactly the stated paidLeave, with no half date appearing in either
+     full-day list.
+
+     sandwichDates, by contrast, IS its own category — non-working days caught
+     between leave days and charged as leave. */
+  const unpaidHalfDates = Array.isArray(d.unpaidHalfDayDates) ? d.unpaidHalfDayDates : [];
+  const unpaidHalfSet = new Set(unpaidHalfDates.map(dateKey).filter(Boolean));
+  const paidHalfDates = halfDayDates.filter((x) => !unpaidHalfSet.has(dateKey(x)));
   const paidDates = withHalves(
-    Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [], halfSplit.paidHalves
+    Array.isArray(d.paidLeaveDates) ? d.paidLeaveDates : [], paidHalfDates
   );
   const unpaidDates = withHalves(
-    Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [], halfSplit.unpaidHalves
+    Array.isArray(d.unpaidLeaveDates) ? d.unpaidLeaveDates : [], unpaidHalfDates
   );
 
   /* How many relaxation days are already granted this quarter. There is no
@@ -673,8 +689,7 @@ export default function LeaveDetailPage() {
   const relaxDoc = useRelaxationAttachment({
     resourceId,
     projectId: d.projectId || projectId,
-    year: d.year || year,
-    quarter: d.quarter || quarter,
+    activityId: d.activityId || activityId,
     refreshKey,
     enabled: !paramError,
   });
@@ -856,7 +871,6 @@ export default function LeaveDetailPage() {
             paidDates={paidDates}
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
-            unassignedHalves={halfSplit.unassigned}
             sandwichDates={sandwichDates}
             year={d.year || year}
             quarter={d.quarter || quarter}
@@ -886,6 +900,7 @@ export default function LeaveDetailPage() {
         <RelaxationModal
           resourceId={resourceId}
           projectId={d.projectId || projectId}
+          activityId={d.activityId || activityId}
           year={d.year || year}
           quarter={d.quarter || quarter}
           hasDocument={!!relaxDoc}
@@ -1364,7 +1379,7 @@ function LeaveDatesSection({
 
 /* =====================================================================
    Quarterly Cost Report
-   GET /api/attendance/cost/quarterly?resourceId=&year=&quarter=
+   Built from /api/attendance/cost/employee, one call per calendar month
    Shape: { attendanceId, employeeName, projectId, period, calendarDays,
             plannedPeriodCost, perDayCost, unpaidLeaveDays, paidCalendarDays,
             deductedAmount, periodCost, relaxationDays, relaxationCost,
@@ -1708,7 +1723,7 @@ function CostReportSection({ loading, error, report, totals }) {
 
 /* =====================================================================
    Quarterly Relaxation — grants relaxation days against unpaid leave.
-   POST /api/attendance/quarterly-relaxation
+   POST /api/attendance/relaxation
    ===================================================================== */
 
 /* ── input validation ────────────────────────────────────────────────
@@ -1731,7 +1746,7 @@ function formatLeaveDate(raw) {
 /* The relaxation endpoint takes every field in the query string and the
    supporting image as the `attachment` part of a multipart body:
 
-     POST /api/attendance/quarterly-relaxation?resourceId=&projectId=
+     POST /api/attendance/relaxation?resourceId=&projectId=
           &year=&quarter=&relaxationDays=
      Content-Type: multipart/form-data   -F attachment=@proof.png
 
@@ -1896,7 +1911,7 @@ function RelaxationDocCard({ file }) {
   );
 }
 
-function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, onSuccess, onClose }) {
+function RelaxationModal({ resourceId, projectId, activityId, year, quarter, hasDocument, onSuccess, onClose }) {
   const [form, setForm] = useState({
     resourceId: resourceId || "",
     projectId: projectId || "",
@@ -1930,8 +1945,7 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
   } = useEligibleRelaxationDates({
     resourceId: form.resourceId,
     projectId: form.projectId,
-    year: form.year,
-    quarter: form.quarter,
+    activityId,
   });
 
   // Drop stale picks that fell out of the eligible list (e.g. Year/Quarter
@@ -1978,10 +1992,6 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
     if (!String(f.projectId || "").trim()) {
       errs.projectId = "This page has no project ID, so a relaxation can't be filed.";
     }
-    if (parseYear(f.year) === null) {
-      errs.year = `Enter a year between ${MIN_YEAR} and ${MAX_YEAR}.`;
-    }
-    if (parseQuarter(f.quarter) === null) errs.quarter = "Choose a quarter from 1 to 4.";
     if (!f.relaxationDates.length) {
       errs.relaxationDates = eligibleOptions.length
         ? "Choose at least one unpaid leave date to relax."
@@ -2025,10 +2035,6 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
     setAttachment(f);
   };
 
-  // True when the form points at a different period than the page is showing.
-  const periodChanged =
-    String(form.year) !== String(year) || Number(form.quarter) !== Number(quarter);
-
   const submit = async () => {
     if (saving) return;                       // guards a double-click / Enter twice
     setError(null);
@@ -2049,8 +2055,10 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
       const qs = new URLSearchParams({
         resourceId: String(form.resourceId).trim(),
         projectId: String(form.projectId).trim(),
-        year: String(parseYear(form.year)),
-        quarter: String(parseQuarter(form.quarter)),
+        /* Activity-scoped, like every other call in this family — the record
+           itself is per-activity now ("No relaxation record for X in activity
+           Y"), so year and quarter no longer identify anything. */
+        activityId: String(activityId),
         /* Comma-separated rather than a repeated key. Spring binds a
            comma-joined value to either `List<LocalDate>` or a plain `String`
            param; a repeated key only binds to the List form, so this is the
@@ -2064,7 +2072,7 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
       const body = new FormData();
       if (attachment) body.append("attachment", attachment, attachment.name);
 
-      const res = await fetch(`${API_BASE}/api/attendance/quarterly-relaxation?${qs}`, {
+      const res = await fetch(`${API_BASE}/api/attendance/relaxation?${qs}`, {
         method: "POST",
         headers: {
           accept: "*/*",
@@ -2125,35 +2133,6 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
                 <input id="relax-resourceId" className="ld-input" value={form.resourceId} disabled />
                 {fieldErrors.resourceId && <span className="ld-field-err">{fieldErrors.resourceId}</span>}
                 {fieldErrors.projectId && <span className="ld-field-err">{fieldErrors.projectId}</span>}
-              </label>
-              <label className="ld-field">
-                <span className="ld-field-lbl">Year</span>
-                {/* text + inputMode rather than type="number": a number input
-                    reports "" for an unparseable entry like "20e5", so the
-                    validator never sees what was actually typed. */}
-                <input
-                  id="relax-year"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={4}
-                  className={`ld-input${fieldErrors.year ? " is-bad" : ""}`}
-                  value={form.year}
-                  aria-invalid={!!fieldErrors.year}
-                  onChange={(e) => set({ year: e.target.value.replace(/[^\d]/g, "") })}
-                />
-                {fieldErrors.year && <span className="ld-field-err">{fieldErrors.year}</span>}
-              </label>
-              <label className="ld-field">
-                <span className="ld-field-lbl">Quarter</span>
-                <select
-                  id="relax-quarter"
-                  className={`ld-input${fieldErrors.quarter ? " is-bad" : ""}`}
-                  value={form.quarter}
-                  onChange={(e) => set({ quarter: Number(e.target.value) })}
-                >
-                  {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
-                </select>
-                {fieldErrors.quarter && <span className="ld-field-err">{fieldErrors.quarter}</span>}
               </label>
               {/* Checkboxes rather than a multiple <select>: a native
                   multi-select needs ctrl-click to pick a second date and gives
@@ -2274,16 +2253,6 @@ function RelaxationModal({ resourceId, projectId, year, quarter, hasDocument, on
                 replacing={hasDocument}
               />
             </div>
-
-            {/* Year and quarter are editable, so they can be pointed at a
-                period other than the one on screen. That's allowed, but it
-                silently files the grant elsewhere — so it's called out. */}
-            {periodChanged && (
-              <div className="ld-warn" role="status">
-                This will be filed against <strong>Q{form.quarter} {form.year}</strong>, not the
-                Q{quarter} {year} shown on this page.
-              </div>
-            )}
 
             {error && <div className="ld-error" role="alert">{error}</div>}
 
