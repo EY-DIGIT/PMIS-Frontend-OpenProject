@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
-import { loadMilestonesForProject, loadActivitiesForMilestone } from "../../api/milestoneConfigApi";
+import {
+  loadMilestonesForProject, loadActivitiesForMilestone, loadActivityById,
+} from "../../api/milestoneConfigApi";
 import {
   readErrorMessage, readJsonBody, requestErrorMessage, messageFromBody, notifyActionError,
   parseYear, parseQuarter, parseMonth, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
 } from "../../utils/apiMessage";
 import { rupeesInWords } from "../../utils/moneyWords";
 import { getToken } from "../../api/auth";
-import { API_BASE as GATEWAY_BASE, authorizedFetch, tokenStore } from "../../api/client";
+import { API_BASE as GATEWAY_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
 import "../../styles/global.css";
 
@@ -453,39 +455,6 @@ export default function ProjectAttendancePage() {
   // Attendance upload modal — the milestone is picked inside it.
   const [uploadOpen, setUploadOpen] = useState(false);
 
-  /* Organisation filter. Empty string = every organisation on the project,
-     which is what the page showed before this existed and so stays the
-     default. Kept separate from the upload modal's own organisation picker:
-     that one chooses who an upload is filed against, this one narrows what's
-     displayed, and conflating them would make opening the modal change the
-     table behind it. */
-  const [filterOrgs, setFilterOrgs] = useState([]);
-  const [filterOrgId, setFilterOrgId] = useState("");
-
-  useEffect(() => {
-    if (!projectId) return undefined;
-    let active = true;
-    (async () => {
-      try {
-        const res = await authorizedFetch(
-          `${GATEWAY_BASE}${ENDPOINTS.projects.get(projectId)}`,
-          { method: "GET", headers: { accept: "application/json" } }
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const raw = await res.json().catch(() => ({}));
-        const vendors = (raw?.data ?? raw)?.vendors;
-        const list = (Array.isArray(vendors) ? vendors : [])
-          .filter((v) => v && v.id)
-          .map((v) => ({ id: v.id, name: v.name || v.id }));
-        if (active) setFilterOrgs(list);
-      } catch {
-        // Non-fatal: the filter just doesn't appear and the page shows everyone.
-        if (active) setFilterOrgs([]);
-      }
-    })();
-    return () => { active = false; };
-  }, [projectId]);
-
   /* Which report is on screen. The two used to stack, so the page opened with
      two tables, two sets of metrics and two filter groups competing — one is
      picked here instead, and the toolbar's second filter follows the choice
@@ -741,11 +710,6 @@ export default function ProjectAttendancePage() {
           year: String(monthYear),
           month: String(monthNum),
         });
-        /* Sent on all three reports for consistency, but only the quarterly
-           attendance report acts on it today — see the note beside the
-           filter's own control. Harmless where it's ignored, and these start
-           filtering for free once the backend catches up. */
-        if (filterOrgId) qs.set("organisationId", filterOrgId);
         /* no-store on all three report fetches: the endpoints send no
            cache-control, so a re-request is at the browser's discretion —
            and a Refresh button that can be answered from cache isn't one. */
@@ -773,7 +737,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, monthYear, monthNum, selectedMonth, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, monthYear, monthNum, selectedMonth, paramError, refreshKey, view]);
 
   // Quarterly leave policy
   useEffect(() => {
@@ -801,8 +765,6 @@ export default function ProjectAttendancePage() {
               year: String(p.year),
               quarter: String(p.quarter),
             });
-            // The one report that genuinely filters on this today.
-            if (filterOrgId) qs.set("organisationId", filterOrgId);
             const res = await fetch(
               `${API_BASE}/api/attendance/report/quarterly?${qs}`,
               {
@@ -841,7 +803,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view]);
 
   /* Quarterly cost — per-resource ₹ for the same quarter, joined onto the
      attendance rows by attendanceId. `resourceId` is optional on this
@@ -869,7 +831,6 @@ export default function ProjectAttendancePage() {
               year: String(p.year),
               quarter: String(p.quarter),
             });
-            if (filterOrgId) qs.set("organisationId", filterOrgId);
             const res = await fetch(
               `${API_BASE}/api/attendance/cost/quarterly?${qs}`,
               {
@@ -907,7 +868,7 @@ export default function ProjectAttendancePage() {
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view, filterOrgId]);
+  }, [projectId, year, quarter, spanPeriods, paramError, refreshKey, view]);
 
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
@@ -1073,7 +1034,7 @@ export default function ProjectAttendancePage() {
      it. So when a filter is active the footer is summed from the rows actually
      displayed, which is the only figure that can agree with them. */
   const quarterlyCostTotal = useMemo(() => {
-    if (filterOrgId || filterActive) {
+    if (filterActive) {
       return quarterlyRows.reduce(
         (sum, emp) => sum + num(quarterlyCostById.get(String(emp.attendanceId))?.totalCost),
         0
@@ -1084,7 +1045,7 @@ export default function ProjectAttendancePage() {
     let sum = 0;
     quarterlyCostById.forEach((r) => { sum += num(r.totalCost); });
     return sum;
-  }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterOrgId, filterActive]);
+  }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterActive]);
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -1214,31 +1175,10 @@ export default function ProjectAttendancePage() {
               </select>
             </Field>
           )}
-          {/* Only rendered when the project actually has vendors to choose
-              between — a one-option filter asks for a decision that doesn't
-              exist. */}
-          {filterOrgs.length > 1 && (
-            <Field label="Organisation">
-              <select
-                className="att-select att-select--org"
-                value={filterOrgId}
-                onChange={(e) => setFilterOrgId(e.target.value)}
-                title={
-                  view === "monthly" && filterOrgId
-                    ? "The monthly report is not filtered by organisation yet"
-                    : "Narrow the report to one organisation"
-                }
-              >
-                {/* Reads like the Milestone and Activity placeholders beside
-                    it. Unlike those two it doesn't gate anything — leaving it
-                    unset still reports every organisation on the project. */}
-                <option value="">Select Organisation</option>
-                {filterOrgs.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </select>
-            </Field>
-          )}
+          {/* The Organisation filter is gone: an activity belongs to exactly
+              one vendor, so once one is chosen the organisation is already
+              decided. Keeping the control could only ever contradict the
+              activity and produce an empty table. */}
           {/* Month is the only period control left, and it offers just the
               months inside the chosen milestone's window — the value carries
               the year with it, because that window can cross one. The
@@ -1281,16 +1221,8 @@ export default function ProjectAttendancePage() {
           )}
         </div>
 
-        {/* Said out loud rather than left to be discovered: the monthly
-            endpoint accepts organisationId and ignores it, so the filter is
-            set but this table is still the whole project. Silently showing
-            everyone under an active filter would be the page lying. */}
-        {filterOrgId && (
-          <div className="att-note" role="status">
-            This monthly report isn’t filtered by organisation yet — it shows the
-            whole project team. The quarterly view does filter.
-          </div>
-        )}
+        {/* The "not filtered by organisation yet" caveat retired with the
+            filter itself — nothing asks the monthly endpoint to do that now. */}
         {/* The milestone/activity choice gates everything, so it's asked for
             before the month — picking a month first would load a table that
             the very next control empties again. */}
@@ -1775,11 +1707,31 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
   // A period from a previously-chosen activity can't survive a new one.
   useEffect(() => { setPeriod(""); }, [activityId]);
 
-  /* The organisation whose attendance this is — required by the upload, and
-     picked from the vendors linked to the project. */
+  /* The organisation is the activity's own vendor, not a choice — one is set
+     when the activity is created, so asking again could only ever file the
+     attendance against the wrong one. The project's vendor list is still
+     fetched, but purely to turn that id into a name worth reading.
+
+     The activity LIST endpoint returns summaries and may omit vendorId, so
+     the full record is fetched when it's missing rather than assumed absent. */
   const [orgs, setOrgs] = useState([]);
   const [orgsLoading, setOrgsLoading] = useState(true);
-  const [organisationId, setOrganisationId] = useState("");
+  const [activityVendorId, setActivityVendorId] = useState("");
+
+  useEffect(() => {
+    if (!activity) { setActivityVendorId(""); return undefined; }
+    if (activity.vendorId) { setActivityVendorId(activity.vendorId); return undefined; }
+    let active = true;
+    (async () => {
+      const full = await loadActivityById(activity.apiId).catch(() => null);
+      if (active) setActivityVendorId(full?.vendorId || "");
+    })();
+    return () => { active = false; };
+  }, [activity]);
+
+  const organisationId = activityVendorId;
+  const organisationName =
+    orgs.find((o) => String(o.id) === String(organisationId))?.name || "";
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -1858,14 +1810,9 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
         const list = (Array.isArray(vendors) ? vendors : [])
           .filter((v) => v && v.id)
           .map((v) => ({ id: v.id, name: v.name || v.id }));
-        if (!active) return;
-        setOrgs(list);
-        // Prefer the signed-in user's own organisation when it's on the
-        // project; otherwise fall back to the first linked vendor.
-        const own =
-          tokenStore.getUser()?.vendor_id || tokenStore.getUser()?.vendorId || "";
-        const preferred = list.find((o) => o.id === own) || list[0];
-        setOrganisationId(preferred ? preferred.id : "");
+        /* No default is chosen any more — the organisation comes from the
+           activity. This list is only a name lookup. */
+        if (active) setOrgs(list);
       } catch {
         // Non-fatal here — the picker stays empty and submit explains why.
         if (active) setOrgs([]);
@@ -1921,10 +1868,12 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
     } else if (!periodOptions.length) {
       errs.activity = "This activity has no start and end date, so there are no months to upload for.";
     }
-    if (!organisationId) {
-      errs.organisation = orgs.length === 0 && !orgsLoading
-        ? "No organisation is linked to this project. Add one on the project details page."
-        : "Choose the organisation this attendance belongs to.";
+    /* Every activity is created with an organisation, so this is a guard
+       against bad data rather than a step the user missed — worth saying
+       plainly, since the upload can't be filed without one. */
+    if (activityId && !organisationId) {
+      errs.organisation =
+        "This activity has no organisation set, so the upload can't be filed. Set one on the milestone configuration page.";
     }
     if (!period) {
       errs.period = "Choose the month this attendance covers.";
@@ -2159,23 +2108,20 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
                 </select>
                 {fieldErrors.activity && <span className="att-field-err">{fieldErrors.activity}</span>}
               </Field>
+              {/* Read-only: it comes from the activity. Still shown rather than
+                  hidden — an upload writes payroll-affecting data, so the
+                  vendor it lands against is worth naming before you commit,
+                  even though it isn't a decision. */}
               <Field label="Organisation">
-                <select
+                <div
                   id="upl-organisation"
-                  className={`att-select att-select--wide${fieldErrors.organisation ? " is-bad" : ""}`}
-                  value={organisationId}
-                  disabled={orgsLoading || orgs.length === 0}
-                  aria-invalid={!!fieldErrors.organisation}
-                  onChange={(e) => { setOrganisationId(e.target.value); setError(null); revalidate(); }}
+                  className={`att-static${fieldErrors.organisation ? " is-bad" : ""}`}
                 >
-                  {orgsLoading && <option value="">Loading…</option>}
-                  {!orgsLoading && orgs.length === 0 && (
-                    <option value="">No organisation available</option>
-                  )}
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>{o.name}</option>
-                  ))}
-                </select>
+                  {!activityId
+                    ? "Set by the activity"
+                    : organisationName ||
+                      (orgsLoading ? "Loading…" : organisationId || "Not set on this activity")}
+                </div>
                 {fieldErrors.organisation && <span className="att-field-err">{fieldErrors.organisation}</span>}
               </Field>
               {/* Monthly is the only type the API supports, so it's stated
