@@ -633,6 +633,14 @@ export default function LeaveDetailPage() {
 
      sandwichDates, by contrast, IS its own category — non-working days caught
      between leave days and charged as leave. */
+  /* The Sandwich Days card keys off a numeric total the report doesn't
+     reliably send — `sandwichDates` is the field that's actually populated,
+     and it's what paints the calendar's sandwich cells and the chip column.
+     Its length IS the count, so the card falls back to it rather than
+     showing an em dash for a figure the page already has in hand. Counted,
+     not weighted: a sandwich day is always a full day (see DAY_KINDS). */
+  const sandwichDays = d.sandwichDays ?? sandwichDates.length;
+
   const unpaidHalfDates = Array.isArray(d.unpaidHalfDayDates) ? d.unpaidHalfDayDates : [];
   const unpaidHalfSet = new Set(unpaidHalfDates.map(dateKey).filter(Boolean));
   const paidHalfDates = halfDayDates.filter((x) => !unpaidHalfSet.has(dateKey(x)));
@@ -810,7 +818,7 @@ export default function LeaveDetailPage() {
                   tone={c.tone}
                   icon={c.icon}
                   label={c.label}
-                  value={show(d[c.key])}
+                  value={show(c.key === "sandwichDays" ? sandwichDays : d[c.key])}
                   hint={HINTS[c.key]}
                 />
               ))}
@@ -1606,8 +1614,8 @@ function CostReportSection({ loading, error, report, totals }) {
                     that note a row reading "7 Jan → 6 Feb" beside a 2 looks
                     like a bug. */}
                 <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
-                <th className="ld-num" title="Total working days in the month, excluding weekends and holidays.">Working Days</th>
-                <th className="ld-num" title="Days the employee was present. Half days count as 0.5.">Present Days</th>
+                <th className="ld-num" title="Working days = calendar days − week offs − holidays. Note this is NOT the divisor behind Per Day Rate — money is spread over calendar days, not working days.">Working Days</th>
+                <th className="ld-num" title="Days present = full days present + (half days × 0.5).">Present Days</th>
                 <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
                 {/* The two halves of Total Leave. Unpaid leads because it is
                     the one that costs money — it reads straight across into
@@ -1619,12 +1627,12 @@ function CostReportSection({ loading, error, report, totals }) {
                 {/* The days actually charged. Sent by the server as
                     billableDays; it equals calendar days less unpaid leave,
                     and is the day-count counterpart of Deducted Amount. */}
-                <th className="ld-num" title="Days actually billed for this period — calendar days less unpaid leave.">Billable Days</th>
+                <th className="ld-num" title="Days billed to the client = calendar days − unpaid leave days. Paid leave and holidays stay billable. Example: 31 − 1 = 30.">Billable Days</th>
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
-                <th className="ld-num" title="Monthly rate divided by the calendar days in the month — not the working days. January: ₹1,98,434 ÷ 31 = ₹6,401.10.">Per Day Rate</th>
+                <th className="ld-num" title="Daily rate = monthly rate ÷ calendar days in that month — not the working days. So the same monthly rate is worth less per day in a long month. January (31 days): ₹1,75,600 ÷ 31 = ₹5,664.52. February (28 days): ₹1,75,600 ÷ 28 = ₹6,271.43.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
-                <th className="ld-num" title="Unpaid days for the month charged at the per-day rate. This is the one figure that crosses from the attendance half of the table into the cost half.">Deducted Amount</th>
-                <th className="ld-num" title="Monthly rate minus the deducted amount — what is billable for the month.">Cost</th>
+                <th className="ld-num" title="Amount deducted for unpaid leave = unpaid leave days × daily rate. This is the one figure that crosses from the attendance half of the table into the cost half. Example (February, 1 unpaid day): 1 × ₹6,271.43 = ₹6,271.43.">Deducted Amount</th>
+                <th className="ld-num" title="Billable cost = billable days × daily rate — the same as the full month's cost minus the unpaid-leave deduction. Example (February): 27 × ₹6,271.43 = ₹1,69,328.57.">Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -1697,7 +1705,7 @@ function CostReportSection({ loading, error, report, totals }) {
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Subtotal</td>
+                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl" title="Period cost = the sum of every cycle's Cost above, before relaxation is added.">Subtotal</td>
                     <td className="ld-num" title={rupeesInWords(monthsSubtotal)}>{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
@@ -1714,7 +1722,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 </>
               )}
               <tr>
-                <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">Total Cost</td>
+                <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl" title="Total cost = period cost + relaxation cost, where period cost is the sum of every cycle's Cost above.">Total Cost</td>
                 <td className="ld-num ld-costtable-cost" title={rupeesInWords(report.totalCost)}>
                   {money(report.totalCost)}
                 </td>

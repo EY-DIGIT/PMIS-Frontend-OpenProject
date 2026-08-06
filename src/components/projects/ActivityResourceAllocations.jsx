@@ -192,8 +192,16 @@ export default function ActivityResourceAllocations({
                 <th style={{ ...headStyle, minWidth: 190 }}>Designation</th>
                 <th style={{ ...headStyle, width: 90 }}>Qty</th>
                 <th style={{ ...headStyle, width: 110 }}>Duration (mo)</th>
-                <th style={{ ...headStyle, width: 130 }}>Monthly Rate</th>
-                <th style={{ ...headStyle, width: 130 }}>Cost</th>
+                <th style={{ ...headStyle, width: 130 }} title="Rate-card rate for this designation, per resource per month.">Monthly Rate</th>
+                {/* The planned budget, not what gets billed — attendance has no
+                    say in it. The formula is on the tooltip because the three
+                    inputs are all in this row, so a reader can check it. */}
+                <th
+                  style={{ ...headStyle, width: 130 }}
+                  title="Planned cost for this designation = monthly rate × planned months × number of resources. Example: 2,11,982 × 3 × 2 = ₹12,71,892."
+                >
+                  Cost
+                </th>
                 <th style={{ ...headStyle, width: 40 }} />
               </tr>
             </thead>

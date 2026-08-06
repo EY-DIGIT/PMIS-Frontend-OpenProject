@@ -1094,6 +1094,29 @@ function AttendanceTable({
      a cost payload was actually joined in — the monthly table is unchanged. */
   const showCost = !!costById && costById.size > 0;
   const costFor = (emp) => (showCost ? costById.get(String(emp.attendanceId)) : null);
+
+  /* Billable days for a row. The cost payload states this per month, not per
+     resource, so a row's figure is the sum of its bands — the same numbers
+     the leave-detail table lists month by month. Only months that actually
+     carry the field are counted: summing over months that don't would report
+     a confident 0 for a figure the server never sent. */
+  const billableDaysOf = (c) => {
+    if (!c) return null;
+    if (c.billableDays != null) return num(c.billableDays);
+    const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
+    const stated = months.filter((m) => m?.billableDays != null);
+    if (!stated.length) return null;
+    return stated.reduce((t, m) => t + num(m.billableDays), 0);
+  };
+  /* Half days make these fractional, so 21.5 has to survive — but 21.0 should
+     read as 21 rather than as a suspiciously precise 21.00. */
+  const days = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+  /* A column of dashes says less than no column — same rule as Joined. */
+  const showBillable =
+    showCost && employees.some((e) => billableDaysOf(costFor(e)) != null);
+  const billableTotal = employees.reduce(
+    (t, e) => t + (billableDaysOf(costFor(e)) ?? 0), 0
+  );
   // The report now splits leave into paid/unpaid and leaves `leaveDays` at 0.
   // Older payloads only carry `leaveDays`, so pick whichever the rows have.
   const splitLeave = employees.some(
@@ -1157,8 +1180,8 @@ function AttendanceTable({
               {/* The dates behind the count sit on both the header and each
                   cell — whichever the pointer lands on, the answer is there. */}
               <th className="att-th att-num" title={holidayTitle}>Holiday</th>
-              <th className="att-th att-num">Working</th>
-              <th className="att-th att-num">Present</th>
+              <th className="att-th att-num" title="Working days = calendar days − week offs − holidays. This is the denominator of Attendance %.">Working</th>
+              <th className="att-th att-num" title="Days present = full days present + (half days × 0.5).">Present</th>
               {/* Half-day column withdrawn — half days already count as 0.5
                   inside Present, so the separate tally was double-reporting. */}
               {/* Total first, then the split it breaks into — "6 taken, of
@@ -1173,8 +1196,30 @@ function AttendanceTable({
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
-              <th className="att-th att-num att-th-att">Attendance</th>
-              {showCost && <th className="att-th att-num">Cost</th>}
+              <th
+                className="att-th att-num att-th-att"
+                title="Attendance % = (present days + paid leave) ÷ working days × 100. Half days count as 0.5; weekends and holidays are excluded from working days. Example: (46 present + 6 paid) ÷ 59 × 100 = 88.14%."
+              >
+                Attendance
+              </th>
+              {/* Sits next to Cost because it belongs to it: these are the days
+                  the amount is charged over, not an attendance count. */}
+              {showBillable && (
+                <th
+                  className="att-th att-num"
+                  title="Days billed to the client = calendar days − unpaid leave days. Paid leave and holidays stay billable. Summed across the period's monthly bands."
+                >
+                  Billable Days
+                </th>
+              )}
+              {showCost && (
+                <th
+                  className="att-th att-num"
+                  title="Billable cost = billable days × daily rate, where the daily rate is the monthly rate ÷ that month's calendar days. Equivalently, the planned month cost minus the unpaid-leave deduction, summed across the period."
+                >
+                  Cost
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -1254,6 +1299,14 @@ function AttendanceTable({
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
+                {showBillable && (() => {
+                  const b = billableDaysOf(costFor(emp));
+                  return (
+                    <td className={`att-td att-num${b == null ? " att-dim" : ""}`}>
+                      {b == null ? "—" : days(b)}
+                    </td>
+                  );
+                })()}
                 {showCost && (() => {
                   const c = costFor(emp);
                   return (
@@ -1290,6 +1343,12 @@ function AttendanceTable({
                 >
                   Total for {period}
                 </td>
+                {/* Its own cell rather than another term in the colSpan above —
+                    the days total is worth stating, and folding it into the
+                    label would push the cost total a column off Cost. */}
+                {showBillable && (
+                  <td className="att-td att-num att-strong">{days(billableTotal)}</td>
+                )}
                 <td
                   className="att-td att-num att-strong att-cost-total"
                   title={rupeesInWords(costTotal)}
@@ -1383,11 +1442,16 @@ function MetricsRow({ metrics, costTotal }) {
           compact
         />
       )}
+      {/* The caveat matters more than the formula here: this is a mean OF
+          percentages, so a resource who worked three days counts as much as
+          one who worked the whole quarter. Anyone reading it as "the team's
+          attendance" would be reading it as the wrong thing. */}
       <StatCard
         label="Avg attendance"
         value={`${metrics.avg.toFixed(1)}%`}
         sub={`${attTone(metrics.avg).label} overall`}
         tone={attTone(metrics.avg).color}
+        title="The average of every listed resource's attendance percentage. Each resource counts equally regardless of how many days they worked — it is not recomputed from the team's summed days."
       />
       <StatCard label="Present" value={metrics.present} sub="days across team" />
       {metrics.paidLeave != null && (
