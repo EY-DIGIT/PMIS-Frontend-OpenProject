@@ -840,7 +840,10 @@ export default function LeaveDetailPage() {
                     here would be the same fact in two places on one screen. */}
                 <InfoItem tone="purple" icon={<FiHash />} label="Attendance ID" value={show(d.attendanceId || attendanceId)} />
                 <InfoItem tone="blue" icon={<FiBriefcase />} label="Project Name" value={show(d.projectName || project?.projectName)} />
-                <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={show(d.joiningDate)} />
+                {/* Formatted, not raw — the cost report's header states the
+                    same date, and one page showing it two ways reads as two
+                    different dates. */}
+                <InfoItem tone="green" icon={<FiCalendar />} label="Joining Date" value={formatBandDate(d.joiningDate) || show(d.joiningDate)} />
                 {CONTEXT_CARDS.map((c) => (
                   <InfoItem key={c.key} tone={c.tone} icon={c.icon} label={c.label} value={show(d[c.key])} />
                 ))}
@@ -873,6 +876,7 @@ export default function LeaveDetailPage() {
               error={costError}
               report={costReport}
               totals={costTotals}
+              joiningDate={d.joiningDate}
             />
           </section>
         </>
@@ -1512,7 +1516,7 @@ function CostChain({
   );
 }
 
-function CostReportSection({ loading, error, report, totals }) {
+function CostReportSection({ loading, error, report, totals, joiningDate }) {
   if (loading) return <div className="ld-muted">Loading cost report…</div>;
   if (error) return <div className="ld-error">⚠️ {error}</div>;
   if (!report || typeof report !== "object" || Object.keys(report).length === 0) {
@@ -1549,6 +1553,12 @@ function CostReportSection({ loading, error, report, totals }) {
   const relaxationDays = num(report.relaxationDays);
   const monthsSubtotal = months.reduce((t, m) => t + num(m.cost), 0);
 
+  /* Prefer the leave report's date, falling back to the cost row's own if it
+     carries one. formatBandDate because the two endpoints disagree on format
+     — dd-MM-yyyy here, yyyy-MM-dd there — and it reads both; `new Date` would
+     take "07-01-2026" as 1 July and say so with a straight face. */
+  const joinedLabel = formatBandDate(joiningDate ?? report.joiningDate);
+
   /* Older payloads omit plannedPeriodCost; the chain still closes without it
      because it's whatever the total was worked back from. */
   const totalCost = num(report.totalCost);
@@ -1583,10 +1593,22 @@ function CostReportSection({ loading, error, report, totals }) {
                   days against a rate divided by 31, and can't. The band says
                   outright that they don't meet. */}
               <tr className="ld-costtable-grouprow">
-                {/* Period, the two band dates and Calendar Days — all of which
-                    say WHICH days this row is about, before either group
-                    starts counting them. */}
-                <th colSpan={2 + (showBand ? 2 : 0)} />
+                {/* The band dates and Calendar Days — which say WHICH days this
+                    row is about, before either group starts counting them.
+
+                    The joining date rides here rather than in a column: it's
+                    one fact about the employee, not a per-month figure, so a
+                    column would repeat it down every row. Sitting over the date
+                    columns is also where it explains something — a first band
+                    with fewer Calendar Days than its span is someone who joined
+                    partway through it. */}
+                <th colSpan={showBand ? 3 : 2} className="ld-costtable-joined">
+                  {joinedLabel && (
+                    <span title="The date this employee joined the project. A band that starts before this date is billed only from the joining date, which is why its Calendar Days can be fewer than the span.">
+                      Joined {joinedLabel}
+                    </span>
+                  )}
+                </th>
                 <th colSpan={5} className="ld-costtable-group">Attendance · working days</th>
                 {/* Rate Year and Billable Days sit on this side: one picks the
                     monthly rate, the other is the day-count counterpart of
@@ -1595,7 +1617,11 @@ function CostReportSection({ loading, error, report, totals }) {
                 <th colSpan={6} className="ld-costtable-group ld-costtable-group--cost">Cost · calendar days</th>
               </tr>
               <tr>
-                <th title="The month this row covers.">Period</th>
+                {/* Dropped: Start and End Date name the row better than a month
+                    label can, since a band can run 7th-to-6th. It survives only
+                    as the fallback for a payload that carries no band dates at
+                    all — without it those rows would have nothing naming them. */}
+                {!showBand && <th title="The month this row covers.">Period</th>}
                 {showBand && (
                   <>
                     {/* The band this month is rated over. Worth a column of its
@@ -1640,7 +1666,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 const leave = monthLeave(m);
                 return (
                 <tr key={i}>
-                  <td className="ld-costtable-period">{show(m.period)}</td>
+                  {!showBand && <td className="ld-costtable-period">{show(m.period)}</td>}
                   {showBand && (
                     <>
                       <td className="ld-costtable-band">{formatBandDate(m.fromDate) || "—"}</td>
@@ -1695,21 +1721,20 @@ function CostReportSection({ loading, error, report, totals }) {
             </tbody>
             <tfoot>
               {/* Every footer label spans everything up to Cost, so the figure
-                  lands under it: ten fixed body columns minus Cost, plus the
-                  two band columns when they're shown. Derived rather than
-                  written out three times — the Total Cost row had been left at
-                  a stale 8 when Calendar Days was added, which pushed its
-                  figure a column left of the one it totals. Restoring the
-                  commented-out Attendance % / HalfDay Amount columns needs a
-                  +1 each here. */}
+                  lands under it — 13 columns with the band dates shown, 12 with
+                  the Period fallback instead. Written once rather than three
+                  times: the Total Cost row had been left at a stale 8 when
+                  Calendar Days was added, which pushed its figure a column left
+                  of the one it totals. Restoring the commented-out Attendance %
+                  / HalfDay Amount columns needs a +1 each here. */}
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl" title="Period cost = the sum of every cycle's Cost above, before relaxation is added.">Subtotal</td>
+                    <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl" title="Period cost = the sum of every cycle's Cost above, before relaxation is added.">Subtotal</td>
                     <td className="ld-num" title={rupeesInWords(monthsSubtotal)}>{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl">
+                    <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -1722,7 +1747,7 @@ function CostReportSection({ loading, error, report, totals }) {
                 </>
               )}
               <tr>
-                <td colSpan={12 + (showBand ? 2 : 0)} className="ld-costtable-totallbl" title="Total cost = period cost + relaxation cost, where period cost is the sum of every cycle's Cost above.">Total Cost</td>
+                <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl" title="Total cost = period cost + relaxation cost, where period cost is the sum of every cycle's Cost above.">Total Cost</td>
                 <td className="ld-num ld-costtable-cost" title={rupeesInWords(report.totalCost)}>
                   {money(report.totalCost)}
                 </td>
@@ -2610,6 +2635,10 @@ const LD_CSS = `
 .ld-costtable-group::after { content: ""; display: block; height: 2px; margin-top: 5px;
   border-radius: 2px; background: ${C.borderStrong}; }
 .ld-costtable-group--cost::after { background: ${C.primary}; opacity: .35; }
+/* Deliberately quieter than the two group labels beside it: it qualifies the
+   table rather than naming a half of it, so it reads as a note, not a heading. */
+.ld-costtable-joined { text-align: left; font-size: 10px; font-weight: 600;
+  letter-spacing: .04em; color: ${C.muted}; white-space: nowrap; }
 .ld-costtable-period { font-weight: 600; }
 /* The band dates qualify the Period beside them rather than standing on their
    own, so they sit a step back from it in weight. */

@@ -1340,6 +1340,10 @@ export default function ProjectFinancePage() {
      arrow. The collapse/expand control is a vertically-centered handle on
      the panel's edge. */
   const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+  /* Held here, not in the pad, so the running value survives the summary
+     being collapsed — the calculator re-renders in a different place, but
+     it's the same calculator. */
+  const calc = useCalculator();
 
   /* Clicking a phase's "Scheduled: n%" chip in Payment Terms opens the
      Financial Summary and jumps to that phase's card in it. `tick` bumps on
@@ -1954,6 +1958,19 @@ export default function ProjectFinancePage() {
     return name.split(/\s[-–—]\s/)[0].trim() || name;
   }
 
+  /* Milestone id → its index in the project's milestone list, which the
+     server returns in deliverable order (D1, D2, … D11).
+
+     Payment terms do NOT come back in that order: the backend numbers
+     `position` in milestone-UUID order, so phase 1 arrives as D6, D1, D5,
+     D4, D2, D3, … Sorting the rows by this map puts the schedule back in
+     deliverable order, which is also (near enough) date order. */
+  const milestoneOrder = useMemo(() => {
+    const m = new Map();
+    milestones.forEach((ms, i) => m.set(ms.id, i));
+    return m;
+  }, [milestones]);
+
   function milestoneStatus(id) {
     return milestones.find((m) => m.id === id)?.status || "Not Completed";
   }
@@ -2341,6 +2358,7 @@ export default function ProjectFinancePage() {
                     allPhases={phases}
                     milestoneName={milestoneName}
                     milestoneStatus={milestoneStatus}
+                    milestoneOrder={milestoneOrder}
                     frequencies={frequencies}
                     carryMethods={carryMethods}
                     projectFrequencyCode={page?.frequencyCode || ""}
@@ -2452,7 +2470,20 @@ export default function ProjectFinancePage() {
             <span aria-hidden="true" style={{ fontSize: 14 }}>◀</span>
             <span className="uidai-pmis-finance-reopen-label">Financial Summary</span>
           </button>
-        ) : (
+        ) : null}
+
+        {/* Fully independent of the summary: one always-mounted floating
+            panel, parked bottom-right and draggable anywhere. Fixed, so it
+            claims no grid row whether the summary is open or closed. */}
+        <CalculatorPanel calc={calc} />
+
+        {!summaryCollapsed && (
+          /* One grid cell holding two independent cards: the Financial
+             Summary, and the Calculator as its own panel beneath it. The
+             aside owns the sticky positioning and the height budget, so the
+             summary shrinks (its body already scrolls) when the calculator
+             is opened instead of pushing it below the fold. */
+          <aside className="uidai-pmis-finance-aside">
           <div className="uidai-pmis-finance-summary">
             <button
               type="button"
@@ -2490,6 +2521,7 @@ export default function ProjectFinancePage() {
               />
             </div>
           </div>
+          </aside>
         )}
       </div>
 
@@ -3140,6 +3172,8 @@ function PhasePanel({
   frequencies = [], carryMethods = [], projectFrequencyCode = "",
   onEditTerm, onEditActivities, onApplyFrequency,
   onSaveLdBasis, ldBasisBusy = false,
+  /* milestoneId → deliverable-order index, used to sort the term rows. */
+  milestoneOrder = new Map(),
   /* Ids of the resource-cost cost items — a term pointing at one is a
      resource-based milestone (see the note where this is built). */
   resourceCostItemIds = new Set(),
@@ -3173,7 +3207,19 @@ function PhasePanel({
      rows from the recurring cost items so the milestone renders here just like
      the other cost types. If the backend ever emits real payment terms for
      recurring costs, realTerms wins and this synthesis is skipped. */
-  const realTerms = phase.paymentTerms || [];
+  /* Ordered by milestone (D1, D2, D3 …), not by the `position` the backend
+     assigns — that one runs in milestone-UUID order, so the schedule arrived
+     shuffled (D6, D1, D5, D4, …). Milestones missing from the list sort last
+     rather than jumping to the front, and `position` breaks any tie so the
+     order stays stable. This also fixes the running "Remaining" balance,
+     which accumulates down the rows as displayed. */
+  const orderOf = (t) => {
+    const idx = milestoneOrder.get(t?.milestoneId);
+    return Number.isInteger(idx) ? idx : Number.MAX_SAFE_INTEGER;
+  };
+  const realTerms = [...(phase.paymentTerms || [])].sort(
+    (a, b) => orderOf(a) - orderOf(b) || (Number(a.position) || 0) - (Number(b.position) || 0)
+  );
   const phaseCostItems = (costItems || []).filter((c) => c.phase === phase.phase);
   const recurringItems = phaseCostItems.filter((c) => c.costTypeCode === "recurring_cost");
   const terms = realTerms.length
@@ -4121,6 +4167,343 @@ function PhasePanel({
           onSetOneTime(phase.phase, cfg);
         }}
       />
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   CalculatorPanel — a plain arithmetic pad at the foot of the summary
+   column, for the sums people were doing in a separate app while reading
+   these figures (a phase's share, a tax add-on, a leftover split).
+
+   Percent follows the familiar calculator convention rather than a bare
+   ÷100, because the common question here is "what is 5% of this base":
+     69301400 × 5 % =  →  3465070      (percent OF the pending amount)
+     4500 + 18 %     =  →  5310        (adds 18% of 4500)
+     25 %            =  →  0.25        (nothing pending → plain ÷100)
+
+   Collapsed by default, and independent of the Financial Summary: hiding
+   that panel must not take the calculator with it.
+
+   The state lives in this hook, held by the PAGE, because the pad renders in
+   two different places — docked in the aside while the summary is open, and
+   floating at the bottom-right corner once it's collapsed. Only one is
+   mounted at a time, so keeping the state above them means collapsing the
+   summary mid-sum doesn't wipe the number on screen.
+   ────────────────────────────────────────────────────────────────── */
+function useCalculator() {
+  const [open, setOpen] = useState(false);
+  /* `entry` is the number being typed, kept as a STRING so "12." and a
+     trailing zero survive until the next keypress. `acc` + `op` hold the
+     pending left-hand side. */
+  const [entry, setEntry] = useState("0");
+  const [acc, setAcc] = useState(null);
+  const [op, setOp] = useState(null);
+  /* After "=" or an operator, the next digit starts a fresh entry rather
+     than appending to the result on screen. */
+  const [fresh, setFresh] = useState(true);
+  const [error, setError] = useState("");
+
+  const value = Number(entry) || 0;
+
+  /* Group the integer part en-IN while leaving the decimals exactly as
+     typed — formatting the whole string would eat a trailing ".". */
+  const display = (() => {
+    if (error) return error;
+    const neg = entry.startsWith("-");
+    const bare = neg ? entry.slice(1) : entry;
+    const [int, dec] = bare.split(".");
+    const grouped = Number(int || 0).toLocaleString("en-IN");
+    return `${neg ? "-" : ""}${grouped}${dec !== undefined ? `.${dec}` : ""}`;
+  })();
+
+  function reset() {
+    setEntry("0"); setAcc(null); setOp(null); setFresh(true); setError("");
+  }
+
+  function apply(a, b, operator) {
+    switch (operator) {
+      case "+": return a + b;
+      case "-": return a - b;
+      case "*": return a * b;
+      case "/": return b === 0 ? NaN : a / b;
+      default: return b;
+    }
+  }
+
+  function pushDigit(d) {
+    if (error) { reset(); }
+    setEntry((cur) => {
+      const base = (fresh || error) ? "" : (cur === "0" ? "" : cur);
+      return `${base}${d}`;
+    });
+    setFresh(false);
+  }
+
+  function pushDot() {
+    if (error) { reset(); }
+    setEntry((cur) => {
+      if (fresh || error) return "0.";
+      return cur.includes(".") ? cur : `${cur}.`;
+    });
+    setFresh(false);
+  }
+
+  function chooseOp(next) {
+    if (error) return;
+    /* Chaining (2 + 3 + …) folds the pending operation first, so the
+       display always shows the running result. */
+    if (op != null && acc != null && !fresh) {
+      const result = apply(acc, value, op);
+      if (!Number.isFinite(result)) { setError("Cannot divide by zero"); return; }
+      setAcc(result);
+      setEntry(String(result));
+    } else {
+      setAcc(value);
+    }
+    setOp(next);
+    setFresh(true);
+  }
+
+  function equals() {
+    if (error || op == null || acc == null) return;
+    const result = apply(acc, value, op);
+    if (!Number.isFinite(result)) { setError("Cannot divide by zero"); return; }
+    setEntry(String(result));
+    setAcc(null);
+    setOp(null);
+    setFresh(true);
+  }
+
+  function percent() {
+    if (error) return;
+    /* + and − take the entry as a percentage OF the pending amount
+       (4500 + 18% = 5310); × and ÷ take it as a plain fraction
+       (69301400 × 5% = 3465070). */
+    const next = (acc != null && (op === "+" || op === "-"))
+      ? (acc * value) / 100
+      : value / 100;
+    setEntry(String(next));
+    setFresh(false);
+  }
+
+  function backspace() {
+    if (error) { reset(); return; }
+    if (fresh) return;
+    setEntry((cur) => (
+      cur.length <= 1 || (cur.length === 2 && cur.startsWith("-")) ? "0" : cur.slice(0, -1)
+    ));
+  }
+
+  /* Keyboard works only while the pad has focus — a window-level listener
+     would swallow digits typed into the page's own inputs. */
+  function onKeyDown(e) {
+    const k = e.key;
+    if (/^[0-9]$/.test(k)) pushDigit(k);
+    else if (k === "." || k === ",") pushDot();
+    else if (["+", "-", "*", "/"].includes(k)) chooseOp(k);
+    else if (k === "Enter" || k === "=") equals();
+    else if (k === "Backspace") backspace();
+    else if (k === "Escape") reset();
+    else if (k === "%") percent();
+    else return;
+    e.preventDefault();
+  }
+
+  return {
+    open, setOpen, display, error, value, acc, op,
+    onKeyDown, reset, backspace, percent, chooseOp, equals, pushDigit, pushDot,
+  };
+}
+
+/* The pad itself — a floating window parked bottom-right, draggable by its
+   header. State comes from useCalculator() in the page.
+
+   Position starts as null, meaning "wherever the stylesheet parks it"
+   (bottom-right). The first drag switches to explicit left/top coordinates;
+   until then the panel keeps its corner anchoring and so survives a window
+   resize without any JS. */
+function CalculatorPanel({ calc }) {
+  const {
+    open, setOpen, display, error, value, acc, op,
+    onKeyDown, reset, backspace, percent, chooseOp, equals, pushDigit, pushDot,
+  } = calc;
+
+  const cardRef = useRef(null);
+  const [pos, setPos] = useState(null);      // { x, y } — viewport top-left
+  const [dragging, setDragging] = useState(false);
+  /* Grab offset + whether the pointer actually travelled. Held in a ref
+     because the move handler must not re-render on every pixel. */
+  const dragRef = useRef(null);
+
+  const MARGIN = 8;
+  const clamp = (x, y, w, h) => ({
+    x: Math.min(Math.max(x, MARGIN), Math.max(MARGIN, window.innerWidth - w - MARGIN)),
+    y: Math.min(Math.max(y, MARGIN), Math.max(MARGIN, window.innerHeight - h - MARGIN)),
+  });
+
+  /* A window that has been dragged can end up off-screen when the viewport
+     shrinks (or the pad is expanded); pull it back into view. */
+  useEffect(() => {
+    if (!pos) return undefined;
+    const onResize = () => {
+      const el = cardRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPos((p) => (p ? clamp(p.x, p.y, r.width, r.height) : p));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [pos]);
+
+  function onHeaderPointerDown(e) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const el = cardRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    dragRef.current = {
+      dx: e.clientX - r.left, dy: e.clientY - r.top,
+      startX: e.clientX, startY: e.clientY, moved: false,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onHeaderPointerMove(e) {
+    const d = dragRef.current;
+    if (!d) return;
+    /* A few pixels of slop, so a click that wobbles still counts as a click
+       on the expand/collapse header rather than a drag. */
+    if (!d.moved && Math.abs(e.clientX - d.startX) + Math.abs(e.clientY - d.startY) < 4) return;
+    if (!d.moved) { d.moved = true; setDragging(true); }
+    const el = cardRef.current;
+    const r = el ? el.getBoundingClientRect() : { width: 288, height: 48 };
+    setPos(clamp(e.clientX - d.dx, e.clientY - d.dy, r.width, r.height));
+  }
+
+  function onHeaderPointerUp(e) {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDragging(false);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    // Only a genuine click (no travel) toggles the pad.
+    if (d && !d.moved) setOpen((v) => !v);
+  }
+
+  const key = (label, onClick, tone) => (
+    <button
+      type="button"
+      onClick={onClick}
+      /* Not tab-stops: the container holds focus so the keyboard keeps
+         working after a click, instead of Enter re-firing the last button. */
+      tabIndex={-1}
+      style={{
+        padding: "9px 0", fontSize: 14, fontWeight: 700, cursor: "pointer",
+        borderRadius: 7, border: "1px solid var(--uidai-pmis-border)",
+        background: tone === "op" ? "#eef3fb" : tone === "eq" ? "#173e77" : "#fff",
+        color: tone === "eq" ? "#fff" : tone === "clear" ? "#b3261e" : "#173e77",
+        fontFamily: "inherit",
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    /* Its own floating card — never a section inside the Financial Summary.
+       Once dragged, explicit left/top replace the stylesheet's bottom-right
+       anchoring (right/bottom must be cleared or both edges would apply). */
+    <div
+      ref={cardRef}
+      className={`uidai-pmis-finance-calc${dragging ? " is-dragging" : ""}`}
+      style={pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : undefined}
+    >
+      {/* Header doubles as the drag handle and the expand toggle — a press
+          that travels moves the window, a press that doesn't opens it. */}
+      <button
+        type="button"
+        onPointerDown={onHeaderPointerDown}
+        onPointerMove={onHeaderPointerMove}
+        onPointerUp={onHeaderPointerUp}
+        onPointerCancel={onHeaderPointerUp}
+        aria-expanded={open}
+        title="Drag to move"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          width: "100%", padding: "12px 16px",
+          cursor: dragging ? "grabbing" : "grab",
+          border: "none", background: "transparent", color: "#173e77",
+          fontFamily: "inherit", borderRadius: 12,
+          fontSize: 13, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase",
+          touchAction: "none",   // let the pointer handlers own touch drags
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span aria-hidden="true" style={{ color: "#9db0cb", letterSpacing: 1 }}>⠿</span>
+          Calculator
+        </span>
+        <span aria-hidden="true" style={{ fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+      </button>
+
+      {open && (
+        <div
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+          style={{
+            padding: "0 16px 16px",
+            borderTop: "1px solid var(--uidai-pmis-border)",
+            paddingTop: 12,
+          }}
+        >
+          <div
+            style={{
+              padding: "8px 10px", borderRadius: 6,
+              background: "#f1f6fd", textAlign: "right",
+              fontSize: error ? 12 : 17, fontWeight: 800,
+              color: error ? "#b3261e" : "#173e77",
+              overflowX: "auto", whiteSpace: "nowrap",
+            }}
+          >
+            {display}
+          </div>
+          {/* The pending operation while one is open, the amount in words
+              otherwise — the same hint the money inputs on this page give. */}
+          <div style={{
+            minHeight: 15, margin: "4px 0 8px", fontSize: 10.5,
+            color: "var(--uidai-pmis-muted)", textAlign: "right",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {error ? "" : (op && acc != null)
+              ? `${Number(acc).toLocaleString("en-IN")} ${op === "*" ? "×" : op === "/" ? "÷" : op}`
+              : wordsHint(value)}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+            {key("C", reset, "clear")}
+            {key("⌫", backspace)}
+            {key("%", percent, "op")}
+            {key("÷", () => chooseOp("/"), "op")}
+            {key("7", () => pushDigit("7"))}
+            {key("8", () => pushDigit("8"))}
+            {key("9", () => pushDigit("9"))}
+            {key("×", () => chooseOp("*"), "op")}
+            {key("4", () => pushDigit("4"))}
+            {key("5", () => pushDigit("5"))}
+            {key("6", () => pushDigit("6"))}
+            {key("−", () => chooseOp("-"), "op")}
+            {key("1", () => pushDigit("1"))}
+            {key("2", () => pushDigit("2"))}
+            {key("3", () => pushDigit("3"))}
+            {key("+", () => chooseOp("+"), "op")}
+            {key("0", () => pushDigit("0"))}
+            {key(".", pushDot)}
+            <div style={{ gridColumn: "span 2" }}>{key("=", equals, "eq")}</div>
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--uidai-pmis-muted)" }}>
+            Click the pad to use the keyboard. Esc clears.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

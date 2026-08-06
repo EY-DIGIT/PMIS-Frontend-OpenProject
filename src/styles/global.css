@@ -694,6 +694,63 @@
   align-items: start;
 }
 .uidai-pmis-finance-main { min-width: 0; }
+/* Right column wrapper — holds the Financial Summary and the Calculator as
+   two separate cards. It owns the sticky position and the height budget so
+   the two share the available space: the summary flexes (its body already
+   scrolls internally) and the calculator keeps its natural height, which
+   means opening the pad shrinks the summary instead of being pushed below
+   the fold. */
+.uidai-pmis-finance-aside {
+  position: sticky;
+  top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  max-height: var(--fin-summary-h, calc(100vh - 210px));
+}
+.uidai-pmis-finance-aside .uidai-pmis-finance-summary {
+  /* The aside is the sticky element and the height cap now. */
+  position: static;
+  max-height: none;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+.uidai-pmis-finance-aside .uidai-pmis-finance-summary-body {
+  max-height: none;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+/* Calculator — a floating window, wholly independent of the Financial
+   Summary (it stays put whether that panel is open or collapsed). Parked
+   bottom-right; dragging the header replaces this anchoring with explicit
+   left/top set inline. Fixed, so it never claims a grid row. */
+.uidai-pmis-finance-calc {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  width: 288px;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  z-index: 41;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f8fd 100%);
+  border: 1px solid var(--uidai-pmis-border);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(20, 50, 110, 0.20);
+}
+/* While dragging: no text selection anywhere in the card, and no smooth
+   scrolling fighting the pointer. */
+.uidai-pmis-finance-calc.is-dragging {
+  user-select: none;
+  box-shadow: 0 16px 36px rgba(20, 50, 110, 0.28);
+}
+@media (max-width: 900px) {
+  /* On one-column layouts the corner is where the page content ends up —
+     keep it clear of the reopen tab and the page's own scrollbar. */
+  .uidai-pmis-finance-calc { right: 8px; bottom: 8px; width: 260px; }
+}
 .uidai-pmis-finance-summary {
   position: sticky;
   top: 4px;

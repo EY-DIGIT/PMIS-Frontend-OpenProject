@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import {
@@ -152,6 +152,21 @@ const formatReportDate = (raw) => {
     return MONTH_NAMES[m] ? `${Number(iso[3])} ${MONTH_NAMES[m].slice(0, 3)} ${iso[1]}` : s;
   }
   return s;
+};
+
+/* Same dd-MM-yyyy the rest of the attendance service speaks, normalised to ISO
+   so dates can be sorted and compared as plain strings and handed to
+   daysBetween. Returns "" for anything unparseable — callers treat that as
+   "no date", which is the honest reading of a value we can't place. */
+const reportDateISO = (raw) => {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const p2 = (v) => String(v).padStart(2, "0");
+  const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(s);
+  if (dmy) return `${dmy[3]}-${p2(dmy[2])}-${p2(dmy[1])}`;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (iso) return `${iso[1]}-${p2(iso[2])}-${p2(iso[3])}`;
+  return "";
 };
 
 const money = (v) =>
@@ -351,6 +366,15 @@ export default function ProjectAttendancePage() {
   const [quarterlyCost, setQuarterlyCost] = useState(null);
   const [quarterlyCostError, setQuarterlyCostError] = useState(null);
 
+  /* Who held each designation over the activity, and where one person handed
+     over to another. The attendance table shows a departed resource and their
+     replacement as two unrelated rows; this is the only place that says they
+     are the same seat. */
+  const [replacements, setReplacements] = useState(null);
+  const [replacementsError, setReplacementsError] = useState(null);
+  const [replacementsLoading, setReplacementsLoading] = useState(false);
+  const [replacementsOpen, setReplacementsOpen] = useState(false);
+
   // Holiday modal
   const [holidayOpen, setHolidayOpen] = useState(false);
   const [holidays, setHolidays] = useState(null);
@@ -435,8 +459,46 @@ export default function ProjectAttendancePage() {
      folding them into "all" or hiding them silently both misrepresent the
      data. */
   const UNASSIGNED = "__none__";
-  const [filterMilestoneId, setFilterMilestoneId] = useState("");
-  const [filterActivityId, setFilterActivityId] = useState("");
+  /* ── the filter lives in the URL, not in component state ──────────────
+     A leave detail returns here with navigate(-1). Held in useState, the
+     selection is gone by the time this remounts, so coming back from one
+     employee landed on "Select Milestone" with both dropdowns to redo. As
+     search params it rides the history entry and comes back with it.
+
+     `replace` rather than push: picking a milestone and then an activity
+     would otherwise leave two dead entries for Back to walk through before
+     it reached wherever the user actually came from. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterMilestoneId = searchParams.get("milestone") || "";
+  const filterActivityId = searchParams.get("activity") || "";
+
+  const setFilter = useCallback(
+    (patch) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        Object.entries(patch).forEach(([k, v]) => {
+          if (v) next.set(k, v);
+          else next.delete(k);
+        });
+        return next;
+      }, { replace: true });
+    },
+    [setSearchParams]
+  );
+
+  /* Changing the milestone drops the activity, which belonged to the old one.
+     Done here, on the user's action, rather than in the load effect below —
+     that effect also runs on mount, so clearing there would wipe the very
+     activity being restored from the URL on the way back from a detail. */
+  const setFilterMilestoneId = useCallback(
+    (id) => setFilter({ milestone: id, activity: "" }),
+    [setFilter]
+  );
+  const setFilterActivityId = useCallback(
+    (id) => setFilter({ activity: id }),
+    [setFilter]
+  );
+
   const [filterActivities, setFilterActivities] = useState([]);
   const [filterActivitiesLoading, setFilterActivitiesLoading] = useState(false);
 
@@ -444,7 +506,6 @@ export default function ProjectAttendancePage() {
      dropdown can only ever offer activities that belong to the first — the
      same cascade the upload modal uses. */
   useEffect(() => {
-    setFilterActivityId("");
     if (!filterMilestoneId || filterMilestoneId === UNASSIGNED) {
       setFilterActivities([]);
       return undefined;
@@ -459,6 +520,21 @@ export default function ProjectAttendancePage() {
     })();
     return () => { active = false; };
   }, [filterMilestoneId]);
+
+  /* A URL can name an activity that doesn't belong to the milestone beside it
+     — bookmarked before the activity moved, or hand-edited. Left alone, the
+     dropdown shows blank while the page fetches against an id it can't
+     display, which reads as "no data" rather than as a bad selection.
+
+     Only checked once the list has actually arrived: clearing while it's
+     still loading would drop the very selection being restored. */
+  useEffect(() => {
+    if (filterActivitiesLoading || !filterActivityId || !filterActivities.length) return;
+    const known = filterActivities.some(
+      (a) => String(a.apiId) === String(filterActivityId)
+    );
+    if (!known) setFilterActivityId("");
+  }, [filterActivities, filterActivitiesLoading, filterActivityId, setFilterActivityId]);
 
   /* ── the period, taken from the milestone rather than asked for ───────
      Year and Quarter are gone as controls. The milestone's own window says
@@ -766,6 +842,48 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, filterMilestoneId, filterActivityId, paramError, refreshKey]);
 
+  /* Replacements. Unlike the two above this needs no milestone — the endpoint
+     takes projectId + activityId only, and the activity already implies its
+     milestone. */
+  useEffect(() => {
+    if (paramError || !projectId || !filterActivityId) {
+      setReplacements(null);
+      setReplacementsError(null);
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const FALLBACK = "Couldn't load the replacement history.";
+    (async () => {
+      setReplacementsLoading(true);
+      setReplacementsError(null);
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({ projectId, activityId: filterActivityId });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/report/activity/replacements?${qs}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }
+        );
+        /* A 404 here means "no such activity report yet", not a failure worth
+           an error banner — the button simply doesn't appear. */
+        if (res.status === 404) { if (active) setReplacements(null); return; }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setReplacements(data && typeof data === "object" ? data : null);
+      } catch (err) {
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active) { setReplacements(null); if (msg) setReplacementsError(msg); }
+      } finally {
+        if (active) setReplacementsLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, filterActivityId, paramError, refreshKey]);
+
   /* Holidays + calendar. Fetched as soon as the year is known rather than on
      the modal opening: the attendance tables tooltip their Holiday counts with
      these dates, so they're needed whether or not anyone clicks Holidays —
@@ -907,10 +1025,11 @@ export default function ProjectAttendancePage() {
         <div className="att-head-main">
           <div className="att-eyebrow">{project?.projectName || "Project"}</div>
           <h1 className="uidai-pmis-title att-title">Attendance</h1>
-          <p className="uidai-pmis-subtitle att-subtitle">
-            Monthly attendance, quarterly leave and the holiday calendar for your project team.
-          </p>
         </div>
+        {/* The two upload-flow actions, together: you download the blank
+            template in order to fill it in and upload it, so separating them
+            put the two halves of one task in different places. The rest of the
+            secondary actions stay in the toolbar with the filters. */}
         <div className="att-head-actions">
           <button
             className="att-btn-secondary"
@@ -919,11 +1038,11 @@ export default function ProjectAttendancePage() {
             title={
               activeRange
                 ? `Download a blank attendance template for ${activeRange.label} (${activeRange.start} → ${activeRange.end})`
-                : "Fix the filters above first"
+                : "Choose a milestone and activity first"
             }
           >
             <DownloadIcon />
-            {templateBusy ? "Preparing…" : "Download template"}
+            {templateBusy ? "Preparing…" : "Template"}
           </button>
           <button
             className="att-btn-primary"
@@ -1014,24 +1133,40 @@ export default function ProjectAttendancePage() {
               decided. Keeping the control could only ever contradict the
               activity and produce an empty table. */}
         </div>
-        <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
-          <CalendarIcon />
-          Holiday calendar
-        </button>
+        {/* Every secondary action, in one place. They were split across the
+            header, this row and the section heading, which made the page read
+            as three separate toolbars for one report. */}
+        <div className="att-toolbar-actions">
+          {/* Only once an activity is chosen — there is nothing to ask for
+              before that, and a disabled button would just be noise. The modal
+              carries its own loading and error states, so the button stays put
+              instead of appearing and vanishing as the request settles. */}
+          {!!filterActivityId && (
+            <button
+              className="att-btn-secondary"
+              onClick={() => setReplacementsOpen(true)}
+              title="Who held each designation over this activity, and where one person replaced another."
+            >
+              <UsersIcon />
+              Replacements
+              {num(replacements?.totalReplacements) > 0 && (
+                <span className="att-btn-badge">{num(replacements.totalReplacements)}</span>
+              )}
+            </button>
+          )}
+          <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
+            <CalendarIcon />
+            Holidays
+          </button>
+          <RefreshButton onClick={refresh} busy={quarterlyLoading} />
+        </div>
       </div>
 
-      {/* The only report on this page now. */}
+      {/* The only report on this page, so it carries no heading of its own —
+          "Quarterly Attendance" under a page titled "Attendance" was naming
+          the same thing twice. Refresh moved up into the toolbar with the
+          other secondary actions. */}
       <section className="att-section">
-        <div className="att-section-head">
-          <h2 className="att-section-title" style={{ margin: 0 }}>Quarterly Attendance</h2>
-          {/* Year and Quarter used to be repeated here because both reports
-              were on screen at once and this one was a scroll away from the
-              toolbar. With the views separated there is one filter row again,
-              so the duplicates are gone and only Refresh remains. */}
-          <div className="att-controls att-section-controls">
-            <RefreshButton onClick={refresh} busy={quarterlyLoading} />
-          </div>
-        </div>
         {!selectionComplete && (
           <EmptyState icon={<LayersIcon />} title={selectionPrompt.title} hint={selectionPrompt.hint} />
         )}
@@ -1057,6 +1192,15 @@ export default function ProjectAttendancePage() {
           />
         )}
       </section>
+
+      {replacementsOpen && (
+        <ReplacementsModal
+          data={replacements}
+          loading={replacementsLoading}
+          error={replacementsError}
+          onClose={() => setReplacementsOpen(false)}
+        />
+      )}
 
       {holidayOpen && (
         <HolidayModal
@@ -2065,6 +2209,228 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
 /* =====================================================================
    Holiday modal — calendar mode
    ===================================================================== */
+/* ─────────────────────────────────────────────────────────────────────────
+   Replacements — who held each designation over the activity.
+
+   The attendance table lists a departed resource and the person who took
+   their place as two unrelated rows; the only hint of a connection is one of
+   them being marked inactive. This says outright that they are the same seat,
+   and in what order it changed hands.
+   ───────────────────────────────────────────────────────────────────────── */
+function ReplacementsModal({ data, loading, error, onClose }) {
+  useModalChrome(onClose);
+
+  /* Memoised because `ordered` below depends on it: the `: []` branch hands
+     back a fresh array every render, which would re-sort on every render. */
+  const rawDesignations = data?.designations;
+  const designations = useMemo(
+    () => (Array.isArray(rawDesignations) ? rawDesignations : []),
+    [rawDesignations]
+  );
+
+  const ordered = useMemo(() => {
+    /* Designations that changed hands lead — that is what anyone opening this
+       came for; the stable ones are context. Ties hold the server's order
+       rather than re-sorting by name, so the list doesn't reshuffle itself
+       between two payloads that mean the same thing. */
+    return designations
+      .map((d, i) => ({ d, i }))
+      .sort((a, b) => num(b.d.replacementCount) - num(a.d.replacementCount) || a.i - b.i)
+      .map((x) => x.d);
+  }, [designations]);
+
+  /* Flattened to one row per person, carrying the rowSpan its designation
+     needs. A seat nobody has held still gets a row — dropping it would make
+     the table disagree with the "designations staffed" count above it. */
+  const rows = useMemo(() => {
+    const out = [];
+    ordered.forEach((d) => {
+      const people = peopleInOrder(d.resources);
+      if (!people.length) {
+        out.push({ d, r: null, first: true, span: 1, handover: null });
+        return;
+      }
+      people.forEach((r, i) => {
+        out.push({
+          d,
+          r,
+          first: i === 0,
+          span: people.length,
+          handover: i === 0 ? null : handoverNote(people[i - 1], r),
+        });
+      });
+    });
+    return out;
+  }, [ordered]);
+
+  const total = num(data?.totalReplacements);
+  const changedCount = designations.filter((d) => num(d.replacementCount) > 0).length;
+  const windowLabel = [data?.activityStartDate, data?.activityEndDate]
+    .map(formatReportDate).filter(Boolean).join(" → ");
+
+  return (
+    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="att-modal att-modal--wide" role="dialog" aria-modal="true" aria-label="Replacements">
+        <div className="att-modal-head">
+          <div>
+            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Staffing</div>
+            <h2 className="att-modal-title">Replacements</h2>
+            {(data?.activityName || windowLabel) && (
+              <div className="att-rep-sub">
+                {data?.activityName}
+                {data?.activityName && windowLabel ? " · " : ""}
+                {windowLabel}
+              </div>
+            )}
+          </div>
+          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        {loading && <div className="att-muted">Loading replacement history…</div>}
+        {!loading && error && <div className="att-error">{error}</div>}
+
+        {!loading && !error && (
+          <>
+            <div className="att-chips" style={{ marginBottom: 14 }}>
+              <Chip accent={total > 0}>
+                {total} {total === 1 ? "replacement" : "replacements"}
+              </Chip>
+              {total > 0 && (
+                <Chip>
+                  across {changedCount} {changedCount === 1 ? "designation" : "designations"}
+                </Chip>
+              )}
+              <Chip>{designations.length} designations staffed</Chip>
+            </div>
+
+            {designations.length === 0 ? (
+              <div className="att-muted">
+                No staffing has been reported against this activity yet.
+              </div>
+            ) : (
+              <div className="att-table-wrap att-rep-tablewrap">
+                <table className="att-table att-rep-table">
+                  <thead>
+                    <tr>
+                      <th className="att-th">Designation</th>
+                      <th className="att-th att-num" title="Resources planned for this designation on the activity.">Configured</th>
+                      {/* "People", not "resources": this counts everyone who
+                          held the seat across the whole activity, which is not
+                          the headcount at any one moment. */}
+                      <th className="att-th att-num" title="Distinct people who held this designation at any point in the activity. Not a headcount at a single moment — a seat handed over once shows 2.">People</th>
+                      <th className="att-th att-num" title="Times this designation changed hands during the activity.">Replacements</th>
+                      {/* ID leads the person, as it does in the attendance
+                          table — the two are read side by side. */}
+                      <th className="att-th">ID</th>
+                      <th className="att-th">Resource</th>
+                      <th className="att-th">Joined</th>
+                      <th className="att-th">Last Working Day</th>
+                      <th className="att-th">Status</th>
+                      <th className="att-th" title="How the seat passed from the person above to this one.">Handover</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => {
+                      const { d, r, first, span, handover } = row;
+                      const isOff = r?.active === false;
+                      return (
+                        <tr
+                          key={`${d.designation}-${r?.resourceId ?? "none"}-${i}`}
+                          className={`att-row${first ? " att-rep-groupstart" : ""}${
+                            isOff ? " att-row--off" : ""
+                          }`}
+                        >
+                          {/* Spanned down the designation's people so the seat
+                              reads as one thing rather than repeating itself. */}
+                          {first && (
+                            <>
+                              <td className="att-td att-strong" rowSpan={span}>
+                                {d.designation || "—"}
+                              </td>
+                              <td className="att-td att-num" rowSpan={span}>
+                                {num(d.configuredQuantity)}
+                              </td>
+                              <td className="att-td att-num" rowSpan={span}>
+                                {num(d.distinctResourceCount)}
+                              </td>
+                              <td
+                                className={`att-td att-num${
+                                  num(d.replacementCount) > 0 ? " att-warn" : " att-dim"
+                                }`}
+                                rowSpan={span}
+                              >
+                                {num(d.replacementCount)}
+                              </td>
+                            </>
+                          )}
+                          <td className="att-td">
+                            {r ? <code className="att-code">{r.resourceId}</code> : "—"}
+                          </td>
+                          <td className="att-td att-strong">
+                            {r
+                              ? r.employeeName || "—"
+                              : <span className="att-dim">No one assigned</span>}
+                          </td>
+                          <td className="att-td">{formatReportDate(r?.joiningDate) || "—"}</td>
+                          <td className={`att-td${isOff ? "" : " att-dim"}`}>
+                            {formatReportDate(r?.lastWorkingDate) || "—"}
+                          </td>
+                          <td className="att-td">
+                            {r && (
+                              <span className={`att-rep-pill${isOff ? " is-off" : ""}`}>
+                                {isOff ? "Inactive" : "Active"}
+                              </span>
+                            )}
+                          </td>
+                          {/* Empty on the first person — there is nothing above
+                              them to have handed over from. */}
+                          <td className={`att-td${handover ? " att-warn" : " att-dim"}`}>
+                            {handover || "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Ordered by joining date so a seat's rows read as a handover. Anyone without a
+   usable date sinks to the end rather than silently sorting as "earliest",
+   which is what comparing empty strings would do. */
+function peopleInOrder(resources) {
+  const list = Array.isArray(resources) ? resources.slice() : [];
+  return list.sort((a, b) => {
+    const x = reportDateISO(a?.joiningDate);
+    const y = reportDateISO(b?.joiningDate);
+    if (!x && !y) return 0;
+    if (!x) return 1;
+    if (!y) return -1;
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+}
+
+/* How the seat passed from one person to the next. Worth stating because the
+   table's adjacency implies a clean same-day handover, and these two were on
+   the project together for a month. Only claimed when both dates parse — a
+   missing one is unknown, not zero. */
+function handoverNote(prev, next) {
+  const prevEnd = reportDateISO(prev?.lastWorkingDate);
+  const thisStart = reportDateISO(next?.joiningDate);
+  if (!prevEnd || !thisStart) return null;
+  const gap = daysBetween(prevEnd, thisStart);
+  if (!Number.isFinite(gap)) return null;
+  if (gap < 0) return `Overlapped ${Math.abs(gap)} days`;
+  if (gap > 1) return `${gap - 1} day gap`;
+  return null; // consecutive days — a clean handover needs no note
+}
+
 function HolidayModal({ year, years, onYearChange, holidays, calendar, loading, error, onClose }) {
   const today = new Date();
   const initialMonth = today.getFullYear() === year ? today.getMonth() + 1 : 1;
@@ -2337,6 +2703,17 @@ function CalendarIcon() {
     </svg>
   );
 }
+/* Two figures — one seat, more than one occupant, which is what a replacement
+   is. Deliberately not the single-person icon the roster uses. */
+function UsersIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M3 19.5c0-3 2.7-4.8 6-4.8s6 1.8 6 4.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16.5 5.2a3.2 3.2 0 0 1 0 5.6M18 14.9c2 .6 3.5 2.2 3.5 4.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 function UploadIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2404,18 +2781,23 @@ function CheckIcon() {
 
 /* ---------- scoped styles ---------- */
 const ATT_CSS = `
-.att-page { padding: 30px 10px 72px; max-width: 1320px; margin: 0 auto; color: ${C.ink}; }
-@media (max-width: 640px) { .att-page { padding: 20px 16px 48px; } }
+/* No top padding: this page always renders inside AttendanceSystemLayout,
+   whose section nav already carries an 18px bottom margin. The two stacked to
+   a 48px gulf between the tabs and the page title. */
+.att-page { padding: 0 10px 72px; max-width: 1320px; margin: 0 auto; color: ${C.ink}; }
+@media (max-width: 640px) { .att-page { padding: 0 16px 48px; } }
 
 .att-page :focus-visible { outline: 2px solid ${C.primary}; outline-offset: 2px; border-radius: 6px; }
 
-.att-head { margin-bottom: 26px; }
-.att-head { display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
+/* Spacing runs on a 8px rhythm — 8 / 16 / 24 — so the page has one vertical
+   beat instead of the 26/30/14 mix it grew into. */
+.att-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
 .att-head-main { min-width: 0; }
-.att-head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
-.att-title { margin: 0 0 6px; letter-spacing: -0.02em; }
-.att-subtitle { margin: 0; color: ${C.muted}; max-width: 640px; }
+.att-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+/* No trailing margin now that the subtitle is gone — the eyebrow above and the
+   header's own margin carry the spacing. */
+.att-title { margin: 0; letter-spacing: -0.02em; }
 /* milestone names are long — let that one select take the full modal row */
 .att-select--wide { min-width: 100%; }
 /* Vendor names run long; capped so one doesn't stretch the filter row. */
@@ -2429,20 +2811,19 @@ const ATT_CSS = `
 .att-ry-range { opacity: .85; font-variant-numeric: tabular-nums; }
 .att-ry-note { margin-top: 6px; opacity: .85; }
 
-.att-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
-  text-transform: uppercase; color: ${C.primary}; margin-bottom: 8px; }
+/* Quieter than it was: at 12px bold primary it competed with the page title
+   directly beneath it. It labels the title, so it sits back from it. */
+.att-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: ${C.muted}; margin-bottom: 6px; }
 
-.att-section { margin-bottom: 30px; }
-.att-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0 0 14px; letter-spacing: -0.01em; }
-.att-section-head { display: flex; align-items: flex-end; justify-content: space-between;
-  gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.att-section { margin-bottom: 24px; }
 
 /* View switch — a segmented control rather than two buttons, so the pair reads
    as one choice with one answer. Sized to line up with the selects beside it. */
 .att-seg { display: inline-flex; padding: 3px; border-radius: 10px;
   border: 1px solid ${C.border}; background: ${C.surfaceAlt}; gap: 3px; }
 .att-seg-btn { border: none; background: transparent; cursor: pointer;
-  padding: 6px 16px; border-radius: 7px; font-size: 13.5px; font-weight: 600;
+  padding: 6px 16px; border-radius: 10px; font-size: 13.5px; font-weight: 600;
   color: ${C.muted}; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
 .att-seg-btn:hover:not(.is-on) { color: ${C.ink}; }
 .att-seg-btn.is-on { background: #fff; color: ${C.primary};
@@ -2451,9 +2832,11 @@ const ATT_CSS = `
 /* Refresh — a quiet control beside the table it reloads, deliberately lighter
    than the header's primary actions: it repeats a fetch the page already does
    on its own, so it shouldn't compete with Upload for attention. */
-.att-refresh { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0;
-  padding: 8px 14px; border-radius: 9px; border: 1px solid ${C.border};
-  background: #fff; color: ${C.ink2}; font-size: 13px; font-weight: 600;
+/* Same 40px box and 14px type as the buttons it now sits beside — it used to
+   live alone in a section heading, where being a size smaller went unnoticed. */
+.att-refresh { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 0 14px; height: 40px; border-radius: 10px; border: 1px solid ${C.border};
+  background: #fff; color: ${C.ink2}; font-size: 14px; font-weight: 600;
   cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
 .att-refresh:hover:not(:disabled) { background: ${C.surface}; border-color: ${C.borderStrong}; color: ${C.ink}; }
 .att-refresh:disabled { opacity: .6; cursor: not-allowed; }
@@ -2464,19 +2847,22 @@ const ATT_CSS = `
 @media (prefers-reduced-motion: reduce) { .att-refresh-ico.is-busy { animation: none; } }
 
 /* ---- toolbar / controls ---- */
+/* Filters left, every secondary action right, on one line. Both sides align on
+   their last row so the controls and buttons sit on a single baseline even
+   after the row wraps on a narrow screen. */
 .att-toolbar { display: flex; align-items: flex-end; justify-content: space-between;
   gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
 .att-controls { display: flex; gap: 12px; flex-wrap: wrap; }
-/* Filters sitting inside a section heading rather than the page toolbar —
-   held to the right edge and kept from stretching the heading row. */
-.att-section-controls { flex: 0 0 auto; align-items: flex-end; }
+.att-toolbar-actions { display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
 .att-field { display: flex; flex-direction: column; gap: 6px; }
 .att-field-label { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em;
   text-transform: uppercase; color: ${C.muted}; }
-.att-select { padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
+/* Explicit height instead of padding-derived, so selects, buttons and the
+   refresh control are all exactly 40px and share one baseline. */
+.att-select { padding: 0 12px; height: 40px; border-radius: 10px; border: 1px solid ${C.border};
   background: #fff; color: ${C.ink}; font-size: 14px; font-family: inherit; min-width: 150px;
-  outline: none; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease;
-  box-shadow: 0 1px 2px rgba(16,32,60,.04); }
+  outline: none; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
 /* A field with one possible value — sized like a control so the row lines
    up, but flat and inert because there is nothing to pick. */
 .att-static { padding: 9px 12px; border-radius: 10px; border: 1px solid ${C.border};
@@ -2486,20 +2872,23 @@ const ATT_CSS = `
 .att-select:focus { border-color: ${C.primary}; box-shadow: 0 0 0 3px ${C.accentBg}; }
 
 .att-btn-secondary { display: inline-flex; align-items: center; gap: 8px;
-  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 10px 16px; height: 40px;
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 0 14px; height: 40px;
   cursor: pointer; border: 1px solid ${C.border}; background: #fff; color: ${C.ink2};
-  transition: background .18s ease, border-color .18s ease, color .18s ease; box-shadow: 0 1px 2px rgba(16,32,60,.04); }
+  transition: background .18s ease, border-color .18s ease, color .18s ease; }
 .att-btn-secondary:hover:not(:disabled) { background: ${C.surface}; border-color: ${C.primary}; color: ${C.primary}; }
 .att-btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
 
+/* Flat and solid rather than a gradient with a coloured glow. One accent
+   colour, one weight — the button is the only primary action on the page, so
+   it doesn't need decoration to be found. Height matched to the secondaries
+   and the selects, which were 38 against 40 and sat a hair low beside them. */
 .att-btn-primary { display: inline-flex; align-items: center; gap: 8px; border: none;
-  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 9px 15px; cursor: pointer;
-  color: #fff; background: linear-gradient(100deg, ${C.primary}, ${C.accent});
-  transition: filter .18s ease, transform .06s ease, box-shadow .18s ease;
-  box-shadow: 0 2px 6px rgba(11,60,136,.22); white-space: nowrap; }
-.att-btn-primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 4px 12px rgba(11,60,136,.28); }
+  border-radius: 10px; font-size: 14px; font-weight: 600; padding: 0 16px; height: 40px;
+  cursor: pointer; color: #fff; background: ${C.primary};
+  transition: background .18s ease, transform .06s ease; white-space: nowrap; }
+.att-btn-primary:hover:not(:disabled) { background: ${C.primaryDark}; }
 .att-btn-primary:active:not(:disabled) { transform: translateY(1px); }
-.att-btn-primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.att-btn-primary:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ---- metric cards ----
    The strip carries up to eight cards, so each one has to survive at roughly
@@ -2509,7 +2898,7 @@ const ATT_CSS = `
 .att-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
   gap: 10px; margin-bottom: 18px; }
 .att-metric { background: #fff; border: 1px solid ${C.border}; border-top: 3px solid ${C.borderStrong};
-  border-radius: 12px; padding: 12px 13px 13px; box-shadow: 0 1px 2px rgba(16,32,60,.04);
+  border-radius: 14px; padding: 12px 13px 13px; box-shadow: 0 1px 2px rgba(16,32,60,.04);
   min-width: 0; overflow: hidden; }
 .att-metric-label { font-size: 10px; font-weight: 700; letter-spacing: .05em;
   text-transform: uppercase; color: ${C.muted}; white-space: nowrap;
@@ -2569,7 +2958,7 @@ const ATT_CSS = `
 .att-row:last-child .att-td { border-bottom: none; }
 .att-row-click { cursor: pointer; }
 .att-row-click:hover { background: ${C.accentBg}; }
-.att-code { font-size: 13px; background: ${C.surface}; padding: 2px 7px; border-radius: 5px;
+.att-code { font-size: 13px; background: ${C.surface}; padding: 2px 7px; border-radius: 6px;
   border: 1px solid ${C.border}; font-variant-numeric: tabular-nums; }
 /* Designation rides under the employee name rather than in a column of its
    own: titles like "Developer - Enrolment Server, Middleware and Logistics"
@@ -2665,7 +3054,7 @@ const ATT_CSS = `
   backdrop-filter: blur(3px); display: flex; align-items: flex-start; justify-content: center;
   padding: 48px 16px; z-index: 1000; animation: attFade .15s ease; }
 @keyframes attFade { from { opacity: 0; } to { opacity: 1; } }
-.att-modal { background: #fff; border-radius: 16px; width: 100%; max-width: 560px;
+.att-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
   max-height: 86vh; overflow-y: auto; padding: 24px; box-shadow: 0 24px 64px rgba(9,20,42,.32);
   animation: attPop .18s cubic-bezier(.2,.8,.2,1); }
 @keyframes attPop { from { transform: translateY(10px); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
@@ -2674,6 +3063,26 @@ const ATT_CSS = `
 .att-modal-sub { color: ${C.muted}; font-size: 14px; margin-bottom: 16px; }
 .att-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .att-modal-head-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+/* ── replacements ────────────────────────────────────────────────────── */
+/* Sized for the ten-column table; it scrolls inside its wrapper below this. */
+.att-modal--wide { max-width: min(1020px, 94vw); }
+.att-btn-badge { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 2px; border-radius: 999px;
+  background: ${C.primary}; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+.att-rep-sub { color: ${C.muted}; font-size: 13px; margin-top: 4px; }
+.att-rep-tablewrap { max-height: 62vh; overflow: auto; }
+.att-rep-table { min-width: 960px; }
+.att-rep-table th { position: sticky; top: 0; z-index: 1; background: #fff; }
+/* The spanned designation cells already group the rows; this line makes the
+   boundary readable when a group's people run to three or more. */
+.att-rep-groupstart > .att-td { border-top: 1px solid ${C.borderStrong}; }
+.att-rep-table tbody tr:first-child > .att-td { border-top: none; }
+/* Status reads at a glance without relying on colour alone — the word is the
+   signal, the tint only reinforces it. */
+.att-rep-pill { display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; background: ${C.greenBg}; color: #166534; }
+.att-rep-pill.is-off { background: ${C.redBg}; color: #b91c1c; }
 .att-year-pick { display: flex; align-items: center; gap: 7px; }
 .att-year-pick-label { font-size: 12px; font-weight: 600; color: ${C.muted};
   text-transform: uppercase; letter-spacing: .04em; }
@@ -2697,7 +3106,7 @@ const ATT_CSS = `
 /* leave-detail key/value */
 .att-kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px 20px; margin-bottom: 18px; padding: 15px 16px; background: ${C.surface};
-  border-radius: 12px; border: 1px solid ${C.border}; }
+  border-radius: 14px; border: 1px solid ${C.border}; }
 .att-kv-grid-sm { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 16px; padding: 13px 14px; margin-bottom: 0; }
 .att-kv-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: ${C.muted}; margin-bottom: 3px; }
 .att-kv-value { font-size: 14px; color: ${C.ink}; font-weight: 600; }
