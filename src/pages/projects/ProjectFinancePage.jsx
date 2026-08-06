@@ -963,6 +963,9 @@ function CostItemActions({  isLocked, isDeleting, onEdit, onDelete }) {
    ────────────────────────────────────────────────────────────────── */
 function EditTermModal({
   open, onClose, term, onSubmit, submitting, milestoneName,
+  /* Cost-driven (resource) milestone — its % of Payment is backend-derived
+     from the activity resource costs, so that field is read-only here. */
+  isResourceTerm = false,
 }) {
   const [percentOfPayment, setPercentOfPayment] = useState(
     term?.percentOfPayment === null || term?.percentOfPayment === undefined
@@ -1017,8 +1020,21 @@ function EditTermModal({
               type="number"
               min="0" max="100"
               value={percentOfPayment}
+              /* Cost-driven milestone: the backend derives this from the sum
+                 of the activities' resource costs and ignores anything sent
+                 here, so an editable box would be a control that silently
+                 does nothing. */
+              disabled={isResourceTerm}
+              title={isResourceTerm
+                ? "Derived from this milestone's activity resource costs — edit the activity's resource allocation to change it"
+                : undefined}
               onChange={(e) => setPercentOfPayment(e.target.value)}
             />
+            {isResourceTerm && (
+              <div className="uidai-pmis-subtitle" style={{ fontSize: 10.5, marginTop: 4 }}>
+                Derived from the activity resource costs — set on the activity.
+              </div>
+            )}
           </div>
           <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
             <label>LD Basis %</label>
@@ -2507,6 +2523,7 @@ export default function ProjectFinancePage() {
         }}
         submitting={savingTerm}
         milestoneName={milestoneName}
+        isResourceTerm={!!editingTerm && resourceCostItemIds.has(editingTerm.costItemId)}
       />
       <EditActivitiesModal
         open={!!editingActivitiesTerm}
@@ -3183,10 +3200,24 @@ function PhasePanel({
   const totalLdBasis =
     Math.round(terms.reduce((s, r) => s + (Number(r.ldBasisPercent) || 0), 0) * 100) / 100;
   const ldBasisBalanced = Math.abs(totalLdBasis - 100) <= 0.02;
-  /* Base (100%) the term percentages are taken from = scheduled value
-     scaled back up by the scheduled %. Remaining = the still-unscheduled
-     part of that base. */
-  const phaseBase = totalPercent > 0 ? totalValue / (totalPercent / 100) : 0;
+  /* The 100% base the phase is measured against — taken from the backend,
+     never reconstructed.
+
+     This used to gross the base up from the rows (totalValue ÷ totalPercent),
+     which silently assumed `value = % × base` for every term. That holds only
+     for percentage-driven (fixed) milestones. A COST-driven (resource)
+     milestone works the other way round — its ₹ comes from the activities and
+     its % is a derived report of the share — so on a resource phase whose
+     percents were null the divisor was 0, the base collapsed to 0, and
+     Remaining went negative. phaseBaseTotal is authoritative for both modes.
+
+     phaseFixedTotal / effectivePhaseTotal are older names for the same idea,
+     kept as fallbacks for a backend that predates phaseBaseTotal. */
+  const phaseBase =
+    Number(phase.phaseBaseTotal) ||
+    Number(phase.effectivePhaseTotal) ||
+    Number(phase.phaseFixedTotal) ||
+    0;
   const phaseRemaining = phaseBase - totalValue;
   const canToggleCarry = typeof onSetCarryForward === "function";
 
@@ -3704,6 +3735,20 @@ function PhasePanel({
                       <td style={{ textAlign: "right" }}>
                         {t.percentOfPayment == null
                           ? <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
+                          /* On a cost-driven milestone the % does not set the
+                             amount — it reports the share the activity costs
+                             worked out to. Muted + labelled so it can't be
+                             read as the payment weight. */
+                          : isResourceTerm ? (
+                            <span title="Cost share — derived from this milestone's activity resource costs, not an input">
+                              <span style={{ color: "#5b6b82", fontWeight: 600 }}>
+                                {Number(t.percentOfPayment)} %
+                              </span>
+                              <span style={{ display: "block", fontSize: 10, color: "var(--uidai-pmis-muted)" }}>
+                                cost share
+                              </span>
+                            </span>
+                          )
                           : <strong style={{ color: "#173e77" }}>{Number(t.percentOfPayment)} %</strong>}
                       </td>
                       {typeof onSaveLdBasis === "function" ? (
@@ -3726,7 +3771,18 @@ function PhasePanel({
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
                           <span style={muted} title={wordsHint(phaseBase)}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
-                          <span style={{ color: "#173e77" }} title={wordsHint(value)}>{pct}% of Total Payment: {inr(value)}</span>
+                          {/* "{pct}% of Total Payment" states that the % produced
+                              the ₹. True for a fixed milestone; backwards for a
+                              resource one, where the ₹ comes up from the
+                              activities and the % is the resulting share. */}
+                          {isResourceTerm ? (
+                            <span style={{ color: "#173e77" }} title={wordsHint(value)}>
+                              Resource cost: {inr(value)}
+                              <span style={muted}> · {pct}% share</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: "#173e77" }} title={wordsHint(value)}>{pct}% of Total Payment: {inr(value)}</span>
+                          )}
                           <span title={wordsHint(remaining)} style={{fontWeight: 700,color: remaining > 0 ? "#b54708" : "#1b7a42",}}>
                             Remaining: {inr(remaining)}
                           </span>
@@ -3737,7 +3793,13 @@ function PhasePanel({
                         <button
                           type="button"
                           className="uidai-pmis-iconbtn"
-                          title="Edit payment term"
+                          /* Still opens for a resource term — the LD Basis %
+                             remains editable there — but the % of Payment
+                             field inside is read-only, since the backend
+                             derives it from the activity costs. */
+                          title={isResourceTerm
+                            ? "Edit LD Basis % — the payment % is derived from the activity resource costs"
+                            : "Edit payment term"}
                           aria-label="Edit payment term"
                           disabled={isLocked}
                           onClick={() => onEditTerm(t)}
@@ -4307,8 +4369,9 @@ function CarryForwardSummarySection({
                   color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
                 })}
                 {stat("Scheduled Amount", inr(scheduledAmount), { hint: wordsHint(scheduledAmount) })}
+                {/* No "+": the carried-out amount is the leftover LEAVING this
+                    phase, not another addend on top of Scheduled Amount. */}
                 {stat("Carried Forward", yes ? inr(carriedOut) : "—", {
-                  op: yes ? "+" : "",
                   color: yes ? "#1b7a42" : "#a3afc1",
                   hint: yes ? wordsHint(carriedOut) : "",
                 })}
