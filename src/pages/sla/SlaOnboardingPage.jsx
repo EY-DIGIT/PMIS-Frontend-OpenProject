@@ -298,6 +298,10 @@ export default function SlaOnboardingPage() {
         let PROJECTS = [];
         let INPUT_VARIABLES = [];
         let editingId = null;
+        // Blob URLs minted for existing-attachment thumbnails; revoked on unmount.
+        const OBJECT_URLS = [];
+        // Serialized form state captured right after edit-mode hydration (see _dirty).
+        let _formBaseline = null;
 
         // After editing, return to that SLA's detail page (so changes are
         // visible and Back goes to the list); after creating, go to the list.
@@ -497,6 +501,33 @@ export default function SlaOnboardingPage() {
             out.value = m ? m[1].toUpperCase() : "";
         }
 
+        /* A saved SLA stores `category` as the catalog's DISPLAY NAME
+           ("Resource Management"), while the picker's option values are the
+           catalog CODEs ("RESOURCE_MANAGEMENT"). Assigning the display name
+           straight to select.value fails silently — the category stayed blank
+           on every edit, which in turn left the Target widget unrendered and
+           dropped the severity table. Resolve either form back to a code. */
+        function _normKey(x) {
+            return String(x == null ? "" : x).toLowerCase().replace(/[^a-z0-9]+/g, "");
+        }
+        function _resolveCategoryCode(raw) {
+            const s = String(raw == null ? "" : raw).trim();
+            if (!s) return "";
+            const n = _normKey(s);
+            const hit = CATEGORIES.find((c) => _normKey(c.code) === n || _normKey(c.display_name) === n);
+            return hit ? hit.code : s;
+        }
+        // Select a value even when the catalog that built the <option>s didn't
+        // include it — a missing option would otherwise blank the field.
+        function _setSelect(el, value, labelSuffix) {
+            if (!el) return;
+            const v = value == null ? "" : String(value);
+            if (v && !Array.from(el.options).some((o) => o.value === v)) {
+                el.insertAdjacentHTML("beforeend", `<option value="${esc(v)}">${esc(v)}${esc(labelSuffix || "")}</option>`);
+            }
+            el.value = v;
+        }
+
         function _onStaticCategoryChange() {
             const sel = host.querySelector("#s_category_code");
             const code = (sel.value || "").trim();
@@ -536,9 +567,20 @@ export default function SlaOnboardingPage() {
             goBack();
         }
         function _dirty() {
+            // Edit mode baselines the form once hydration finishes and diffs
+            // against that — otherwise every loaded value counts as a change
+            // (assigning .value never updates .defaultValue, and <select> has
+            // no .defaultValue at all), so Cancel always nagged.
+            if (_formBaseline !== null) return _formSnapshot() !== _formBaseline;
             const staticEls = ["s_sla_ref", "s_title", "s_project_id", "s_category_code"].map((id) => host.querySelector("#" + id)).filter(Boolean);
             const dynEls = Array.from(host.querySelectorAll("#dynBody input, #dynBody textarea, #dynBody select"));
             return [...staticEls, ...dynEls].some((el) => (el.value || "").trim() !== "" && el.value !== el.defaultValue);
+        }
+        function _formSnapshot() {
+            return Array.from(host.querySelectorAll(
+                "#s_sla_ref, #s_title, #s_project_id, #s_category_code, #s_description, #s_calculation_method," +
+                "#s_target_container [data-k], #dynBody input, #dynBody textarea, #dynBody select"
+            )).map((el) => (el.type === "file" ? String(el.files ? el.files.length : 0) : el.value)).join("");
         }
 
         /* ── row management ── */
@@ -612,6 +654,9 @@ export default function SlaOnboardingPage() {
                 row.querySelector(".field-help").textContent = "";
             } else {
                 _renderValueWidget(row, key);
+                // A row added by hand during an edit is subject to the same
+                // PATCH field-set limits as the hydrated ones.
+                if (editingId && !_PATCHABLE_KEYS.has(key) && key !== "attachments") _lockCell(row.querySelector(".dyn-cell-value"));
             }
             _refreshAllRowDropdowns();
             _refreshAddButton();
@@ -980,7 +1025,7 @@ export default function SlaOnboardingPage() {
                DIFFERENT field names for the same four values. Everything above
                — validation, the RFP row widgets — works in the internal (edit)
                names, so translate once, here, only on the create path (#349). */
-            const wire = editingId ? payload : _toFromRfpPayload(payload);
+            const wire = editingId ? _toPatchPayload(payload) : _toFromRfpPayload(payload);
             // The file-picker widget stashes selected files on window.__currentPayload__
             // during _collectPayload() (they can't ride inside the JSON object).
             const files = (window.__currentPayload__ && window.__currentPayload__.__files) || [];
@@ -1008,11 +1053,53 @@ export default function SlaOnboardingPage() {
                     serverErrors.forEach((e) => toast(e.label, e.message, "error"));
                     return;
                 }
+                // PATCH can't carry files, so new attachments go up separately
+                // (they were dropped on the floor before).
+                if (files.length && editingId) {
+                    const failed = await _uploadAttachments(editingId, files);
+                    if (failed.length) toast("Attachments", `${failed.length} of ${files.length} image(s) failed to upload.`, "error");
+                }
                 toast("Saved", editingId ? "SLA updated." : "SLA onboarded.", "success");
                 window.setTimeout(() => goBack(), 800);
             } catch (e) {
                 toast("Network error", e.message, "error");
             }
+        }
+
+        /* PATCH /sla-masters/{id} takes SlaUpdateRequest — a narrower, partly
+           differently-named field set than the create payload. Unknown keys are
+           dropped server-side, so sending the raw form payload meant a category
+           change never saved. Send only what the endpoint accepts. */
+        function _toPatchPayload(payload) {
+            const out = {};
+            const copy = [
+                "title", "description", "scope_text", "data_source", "calculation_method",
+                "reports_submitted_to", "measurement_interval", "reporting_interval",
+                "ld_computation_base", "effective_until", "project_id", "placeholders",
+            ];
+            copy.forEach((k) => { if (payload[k] !== undefined) out[k] = payload[k]; });
+            // The record stores the category's display name, not its code.
+            if (payload.category_code) {
+                const cat = CATEGORIES.find((c) => c.code === payload.category_code);
+                out.category = (cat && cat.display_name) || payload.category_code;
+            }
+            return out;
+        }
+
+        // POST /sla-masters/{id}/attachments — one multipart request per file.
+        async function _uploadAttachments(id, files) {
+            const failed = [];
+            for (const f of files) {
+                try {
+                    const fd = new FormData();
+                    fd.append("file", f);
+                    const res = await authorizedFetch(`${CONTRACTS_BASE}/api/v3/sla-masters/${id}/attachments`, {
+                        method: "POST", headers: { Accept: "application/json" }, body: fd,
+                    });
+                    if (!res.ok) failed.push(f.name);
+                } catch { failed.push(f.name); }
+            }
+            return failed;
         }
 
         /* ── internal (edit) names → /from-rfp (create) names ──────────────
@@ -1159,74 +1246,215 @@ export default function SlaOnboardingPage() {
         }
 
         /* ── edit-mode hydration ── */
+
+        // The detail envelope is sometimes double-wrapped ({data:{_type,data:{…}}}).
+        function _unwrapSla(body) {
+            const lvl1 = (body && body.data) || body || {};
+            return lvl1 && typeof lvl1.data === "object" && lvl1.data !== null ? lvl1.data : lvl1;
+        }
+        const _hasValue = (v) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0);
+        const _asDate = (v) => (v ? String(v).slice(0, 10) : null);
+
+        /* Every RFP row the edit form can carry, in display order, paired with
+           the response field(s) it reads. `always` rows render even when the
+           record has no value so the form shows the SLA's full shape (the old
+           code skipped every null, so most of the form simply wasn't there). */
+        function _editRowPlan(d) {
+            return [
+                { key: "scope_text", value: d.scope_text ?? d.scope, always: true },
+                { key: "data_source", value: d.data_source, always: true },
+                { key: "monitoring_tool", value: d.monitoring_tool },
+                { key: "data_capture_process", value: d.data_capture_process },
+                { key: "ld_calculation", value: d.ld_calculation },
+                { key: "assumptions", value: d.assumptions },
+                { key: "reports_submitted_to", value: d.reports_submitted_to, always: true },
+                { key: "metric_type", value: d.metric_type },
+                { key: "measurement_interval", value: d.measurement_interval, always: true },
+                { key: "reporting_interval", value: d.reporting_interval, always: true },
+                { key: "ld_computation_base", value: d.ld_computation_base ?? d.applied_on, always: true },
+                { key: "effective_from", value: _asDate(d.effective_from), always: true },
+                { key: "effective_until", value: _asDate(d.effective_until), always: true },
+                { key: "measurement", value: d.measurement, always: true },
+                { key: "secondary_measurement", value: d.secondary_measurement },
+                { key: "placeholders", value: d.placeholders },
+                { key: "attachments", value: d.attachments, always: true },
+            ];
+        }
+
         async function loadSlaForEdit(id) {
             try {
                 const r = await authorizedFetch(CONTRACTS_BASE + "/api/v3/sla-masters/" + id, { method: "GET", headers: { Accept: "application/json" } });
                 if (!r.ok) { toast("Load failed", "HTTP " + r.status, "error"); return; }
-                const body = await r.json();
-                const d = body.data || body;
+                const d = _unwrapSla(await r.json());
                 host.querySelector("#dynBody").innerHTML = "";
 
-                if (d.sla_ref) host.querySelector("#s_sla_ref").value = d.sla_ref;
+                /* ── static identification block ── */
+                const setStatic = (elId, v) => { const el = host.querySelector("#" + elId); if (el) el.value = v == null ? "" : v; };
+                setStatic("s_sla_ref", d.sla_ref);
                 /* Prefer the stored contract_type when the SLA already has
                    one; otherwise fall back to the prefix derivation so the
                    row isn't blank on an older record. */
                 const ctEl = host.querySelector("#s_contract_type");
                 if (ctEl && d.contract_type) ctEl.value = d.contract_type;
                 else _syncContractType();
-                if (d.title) host.querySelector("#s_title").value = d.title;
-                if (d.project_id) host.querySelector("#s_project_id").value = d.project_id;
-                const catCode = d.category_code || d.category;
-                if (catCode) { host.querySelector("#s_category_code").value = catCode; _onStaticCategoryChange(); }
-                if (d.description || d.definition) host.querySelector("#s_description").value = d.description || d.definition;
-                if (d.calculation_method || d.calculation) host.querySelector("#s_calculation_method").value = d.calculation_method || d.calculation;
+                setStatic("s_title", d.title || d.name);
+                setStatic("s_description", d.description || d.definition);
+                setStatic("s_calculation_method", d.calculation_method || d.calculation);
+                _setSelect(host.querySelector("#s_project_id"), d.project_id, " (not in project list)");
 
-                window.setTimeout(() => {
-                    const container = host.querySelector("#s_target_container");
-                    if (d.target_rows && d.target_rows.length) {
-                        const body2 = container.querySelector(".sev-body");
-                        if (body2) {
-                            body2.innerHTML = "";
-                            const addBtn = container.querySelector("button");
-                            d.target_rows.forEach((tr) => {
-                                _addSevRow(addBtn);
-                                const sevRow = body2.lastChild;
-                                sevRow.querySelector('[data-k="severity"]').value = tr.severity ?? 0;
-                                _updateSevPill(sevRow.querySelector('[data-k="severity"]'));
-                                if (tr.input_variable) sevRow.querySelector('[data-k="input_variable"]').value = tr.input_variable;
-                                sevRow.querySelector('[data-k="threshold_label"]').value = tr.threshold_label || "";
-                                if (tr.from_value != null) sevRow.querySelector('[data-k="from_value"]').value = tr.from_value;
-                                if (tr.to_value != null) sevRow.querySelector('[data-k="to_value"]').value = tr.to_value;
-                            });
-                        }
-                    } else if (d.linear_escalation) {
-                        const lin = d.linear_escalation;
-                        if (lin.rate_per_unit_percent != null) container.querySelector('[data-k="rate_per_unit_percent"]').value = lin.rate_per_unit_percent;
-                        if (lin.unit) container.querySelector('[data-k="unit"]').value = lin.unit;
-                        if (lin.grace_units != null) container.querySelector('[data-k="grace_units"]').value = lin.grace_units;
-                        _renderLinPreview(container.querySelector('[data-k="rate_per_unit_percent"]'));
-                    }
-                }, 0);
+                const catSel = host.querySelector("#s_category_code");
+                _setSelect(catSel, _resolveCategoryCode(d.category_code || d.category));
+                // Renders the Target widget for the resolved category. Must run
+                // BEFORE the target hydration below — the old code hydrated on a
+                // setTimeout hop that fired against an empty container.
+                _onStaticCategoryChange();
+                _hydrateTarget(host.querySelector("#s_target_container"), d);
 
-                const stateFor = (k, v) => {
-                    if (v == null) return;
-                    addRow(k);
-                    window.setTimeout(() => _hydrateRow(k, v), 0);
-                };
-                stateFor("scope_text", d.scope_text || d.scope);
-                stateFor("data_source", d.data_source);
-                stateFor("reports_submitted_to", d.reports_submitted_to);
-                stateFor("measurement_interval", d.measurement_interval);
-                stateFor("reporting_interval", d.reporting_interval);
-                stateFor("ld_computation_base", d.ld_computation_base || d.applied_on);
-                stateFor("effective_from", (d.effective_from || "").slice(0, 10) || null);
-                stateFor("effective_until", d.effective_until ? d.effective_until.slice(0, 10) : null);
-                if (d.measurement) stateFor("measurement", d.measurement);
-                if (d.secondary_measurement) stateFor("secondary_measurement", d.secondary_measurement);
-                if (d.placeholders && d.placeholders.length) stateFor("placeholders", d.placeholders);
+                /* ── dynamic RFP rows ── */
+                _editRowPlan(d).forEach(({ key, value, always }) => {
+                    if (!RFP_FIELDS.some((f) => f.key === key)) return;   // not in this catalog
+                    const has = _hasValue(value);
+                    if (!has && !always) return;
+                    // addRow() renders the widget synchronously, so hydrate inline.
+                    addRow(key);
+                    if (has) { _hydrateRow(key, value); return; }
+                    /* An `always` row with nothing stored must stay empty — a
+                       <select> would otherwise show its catalog default and
+                       PATCH that over the record's null. */
+                    const sel = host.querySelector(`#dynBody .dyn-row[data-field-key="${key}"] select[data-v]`);
+                    if (sel) { sel.insertAdjacentHTML("afterbegin", '<option value="" selected>— Not set —</option>'); sel.value = ""; }
+                });
+
+                _lockUnpatchableFields();
+                _snapshotDefaults();
             } catch (e) {
                 toast("Network error", e.message, "error");
             }
+        }
+
+        // Fill the Target widget from whichever shape the record actually
+        // stores, re-rendering the widget if the category picked the other one.
+        function _hydrateTarget(container, d) {
+            if (!container) return;
+            const rows = Array.isArray(d.target_rows) && d.target_rows.length ? d.target_rows
+                : (Array.isArray(d.bands) && d.bands.length ? d.bands : null);
+            const lin = d.linear_escalation;
+            if (!rows && !lin) return;   // nothing stored — keep the category's default widget
+
+            if (rows) {
+                if (!container.querySelector(".sev-body")) _widgetSeverityTable(container, { key: "target_rows" });
+                const form = container.querySelector(".sub-form");
+                const body = container.querySelector(".sev-body");
+                const addBtn = form.querySelector(":scope > button");
+                body.innerHTML = "";
+                rows.forEach((tr) => {
+                    _addSevRow(addBtn);
+                    const sevRow = body.lastElementChild;
+                    const sevSel = sevRow.querySelector('[data-k="severity"]');
+                    const sev = Number(tr.severity ?? 0);
+                    // Regenerate so a severity above the default 0–9 range exists.
+                    sevSel.innerHTML = _severityOptions(sev);
+                    sevSel.value = String(sev);
+                    _updateSevPill(sevSel);
+                    // The input variable may not be in the catalog — rebuild the
+                    // options with it selected so it can't blank itself out.
+                    const ivSel = sevRow.querySelector('[data-k="input_variable"]');
+                    if (tr.input_variable && ivSel) {
+                        ivSel.innerHTML = _sevInputVarOptions(tr.input_variable, sevRow);
+                        ivSel.value = tr.input_variable;
+                    }
+                    sevRow.querySelector('[data-k="threshold_label"]').value = tr.threshold_label ?? "";
+                    if (tr.from_value != null) sevRow.querySelector('[data-k="from_value"]').value = tr.from_value;
+                    if (tr.to_value != null) sevRow.querySelector('[data-k="to_value"]').value = tr.to_value;
+                });
+                return;
+            }
+
+            if (!container.querySelector('[data-k="rate_per_unit_percent"]')) _widgetLinearForm(container, { key: "linear_escalation" });
+            const rate = container.querySelector('[data-k="rate_per_unit_percent"]');
+            if (lin.rate_per_unit_percent != null && rate) rate.value = lin.rate_per_unit_percent;
+            if (lin.unit) _setSelect(container.querySelector('[data-k="unit"]'), lin.unit);
+            const grace = container.querySelector('[data-k="grace_units"]');
+            if (lin.grace_units != null && grace) grace.value = lin.grace_units;
+            if (rate) _renderLinPreview(rate);
+        }
+
+        /* PATCH /sla-masters/{id} accepts a narrow field set (SlaUpdateRequest):
+           title, description, category, scope_text, data_source,
+           calculation_method, reports_submitted_to, measurement_interval,
+           reporting_interval, ld_computation_base, effective_until, project_id,
+           placeholders, status. Everything else is silently dropped, so leaving
+           those fields editable on an edit means changes vanish on save. Show
+           them (they're part of the SLA) but lock them. */
+        const _PATCHABLE_KEYS = new Set([
+            "title", "description", "category_code", "scope_text", "data_source",
+            "calculation_method", "reports_submitted_to", "measurement_interval",
+            "reporting_interval", "ld_computation_base", "effective_until",
+            "project_id", "placeholders",
+        ]);
+        const _LOCK_NOTE = "Set at onboarding — this field can't be changed from the edit form.";
+        function _lockCell(cell, note) {
+            if (!cell || cell.dataset.locked) return;
+            cell.dataset.locked = "1";
+            cell.querySelectorAll("input, textarea, select, button").forEach((el) => { el.disabled = true; });
+            cell.style.opacity = ".72";
+            cell.insertAdjacentHTML("beforeend", `<div class="hint" style="color:var(--amber);font-weight:600;">🔒 ${esc(note || _LOCK_NOTE)}</div>`);
+        }
+        function _lockUnpatchableFields() {
+            ["s_sla_ref"].forEach((elId) => {
+                const el = host.querySelector("#" + elId);
+                if (el) { el.readOnly = true; el.style.background = "#f8fafc"; }
+            });
+            _lockCell(host.querySelector("#s_target_container").parentElement,
+                "Target / severity bands are fixed at onboarding — re-onboard the SLA to change them.");
+            host.querySelectorAll("#dynBody .dyn-row").forEach((row) => {
+                const key = row.dataset.fieldKey;
+                if (!key || _PATCHABLE_KEYS.has(key) || key === "attachments") return;
+                _lockCell(row.querySelector(".dyn-cell-value"));
+                const sel = row.querySelector(".field-type-select");
+                if (sel) sel.disabled = true;
+                const del = row.querySelector(".dyn-delete-btn");
+                if (del) del.disabled = true;
+            });
+        }
+
+        function _snapshotDefaults() { _formBaseline = _formSnapshot(); }
+
+        /* Existing attachments — rendered above the file input in edit mode.
+           Fetched as authorized blobs (the store URLs are token-protected),
+           falling back to a direct <img src> for public URLs. */
+        function _renderExistingAttachments(cell, list) {
+            const form = cell.querySelector(".sub-form");
+            if (!form) return;
+            const wrap = document.createElement("div");
+            wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;";
+            list.forEach((a) => {
+                const url = a && (a.file_url || a.url || a.href || a.download_url);
+                if (!url) return;
+                const fig = document.createElement("a");
+                fig.href = url; fig.target = "_blank"; fig.rel = "noreferrer";
+                fig.title = a.original_filename || "attachment";
+                fig.style.cssText = "display:block;border:1px solid var(--border-soft);border-radius:8px;padding:6px;background:#fff;text-decoration:none;color:var(--text-muted);font-size:11px;max-width:170px;";
+                fig.innerHTML = `<div style="width:156px;height:104px;border-radius:5px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;overflow:hidden;">…</div>
+                    <div style="margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(a.original_filename || "attachment")}</div>`;
+                const box = fig.firstElementChild;
+                (async () => {
+                    let src = url;
+                    try {
+                        const res = await authorizedFetch(url, { method: "GET" });
+                        if (!res.ok) throw new Error("HTTP " + res.status);
+                        const objUrl = URL.createObjectURL(await res.blob());
+                        OBJECT_URLS.push(objUrl);
+                        src = objUrl;
+                    } catch { /* fall through to the direct URL */ }
+                    box.innerHTML = `<img src="${esc(src)}" alt="" style="max-width:100%;max-height:100%;object-fit:contain;">`;
+                    fig.href = src;
+                })();
+                wrap.appendChild(fig);
+            });
+            if (!wrap.childElementCount) return;
+            form.insertAdjacentHTML("afterbegin", '<label style="display:block;margin-bottom:6px;">Already uploaded</label>');
+            form.insertBefore(wrap, form.children[1]);
         }
         function _hydrateRow(key, value) {
             const row = Array.from(host.querySelectorAll("#dynBody .dyn-row")).find((r) => r.dataset.fieldKey === key);
@@ -1240,9 +1468,16 @@ export default function SlaOnboardingPage() {
                 if (el) el.value = value || "";
                 return;
             }
-            if (t === "select" || t === "project_picker" || t === "category_picker") {
-                const el = cell.querySelector("[data-v]");
-                if (el) el.value = value || "";
+            if (t === "select" || t === "project_picker") {
+                _setSelect(cell.querySelector("[data-v]"), value);
+                return;
+            }
+            if (t === "category_picker") {
+                _setSelect(cell.querySelector("[data-v]"), _resolveCategoryCode(value));
+                return;
+            }
+            if (t === "file_picker") {
+                if (Array.isArray(value) && value.length) _renderExistingAttachments(cell, value);
                 return;
             }
             if (t === "measurement_set") {
@@ -1381,6 +1616,7 @@ export default function SlaOnboardingPage() {
         return () => {
             try { document.head.removeChild(styleEl); } catch { /* already gone */ }
             if (scroller) scroller.style.paddingBottom = prevPadBottom;
+            OBJECT_URLS.forEach((u) => { try { URL.revokeObjectURL(u); } catch { /* already revoked */ } });
             delete window.__slaOnb;
             delete window.__currentPayload__;
         };
