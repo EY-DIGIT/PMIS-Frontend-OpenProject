@@ -166,7 +166,48 @@ const reportDateISO = (raw) => {
   if (dmy) return `${dmy[3]}-${p2(dmy[2])}-${p2(dmy[1])}`;
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
   if (iso) return `${iso[1]}-${p2(iso[2])}-${p2(iso[3])}`;
+  /* 07-Jan-2026 — the shape the cost report puts in its `period` string, as
+     opposed to the all-numeric dd-MM-yyyy it uses for the band dates. */
+  const dMy = /^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$/.exec(s);
+  if (dMy) {
+    const m = MONTH_NAMES.findIndex(
+      (n) => n && n.toLowerCase().startsWith(dMy[2].toLowerCase().slice(0, 3))
+    );
+    if (m > 0) return `${dMy[3]}-${p2(m)}-${p2(dMy[1])}`;
+  }
   return "";
+};
+
+// "2026-01-07" → "7 Jan 2026"
+const formatISODate = (iso) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return "";
+  const mm = Number(m[2]);
+  return MONTH_NAMES[mm] ? `${Number(m[3])} ${MONTH_NAMES[mm].slice(0, 3)} ${m[1]}` : "";
+};
+
+/* The reporting window, which arrives as one opaque string — and in three
+   different date shapes depending on which endpoint produced it. Split into
+   its two ends so the card can lay them out as a range rather than printing
+   "2026-01-07 to 2026-04-06" as a title. Returns null when it can't be read,
+   and the caller falls back to showing the raw string unchanged. */
+const parsePeriod = (raw) => {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const parts = s.split(/\s+to\s+/i);
+  if (parts.length !== 2) return null;
+  const startISO = reportDateISO(parts[0]);
+  const endISO = reportDateISO(parts[1]);
+  const start = formatISODate(startISO);
+  const end = formatISODate(endISO);
+  if (!start || !end) return null;
+  // Inclusive of both ends: 7 Jan → 6 Apr is 90 days, which is what the
+  // report's own calendarDays says for a full-window resource.
+  const span = daysBetween(startISO, endISO);
+  return {
+    start, end,
+    days: Number.isFinite(span) && span >= 0 ? span + 1 : null,
+  };
 };
 
 const money = (v) =>
@@ -454,10 +495,11 @@ export default function ProjectAttendancePage() {
      fields, so the filtering happens here. It narrows what is displayed; it
      does not reduce what is fetched.
 
-     "" = no filter. UNASSIGNED is its own selectable value because a large
-     share of rows genuinely have no milestone — 7 of 14 in January — and
-     folding them into "all" or hiding them silently both misrepresent the
-     data. */
+     "" = no filter. UNASSIGNED is no longer offered in the dropdown, but the
+     value is still handled everywhere below: a URL saved while the option
+     existed still carries ?milestone=__none__, and the branches keep such a
+     link showing the unassigned rows it was saved for rather than an
+     unexplained empty table. Nothing in the UI can produce it any more. */
   const UNASSIGNED = "__none__";
   /* ── the filter lives in the URL, not in component state ──────────────
      A leave detail returns here with navigate(-1). Held in useState, the
@@ -1090,9 +1132,6 @@ export default function ProjectAttendancePage() {
                     {[m.serverDisplayCode || m.id, m.name].filter(Boolean).join(" · ")}
                   </option>
                 ))}
-                {/* Its own option rather than a silent omission — a lot of rows
-                    carry no milestone, and they have to be reachable. */}
-                <option value={UNASSIGNED}>No milestone</option>
               </select>
             </Field>
           )}
@@ -1255,9 +1294,26 @@ function AttendanceTable({
   /* Half days make these fractional, so 21.5 has to survive — but 21.0 should
      read as 21 rather than as a suspiciously precise 21.00. */
   const days = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+  /* Sandwich days — weekends and holidays falling between leave days, charged
+     as leave. Stated per month like billableDays and with no resource-level
+     total, so a row's figure is the sum of its bands. */
+  const sandwichOf = (c) => {
+    if (!c) return null;
+    if (c.sandwichLeave != null) return num(c.sandwichLeave);
+    const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
+    const stated = months.filter((m) => m?.sandwichLeave != null);
+    if (!stated.length) return null;
+    return stated.reduce((t, m) => t + num(m.sandwichLeave), 0);
+  };
+
   /* A column of dashes says less than no column — same rule as Joined. */
   const showBillable =
     showCost && employees.some((e) => billableDaysOf(costFor(e)) != null);
+  /* Shown whenever the figure is reported, including when every row is 0 —
+     "nobody lost a weekend to sandwich leave this quarter" is an answer, and a
+     column that vanishes on zero would leave you unsure it was ever checked. */
+  const showSandwich =
+    showCost && employees.some((e) => sandwichOf(costFor(e)) != null);
   const billableTotal = employees.reduce(
     (t, e) => t + (billableDaysOf(costFor(e)) ?? 0), 0
   );
@@ -1289,10 +1345,31 @@ function AttendanceTable({
     return s.length > 10 ? `${s.slice(0, 8)}…` : s;
   };
 
+  const periodRange = useMemo(() => parsePeriod(period), [period]);
+
   return (
     <div className="uidai-pmis-card att-card">
       <div className="att-card-head">
-        <strong className="att-card-title">{period}</strong>
+        {/* Laid out as a range rather than printed as a sentence: the two
+            dates are the point, so they carry the weight and "to" becomes an
+            arrow between them. Falls back to the raw string if the period
+            arrives in a shape parsePeriod doesn't recognise — better an ugly
+            label than a missing one. */}
+        {periodRange ? (
+          <div className="att-period" title={period}>
+            <span className="att-period-lbl">Period</span>
+            <span className="att-period-range">
+              <span className="att-period-date">{periodRange.start}</span>
+              <span className="att-period-arrow" aria-hidden="true">→</span>
+              <span className="att-period-date">{periodRange.end}</span>
+            </span>
+            {periodRange.days != null && (
+              <span className="att-period-days">{periodRange.days} days</span>
+            )}
+          </div>
+        ) : (
+          <strong className="att-card-title">{period}</strong>
+        )}
         <div className="att-chips">
           <Chip>{employees.length} {employees.length === 1 ? "employee" : "employees"}</Chip>
           {sharedMilestoneId && (
@@ -1304,7 +1381,6 @@ function AttendanceTable({
               {labelFor(sharedMilestoneId)}
             </span>
           )}
-          {clickable && <span className="att-hint-inline">Click a row for full leave detail</span>}
         </div>
       </div>
       <div className="att-table-wrap">
@@ -1337,25 +1413,38 @@ function AttendanceTable({
                   <th className="att-th att-num">Unpaid Leave</th>
                 </>
               )}
+              {/* Sits with the leave columns even though it comes from the cost
+                  payload rather than the report — it is leave, and grouping it
+                  by data source instead of meaning would be filing it by an
+                  accident of the API. */}
+              {showSandwich && (
+                <th
+                  className="att-th att-num"
+                  title="Weekends or holidays falling between leave days, counted as leave. Summed across the period's monthly bands."
+                >
+                  Sandwich
+                </th>
+              )}
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
+              {/* Last of the day counts, closing the run that starts at
+                  Holiday — so every column measured in days sits together and
+                  Attendance, the only percentage, is what breaks the run. */}
+              {showBillable && (
+                <th
+                  className="att-th att-num"
+                  title="Days billed to the client = days on the project − unpaid leave days. Paid leave and holidays stay billable. Summed across the period's monthly bands, so anyone who joined or left partway is counted only for the days they were on it."
+                >
+                  Billable Days
+                </th>
+              )}
               <th
                 className="att-th att-num att-th-att"
                 title="Attendance % = (present days + paid leave) ÷ working days × 100. Half days count as 0.5; weekends and holidays are excluded from working days. Example: (46 present + 6 paid) ÷ 59 × 100 = 88.14%."
               >
                 Attendance
               </th>
-              {/* Sits next to Cost because it belongs to it: these are the days
-                  the amount is charged over, not an attendance count. */}
-              {showBillable && (
-                <th
-                  className="att-th att-num"
-                  title="Days billed to the client = calendar days − unpaid leave days. Paid leave and holidays stay billable. Summed across the period's monthly bands."
-                >
-                  Billable Days
-                </th>
-              )}
               {showCost && (
                 <th
                   className="att-th att-num"
@@ -1437,12 +1526,17 @@ function AttendanceTable({
                     </td>
                   </>
                 )}
+                {showSandwich && (() => {
+                  const s = sandwichOf(costFor(emp));
+                  return (
+                    <td className={`att-td att-num${s ? " att-warn" : " att-dim"}`}>
+                      {s == null ? "—" : days(s)}
+                    </td>
+                  );
+                })()}
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 */}
-                <td className="att-td att-num att-att-cell">
-                  <AttendanceBar value={emp.attendancePercentage} />
-                </td>
                 {showBillable && (() => {
                   const b = billableDaysOf(costFor(emp));
                   return (
@@ -1451,6 +1545,9 @@ function AttendanceTable({
                     </td>
                   );
                 })()}
+                <td className="att-td att-num att-att-cell">
+                  <AttendanceBar value={emp.attendancePercentage} />
+                </td>
                 {showCost && (() => {
                   const c = costFor(emp);
                   return (
@@ -1471,18 +1568,20 @@ function AttendanceTable({
           {showCost && (
             <tfoot>
               <tr className="att-row att-foot-row">
-                {/* Everything up to the Cost column is one spanned label: seven
-                    fixed columns, plus Milestone when the rows differ, Joined
-                    when the report carries it, and the paid/unpaid pair when
-                    leave is split — so the total always lands under Cost. Every
-                    optional column above needs its term here. */}
+                {/* The label spans everything up to Billable Days: six fixed
+                    columns — ID, Name, Holiday, Working, Present, Leave Taken —
+                    plus Milestone when the rows differ, Joined when the report
+                    carries it, the paid/unpaid pair when leave is split, and
+                    Sandwich when it's reported. Every optional column before
+                    Billable needs its term here, or both totals shift left. */}
                 <td
                   className="att-td att-strong"
                   colSpan={
-                    7 +
+                    6 +
                     (showMilestoneCol ? 1 : 0) +
                     (showJoined ? 1 : 0) +
-                    (splitLeave ? 2 : 0)
+                    (splitLeave ? 2 : 0) +
+                    (showSandwich ? 1 : 0)
                   }
                 >
                   Total for {period}
@@ -1493,6 +1592,10 @@ function AttendanceTable({
                 {showBillable && (
                   <td className="att-td att-num att-strong">{days(billableTotal)}</td>
                 )}
+                {/* Attendance now sits between Billable Days and Cost, and an
+                    average of percentages doesn't belong on a totals row — so
+                    the column is held open and left blank. */}
+                <td className="att-td" />
                 <td
                   className="att-td att-num att-strong att-cost-total"
                   title={rupeesInWords(costTotal)}
@@ -2917,6 +3020,22 @@ const ATT_CSS = `
   gap: 12px; padding: 14px 16px 12px; flex-wrap: wrap; }
 .att-card-title { font-size: 15px; color: ${C.ink}; font-weight: 700; }
 
+/* ── reporting period ───────────────────────────────────────────────────
+   The two dates read as one range: a quiet label, the dates at full weight,
+   and the span as a trailing fact. Tabular numerals so the two ends line up
+   on their digits instead of drifting apart by glyph width. */
+.att-period { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.att-period-lbl { font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: ${C.faint}; }
+.att-period-range { display: inline-flex; align-items: baseline; gap: 8px;
+  font-variant-numeric: tabular-nums; }
+.att-period-date { font-size: 15px; font-weight: 700; color: ${C.ink}; letter-spacing: -0.01em; }
+.att-period-arrow { color: ${C.faint}; font-size: 13px; }
+/* A fact about the range, not part of it — so it sits apart and lighter. */
+.att-period-days { font-size: 12px; font-weight: 600; color: ${C.muted};
+  background: ${C.surface}; border: 1px solid ${C.border};
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+
 .att-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .att-chip { font-size: 12px; background: ${C.surface}; color: ${C.ink2};
   padding: 3px 10px; border-radius: 999px; border: 1px solid ${C.border}; white-space: pre-line; }
@@ -2929,7 +3048,6 @@ const ATT_CSS = `
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .att-ms-chip-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: ${C.muted}; flex: 0 0 auto; }
-.att-hint-inline { font-size: 12px; color: ${C.faint}; }
 
 .att-table-wrap { overflow-x: auto; }
 .att-table { width: 100%; border-collapse: collapse; font-size: 14px; }

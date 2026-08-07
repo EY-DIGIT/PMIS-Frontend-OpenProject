@@ -563,11 +563,11 @@ export default function LeaveDetailPage() {
      activity and answers 404. */
   /* Cost across the activity, in one call.
 
-     /api/attendance/cost/activity?projectId&activityId returns the full
-     envelope — { period, totals, resources: [ …one per resource, each with its
-     own monthlyBreakdown… ] } — so this page just picks its own resource out
-     of it. That replaced a fan-out over /cost/employee, which answered one
-     calendar month at a time and forced the envelope to be assembled here. */
+     /api/attendance/cost/activity?projectId&activityId&resourceId returns the
+     envelope — { period, totals, resources: [ …each with its own
+     monthlyBreakdown… ] } — narrowed to the one resource asked for. That
+     replaced a fan-out over /cost/employee, which answered one calendar month
+     at a time and forced the envelope to be assembled here. */
   useEffect(() => {
     if (paramError || !resourceId || !projectId || !activityId) return undefined;
     const FALLBACK = "Couldn't load the cost report.";
@@ -578,7 +578,13 @@ export default function LeaveDetailPage() {
       setCostError(null);
       try {
         const token = getToken();
-        const qs = new URLSearchParams({ projectId, activityId });
+        /* resourceId narrows the envelope to this one person server-side. The
+           page used to pull the whole activity team down and pick its row out
+           of eleven — 25.9 KB to use 2.6 KB of it. Verified against the live
+           endpoint: the returned resource object is byte-identical to the one
+           the client-side find used to select, and `totals` scopes to the
+           single resource rather than the team. */
+        const qs = new URLSearchParams({ projectId, activityId, resourceId });
         const res = await fetch(`${API_BASE}/api/attendance/cost/activity?${qs}`, {
           signal: controller.signal,
           headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -591,10 +597,12 @@ export default function LeaveDetailPage() {
         if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
         const json = await readJsonBody(res, FALLBACK);
         const payload = json?.data ?? json;
-        /* Matched by attendanceId rather than taken positionally — the list
-           covers the whole activity team, and this page is about one of them.
-           No fallback to resources[0]: showing another employee's cost under
-           this employee's name would be worse than showing none. */
+        /* Still matched by attendanceId rather than taken positionally. The
+           request is now filtered, so this normally has one row to choose
+           from — but a deployment that doesn't know `resourceId` ignores it
+           and returns the whole team, and against that, resources[0] would
+           put another employee's cost under this employee's name. Keeping the
+           match makes the page correct either way. */
         const rows = Array.isArray(payload?.resources) ? payload.resources : [];
         const mine = rows.find((r) => String(r?.attendanceId) === String(resourceId));
         if (!active) return;
@@ -1429,10 +1437,13 @@ const COST_KNOWN_KEYS = new Set([
    needs and nothing a satisfied reader wants, so it starts closed. Every
    figure is written out as text either way — the meter is a second reading
    of numbers already on screen, never the only way to reach one. */
-function ChainTerm({ label, value, amount, total }) {
+function ChainTerm({ label, value, amount, total, hint }) {
   return (
     <div className={`ld-chain-term${total ? " is-total" : ""}`}>
-      <div className="ld-chain-lbl">{label}</div>
+      {/* The formula sits on the label and the amount-in-words on the figure,
+          so the two hovers answer different questions: what this term means,
+          and exactly how much it is. */}
+      <div className="ld-chain-lbl" title={hint}>{label}</div>
       {/* The figure spelled out on hover. These are the largest numbers on the
           page, and the one place a reader is asked to check that the
           arithmetic closes — so they're the ones worth being sure of. */}
@@ -1443,8 +1454,13 @@ function ChainTerm({ label, value, amount, total }) {
 
 function CostChain({
   planned, deducted, relaxation, relaxationDays, total,
-  calendarDays, paidCalendarDays, unpaidDays, perDayCost,
+  calendarDays, periodDays, paidCalendarDays, unpaidDays, perDayCost,
 }) {
+  /* Someone who joined or left mid-period is billed over fewer days than the
+     period holds. Worth saying out loud when it happens, because otherwise the
+     working below divides by a number the reader can't see anywhere. */
+  const partial = num(periodDays) > 0 && num(calendarDays) > 0
+    && num(calendarDays) < num(periodDays);
   const billablePct =
     planned > 0 ? Math.min(100, Math.max(0, (total / planned) * 100)) : 0;
   // The working only reads as an explanation when both halves of it are real.
@@ -1453,9 +1469,19 @@ function CostChain({
   return (
     <div className="uidai-pmis-card ld-chain">
       <div className="ld-chain-row">
-        <ChainTerm label="Planned" value={money(planned)} amount={planned} />
+        <ChainTerm
+          label="Planned"
+          value={money(planned)}
+          amount={planned}
+          hint="The budget for this resource before any deduction = days on the project × the daily rate, summed across the period's cycles. For someone on the whole period that is simply the monthly rate × the number of cycles; for someone who joined or left partway it is pro-rated. Attendance does not affect it."
+        />
         <span className="ld-chain-op" aria-hidden="true">−</span>
-        <ChainTerm label="Deducted" value={money(deducted)} amount={deducted} />
+        <ChainTerm
+          label="Deducted"
+          value={money(deducted)}
+          amount={deducted}
+          hint="Amount deducted for unpaid leave = unpaid leave days × daily rate, summed across the period's cycles. The daily rate is the monthly rate ÷ that cycle's calendar days."
+        />
         {relaxation > 0 && (
           <>
             <span className="ld-chain-op" aria-hidden="true">+</span>
@@ -1467,11 +1493,18 @@ function CostChain({
               }
               value={money(relaxation)}
               amount={relaxation}
+              hint="Deducted days waived as an exception, added back at the same daily rate they were withheld at."
             />
           </>
         )}
         <span className="ld-chain-op" aria-hidden="true">=</span>
-        <ChainTerm label="Billable" value={money(total)} amount={total} total />
+        <ChainTerm
+          label="Billable"
+          value={money(total)}
+          amount={total}
+          total
+          hint="What is actually billed = planned − deducted, plus any relaxation added back. The same figure as billable days × daily rate, summed across the period's cycles."
+        />
       </div>
 
       {/* Meter, not a two-slice pie: this is one ratio against a limit. The
@@ -1498,7 +1531,10 @@ function CostChain({
           <p>
             <span title={rupeesInWords(planned)}>{money(planned)}</span> ÷{" "}
             {dayCount(calendarDays)} calendar days
-            = <strong title={rupeesInWords(perDayCost)}>{money(perDayCost)}</strong> a day.
+            {/* Named explicitly when it isn't the whole period, or the division
+                reads as wrong: 90 days are on screen and this divides by 61. */}
+            {partial && <> on the project (of {dayCount(periodDays)})</>}
+            {" "}= <strong title={rupeesInWords(perDayCost)}>{money(perDayCost)}</strong> a day.
             {" "}
             {dayCount(unpaidDays)} unpaid {num(unpaidDays) === 1 ? "day" : "days"}
             {" "}× <span title={rupeesInWords(perDayCost)}>{money(perDayCost)}</span>
@@ -1569,13 +1605,18 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
 
   return (
     <>
+      {/* calendarDays is fed activeCalendarDays: the divisor behind perDayCost
+          is the days this resource was actually ON the project, which is fewer
+          than the period for anyone who joined or left partway. periodDays
+          carries the full window so the working can name both. */}
       <CostChain
         planned={planned}
         deducted={totalDeducted}
         relaxation={relaxationAmount}
         relaxationDays={relaxationDays}
         total={totalCost}
-        calendarDays={report.calendarDays}
+        calendarDays={report.activeCalendarDays ?? report.calendarDays}
+        periodDays={report.calendarDays}
         paidCalendarDays={report.paidCalendarDays}
         unpaidDays={report.unpaidLeaveDays}
         perDayCost={report.perDayCost}
@@ -1653,7 +1694,7 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                 {/* The days actually charged. Sent by the server as
                     billableDays; it equals calendar days less unpaid leave,
                     and is the day-count counterpart of Deducted Amount. */}
-                <th className="ld-num" title="Days billed to the client = calendar days − unpaid leave days. Paid leave and holidays stay billable. Example: 31 − 1 = 30.">Billable Days</th>
+                <th className="ld-num" title="Days billed to the client = days on the project in this cycle − unpaid leave days. Paid leave and holidays stay billable; for a full cycle the first figure is just its calendar days. Example: 31 − 1 = 30.">Billable Days</th>
                 <th className="ld-num" title="Full monthly rate from the rate card, before any deduction.">Monthly Rate</th>
                 <th className="ld-num" title="Daily rate = monthly rate ÷ calendar days in that month — not the working days. So the same monthly rate is worth less per day in a long month. January (31 days): ₹1,75,600 ÷ 31 = ₹5,664.52. February (28 days): ₹1,75,600 ÷ 28 = ₹6,271.43.">Per Day Rate</th>
                 {/* <th className="ld-num">HalfDay Amount</th> */}
