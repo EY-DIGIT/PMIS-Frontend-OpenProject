@@ -210,8 +210,181 @@ const parsePeriod = (raw) => {
   };
 };
 
+/* ── row derivations, shared by the table and the downloadable report ──
+   At module scope on purpose: the report has to state the same numbers the
+   table shows, and a second copy of these would be free to drift from it. */
+
+/* Billable days for a row. The cost payload states this per month, not per
+   resource, so a row's figure is the sum of its bands — the same numbers the
+   leave-detail table lists month by month. Only months that actually carry
+   the field are counted: summing over months that don't would report a
+   confident 0 for a figure the server never sent. */
+const billableDaysOf = (c) => {
+  if (!c) return null;
+  if (c.billableDays != null) return num(c.billableDays);
+  const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
+  const stated = months.filter((m) => m?.billableDays != null);
+  if (!stated.length) return null;
+  return stated.reduce((t, m) => t + num(m.billableDays), 0);
+};
+
+/* Sandwich days — weekends and holidays falling between leave days, charged
+   as leave. Stated per month like billableDays and with no resource-level
+   total, so a row's figure is the sum of its bands. */
+const sandwichOf = (c) => {
+  if (!c) return null;
+  if (c.sandwichLeave != null) return num(c.sandwichLeave);
+  const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
+  const stated = months.filter((m) => m?.sandwichLeave != null);
+  if (!stated.length) return null;
+  return stated.reduce((t, m) => t + num(m.sandwichLeave), 0);
+};
+
+/* Half days make these fractional, so 21.5 has to survive — but 21.0 should
+   read as 21 rather than as a suspiciously precise 21.00. */
+const days = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+
 const money = (v) =>
   `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/* ── downloadable report ───────────────────────────────────────────────────
+   One HTML document, used two ways: written to a .xls blob (Excel opens HTML
+   tables and keeps the styling — the same trick the audit log export uses, and
+   it needs no library), or opened in a tab and printed to PDF.
+
+   Everything here is escaped: employee names come from an upload, and an
+   apostrophe or an angle bracket in one would otherwise break the document. */
+const esc = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+function buildAttendanceReportHtml({
+  projectName, period, periodRange, milestoneLabel, activityLabel,
+  employees, costById, metrics, costTotal, generatedAt,
+}) {
+  const costFor = (e) => (costById ? costById.get(String(e.attendanceId)) : null);
+  const has = (fn) => employees.some((e) => fn(e) != null);
+  const showJoined = employees.some((e) => e.joiningDate);
+  const splitLeave = employees.some((e) => e.paidLeaveDays != null || e.unpaidLeaveDays != null);
+  const showCost = !!costById && costById.size > 0;
+  const showBillable = showCost && has((e) => billableDaysOf(costFor(e)));
+  const showSandwich = showCost && has((e) => sandwichOf(costFor(e)));
+
+  /* Columns are declared once, as data. The header, every row and the totals
+     line are generated from this list, so they cannot disagree about how many
+     there are — the failure this table has had before. */
+  const cols = [
+    { h: "ID", get: (e) => e.attendanceId },
+    { h: "Name", get: (e) => e.employeeName },
+    { h: "Designation", get: (e) => e.designation || "" },
+    { h: "Status", get: (e) => (e.active === false ? "Inactive" : "Active") },
+    ...(showJoined ? [{ h: "Joined", get: (e) => formatReportDate(e.joiningDate) }] : []),
+    ...(employees.some((e) => e.lastWorkingDate)
+      ? [{ h: "Last Working Day", get: (e) => formatReportDate(e.lastWorkingDate) }] : []),
+    { h: "Holiday", num: true, get: (e) => num(e.holidayDays) },
+    { h: "Working", num: true, get: (e) => num(e.workingDays) },
+    { h: "Present", num: true, get: (e) => num(e.presentDays) },
+    { h: "Leave Taken", num: true, get: (e) => leaveTakenOf(e) },
+    ...(splitLeave ? [
+      { h: "Paid Leave", num: true, get: (e) => num(e.paidLeaveDays) },
+      { h: "Unpaid Leave", num: true, get: (e) => num(e.unpaidLeaveDays) },
+    ] : []),
+    ...(showSandwich ? [{ h: "Sandwich", num: true, get: (e) => sandwichOf(costFor(e)) ?? 0 }] : []),
+    ...(showBillable ? [{ h: "Billable Days", num: true, get: (e) => billableDaysOf(costFor(e)) ?? 0 }] : []),
+    { h: "Attendance %", num: true, get: (e) => `${num(e.attendancePercentage).toFixed(2)}%` },
+    ...(showCost ? [{ h: "Cost (INR)", num: true, get: (e) => num(costFor(e)?.totalCost).toFixed(2) }] : []),
+  ];
+
+  const head = cols.map((c) => `<th${c.num ? ' class="n"' : ""}>${esc(c.h)}</th>`).join("");
+  const body = employees.map((e) => {
+    const off = e.active === false;
+    return `<tr${off ? ' class="off"' : ""}>${
+      cols.map((c) => `<td${c.num ? ' class="n"' : ""}>${esc(c.get(e))}</td>`).join("")
+    }</tr>`;
+  }).join("");
+
+  /* The totals line only carries figures that are meaningful summed. An
+     average of percentages is not a total, so Attendance is left blank
+     rather than filled with something that looks like one. */
+  const totalOf = (h) => {
+    if (h === "Billable Days") return days(employees.reduce((t, e) => t + (billableDaysOf(costFor(e)) ?? 0), 0));
+    if (h === "Sandwich") return days(employees.reduce((t, e) => t + (sandwichOf(costFor(e)) ?? 0), 0));
+    if (h === "Present") return days(employees.reduce((t, e) => t + num(e.presentDays), 0));
+    if (h === "Leave Taken") return days(employees.reduce((t, e) => t + leaveTakenOf(e), 0));
+    if (h === "Paid Leave") return days(employees.reduce((t, e) => t + num(e.paidLeaveDays), 0));
+    if (h === "Unpaid Leave") return days(employees.reduce((t, e) => t + num(e.unpaidLeaveDays), 0));
+    if (h === "Cost (INR)") return num(costTotal).toFixed(2);
+    return "";
+  };
+  const totals = `<tr class="tot"><td colspan="2">Total · ${esc(employees.length)} ${
+    employees.length === 1 ? "employee" : "employees"
+  }</td>${cols.slice(2).map((c) => `<td${c.num ? ' class="n"' : ""}>${esc(totalOf(c.h))}</td>`).join("")}</tr>`;
+
+  const metaRow = (k, v) => (v ? `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>` : "");
+  const windowLabel = periodRange
+    ? `${periodRange.start} to ${periodRange.end}${periodRange.days != null ? ` (${periodRange.days} days)` : ""}`
+    : period;
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8" />
+<title>Attendance Report — ${esc(projectName || "Project")}</title>
+<style>
+  @page { size: A4 landscape; margin: 12mm; }
+  body { font-family: Segoe UI, Inter, Arial, sans-serif; color: #16202e; font-size: 11px; margin: 0; }
+  h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: -0.2px; }
+  .sub { color: #64748b; font-size: 11px; margin-bottom: 12px; }
+  .meta { border-collapse: collapse; margin-bottom: 14px; }
+  .meta th { text-align: left; color: #64748b; font-weight: 600; padding: 2px 14px 2px 0;
+    text-transform: uppercase; font-size: 9px; letter-spacing: .06em; white-space: nowrap; }
+  .meta td { padding: 2px 0; font-weight: 600; }
+  .cards { margin-bottom: 12px; border-collapse: collapse; }
+  .cards td { border: 1px solid #e3e9f2; padding: 6px 12px; }
+  .cards .k { color: #64748b; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+  .cards .v { font-size: 14px; font-weight: 700; }
+  table.data { border-collapse: collapse; width: 100%; }
+  table.data th, table.data td { border: 1px solid #d8e0ea; padding: 5px 7px; }
+  table.data th { background: #eef3f9; text-align: left; font-size: 9px;
+    text-transform: uppercase; letter-spacing: .05em; color: #475569; }
+  table.data td.n, table.data th.n { text-align: right; }
+  tr.off td { color: #94a3b8; }
+  tr.tot td { font-weight: 700; background: #f6f9fc; border-top: 2px solid #cbd5e1; }
+  .legend { margin-top: 12px; color: #64748b; font-size: 9.5px; line-height: 1.6; }
+  .legend b { color: #16202e; }
+</style></head>
+<body>
+  <h1>Quarterly Attendance Report</h1>
+  <div class="sub">${esc(projectName || "Project")}</div>
+  <table class="meta">
+    ${metaRow("Period", windowLabel)}
+    ${metaRow("Milestone", milestoneLabel)}
+    ${metaRow("Activity", activityLabel)}
+    ${metaRow("Generated", generatedAt)}
+  </table>
+  <table class="cards"><tr>
+    <td><div class="k">Team size</div><div class="v">${esc(employees.length)}</div></td>
+    ${metrics ? `<td><div class="k">Avg attendance</div><div class="v">${esc(num(metrics.avg).toFixed(1))}%</div></td>` : ""}
+    ${metrics ? `<td><div class="k">Present days</div><div class="v">${esc(days(num(metrics.present)))}</div></td>` : ""}
+    ${metrics && metrics.paidLeave != null ? `<td><div class="k">Paid leave</div><div class="v">${esc(days(num(metrics.paidLeave)))}</div></td>` : ""}
+    ${metrics && metrics.unpaidLeave != null ? `<td><div class="k">Unpaid leave</div><div class="v">${esc(days(num(metrics.unpaidLeave)))}</div></td>` : ""}
+    ${showCost ? `<td><div class="k">Total cost</div><div class="v">${esc(money(costTotal))}</div></td>` : ""}
+  </tr></table>
+  <table class="data">
+    <thead><tr>${head}</tr></thead>
+    <tbody>${body || `<tr><td colspan="${cols.length}" style="text-align:center;padding:20px;color:#7a869a;">No attendance rows.</td></tr>`}</tbody>
+    ${employees.length ? `<tfoot>${totals}</tfoot>` : ""}
+  </table>
+  <div class="legend">
+    <b>Attendance %</b> = (present days + paid leave) ÷ working days × 100. Half days count as 0.5;
+    weekends and holidays are excluded from working days.<br />
+    <b>Billable Days</b> = days on the project − unpaid leave days. Paid leave and holidays stay billable.<br />
+    <b>Sandwich</b> = weekends or holidays falling between leave days, charged as leave in addition to
+    the paid/unpaid split.<br />
+    <b>Cost</b> = billable days × daily rate, where the daily rate is the monthly rate ÷ that cycle's
+    calendar days. Figures in INR.
+  </div>
+</body></html>`;
+}
 
 /* Whole rupees, for the stat cards. A lakh-scale total at card font size is
    far wider than "11" or "89.6%", and the paise carry no meaning at that
@@ -415,6 +588,7 @@ export default function ProjectAttendancePage() {
   const [replacementsError, setReplacementsError] = useState(null);
   const [replacementsLoading, setReplacementsLoading] = useState(false);
   const [replacementsOpen, setReplacementsOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Holiday modal
   const [holidayOpen, setHolidayOpen] = useState(false);
@@ -1001,6 +1175,7 @@ export default function ProjectAttendancePage() {
     }
   }
 
+
   /* Row click → the full-page leave detail. It needs the ACTIVITY: its leave
      report is scoped to resource + activity now. Year and quarter still ride
      along because the cost report and the relaxation workflow on that page
@@ -1056,6 +1231,75 @@ export default function ProjectAttendancePage() {
     quarterlyCostById.forEach((r) => { sum += num(r.totalCost); });
     return sum;
   }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterActive]);
+
+  /* ── the downloadable report ──────────────────────────────────────────
+     Built from the same rows and cost map the table on screen renders, so
+     the file can't state different numbers than the page it came from. */
+  const reportHtml = useCallback(() => {
+    const label = (m) => (m ? [m.serverDisplayCode || m.id, m.name].filter(Boolean).join(" · ") : "");
+    const activity = filterActivities.find((a) => String(a.apiId) === String(filterActivityId));
+    return buildAttendanceReportHtml({
+      projectName: project?.projectName || "",
+      period: quarterly?.period || "",
+      periodRange: parsePeriod(quarterly?.period || ""),
+      milestoneLabel: label(selectedMilestone),
+      activityLabel: label(activity),
+      employees: quarterlyRows,
+      costById: quarterlyCostById,
+      metrics: quarterlyMetrics,
+      costTotal: quarterlyCostTotal,
+      generatedAt: new Date().toLocaleString("en-IN"),
+    });
+  }, [
+    project?.projectName, quarterly?.period, selectedMilestone, filterActivities,
+    filterActivityId, quarterlyRows, quarterlyCostById, quarterlyMetrics, quarterlyCostTotal,
+  ]);
+
+  const reportFileName = () => {
+    const slug = (s) => String(s || "").replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+    /* Colons are illegal in Windows filenames, so the timestamp is flattened
+       rather than taken straight from toISOString. */
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+    return `attendance-${slug(project?.projectName) || "project"}-${stamp}`;
+  };
+
+  function downloadReport(kind) {
+    if (!quarterlyRows.length) return;
+    const html = reportHtml();
+    if (kind === "excel") {
+      /* .xls wrapping an HTML table — Excel reads the markup and keeps the
+         styling, with no library to add. The BOM makes it open as UTF-8, so
+         the ₹ sign and any non-ASCII name survive. */
+      const blob = new Blob(["﻿", html], { type: "application/vnd.ms-excel" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${reportFileName()}.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setReportOpen(false);
+      return;
+    }
+    // PDF: render in a tab and hand over to the browser's print dialog, where
+    // "Save as PDF" is the default destination.
+    const win = window.open("", "_blank");
+    if (!win) {
+      notifyActionError(
+        "Couldn't open the report",
+        "Allow pop-ups for this site to export as PDF, or download the Excel copy instead."
+      );
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    const print = () => { try { win.focus(); win.print(); } catch { /* dismissed */ } };
+    if (win.document.readyState === "complete") setTimeout(print, 150);
+    else win.addEventListener("load", () => setTimeout(print, 150));
+    setReportOpen(false);
+  }
 
   return (
     <div className="uidai-pmis-content att-page">
@@ -1193,6 +1437,18 @@ export default function ProjectAttendancePage() {
               )}
             </button>
           )}
+          {/* Only once there is a table to report on. Offered as a choice of
+              format rather than two more toolbar buttons. */}
+          {quarterlyRows.length > 0 && (
+            <button
+              className="att-btn-secondary"
+              onClick={() => setReportOpen(true)}
+              title="Download this table as a formatted report"
+            >
+              <ReportIcon />
+              Report
+            </button>
+          )}
           <button className="att-btn-secondary" onClick={() => setHolidayOpen(true)}>
             <CalendarIcon />
             Holidays
@@ -1231,6 +1487,14 @@ export default function ProjectAttendancePage() {
           />
         )}
       </section>
+
+      {reportOpen && (
+        <ReportModal
+          rowCount={quarterlyRows.length}
+          onPick={downloadReport}
+          onClose={() => setReportOpen(false)}
+        />
+      )}
 
       {replacementsOpen && (
         <ReplacementsModal
@@ -1277,34 +1541,6 @@ function AttendanceTable({
      a cost payload was actually joined in — the monthly table is unchanged. */
   const showCost = !!costById && costById.size > 0;
   const costFor = (emp) => (showCost ? costById.get(String(emp.attendanceId)) : null);
-
-  /* Billable days for a row. The cost payload states this per month, not per
-     resource, so a row's figure is the sum of its bands — the same numbers
-     the leave-detail table lists month by month. Only months that actually
-     carry the field are counted: summing over months that don't would report
-     a confident 0 for a figure the server never sent. */
-  const billableDaysOf = (c) => {
-    if (!c) return null;
-    if (c.billableDays != null) return num(c.billableDays);
-    const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
-    const stated = months.filter((m) => m?.billableDays != null);
-    if (!stated.length) return null;
-    return stated.reduce((t, m) => t + num(m.billableDays), 0);
-  };
-  /* Half days make these fractional, so 21.5 has to survive — but 21.0 should
-     read as 21 rather than as a suspiciously precise 21.00. */
-  const days = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
-  /* Sandwich days — weekends and holidays falling between leave days, charged
-     as leave. Stated per month like billableDays and with no resource-level
-     total, so a row's figure is the sum of its bands. */
-  const sandwichOf = (c) => {
-    if (!c) return null;
-    if (c.sandwichLeave != null) return num(c.sandwichLeave);
-    const months = Array.isArray(c.monthlyBreakdown) ? c.monthlyBreakdown : [];
-    const stated = months.filter((m) => m?.sandwichLeave != null);
-    if (!stated.length) return null;
-    return stated.reduce((t, m) => t + num(m.sandwichLeave), 0);
-  };
 
   /* A column of dashes says less than no column — same rule as Joined. */
   const showBillable =
@@ -2312,6 +2548,44 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
 /* =====================================================================
    Holiday modal — calendar mode
    ===================================================================== */
+/* Format choice for the download. A modal rather than two more toolbar
+   buttons, and it names what the report covers — the file is scoped to the
+   current milestone and activity, which the filename alone doesn't say. */
+function ReportModal({ rowCount, onPick, onClose }) {
+  useModalChrome(onClose);
+  return (
+    <div className="att-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="att-modal" role="dialog" aria-modal="true" aria-label="Download report">
+        <div className="att-modal-head">
+          <div>
+            <div className="att-eyebrow" style={{ marginBottom: 4 }}>Download</div>
+            <h2 className="att-modal-title">Attendance report</h2>
+          </div>
+          <button className="att-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <p className="att-modal-sub">
+          {rowCount} {rowCount === 1 ? "employee" : "employees"} for the selected milestone and
+          activity, with the period, team summary and the same figures shown in the table.
+        </p>
+        <div className="att-report-picks">
+          <button className="att-report-pick" onClick={() => onPick("excel")}>
+            <span className="att-report-pick-t">Excel</span>
+            <span className="att-report-pick-d">
+              A .xls file that opens in Excel or Sheets, with the totals row intact.
+            </span>
+          </button>
+          <button className="att-report-pick" onClick={() => onPick("pdf")}>
+            <span className="att-report-pick-t">PDF</span>
+            <span className="att-report-pick-d">
+              Opens the print dialog — choose “Save as PDF”. Laid out for A4 landscape.
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Replacements — who held each designation over the activity.
 
@@ -2806,6 +3080,16 @@ function CalendarIcon() {
     </svg>
   );
 }
+/* A sheet with ruled lines — a document, distinct from the download arrow the
+   template button uses, because this produces a report rather than a blank. */
+function ReportIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 3h8l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M14 3v4h4M8.5 12.5h7M8.5 16.5h4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 /* Two figures — one seat, more than one occupant, which is what a replacement
    is. Deliberately not the single-person icon the roster uses. */
 function UsersIcon() {
@@ -3181,6 +3465,17 @@ const ATT_CSS = `
 .att-modal-sub { color: ${C.muted}; font-size: 14px; margin-bottom: 16px; }
 .att-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .att-modal-head-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+/* ── report format picker ────────────────────────────────────────────── */
+.att-report-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.att-report-pick { display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 13px 15px; border: 1px solid ${C.border}; border-radius: 10px; background: #fff;
+  cursor: pointer; font-family: inherit;
+  transition: border-color .15s ease, background .15s ease; }
+.att-report-pick:hover { border-color: ${C.primary}; background: ${C.surface}; }
+.att-report-pick-t { font-size: 14px; font-weight: 700; color: ${C.ink}; }
+.att-report-pick-d { font-size: 12px; color: ${C.muted}; line-height: 1.45; }
+@media (max-width: 520px) { .att-report-picks { grid-template-columns: 1fr; } }
 
 /* ── replacements ────────────────────────────────────────────────────── */
 /* Sized for the ten-column table; it scrolls inside its wrapper below this. */

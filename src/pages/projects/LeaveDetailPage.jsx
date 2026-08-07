@@ -1563,6 +1563,10 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
   /* Older payloads carry no band on the month rows; two columns of "—" say
      less than no columns at all, so they appear only when there's data. */
   const showBand = months.some((m) => m.fromDate || m.toDate);
+  /* Shown whenever the figure is reported, including when every month is 0 —
+     the same rule the attendance table uses. Older payloads omit the field
+     entirely, and a column of dashes says less than no column. */
+  const showSandwich = months.some((m) => m.sandwichLeave != null);
   const extraEntries = Object.entries(report).filter(([k]) => !COST_KNOWN_KEYS.has(k));
 
   /* The envelope's totals carry the quarter's deduction; without one (older
@@ -1650,7 +1654,7 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                     </span>
                   )}
                 </th>
-                <th colSpan={5} className="ld-costtable-group">Attendance · working days</th>
+                <th colSpan={5 + (showSandwich ? 1 : 0)} className="ld-costtable-group">Attendance · working days</th>
                 {/* Rate Year and Billable Days sit on this side: one picks the
                     monthly rate, the other is the day-count counterpart of
                     Deducted Amount. Both are inputs to the money, not to the
@@ -1689,6 +1693,13 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                     Billable Days and Deducted Amount. */}
                 <th className="ld-num" title="Leave beyond the allowance. These are the days Deducted Amount is charged on.">Unpaid Leave</th>
                 <th className="ld-num" title="Leave within the permissible allowance — nothing is deducted for these days.">Paid Leave</th>
+                {/* Its own category rather than part of the paid/unpaid split:
+                    a sandwich day is a non-working day caught between leave
+                    days and charged on top of them, so it is not inside Total
+                    Leave and the three above do not sum to include it. */}
+                {showSandwich && (
+                  <th className="ld-num" title="Weekends or holidays falling between leave days, counted as leave. Charged in addition to the paid/unpaid split beside it, not included in Total Leave.">Sandwich</th>
+                )}
                 {/* <th className="ld-num" title="Present days as a percentage of working days.">Attendance %</th> */}
                 <th title="Which year of the resource's rate card was used for this month.">Rate Year</th>
                 {/* The days actually charged. Sent by the server as
@@ -1730,6 +1741,11 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                     {dayCount(m.unpaidLeaveDays)}
                   </td>
                   <td className="ld-num">{dayCount(m.paidLeaveDays)}</td>
+                  {showSandwich && (
+                    <td className={`ld-num${num(m.sandwichLeave) > 0 ? " ld-unpaid" : " ld-dim"}`}>
+                      {dayCount(m.sandwichLeave)}
+                    </td>
+                  )}
                   <td>{show(m.rateYear)}</td>
                   {/* Sent by the server as billableDays — not derived here. */}
                   <td className="ld-num">{dayCount(m.billableDays)}</td>
@@ -1771,11 +1787,11 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
               {relaxationAmount > 0 && (
                 <>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl" title="Period cost = the sum of every cycle's Cost above, before relaxation is added.">Subtotal</td>
+                    <td colSpan={(showBand ? 13 : 12) + (showSandwich ? 1 : 0)} className="ld-costtable-totallbl" title="Period cost = the sum of every cycle's Cost above, before relaxation is added.">Subtotal</td>
                     <td className="ld-num" title={rupeesInWords(monthsSubtotal)}>{money(monthsSubtotal)}</td>
                   </tr>
                   <tr className="ld-costtable-subrow">
-                    <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl">
+                    <td colSpan={(showBand ? 13 : 12) + (showSandwich ? 1 : 0)} className="ld-costtable-totallbl">
                       Relaxation Amount
                       {relaxationDays > 0 && (
                         <span className="ld-costtable-sublbl">
@@ -1788,7 +1804,7 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                 </>
               )}
               <tr>
-                <td colSpan={showBand ? 13 : 12} className="ld-costtable-totallbl" title="Total cost = period cost + relaxation cost, where period cost is the sum of every cycle's Cost above.">Total Cost</td>
+                <td colSpan={(showBand ? 13 : 12) + (showSandwich ? 1 : 0)} className="ld-costtable-totallbl" title="Total cost = period cost + relaxation cost, where period cost is the sum of every cycle's Cost above.">Total Cost</td>
                 <td className="ld-num ld-costtable-cost" title={rupeesInWords(report.totalCost)}>
                   {money(report.totalCost)}
                 </td>

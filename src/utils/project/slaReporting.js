@@ -430,23 +430,13 @@ export function recheckSla(item, master, { severityScale: scale, ldBands, period
             ? null
             : list.reduce((n, b) => n + b.points, 0);
 
+        /* The multi-scored and empty-interval findings are still COUNTED —
+           `detail.multiScoredCount` / `detail.emptyCount` below, and
+           `diverges` still turns on the first — but they no longer write
+           themselves into the note. They fired on almost every quarter (a
+           quarter in progress has empty intervals by definition) and buried
+           the notes that mean something. */
         const notes = [];
-        if (multiScored.length) {
-            notes.push(
-                `${multiScored.length} measurement interval(s) hold more than one scored result `
-                + `(${multiScored.map((b) => `${b.key}: ${b.scored.length}`).join(", ")}). `
-                + `§5.28.1.b scores ONE aggregated figure per measurement interval — all resources in scope `
-                + `combined — so several rows in one interval multiply that interval's points by the number of rows.`
-            );
-        }
-        if (empty.length) {
-            notes.push(
-                `${empty.length} of ${expected.length} measurement interval(s) produced no result at all `
-                + `(${empty.map((b) => b.key).join(", ")}). An interval that was never run is not a clean one: `
-                + `a met interval scores severity 0, which is worth ${scale?.points?.get(0) ?? "−2"} points and would `
-                + `pull the quarter's total down.`
-            );
-        }
         if (strays.length) {
             notes.push(`${strays.length} result(s) carry no usable evaluation date and sit in no measurement interval.`);
         }
