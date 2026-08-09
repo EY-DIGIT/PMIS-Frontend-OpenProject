@@ -38,8 +38,11 @@
    understates every Phase 2/3 quarter by exactly one instalment, which
    is why `verifyAqp` exists.
 
-   Pure functions, no React, no fetching.
+   Pure functions, no React, no fetching — the one import is the shared
+   quarter-key formatter, so a row labels itself the same way here as it
+   does on every screen.
    ══════════════════════════════════════════════════════════════════ */
+import { formatQuarterKey } from "../../api/slaCompliance";
 
 const num = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -204,7 +207,12 @@ export function taxBreakdown(amount, { gstPercent, tdsPercent } = TAX_DEFAULTS) 
 export function cumulativePayout(settlements) {
     const rows = (Array.isArray(settlements) ? settlements : [])
         .map((r) => ({
-            key: `${r.fiscalYear}-Q${r.quarter}`,
+            /* fiscalYear is the 1-based CONTRACT year on an anchored project
+               (quarters run from T0), so the key reads "Y1-Q3". Undated
+               projects still come back on calendar quarters — formatQuarterKey
+               labels each row in whichever regime it belongs to. The numeric
+               sort below is unaffected either way. */
+            key: formatQuarterKey(r.fiscalYear, r.quarter),
             fiscalYear: r.fiscalYear,
             quarter: r.quarter,
             status: r.status || null,

@@ -36,6 +36,13 @@ function inr(n) {
   return `₹ ${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+/* Same as inr(), but an ABSENT figure reads as "—" rather than ₹ 0 —
+   Number(null) is 0 and finite, so inr() alone turns "the backend did not
+   send this" into a confident zero. */
+function inrOrDash(n) {
+  return n === null || n === undefined || n === "" ? "—" : inr(n);
+}
+
 /* ISO datetime → YYYY-MM-DD for <input type="date">. */
 function toDateInput(iso) {
   return typeof iso === "string" && iso.length >= 10 ? iso.slice(0, 10) : "";
@@ -87,6 +94,157 @@ const segStyle = (active) => ({
 function wordsHint(amount) {
   const w = amountToWords(amount);
   return w ? `${w} Rupees` : "";
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Tax mode + the milestone value breakup.
+
+   Every milestone value on /payment-page now arrives split two ways —
+   before-tax / tax / total, and delivery (fixed/resource/txn) vs the
+   one-time share. All of it is ADDITIVE: `value` and `ldBasisValue` are
+   unchanged, so a payload that predates the split still renders, just
+   without the parts.
+
+   The page-level toggle picks which of the two headline numbers every
+   amount shows. Nothing is recomputed client-side — both figures come
+   from the backend, and where one is missing the row says so instead of
+   quietly showing the other.
+   ────────────────────────────────────────────────────────────────── */
+/* Not exported — this file only exports its page component, and adding a
+   second export breaks Vite's fast refresh for the whole module. */
+const TAX_MODE = { WITH: "with", WITHOUT: "without" };
+
+/* null / undefined / "" are ABSENT, not zero — Number("") is 0, and a
+   field the backend never sent must not read as a genuine ₹0. */
+function amt(v) {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* One payment term's money, in the shape the page renders it.
+
+   `total` falls back to the legacy `value` (post-tax for a fixed term,
+   the pre-tax resource cost for a resource one), and `preTax` / `tax`
+   are derived from whichever of the pair came back. `hasSplit` is what
+   the UI checks before offering a before-tax figure at all: a term with
+   neither field has no honest pre-tax number to show. */
+function termMoney(t) {
+  const legacy = amt(t?.value) ?? 0;
+  const total = amt(t?.totalValue) ?? legacy;
+  const preTaxRaw = amt(t?.preTaxValue);
+  const taxRaw = amt(t?.taxValue);
+
+  const part = (pre, tax, tot) => {
+    const p = amt(pre);
+    const x = amt(tax);
+    const o = amt(tot);
+    return {
+      preTax: p ?? (o !== null && x !== null ? o - x : null),
+      tax: x ?? (o !== null && p !== null ? o - p : null),
+      total: o ?? (p !== null && x !== null ? p + x : null),
+      known: p !== null || x !== null || o !== null,
+    };
+  };
+
+  const delivery = part(t?.deliveryPreTaxValue, t?.deliveryTaxValue, t?.deliveryValue);
+  const oneTime = part(t?.oneTimePreTaxValue, t?.oneTimeTaxValue, t?.oneTimeValue);
+
+  return {
+    total,
+    preTax: preTaxRaw ?? (taxRaw !== null ? total - taxRaw : total),
+    tax: taxRaw ?? (preTaxRaw !== null ? total - preTaxRaw : 0),
+    hasSplit: preTaxRaw !== null || taxRaw !== null,
+    delivery,
+    oneTime,
+    /* Only worth drawing when at least one side actually came back — a
+       term the backend did not split is not a term with a zero one-time
+       cost. */
+    hasParts: delivery.known || oneTime.known,
+    /* The SLA / LD penalty base: allotment × delivery PRE-tax, so it
+       carries neither tax nor one-time cost. Distinct from the post-tax
+       `ldBasisValue`, which is kept for continuity. */
+    ldBasisPretax: amt(t?.ldBasisPretaxValue),
+    ldBasis: amt(t?.ldBasisValue),
+  };
+}
+
+/* The headline number for a term under the current mode. */
+const shownOf = (m, withTax) => (withTax ? m.total : m.preTax);
+
+/* A phase's 100% base, in the current mode. `phaseBasePretax` is the new
+   additive field; the post-tax total keeps its existing fallback chain
+   for backends that predate phaseBaseTotal. */
+function phaseBaseOf(phase, withTax) {
+  const postTax =
+    Number(phase?.phaseBaseTotal) ||
+    Number(phase?.effectivePhaseTotal) ||
+    Number(phase?.phaseFixedTotal) ||
+    0;
+  if (withTax) return postTax;
+  const pre = amt(phase?.phaseBasePretax);
+  /* No pre-tax base means the backend has not split this phase yet.
+     Falling through to the post-tax figure would silently mix the two
+     modes on one screen, so the total is used and the panel labels the
+     mode as unavailable rather than pretending. */
+  return pre ?? postTax;
+}
+
+/* totals.<bucket> / totals.<bucket>Pretax — e.g. totalContractCost →
+   totalContractCostPretax, fixedCost → fixedCostPretax. */
+function totalOf(totals, bucket, withTax) {
+  if (withTax) return Number(totals?.[bucket]) || 0;
+  const pre = amt(totals?.[`${bucket}Pretax`]);
+  return pre ?? (Number(totals?.[bucket]) || 0);
+}
+const hasPretaxTotals = (totals) => amt(totals?.totalContractCostPretax) !== null;
+
+/* Page-level "With tax / Without tax" segmented control. */
+function TaxModeToggle({ mode, onChange, available = true }) {
+  const btn = (active) => ({
+    padding: "6px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 700,
+    border: active ? "1px solid #173e77" : "1px solid var(--uidai-pmis-border)",
+    background: active ? "#173e77" : "#fff",
+    color: active ? "#fff" : "#173e77",
+    cursor: "pointer", flex: "0 0 auto", transition: "all .16s ease",
+  });
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "#5b6b82" }}>
+        Amounts
+      </span>
+      <div
+        role="group"
+        aria-label="Show amounts with or without tax"
+        style={{ display: "inline-flex", gap: 6, background: "#f1f6fd", padding: 4, borderRadius: 999 }}
+      >
+        <button
+          type="button"
+          aria-pressed={mode === TAX_MODE.WITH}
+          onClick={() => onChange(TAX_MODE.WITH)}
+          style={btn(mode === TAX_MODE.WITH)}
+          title="Show every amount inclusive of tax (the total)"
+        >
+          With tax
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === TAX_MODE.WITHOUT}
+          onClick={() => onChange(TAX_MODE.WITHOUT)}
+          style={btn(mode === TAX_MODE.WITHOUT)}
+          title="Show every amount before tax — the figure SLA / LD penalties are charged on"
+        >
+          Without tax
+        </button>
+      </div>
+      {/* Said once, on the control, rather than on every amount it changes. */}
+      {!available && (
+        <span style={{ fontSize: 11, color: "#b54708", fontWeight: 600 }}>
+          Before-tax figures not returned for this project yet
+        </span>
+      )}
+    </div>
+  );
 }
 
 const ctrl = {
@@ -320,11 +478,16 @@ function MilestoneMultiSelect({ value, options, onChange, disabled, disabledIds 
 
 /* Summary section — top half of the unified right-side card. Renders
    as plain content (no border / shadow); the parent owns the card. */
-function SummaryPanel({ totals }) {
-  const fixed = Number(totals?.fixedCost) || 0;
-  const oneTime = Number(totals?.oneTimeCost) || 0;
-  const recurring = Number(totals?.recurringCost) || 0;
-  const total = Number(totals?.totalContractCost) || 0;
+function SummaryPanel({ totals, taxMode = TAX_MODE.WITH }) {
+  /* Each bucket now comes back split — fixedCost / fixedCostPretax (and
+     fixedCostTax), and so on — so the toggle swaps the figure rather than
+     deriving one. */
+  const withTax = taxMode === TAX_MODE.WITH;
+  const fixed = totalOf(totals, "fixedCost", withTax);
+  const oneTime = totalOf(totals, "oneTimeCost", withTax);
+  const recurring = totalOf(totals, "recurringCost", withTax);
+  const total = totalOf(totals, "totalContractCost", withTax);
+  const totalTax = amt(totals?.totalContractCostTax);
   /* Allocated-vs-pending for the Out of Pocket Expense pool. These are the
      authoritative roll-up — summing the per-phase oneTimeAllocated would
      drift, because phases the backend clears (recurring-only) report no
@@ -396,11 +559,20 @@ function SummaryPanel({ totals }) {
           boxShadow: "0 4px 10px rgba(23, 62, 119, 0.18)",
         }}>
           <span style={{ fontSize: 11, opacity: 0.9, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            Total Contract Cost
+            Total Contract Cost {withTax ? "(incl. tax)" : "(before tax)"}
           </span>
           <strong style={{ fontSize: 18, color: "#fff" }} title={wordsHint(total)}>
             {inr(total)}
           </strong>
+          {/* The other side of the split, so switching the toggle is never
+              needed just to read what the tax component is. */}
+          {totalTax !== null && (
+            <span style={{ fontSize: 11, opacity: 0.9 }} title={wordsHint(totalTax)}>
+              {withTax
+                ? `includes ${inr(totalTax)} tax`
+                : `+ ${inr(totalTax)} tax`}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -1103,8 +1275,19 @@ function EditTermModal({
    `term.ldBasisPercent` is always the EFFECTIVE value (the backend fills in
    the even split, 100 / milestones-in-phase, when it was never set), so the
    input is seeded from it and clearing the box means "go back to the even
-   split" (committed as null). `term.ldBasisValue` is the ₹ penalty base the
-   backend derived from it and is shown read-only underneath.
+   split" (committed as null).
+
+   Two ₹ figures are derived from that % and both are shown read-only
+   underneath, because they are NOT interchangeable:
+
+     · `ldBasisPretaxValue` — allotment × delivery PRE-TAX. Tax-free, and
+       one-time cost excluded. This is the SLA / LD penalty base, and it is
+       what the SLA screens charge on.
+     · `ldBasisValue` — the same allotment against the post-tax effective
+       base, one-time included. Unchanged, kept for continuity.
+
+   The pre-tax figure leads for that reason; the post-tax one is a
+   secondary line rather than the headline it used to be.
 
    The edit commits on blur or Enter and only when the value actually changed;
    Escape restores the server value.
@@ -1128,6 +1311,7 @@ function LdBasisCell({ term, disabled, busy, onSave }) {
   };
 
   const value = Number(term.ldBasisValue);
+  const pretaxBase = amt(term.ldBasisPretaxValue);
   const overpaid = (Number(term.percentOfPayment) || 0) - (Number(term.ldBasisPercent) || 0) > 0.001;
 
   return (
@@ -1157,9 +1341,23 @@ function LdBasisCell({ term, disabled, busy, onSave }) {
           background: disabled ? "#f5f6f8" : "#fff",
         }}
       />
+      {pretaxBase !== null && pretaxBase > 0 && (
+        <div
+          style={{ fontSize: 10.5, color: "#173e77", fontWeight: 700, marginTop: 2 }}
+          title={"SLA / LD penalty base — allotment × delivery cost BEFORE tax, "
+            + "with one-time cost excluded. This is the figure the SLA screens charge on. "
+            + wordsHint(pretaxBase)}
+        >
+          {inr(pretaxBase)} <span style={{ fontWeight: 500, color: "var(--uidai-pmis-muted)" }}>LD base</span>
+        </div>
+      )}
       {Number.isFinite(value) && value > 0 && (
-        <div style={{ fontSize: 10.5, color: "var(--uidai-pmis-muted)", marginTop: 2 }} title={wordsHint(value)}>
-          {inr(value)}
+        <div
+          style={{ fontSize: 10, color: "var(--uidai-pmis-muted)", marginTop: 1 }}
+          title={"Allotment against the post-tax effective base, one-time cost included. "
+            + "Not the penalty base. " + wordsHint(value)}
+        >
+          {inr(value)} incl. tax
         </div>
       )}
     </td>
@@ -1269,6 +1467,10 @@ export default function ProjectFinancePage() {
   useEffect(() => {
     if (orgs.length > 0 && activeOrg > orgs.length - 1) setActiveOrg(0);
   }, [orgs.length, activeOrg]);
+  /* Which side of the tax split every amount on the page shows. Defaults
+     to with-tax, which is what the page has always displayed. */
+  const [taxMode, setTaxMode] = useState(TAX_MODE.WITH);
+  const withTax = taxMode === TAX_MODE.WITH;
   useEffect(() => {
     if (!projectId) return;
     if (Array.isArray(project?.vendors) && project.vendors.length) return;
@@ -2028,17 +2230,27 @@ export default function ProjectFinancePage() {
         >
           ← Back
         </button>
-        <button
-          type="button"
-          className="uidai-pmis-btn uidai-pmis-btn-small"
-          style={{ marginTop: 0 }}
-          onClick={() => {
-            setShowValidateModal(true);
-            loadValidationResult();
-          }}
-        >
-          Validate
-        </button>
+        {/* One control for the whole page: every amount below follows it.
+            Sits beside Validate so it is visible before the user starts
+            reading figures. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <TaxModeToggle
+            mode={taxMode}
+            onChange={setTaxMode}
+            available={hasPretaxTotals(totals)}
+          />
+          <button
+            type="button"
+            className="uidai-pmis-btn uidai-pmis-btn-small"
+            style={{ marginTop: 0 }}
+            onClick={() => {
+              setShowValidateModal(true);
+              loadValidationResult();
+            }}
+          >
+            Validate
+          </button>
+        </div>
       </div>
 
       {showValidateModal && createPortal(
@@ -2113,10 +2325,10 @@ export default function ProjectFinancePage() {
       >
         <div style={{ minWidth: 160 }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: "#5b6b82" }}>
-            Contract Value
+            Contract Value {withTax ? "(incl. tax)" : "(before tax)"}
           </div>
           <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginTop: 2 }}>
-            {inr(totals?.totalContractCost || 0)}
+            {inr(totalOf(totals, "totalContractCost", withTax))}
           </div>
         </div>
         <div style={{ minWidth: 120 }}>
@@ -2382,6 +2594,7 @@ export default function ProjectFinancePage() {
                     oneTimeBusy={oneTimeSaving}
                     onSetOneTime={setOneTimeForPhase}
                     onShowInSummary={revealPhaseInSummary}
+                    taxMode={taxMode}
                   />
                 )}
               </>
@@ -2506,7 +2719,7 @@ export default function ProjectFinancePage() {
                   Financial Summary
                 </span>
               </div>
-              <SummaryPanel totals={totals} />
+              <SummaryPanel totals={totals} taxMode={taxMode} />
               <div style={{
                 height: 1,
                 background: "var(--uidai-pmis-border)",
@@ -3182,7 +3395,12 @@ function PhasePanel({
   /* Opens the Financial Summary on this phase's card — wired to the
      "Scheduled: n%" chip below the terms table. */
   onShowInSummary,
+  /* Page-level tax mode. Every ₹ in this panel — term values, the phase
+     base and the running Remaining — reads from the same side of the
+     split, so the Breakup column keeps reconciling either way. */
+  taxMode = TAX_MODE.WITH,
 }) {
+  const withTax = taxMode === TAX_MODE.WITH;
   /* Which payment-term rows are expanded to reveal their activity-wise
      breakdown (partial-payment milestones). */
   const [expandedTerms, setExpandedTerms] = useState(() => new Set());
@@ -3239,7 +3457,10 @@ function PhasePanel({
      % total row and the Scheduled/Remaining chips are hidden for it. */
   const isSyntheticOnly = realTerms.length === 0 && terms.length > 0;
   const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
-  const totalValue = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
+  /* Summed on the SHOWN side of the split, so Remaining = base − scheduled
+     holds in both modes rather than mixing a pre-tax base with post-tax
+     rows. */
+  const totalValue = terms.reduce((s, r) => s + shownOf(termMoney(r), withTax), 0);
   /* Allotment total for the phase — the backend's `ld-basis-pct` check wants
      exactly 100%. Rounded to 2dp so a 3-way even split (33.33 × 3) doesn't
      read as unbalanced from float noise. */
@@ -3258,12 +3479,12 @@ function PhasePanel({
      Remaining went negative. phaseBaseTotal is authoritative for both modes.
 
      phaseFixedTotal / effectivePhaseTotal are older names for the same idea,
-     kept as fallbacks for a backend that predates phaseBaseTotal. */
-  const phaseBase =
-    Number(phase.phaseBaseTotal) ||
-    Number(phase.effectivePhaseTotal) ||
-    Number(phase.phaseFixedTotal) ||
-    0;
+     kept as fallbacks for a backend that predates phaseBaseTotal.
+
+     `phaseBasePretax` is the additive before-tax twin; phaseBaseOf picks
+     whichever side the page is showing. */
+  const phaseBase = phaseBaseOf(phase, withTax);
+  const phaseBaseTax = amt(phase.phaseBaseTax);
   const phaseRemaining = phaseBase - totalValue;
   const canToggleCarry = typeof onSetCarryForward === "function";
 
@@ -3674,8 +3895,16 @@ function PhasePanel({
                       (penalty base)
                     </span>
                   </th>
-                  <th style={{ width: 130, textAlign: "right" }}>Value</th>
-                  <th style={{ width: 220 }}>Breakup (Total / % / Remaining)</th>
+                  <th style={{ width: 160, textAlign: "right" }}>
+                    Value
+                    <span style={{
+                      display: "block", fontWeight: 500, fontSize: 10.5,
+                      color: "var(--uidai-pmis-muted)", textTransform: "none", letterSpacing: 0,
+                    }}>
+                      ({withTax ? "incl. tax" : "before tax"})
+                    </span>
+                  </th>
+                  <th style={{ width: 240 }}>Breakup (Total / % / Remaining)</th>
                   <th style={{ width: 200, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
@@ -3687,6 +3916,8 @@ function PhasePanel({
                     </td>
                   </tr>
                 ) : terms.map((t, idx) => {
+                  const m = termMoney(t);
+                  const shown = shownOf(m, withTax);
                   if (t.__recurring) {
                     return (
                       <tr key={t.id}>
@@ -3705,8 +3936,13 @@ function PhasePanel({
                         <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                         {/* Recurring costs carry no % and therefore no LD basis. */}
                         <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                        <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(t.value)}>
-                          ₹ {Number(t.value).toLocaleString("en-IN")}
+                        <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(shown)}>
+                          ₹ {shown.toLocaleString("en-IN")}
+                          {m.hasSplit && (
+                            <div style={{ fontSize: 10, fontWeight: 500, color: "var(--uidai-pmis-muted)" }}>
+                              {withTax ? `incl. ${inr(m.tax)} tax` : `+ ${inr(m.tax)} tax`}
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, background: "#eef3fb", color: "#0b3c88", fontSize: 10.5, fontWeight: 700, border: "1px solid #cfe0f5" }}>Recurring cost</span>
@@ -3715,14 +3951,15 @@ function PhasePanel({
                       </tr>
                     );
                   }
-                  const value = Number(t.value) || 0;
+                  const value = shown;
                   const pct = Number(t.percentOfPayment) || 0;
                   /* Running balance: each row's remaining = base minus every
                      term value up to and including this one, so it carries
-                     down from the previous row's remaining. */
+                     down from the previous row's remaining. Summed on the
+                     shown side of the split, matching phaseBase. */
                   const scheduledSoFar = terms
                     .slice(0, idx + 1)
-                    .reduce((s, r) => s + (Number(r.value) || 0), 0);
+                    .reduce((s, r) => s + shownOf(termMoney(r), withTax), 0);
                   const remaining = phaseBase - scheduledSoFar;
                   /* Per-activity split — the backend returns activities[]
                      only for partial-payment terms (complete_payment terms
@@ -3813,10 +4050,23 @@ function PhasePanel({
                       )}
                       <td style={{ fontWeight: 700, color: "#173e77", textAlign: "right", whiteSpace: "nowrap" }} title={wordsHint(value)}>
                         ₹ {value.toLocaleString("en-IN")}
+                        {/* Before-tax / tax / total, so the headline number is
+                            never the only figure on offer. Only drawn when the
+                            backend actually split this term. */}
+                        {m.hasSplit && (
+                          <div style={{ fontSize: 10, fontWeight: 500, color: "var(--uidai-pmis-muted)", lineHeight: 1.5 }}>
+                            <div title={wordsHint(m.preTax)}>Before tax {inr(m.preTax)}</div>
+                            <div title={wordsHint(m.tax)}>Tax {inr(m.tax)}</div>
+                            <div title={wordsHint(m.total)}>Total {inr(m.total)}</div>
+                          </div>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
-                          <span style={muted} title={wordsHint(phaseBase)}>Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong></span>
+                          <span style={muted} title={wordsHint(phaseBase)}>
+                            Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong>
+                            {!withTax && phaseBaseTax !== null && <span style={muted}> · + {inr(phaseBaseTax)} tax</span>}
+                          </span>
                           {/* "{pct}% of Total Payment" states that the % produced
                               the ₹. True for a fixed milestone; backwards for a
                               resource one, where the ₹ comes up from the
@@ -3828,6 +4078,35 @@ function PhasePanel({
                             </span>
                           ) : (
                             <span style={{ color: "#173e77" }} title={wordsHint(value)}>{pct}% of Total Payment: {inr(value)}</span>
+                          )}
+                          {/* Delivery (the fixed / resource / transaction share)
+                              vs the one-time cost allocated to this milestone.
+                              They reconcile: delivery + one-time (+ any carry
+                              received) = the term's total. Shown on the side of
+                              the split the page is on. */}
+                          {m.hasParts && (
+                            <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 1 }}>
+                              <span
+                                style={{
+                                  display: "inline-block", padding: "1px 7px", borderRadius: 999,
+                                  background: "#eef3fb", color: "#0b3c88", fontSize: 10.5,
+                                  fontWeight: 700, border: "1px solid #cfe0f5",
+                                }}
+                                title="Delivery — the fixed / resource / transaction share of this milestone. This is what SLA and LD are computed on."
+                              >
+                                Delivery {inrOrDash(withTax ? m.delivery.total : m.delivery.preTax)}
+                              </span>
+                              <span
+                                style={{
+                                  display: "inline-block", padding: "1px 7px", borderRadius: 999,
+                                  background: "#fff5e8", color: "#b54708", fontSize: 10.5,
+                                  fontWeight: 700, border: "1px solid #f3ddc0",
+                                }}
+                                title="One-time (out-of-pocket) cost allocated to this milestone. Reimbursement, not deliverable value — excluded from the SLA / LD base."
+                              >
+                                One-time {inrOrDash(withTax ? m.oneTime.total : m.oneTime.preTax)}
+                              </span>
+                            </span>
                           )}
                           <span title={wordsHint(remaining)} style={{fontWeight: 700,color: remaining > 0 ? "#b54708" : "#1b7a42",}}>
                             Remaining: {inr(remaining)}
@@ -3867,7 +4146,12 @@ function PhasePanel({
                         weightage modal for the whole term. */}
                     {showActivities && expandedTerms.has(t.id) && acts.map((a, ai) => {
                       const aPct = Number(a.percentOfPayment) || 0;
-                      const aVal = Number(a.value) || 0;
+                      /* Activities carry the same additive split when the
+                         backend sends it, and degrade to their legacy `value`
+                         when it does not — so the child rows follow the page's
+                         tax mode with the parent instead of contradicting it. */
+                      const aMoney = termMoney(a);
+                      const aVal = shownOf(aMoney, withTax);
                       const last = ai === acts.length - 1;
                       const code = a.activityDisplayCode || a.activityId;
                       return (
@@ -3906,6 +4190,11 @@ function PhasePanel({
                               : wordsHint(aVal)}
                           >
                             ₹ {aVal.toLocaleString("en-IN")}
+                            {aMoney.hasSplit && (
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "var(--uidai-pmis-muted)" }}>
+                                {withTax ? `incl. ${inr(aMoney.tax)} tax` : `+ ${inr(aMoney.tax)} tax`}
+                              </div>
+                            )}
                           </td>
                           <td>
                             <span style={{

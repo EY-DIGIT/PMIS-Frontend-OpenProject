@@ -9,21 +9,34 @@
    SLA 001 and 002 both charge on "the total cost of that deliverable"
    (§5.28.2.b, §5.28.2.c), and §5.23.1 defines that cost as the
    deliverable's own share of the Phase-1 fixed + one-time cost —
-   D1..D6 at 5% each, D7 at 15%, D8 at 20%. For D1–D8 the deliverable's
-   cost and its payment are therefore the SAME number:
+   D1..D6 at 5% each, D7 at 15%, D8 at 20%.
 
-       LD ₹        = payment × Σ LD %
-       Net payable = payment − LD ₹
+   The payment page now computes that base itself and returns it per
+   term as `ldBasisPretaxValue` = allotment × delivery PRE-TAX. It is the
+   right base for two reasons the frontend cannot reconstruct on its own:
 
-   The finance module's separate "LD Basis %" allotment is deliberately
-   NOT used here. That split — a milestone paid less than its allotment
-   but penalised on the whole of it — is built for the resource /
-   quarterly regime; Phase 1 has no such distinction, because §5.23.1
-   pays each deliverable its own cost outright. The allotment is still
-   carried on each row so a divergence can be reported: an LD Basis that
-   differs from the deliverable's cost usually means it is still sitting
-   on the backend's even split (100 / milestones-in-phase) rather than
-   the §5.23.1 schedule.
+     · TAX IS EXCLUDED. A penalty is charged on the work, not on the GST
+       collected on it. `value` and `ldBasisValue` are both post-tax, so
+       charging on either inflates every LD by the tax rate (18% on a
+       standard term).
+     · ONE-TIME COST IS EXCLUDED. Out-of-pocket expense allocated to a
+       milestone is a reimbursement, not deliverable value, and §5.28.2
+       charges on the deliverable.
+
+   So:
+       LD ₹        = ldBasisPretaxValue × Σ LD %
+       Net payable = payment − LD ₹        (deducted from what is paid,
+                                            which IS tax-inclusive)
+
+   `paymentValue` remains the fallback base for a payload that predates
+   the split — the old behaviour exactly — and every row reports which of
+   the two it used, so a screen never has to guess.
+
+   The post-tax `ldBasisValue` allotment is still carried on each row so a
+   divergence can be reported: a base that differs from the deliverable's
+   own pre-tax payment usually means the LD Basis % is still sitting on
+   the backend's even split (100 / milestones-in-phase) rather than the
+   §5.23.1 schedule.
 
    ── Ceilings ──────────────────────────────────────────────────────
    §5.28.2 states no ceiling. The RFP's two ceilings are both scoped to
@@ -75,9 +88,19 @@ export function paymentTermsByMilestone(paymentPage) {
                     terms: [],
                     phases: [],
                     paymentValue: 0,
+                    paymentPreTaxValue: 0,
+                    paymentTaxValue: 0,
                     paymentPercent: 0,
                     ldBasisValue: 0,
+                    ldBasisPretaxValue: 0,
                     ldBasisPercent: 0,
+                    /* Whether the pre-tax base was actually returned. Summing
+                       into a 0 cannot say that: a term genuinely worth 0 and a
+                       term from a payload that predates the field both leave
+                       the total at 0, and only one of them means "fall back to
+                       the payment". */
+                    hasLdBasisPretax: false,
+                    hasValueBreakup: false,
                 });
             }
             const e = byMilestone.get(key);
@@ -85,8 +108,18 @@ export function paymentTermsByMilestone(paymentPage) {
             const phaseLabel = String(ph?.phase ?? "");
             if (phaseLabel && !e.phases.includes(phaseLabel)) e.phases.push(phaseLabel);
             e.paymentValue += num(t.value) ?? 0;
+            /* preTaxValue / taxValue are additive — an older payload carries
+               neither, and there the legacy `value` is the only figure there
+               is, so the pre-tax total degrades to it rather than to zero. */
+            const pre = num(t.preTaxValue);
+            const tax = num(t.taxValue);
+            if (pre !== null || tax !== null) e.hasValueBreakup = true;
+            e.paymentPreTaxValue += pre ?? num(t.value) ?? 0;
+            e.paymentTaxValue += tax ?? 0;
             e.paymentPercent += num(t.percentOfPayment) ?? 0;
             e.ldBasisValue += num(t.ldBasisValue) ?? 0;
+            const ldPre = num(t.ldBasisPretaxValue);
+            if (ldPre !== null) { e.hasLdBasisPretax = true; e.ldBasisPretaxValue += ldPre; }
             e.ldBasisPercent += num(t.ldBasisPercent) ?? 0;
         }
     }
@@ -153,8 +186,13 @@ export function buildDeliverablePayables({
                     phases: term.phases.slice(),
                     termCount: term.terms.length,
                     paymentValue: term.paymentValue,
+                    paymentPreTaxValue: term.paymentPreTaxValue,
+                    paymentTaxValue: term.paymentTaxValue,
+                    hasValueBreakup: term.hasValueBreakup,
                     paymentPercent: term.paymentPercent,
                     ldBasisValue: term.ldBasisValue,
+                    ldBasisPretaxValue: term.ldBasisPretaxValue,
+                    hasLdBasisPretax: term.hasLdBasisPretax,
                     ldBasisPercent: term.ldBasisPercent,
                     contributions: [],
                 });
@@ -169,11 +207,19 @@ export function buildDeliverablePayables({
         const cap = num(capPercent);
         const ldPercentCapped = cap === null ? ldPercent : Math.min(ldPercent, cap);
 
-        /* §5.28.2 charges on "the total cost of that deliverable", and
-           §5.23.1 makes that cost the deliverable's own payment. So the
-           base IS the payment — there is no allotment step in Phase 1. */
-        const hasBase = row.paymentValue > 0;
-        const ldAmount = hasBase ? (row.paymentValue * ldPercentCapped) / 100 : null;
+        /* §5.28.2 charges on "the total cost of that deliverable". The
+           payment page computes that as `ldBasisPretaxValue` — allotment ×
+           delivery pre-tax, so tax-free and with one-time cost excluded —
+           and that is the base whenever it came back. `paymentValue` is
+           the fallback for payloads that predate the field, which is the
+           behaviour this report had before. Which one was used is carried
+           on the row, because the two differ by the tax rate and a reader
+           comparing against the finance page needs to know why. */
+        const usePretaxBase = row.hasLdBasisPretax && row.ldBasisPretaxValue > 0;
+        const ldBase = usePretaxBase ? row.ldBasisPretaxValue : row.paymentValue;
+        const ldBaseSource = usePretaxBase ? "ldBasisPretaxValue" : "paymentValue";
+        const hasBase = ldBase > 0;
+        const ldAmount = hasBase ? (ldBase * ldPercentCapped) / 100 : null;
 
         // What the backend itself priced each occurrence at, kept alongside
         // so a divergence between the two bases is visible rather than
@@ -206,18 +252,31 @@ export function buildDeliverablePayables({
             ldPercentCapped,
             ldCapApplied: cap !== null && ldPercent > cap,
             hasBase,
+            ldBase,
+            ldBaseSource,
             ldAmount,
             backendLdAmount,
             /* LD % can exceed 100 — §5.28.2 sets no ceiling and the rates
                accrue per week indefinitely — so net payable can go
                negative. Shown rather than clamped: a deliverable whose
-               LD has eaten its entire cost is a fact the reviewer needs. */
+               LD has eaten its entire cost is a fact the reviewer needs.
+
+               Deducted from `paymentValue`, the tax-inclusive amount that is
+               actually paid, even though the LD was charged on a pre-tax
+               base — §5.28.1.d takes the deduction off the payable. */
             netPayable: ldAmount === null ? null : row.paymentValue - ldAmount,
-            /* The allotment is not the charge base (see header). A
-               divergence means LD Basis is configured off the §5.23.1
-               deliverable schedule — worth reporting, not acting on. */
+            /* §5.23.1 pays each deliverable its own cost, so the base and
+               the deliverable's pre-tax payment should be the same number.
+               Compared PRE-TAX on both sides — the base excludes tax, so
+               measuring it against the post-tax payment would flag every
+               taxed milestone. A real gap means the LD Basis % is off the
+               §5.23.1 schedule (usually still on the backend's even split),
+               or that one-time cost is a material part of the milestone —
+               worth reporting, not acting on. */
             ldBasisDiffers:
-                row.ldBasisValue > 0 && Math.abs(row.ldBasisValue - row.paymentValue) > 0.5,
+                ldBase > 0
+                && row.paymentPreTaxValue > 0
+                && Math.abs(ldBase - row.paymentPreTaxValue) > 0.5,
         };
     });
 
@@ -232,7 +291,25 @@ export function buildDeliverablePayables({
         totals: {
             deliverableCount: out.length,
             totalPayment: sum(out, (r) => r.paymentValue),
+            totalPaymentPreTax: sum(out, (r) => r.paymentPreTaxValue),
+            // What the LD was actually charged on, across every row.
+            totalLdBase: sum(out, (r) => r.ldBase),
             totalLdBasis: sum(out, (r) => r.ldBasisValue),
+            totalLdBasisPretax: sum(out, (r) => r.ldBasisPretaxValue),
+            // Rows still falling back to the post-tax payment as their base.
+            legacyBaseCount: out.filter((r) => r.ldBaseSource === "paymentValue").length,
+            /* How many rows a ceiling actually bit on. Normally zero —
+               §5.28.2 sets none, so `capPercent` is only ever passed by a
+               caller that has decided otherwise — and a screen showing
+               "before → after" needs to distinguish "nothing capped it"
+               from "no cap exists". */
+            capAppliedCount: out.filter((r) => r.ldCapApplied).length,
+            /* The pre-cap total, so the pair can be shown without the
+               caller re-deriving it from the rows. Equal to totalLdAmount
+               whenever no ceiling was passed in. */
+            totalLdAmountUncapped: withAmount.length
+                ? sum(withAmount, (r) => (r.hasBase ? (r.ldBase * r.ldPercent) / 100 : 0))
+                : null,
             totalLdAmount: withAmount.length ? sum(withAmount, (r) => r.ldAmount) : null,
             totalNetPayable: withAmount.length
                 ? sum(out, (r) => r.paymentValue) - sum(withAmount, (r) => r.ldAmount)

@@ -34,6 +34,8 @@ import {
     listSettlements,
     getSettlement,
     overrideSettlement,
+    formatQuarterKey,
+    isContractYear,
 } from "../../../api/slaCompliance";
 import { getPaymentPage, isFinanceForbidden } from "../../../api/paymentPage";
 import {
@@ -74,6 +76,13 @@ import {
     contractCeiling,
 } from "../../../utils/project/settlementChain";
 import { buildDeliverablePayables } from "../../../utils/project/deliverablePayable";
+import {
+    detectFinanceBasis,
+    reconcileTaxBasis,
+    reconcileSlaDeductions,
+    ceilingBaseFor,
+    SEVERITY,
+} from "../../../utils/project/taxBasis";
 import { formatINR } from "../../../utils/project/helpers";
 
 const muted = { color: "var(--uidai-pmis-muted)" };
@@ -460,8 +469,26 @@ function PeriodStrip({ period, contractStart }) {
             }}
         >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", ...muted }}>
-                    Reporting interval
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", ...muted }}>
+                        Reporting interval
+                    </div>
+                    {/* The quarter's own name. Contract-anchored, so "Y2" is the
+                        second CONTRACT year measured from T0 — never 2026. This
+                        is also the value the settlement / NPQP / aggregate
+                        endpoints take as ?quarter=. */}
+                    {period?.key && (
+                        <span
+                            title={`Contract year ${period.year}, quarter ${period.quarter} — measured from the project's start date, not the calendar`}
+                            style={{
+                                fontFamily: "monospace", fontSize: 11, fontWeight: 800,
+                                color: INK, background: "#dceafe", border: "1px solid #bcd4f5",
+                                borderRadius: 999, padding: "1px 8px",
+                            }}
+                        >
+                            {period.key}
+                        </span>
+                    )}
                 </div>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: tone }}>
                     <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone, display: "inline-block" }} />
@@ -506,13 +533,13 @@ function PeriodStrip({ period, contractStart }) {
    "What was this deliverable meant to be paid, what did the SLAs take
    off it, and what is actually payable?"
 
-   The two finance percentages are different things and are kept
-   visibly apart here for that reason: LD is charged on the milestone's
-   LD Basis (its full allotment) while the payment it comes off is the
-   % of Payment value. A milestone paid below its allotment is still
-   penalised on the whole allotment, so the deduction can be a bigger
-   slice of the payment than the LD % reads — flagged inline rather
-   than quietly normalised.                                          */
+   The base and the payment are different numbers and are kept visibly
+   apart here for that reason. LD is charged on `ldBasisPretaxValue` —
+   the milestone's allotment × its delivery cost BEFORE tax, one-time
+   cost excluded — and deducted from what is actually paid, which is
+   tax-inclusive. So the deduction is a smaller slice of the payment
+   than of the base, and the payment column names both rather than
+   letting one stand in for the other. */
 function PayableRow({ row, open, onToggle }) {
     const overrun = row.netPayable !== null && row.netPayable < 0;
     return (
@@ -554,24 +581,62 @@ function PayableRow({ row, open, onToggle }) {
                     </div>
                 </td>
                 <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: INK, whiteSpace: "nowrap" }}>
-                    {row.hasBase ? money(row.paymentValue) : <span style={{ color: AMBER, fontWeight: 700 }}>no payment term</span>}
+                    {row.hasBase ? money(row.ldBase) : <span style={{ color: AMBER, fontWeight: 700 }}>no payment term</span>}
                     <div style={{ fontSize: 10.5, ...muted, fontWeight: 400 }}>
-                        {row.hasBase ? `${pct(row.paymentPercent)} of phase · §5.23.1` : "nothing to charge against"}
+                        {!row.hasBase ? "nothing to charge against"
+                            : row.ldBaseSource === "ldBasisPretaxValue"
+                                /* Tax-free and one-time-free: the LD is charged on the
+                                   work, not on the GST or the reimbursed expense. */
+                                ? `${pct(row.ldBasisPercent)} allotment · pre-tax · §5.23.1`
+                                : `${pct(row.paymentPercent)} of phase · §5.23.1`}
                     </div>
+                    {row.hasBase && row.ldBaseSource === "ldBasisPretaxValue" && (
+                        <div
+                            style={{ fontSize: 10.5, ...muted, fontWeight: 400 }}
+                            title={"The penalty base is ldBasisPretaxValue — the milestone's allotment × its "
+                                + "delivery cost BEFORE tax, with one-time cost excluded. It is deliberately not "
+                                + "the paid amount " + money(row.paymentValue) + ", which carries "
+                                + money(row.paymentTaxValue) + " of tax and any one-time share."}
+                        >
+                            paid {money(row.paymentValue)} incl. tax
+                        </div>
+                    )}
+                    {row.hasBase && row.ldBaseSource === "paymentValue" && (
+                        <div
+                            style={{ fontSize: 10.5, color: AMBER, fontWeight: 700 }}
+                            title={"The payment page did not return ldBasisPretaxValue for this milestone, so the LD "
+                                + "falls back to the paid amount — which INCLUDES tax and any one-time share, and so "
+                                + "overstates the penalty. Re-save the term on the finance page to have the backend "
+                                + "compute the pre-tax base."}
+                        >
+                            ⚠ post-tax base (no pre-tax figure)
+                        </div>
+                    )}
                     {row.ldBasisDiffers && (
                         <div
                             style={{ fontSize: 10.5, color: AMBER, fontWeight: 700 }}
-                            title={"Finance holds an LD Basis allotment of " + money(row.ldBasisValue)
-                                + " (" + pct(row.ldBasisPercent) + ") for this milestone. It is NOT used here — §5.28.2 charges "
-                                + "on the deliverable's own cost. A divergence usually means LD Basis is still on the backend's "
-                                + "even split rather than the §5.23.1 schedule."}
+                            title={"The base charged (" + money(row.ldBase) + ") differs from this deliverable's own "
+                                + "pre-tax payment (" + money(row.paymentPreTaxValue) + "). §5.23.1 pays each "
+                                + "deliverable its own cost, so those should agree. A gap usually means the LD Basis % "
+                                + "is still on the backend's even split rather than the §5.23.1 schedule, or that a "
+                                + "one-time share makes up part of the milestone."}
                         >
-                            ⚠ LD Basis {pct(row.ldBasisPercent)} differs
+                            ⚠ base ≠ pre-tax payment
                         </div>
                     )}
                 </td>
                 <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 800, color: row.ldPercent > 0 ? RED : GREEN }}>
-                    {pct(Math.round(row.ldPercent * 100) / 100)}
+                    {/* Both figures, always. §5.28.2 sets no ceiling, so these
+                        are normally equal — and saying that outright beats a
+                        lone number that could equally mean "capped" or
+                        "nothing capped it". */}
+                    <CapPair
+                        before={Math.round(row.ldPercent * 100) / 100}
+                        after={Math.round(row.ldPercentCapped * 100) / 100}
+                        clause="§5.27.6"
+                        noCapClause="§5.28.2"
+                        compact
+                    />
                 </td>
                 <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: RED, whiteSpace: "nowrap" }}>
                     {money(row.ldAmount)}
@@ -708,18 +773,77 @@ function IntervalBar({ interval, occupancy, configuredSeats }) {
 /* ─── one SLA group ──────────────────────────────────────────────── */
 
 /* A small right-aligned figure in the group header. */
-function Metric({ label, value, accent, flag, flagTitle }) {
+function Metric({ label, value, accent, flag, flagTitle, wide }) {
     return (
-        <span style={{ textAlign: "right", minWidth: 74 }}>
+        <span style={{ textAlign: "right", minWidth: wide ? 132 : 74 }}>
             <span style={{ display: "block", fontSize: 10.5, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".3px" }}>
                 {label}
             </span>
-            <span style={{ fontSize: 15, fontWeight: 800, color: accent || INK, fontVariantNumeric: "tabular-nums" }}>
+            <span style={{ fontSize: wide ? 13 : 15, fontWeight: 800, color: accent || INK, fontVariantNumeric: "tabular-nums" }}>
                 {value}
                 {flag && (
                     <span style={{ fontSize: 11, color: AMBER, fontWeight: 700, marginLeft: 4 }} title={flagTitle}>▲</span>
                 )}
             </span>
+        </span>
+    );
+}
+
+/* ─── before the cap → after the cap ──────────────────────────────
+   Every SLA type is capped by something different — the top LD band for
+   a points SLA, nothing at all for a deliverable one, the 10% quarter
+   ceiling for the total — and the page used to say only "uncapped",
+   which reads as "we did not check" rather than "the RFP sets none".
+
+   So the pair is always shown, in the same shape, whatever the type:
+
+       12.4% → 10%     a cap bit, and by how much
+       3.2%            nothing to cap it with, and the clause that says so
+
+   `before` and `after` being equal is a real answer, not a missing one.
+   Where a type genuinely has no ceiling, the clause is named — because
+   "no cap" is a contractual fact about §5.28.2, not an oversight. */
+function CapPair({ before, after, format = pct, clause, noCapClause, compact }) {
+    /* Guarded on the RAW values: `Number(null)` is 0, not NaN, so an SLA
+       that was never scored would otherwise render a confident "0%" —
+       which reads as "cost nothing" rather than "not measured". */
+    const real = (v) => v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
+    const b = real(before) ? Number(before) : null;
+    const a = real(after) ? Number(after) : null;
+    const known = b !== null && a !== null;
+    const bit = known && Math.abs(b - a) > 1e-9;
+
+    if (!known) {
+        const only = a ?? b;
+        return (
+            <span style={{ ...muted, fontVariantNumeric: "tabular-nums" }}>
+                {only === null ? "—" : format(only)}
+            </span>
+        );
+    }
+
+    return (
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5, flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
+            {bit ? (
+                <>
+                    {/* The pre-cap figure is struck through rather than dropped:
+                        it is what was scored, and a reader checking the working
+                        needs to see the number the cap acted on. */}
+                    <span style={{ ...muted, textDecoration: "line-through", fontSize: compact ? 11 : 12 }}>
+                        {format(b)}
+                    </span>
+                    <span style={{ ...muted, fontSize: compact ? 10 : 11 }}>→</span>
+                    <b style={{ color: RED }}>{format(a)}</b>
+                    {clause && <span style={{ ...muted, fontSize: 10 }}>{clause}</span>}
+                </>
+            ) : (
+                <>
+                    <b style={{ color: INK }}>{format(a)}</b>
+                    <span style={{ ...muted, fontSize: 10 }}>
+                        {noCapClause ? `no cap · ${noCapClause}` : "under the cap"}
+                    </span>
+                </>
+            )}
         </span>
     );
 }
@@ -1172,6 +1296,39 @@ function StatementSection({ letter, title, clause, first }) {
     );
 }
 
+/* ─── one finance cross-check ─────────────────────────────────────
+   Four states, and "not examined" is deliberately one of them: a check
+   that could not run must not read like a check that passed, because
+   only one of those is reassuring. */
+const CHECK_MARK = {
+    [SEVERITY.OK]: { icon: "✓", tone: GREEN, bg: "#f2faf5", border: "#bfe3cd" },
+    [SEVERITY.WARN]: { icon: "▲", tone: AMBER, bg: "#fffaf0", border: "#e8d9b0" },
+    [SEVERITY.ERROR]: { icon: "✕", tone: RED, bg: "#fdf4f2", border: "#f0c9c2" },
+    [SEVERITY.UNKNOWN]: { icon: "◍", tone: "var(--uidai-pmis-muted)", bg: "#f6f9fd", border: "var(--uidai-pmis-border)" },
+};
+
+function CheckRow({ check }) {
+    const m = CHECK_MARK[check.severity] || CHECK_MARK[SEVERITY.UNKNOWN];
+    return (
+        <div style={{
+            display: "flex", gap: 10, padding: "10px 12px", borderRadius: 9,
+            background: m.bg, border: `1px solid ${m.border}`,
+        }}>
+            <span style={{ color: m.tone, fontWeight: 800, fontSize: 12, lineHeight: 1.5, flex: "0 0 auto" }}>
+                {m.icon}
+            </span>
+            <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: INK }}>
+                    {check.title}
+                </span>
+                <span style={{ display: "block", fontSize: 11.5, color: "#334155", marginTop: 2, lineHeight: 1.6 }}>
+                    {check.detail}
+                </span>
+            </span>
+        </div>
+    );
+}
+
 /* ─── granting an LD relaxation ───────────────────────────────────
    Writes through the settlement override, which is what the backend
    offers: it replaces Σ LD % and stores the reason, re-capping the value
@@ -1598,9 +1755,19 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                     Points-scored SLAs lead with points; the linear NPQP one (SLA
                     003) has no points, so it leads with the delay that drove it. */}
                 <span style={{ marginLeft: "auto", display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+                    {/* Every type shows its cap the same way — what was scored,
+                        what survived the ceiling, and which clause imposed it.
+                        A type the RFP sets no ceiling for says so outright
+                        instead of showing a bare figure that reads as
+                        "nobody checked". */}
                     {isDeliverable ? (
                         <>
                             <Metric label="Deliverables" value={num(item.occurrences.length, 0)} />
+                            <Metric
+                                label="Highest LD %"
+                                wide
+                                value={<CapPair before={item.maxLdPercent} after={item.maxLdPercent} noCapClause="§5.28.2" compact />}
+                            />
                             <Metric label="Penalty amount" value={money(item.totalLdAmount)} accent={costing ? RED : GREEN} />
                         </>
                     ) : (
@@ -1608,14 +1775,41 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                             {isPoints ? (
                                 <Metric
                                     label="Points"
-                                    value={num(item.accumulatedPoints, 0)}
-                                    flag={item.pointsCapped}
-                                    flagTitle={`${num(item.excessPoints, 0)} points beyond the top band earn no further LD (§5.28.1.b)`}
+                                    wide
+                                    value={
+                                        <CapPair
+                                            before={item.accumulatedPoints}
+                                            after={item.pointsCapped
+                                                ? item.accumulatedPoints - item.excessPoints
+                                                : item.accumulatedPoints}
+                                            format={(v) => num(v, 0)}
+                                            clause="§5.28.1.b"
+                                            noCapClause={null}
+                                            compact
+                                        />
+                                    }
+                                    flag={item.capHits > 0}
+                                    flagTitle={`Severity was capped on ${item.capHits} measurement(s) before these points were scored — §5.28.1.b`}
                                 />
                             ) : (
                                 <Metric label="Delay" value={`${num(item.totalDelayDays, 0)}d`} />
                             )}
-                            <Metric label="LD %" value={pct(item.ldPercent)} accent={costing ? RED : GREEN} />
+                            {/* The band table IS this SLA's ceiling, so the LD % is
+                                already post-cap. Points past the top threshold buy
+                                nothing, which is what the pair above shows. */}
+                            <Metric
+                                label="LD %"
+                                wide
+                                value={
+                                    <CapPair
+                                        before={item.ldPercent}
+                                        after={item.ldPercent}
+                                        noCapClause={item.pointsCapped ? "at top band" : isPoints ? "within band" : "§5.28.3.a"}
+                                        compact
+                                    />
+                                }
+                                accent={costing ? RED : GREEN}
+                            />
                         </>
                     )}
                 </span>
@@ -2472,22 +2666,39 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     );
 
     /* ── the money chain (§5.28.1.d) ──────────────────────────────────
-       The settled row for THIS quarter, matched only when the contract
-       quarter aligns with a calendar one — settlement rows are keyed by
-       fiscal year + calendar quarter, and pairing a straddling window
-       with one of them would attribute the wrong money to it. */
+       The settled row for THIS quarter.
+
+       Settlement rows are now anchored the same way this page is —
+       fiscalYear is the 1-based CONTRACT year and quarter is 1..4 within
+       it — so a row can be matched to the selected contract quarter
+       directly. Rows from an UNDATED project are still calendar-keyed, and
+       those can only be paired when the contract quarter happens to
+       coincide with a calendar one; pairing a straddling window with one
+       of them would attribute the wrong money to it. */
     const settlementRow = useMemo(() => {
         /* The backend's answer for a date inside this contract quarter wins:
            it resolved the window itself, so there is nothing left to guess.
-           The keyed lookup below is the fallback for when that call has not
-           landed, or 404'd because the quarter is not closed yet. */
+           The keyed lookups below are the fallback for when that call has
+           not landed, or 404'd because the quarter is not closed yet. */
         if (contractSettlement) return contractSettlement;
+
+        // Contract-anchored rows: match the selected contract quarter outright.
+        if (period) {
+            const anchored = settlements.find(
+                (r) => isContractYear(r.fiscalYear)
+                    && Number(r.fiscalYear) === Number(period.year)
+                    && Number(r.quarter) === Number(period.quarter)
+            );
+            if (anchored) return anchored;
+        }
+
+        // Calendar-keyed rows (undated project): only when the windows align.
         if (!alignedQuarterKey) return null;
         const [y, q] = alignedQuarterKey.split("-Q");
         return settlements.find(
             (r) => Number(r.fiscalYear) === Number(y) && Number(r.quarter) === Number(q)
         ) || null;
-    }, [contractSettlement, settlements, alignedQuarterKey]);
+    }, [contractSettlement, settlements, alignedQuarterKey, period]);
 
     /* PA only exists once a quarter has been settled — it is the actual
        deployment payable, computed from attendance. Everything else the
@@ -2623,15 +2834,18 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     }, [totals.sumLdPercent, settlementRow, chain.npqp, contractSettlementError]);
 
     /* ── does that settlement row actually cover this quarter? ────────
-       The rows carry `quarterStart` / `quarterEnd`, and they are CALENDAR
-       quarters: 2026-Q3 is 01 Jul → 30 Sep. A contract quarter measured
-       from T0 is a different three-month window — Y1·Q3 here is 10 May →
-       09 Aug — so asking the endpoint about a date inside the contract
-       quarter returns a row describing a window that is not this one.
+       The rows carry `quarterStart` / `quarterEnd`. Those are now anchored
+       to the project's start date, so on a dated project they should equal
+       this contract quarter's own window exactly and `matches` comes back
+       true. Two cases still make them differ: an UNDATED project, where
+       the backend falls back to calendar quarters (2026-Q3 = 01 Jul → 30
+       Sep, against a Y1-Q3 of 10 May → 09 Aug), and a service that has not
+       taken the anchoring deploy yet.
 
-       Checked rather than assumed, because the failure is silent: every
-       figure would look plausible while belonging to a different quarter.
-       The dates are compared directly; nothing is inferred from the key. */
+       So the check stays, and is checked rather than assumed, because the
+       failure is silent: every figure would look plausible while belonging
+       to a different quarter. The dates are compared directly; nothing is
+       inferred from the key. */
     const settlementWindow = useMemo(() => {
         const rowStart = settlementRow?.quarterStart ? String(settlementRow.quarterStart).slice(0, 10) : "";
         const rowEnd = settlementRow?.quarterEnd ? String(settlementRow.quarterEnd).slice(0, 10) : "";
@@ -2651,9 +2865,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             overlapDays,
             periodDays,
             overlapPercent: periodDays ? Math.round((overlapDays / periodDays) * 1000) / 10 : null,
-            key: settlementRow.fiscalYear && settlementRow.quarter
-                ? `${settlementRow.fiscalYear}-Q${settlementRow.quarter}`
-                : "",
+            /* "Y1-Q3" on an anchored project, "2026-Q3" on an undated one —
+               fiscalYear carries the contract year in the first case. */
+            key: formatQuarterKey(settlementRow.fiscalYear, settlementRow.quarter),
         };
     }, [settlementRow, period]);
 
@@ -2669,12 +2883,25 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
     const cumulative = useMemo(() => cumulativePayout(settlements), [settlements]);
 
+    /* Which basis the finance page is keeping its money on. Read off the
+       payload rather than assumed: this contract follows the RFP's
+       "compute without tax, tax once at the invoice", but another project
+       may hold tax-inclusive values, or a different rate, or an older
+       payload with no split at all. */
+    const financeBasis = useMemo(() => detectFinanceBasis(paymentPage), [paymentPage]);
+
     /* §5.26.2 — 1.25 × contract value. The payment page is already loaded
        for the deliverable report and carries the contract value on its
-       totals, so no extra call. */
+       totals, so no extra call.
+
+       Measured against the PRE-TAX contract value when the page returns
+       one. AQP is tax-exclusive (§5.27.6), so comparing it with the
+       tax-inclusive total understates usage by the entire tax component —
+       on an 18% contract, 40% of the ceiling reads as 33.9%. */
+    const ceilingBase = useMemo(() => ceilingBaseFor(financeBasis), [financeBasis]);
     const ceiling = useMemo(
-        () => contractCeiling(paymentPage?.totals?.totalContractCost, cumulative.totalAqp),
-        [paymentPage, cumulative.totalAqp]
+        () => contractCeiling(ceilingBase.value, cumulative.totalAqp),
+        [ceilingBase.value, cumulative.totalAqp]
     );
     const dTotals = useMemo(() => deliverableTotals(deliverableItems), [deliverableItems]);
 
@@ -2848,6 +3075,40 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         };
     }, [payables.totals.totalNetPayable, payables.totals.totalLdAmount, chain.aqp, chain.ldAmount,
         deliverableItems.length, quarterlyItems.length]);
+
+    /* ── does this page agree with Finance about tax? ─────────────────
+       The rollup draws from two services that keep money on different
+       bases: the payment page returns each term pre-tax AND post-tax,
+       while the contracts service keeps NPQP, PA, LD and AQP exclusive of
+       tax (§5.27.6) and taxes once at the invoice (§5.28.1.e).
+
+       That is fine as long as nothing compares across the line. This
+       memo checks the places that do — and reports rather than corrects,
+       because which basis a project uses is a contract fact, not
+       something a screen should decide on its behalf. */
+    const taxCheck = useMemo(() => reconcileTaxBasis({
+        finance: financeBasis,
+        payables,
+        statement,
+        cumulative,
+        expectedGstPercent: statement?.tax?.gstPercent,
+    }), [financeBasis, payables, statement, cumulative]);
+
+    /* The payment page publishes `slaLdDeductions` — the settlement rows
+       themselves, on contract quarters. Both sides derive from the same
+       evaluations, so every figure should match to the rupee; anything
+       that does not means one of them applied a rule the other did not.
+
+       This is the reconciliation proper. The tax checks above are about
+       which BASIS a figure is on; these are about whether the two screens
+       agree on the figure at all. */
+    const financeDeductions = useMemo(() => reconcileSlaDeductions({
+        paymentPage,
+        period,
+        totals,
+        chain,
+        quarterlyNet: statement?.quarterlyNet,
+    }), [paymentPage, period, totals, chain, statement?.quarterlyNet]);
 
     /* Occurrences that were evaluated but never read. Every resource SLA
        (005–009) is manual by definition — the backend cannot derive
@@ -3254,12 +3515,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             hint={`${num(totals.contributingCount, 0)} SLA${totals.contributingCount === 1 ? "" : "s"} contributing`}
                                         />
                                         <Tile
-                                            label="Penalty % applied"
-                                            value={pct(totals.cappedLdPercent)}
+                                            label="Penalty % before → after"
+                                            value={<CapPair
+                                                before={totals.sumLdPercent}
+                                                after={totals.cappedLdPercent}
+                                                clause="§5.27.6"
+                                                noCapClause={`under the ${totals.quarterCapPercent}% ceiling`}
+                                            />}
                                             accent={RED}
                                             hint={totals.capApplied
-                                                ? `capped from ${pct(totals.sumLdPercent)}`
-                                                : `ceiling ${totals.quarterCapPercent}%`}
+                                                ? `the ${totals.quarterCapPercent}% quarter ceiling bit`
+                                                : `ceiling ${totals.quarterCapPercent}% of NPQP`}
                                         />
                                         <Tile
                                             label="NPQP"
@@ -3898,9 +4164,22 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <>
                                             <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
                                                 <Tile label="Deliverables" value={num(payables.totals.deliverableCount, 0)} hint="with an SLA this period" />
-                                                <Tile label="Deliverable cost" value={money(payables.totals.totalPayment)} hint="per §5.23.1" />
-                                                <Tile label="LD deducted" value={money(payables.totals.totalLdAmount)} accent={RED} hint="uncapped · §5.28.2" />
-                                                <Tile label="Net payable" value={money(payables.totals.totalNetPayable)} accent={GREEN} hint="cost − LD" />
+                                                <Tile
+                                                    label="LD base"
+                                                    value={money(payables.totals.totalLdBase)}
+                                                    hint={payables.totals.legacyBaseCount
+                                                        ? `pre-tax · §5.23.1 · ${payables.totals.legacyBaseCount} row(s) still post-tax`
+                                                        : "pre-tax, one-time excluded · §5.23.1"}
+                                                />
+                                                <Tile
+                                                    label="LD deducted"
+                                                    value={money(payables.totals.totalLdAmount)}
+                                                    accent={RED}
+                                                    hint={payables.totals.capAppliedCount > 0
+                                                        ? `${payables.totals.capAppliedCount} capped`
+                                                        : "before = after · §5.28.2 sets no ceiling"}
+                                                />
+                                                <Tile label="Net payable" value={money(payables.totals.totalNetPayable)} accent={GREEN} hint={`paid ${money(payables.totals.totalPayment)} − LD`} />
                                             </div>
 
                                             <div className="uidai-pmis-table-wrap" style={{ marginTop: 12, overflowX: "auto" }}>
@@ -3909,7 +4188,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                         <tr>
                                                             <th>Deliverable</th>
                                                             <th>SLAs applied</th>
-                                                            <th style={{ textAlign: "right" }}>Deliverable cost</th>
+                                                            <th style={{ textAlign: "right" }}>LD base (pre-tax)</th>
                                                             <th style={{ textAlign: "right" }}>LD %</th>
                                                             <th style={{ textAlign: "right" }}>LD amount</th>
                                                             <th style={{ textAlign: "right" }}>Net payable</th>
@@ -4367,7 +4646,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     value={money(statement.deliverableNet)}
                                                     strong
                                                     rule
-                                                    hint="Uncapped — can go negative."
+                                                    hint={`LD before any ceiling ${money(payables.totals.totalLdAmountUncapped)}, after ${money(payables.totals.totalLdAmount)} — §5.28.2 sets no ceiling, so these agree and the net can go negative.`}
                                                 />
                                             </>
                                         )}
@@ -4598,6 +4877,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     </tbody>
                                 </table>
 
+                                {/* The cross-check below is the detail; this is the
+                                    pointer, because the figure it affects is the one
+                                    directly above it and a reader who stops here
+                                    would otherwise take it as final. */}
+                                {taxCheck.checks.some((c) => c.id === "mixed-basis-invoice" && c.severity === SEVERITY.ERROR) && (
+                                    <div style={{ fontSize: 11.5, color: RED, fontWeight: 600, marginTop: 8, lineHeight: 1.6, maxWidth: 620 }}>
+                                        ✕ GST here is applied to two figures kept on different tax bases &mdash; see the
+                                        cross-check below before invoicing this.
+                                    </div>
+                                )}
+
                                     </div>
 
                                     {/* ── D · where the contract stands ─────────
@@ -4656,6 +4946,95 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 </table>
                                     </div>
                                 </div>
+
+                                {/* ══ CROSS-CHECK AGAINST FINANCE ══════════
+                                    The statement above draws from two services
+                                    that keep money on different sides of the
+                                    tax line: the payment page returns each term
+                                    pre-tax and post-tax, the contracts service
+                                    keeps NPQP / PA / LD / AQP tax-exclusive
+                                    (§5.27.6) and taxes once at the invoice.
+
+                                    Fine until something compares across that
+                                    line — and when it does, the error is the
+                                    whole tax rate, which is far too large to
+                                    find by eye. Reported, never silently
+                                    corrected: which basis a project uses is a
+                                    contract fact, not a screen's decision. */}
+                                {taxCheck.checked && taxCheck.checks.length > 0 && (
+                                    <div style={{ marginTop: 18 }}>
+                                        <div style={{
+                                            display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap",
+                                            marginBottom: 10,
+                                        }}>
+                                            <span style={{
+                                                width: 21, height: 21, borderRadius: 6, background: "#eaf1fb",
+                                                color: INK, fontSize: 11, fontWeight: 800,
+                                                display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto",
+                                            }}>
+                                                ✓
+                                            </span>
+                                            <span style={{ fontSize: 12, fontWeight: 800, color: INK, letterSpacing: ".2px", textTransform: "uppercase" }}>
+                                                Cross-check against Finance
+                                            </span>
+                                            <ClauseChip clause="§5.27.6 · §5.28.1.e" />
+                                            <span style={{ flex: 1, height: 1, background: "var(--uidai-pmis-border)" }} />
+                                            {/* Counted across BOTH groups — a reader glancing
+                                                at the header wants "is anything wrong here",
+                                                not "is anything wrong in one of the two
+                                                halves of this section". */}
+                                            {(() => {
+                                                const all = [...(financeDeductions.checks || []), ...taxCheck.checks];
+                                                const errors = all.filter((c) => c.severity === SEVERITY.ERROR).length;
+                                                const warns = all.filter((c) => c.severity === SEVERITY.WARN).length;
+                                                return (
+                                                    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                                                        {errors > 0 && (
+                                                            <span className="uidai-pmis-badge uidai-pmis-badge-red">{errors} to fix</span>
+                                                        )}
+                                                        {warns > 0 && (
+                                                            <span className="uidai-pmis-badge uidai-pmis-badge-orange">{warns} to watch</span>
+                                                        )}
+                                                        {errors === 0 && warns === 0 && (
+                                                            <span className="uidai-pmis-badge uidai-pmis-badge-green">agrees</span>
+                                                        )}
+                                                    </span>
+                                                );
+                                            })()}
+                                        </div>
+
+                                        {/* Figure-for-figure first: whether the two screens
+                                            agree at all matters before whether they agree
+                                            about tax. */}
+                                        {financeDeductions.available && financeDeductions.checks.length > 0 && (
+                                            <>
+                                                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", ...muted, margin: "2px 0 7px" }}>
+                                                    Same quarter, both screens
+                                                    {financeDeductions.status && (
+                                                        <span style={{ marginLeft: 8, fontWeight: 600, textTransform: "none", letterSpacing: 0 }}>
+                                                            · Finance row is {String(financeDeductions.status).replace(/_/g, " ")}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div style={{ display: "grid", gap: 8, maxWidth: 720, marginBottom: 14 }}>
+                                                    {financeDeductions.checks.map((c) => <CheckRow key={c.id} check={c} />)}
+                                                </div>
+                                            </>
+                                        )}
+                                        {!financeDeductions.available && (
+                                            <div style={{ fontSize: 11.5, ...muted, marginBottom: 12, lineHeight: 1.6 }}>
+                                                ◍ Figure-for-figure reconciliation not run &mdash; {financeDeductions.reason}.
+                                            </div>
+                                        )}
+
+                                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", ...muted, margin: "2px 0 7px" }}>
+                                            Tax basis
+                                        </div>
+                                        <div style={{ display: "grid", gap: 8, maxWidth: 720 }}>
+                                            {taxCheck.checks.map((c) => <CheckRow key={c.id} check={c} />)}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </>
                     )}

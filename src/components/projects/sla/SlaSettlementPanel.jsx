@@ -14,9 +14,12 @@ import {
     overrideSettlement,
     markSettlementInvoiced,
     quarterKeyOf,
+    quarterKeyOfRow,
     recentQuarterKeys,
     parseQuarterKey,
+    rowMatchesQuarter,
 } from "../../../api/slaCompliance";
+import { contractQuarters, contractQuarterFor } from "../../../utils/project/slaRollup";
 import { formatINR } from "../../../utils/project/helpers";
 
 const muted = { color: "var(--uidai-pmis-muted)" };
@@ -90,15 +93,66 @@ function Section({ title, badge, defaultOpen = false, children }) {
     );
 }
 
-export default function SlaSettlementPanel({ projectId }) {
-    const quarterOptions = useMemo(() => recentQuarterKeys(8), []);
-    const [quarter, setQuarter] = useState(() => quarterKeyOf());
-    const range = useMemo(() => parseQuarterKey(quarter), [quarter]);
-
+export default function SlaSettlementPanel({ projectId, projectStartDate = "", projectEndDate = "" }) {
     const [aggregate, setAggregate] = useState(null);
     const [npqp, setNpqp] = useState(null);
     const [settlement, setSettlement] = useState(null);
     const [history, setHistory] = useState([]);
+
+    /* ── which quarters this project has ──────────────────────────────
+       Quarters are anchored to the project's start date now, so the
+       options come from T0 ("Y1-Q1", "Y1-Q2", …) rather than from the
+       calendar. Two things can leave that list empty: a project with no
+       start date (the backend then genuinely keys by calendar quarter),
+       and a deep link, where `useProject` reads an in-memory list nothing
+       has populated yet. The settlement history covers the second case —
+       its rows already name the quarters this project has closed — and
+       the calendar list is the last resort for the first. */
+    const contractQs = useMemo(
+        () => contractQuarters(projectStartDate, projectEndDate),
+        [projectStartDate, projectEndDate]
+    );
+    const quarterOptions = useMemo(() => {
+        const seen = new Set();
+        const out = [];
+        for (const q of contractQs) { seen.add(q.key); out.push(q.key); }
+        for (const r of history) {
+            const key = quarterKeyOfRow(r);
+            if (key && !seen.has(key)) { seen.add(key); out.push(key); }
+        }
+        return out.length ? out : recentQuarterKeys(8);
+    }, [contractQs, history]);
+
+    const [quarter, setQuarter] = useState("");
+    // Land on the quarter the project is actually in; hold the user's pick
+    // once the options have arrived.
+    useEffect(() => {
+        setQuarter((cur) => {
+            if (cur && quarterOptions.includes(cur)) return cur;
+            if (contractQs.length) return (contractQuarterFor(contractQs) || contractQs[0]).key;
+            return quarterOptions[0] || quarterKeyOf();
+        });
+    }, [quarterOptions, contractQs]);
+
+    /* The selected quarter's date window. A contract key carries no dates
+       of its own, so the bounds come from the anchored list; a row the
+       backend already returned is the next best source, and a calendar key
+       derives its own. */
+    const range = useMemo(() => {
+        const anchored = contractQs.find((q) => q.key === quarter);
+        if (anchored) return { year: anchored.year, quarter: anchored.quarter, start: anchored.start, end: anchored.end };
+        const row = history.find((r) => quarterKeyOfRow(r) === quarter);
+        const parsed = parseQuarterKey(quarter);
+        if (row?.quarterStart && row?.quarterEnd) {
+            return {
+                year: Number(row.fiscalYear),
+                quarter: Number(row.quarter),
+                start: String(row.quarterStart).slice(0, 10),
+                end: String(row.quarterEnd).slice(0, 10),
+            };
+        }
+        return parsed;
+    }, [quarter, contractQs, history]);
 
     const [loading, setLoading] = useState(false);
     const [closing, setClosing] = useState(false);
@@ -117,6 +171,8 @@ export default function SlaSettlementPanel({ projectId }) {
     // auto-closes the quarter as a side effect, so it stays behind a button.
     const load = useCallback(async () => {
         if (!projectId) { setError("Missing project id."); return; }
+        // The first render has no quarter yet — the options arrive a tick later.
+        if (!quarter) return;
         setLoading(true);
         setError("");
         setNotice("");
@@ -138,15 +194,16 @@ export default function SlaSettlementPanel({ projectId }) {
         if (histRes.status === "rejected") problems.push(`Settlement history: ${histRes.reason?.message || "failed"}`);
 
         // If this quarter has already been closed, show it without re-triggering
-        // the lazy auto-close.
-        const existing = range
-            ? rows.find((r) => r.fiscalYear === range.year && r.quarter === range.quarter)
-            : null;
-        setSettlement(existing || null);
+        // the lazy auto-close. Matched on fiscalYear + quarter rather than on a
+        // reconstructed label, and numerically — see rowMatchesQuarter.
+        setSettlement(rows.find((r) => rowMatchesQuarter(r, quarter)) || null);
 
         if (problems.length) setError(problems.join("\n"));
         setLoading(false);
-    }, [projectId, quarter, range]);
+        /* `range` is deliberately NOT a dependency: it is derived from
+           `history`, which this function sets, so depending on it would
+           re-create load() on every load and spin. */
+    }, [projectId, quarter]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -208,6 +265,7 @@ export default function SlaSettlementPanel({ projectId }) {
         }
     }
 
+    const isContractKey = range?.kind === "contract" || /^Y\d+-Q[1-4]$/i.test(quarter);
     const invoiced = settlement?.status === "invoiced";
     const npqpUnavailable = npqp && npqp.status && npqp.status !== "ok";
     const aggItems = Array.isArray(aggregate?.items) ? aggregate.items : [];
@@ -237,7 +295,16 @@ export default function SlaSettlementPanel({ projectId }) {
 
             {range && (
                 <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                    Period <b style={{ color: "#173e77" }}>{range.start}</b> → <b style={{ color: "#173e77" }}>{range.end}</b>
+                    {/* Quarters run from the project's start date, so the year in
+                        the key is the contract year — spelled out here so "Y2" is
+                        never read as a calendar year. Undated projects fall back
+                        to calendar quarters and are labelled as such. */}
+                    {isContractKey
+                        ? <>Contract year <b style={{ color: "#173e77" }}>{range.year}</b>, quarter <b style={{ color: "#173e77" }}>{range.quarter}</b> · </>
+                        : <>Calendar quarter (project has no start date to anchor to) · </>}
+                    {range.start
+                        ? <>Period <b style={{ color: "#173e77" }}>{range.start}</b> → <b style={{ color: "#173e77" }}>{range.end}</b></>
+                        : <>period resolved by the backend</>}
                 </div>
             )}
 
@@ -327,7 +394,12 @@ export default function SlaSettlementPanel({ projectId }) {
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--uidai-pmis-border)" }}>
                                     <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
                                         <label>Invoice reference</label>
-                                        <input type="text" value={invoiceRef} placeholder="INV-2026-Q3-001" onChange={(e) => setInvoiceRef(e.target.value)} />
+                                        <input
+                                            type="text"
+                                            value={invoiceRef}
+                                            placeholder={`INV-${quarter || "Y1-Q3"}-001`}
+                                            onChange={(e) => setInvoiceRef(e.target.value)}
+                                        />
                                         <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Locks the row permanently once the LD has been billed.</div>
                                     </div>
                                     <div style={{ display: "flex", alignItems: "flex-end" }}>
@@ -447,7 +519,9 @@ export default function SlaSettlementPanel({ projectId }) {
                             </thead>
                             <tbody>
                                 {history.map((r) => {
-                                    const key = `${r.fiscalYear}-Q${r.quarter}`;
+                                    /* "Y1-Q3", not "2026-Q3": fiscalYear is the
+                                       contract year on an anchored project. */
+                                    const key = quarterKeyOfRow(r);
                                     const isCurrent = key === quarter;
                                     return (
                                         <tr key={r.id} style={{ background: isCurrent ? "#fff8ec" : undefined, cursor: "pointer" }} onClick={() => setQuarter(key)}>

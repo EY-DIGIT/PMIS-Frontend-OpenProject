@@ -21,9 +21,13 @@ import "../../styles/global.css";
      3. Feeds that count into the SAME evaluate endpoint the Activity-SLA
         page already uses, so the backend returns accumulated points and
         LD% exactly as it does today.
-     4. Applies the penalty to the milestone's payment as the RFP states:
-        net payable = payment − LD, with LD% capped at 10% per activity
-        (and per milestone).
+     4. Applies the penalty as the RFP states, charging on the milestone's
+        PRE-TAX delivery base and deducting from what is actually paid:
+            LD          = ldBasisPretaxValue × LD%     (tax-free, one-time excluded)
+            net payable = payment − LD                 (payment is tax-inclusive)
+        with LD% capped at 10% per activity (and per milestone). A payment
+        page that does not return the pre-tax base falls back to charging
+        on the payment itself, which is what this report did before.
 
    ── The one seam you need to wire ──────────────────────────────────
    SLAs live on ACTIVITIES; payments group by MILESTONE. To join them we
@@ -312,15 +316,33 @@ export default function PenaltyReportPage() {
     [itemsActivities, itemsMilestones]
   );
 
-  /* Milestone → total scheduled payment (sum of every phase's term value
-     for that milestone). This is the base the penalty is taken from. */
+  /* Milestone → its money, summed over every phase's terms.
+
+       `value`  — total scheduled payment (tax-inclusive). What is paid, and
+                  what the penalty is deducted FROM.
+       `ldBase` — `ldBasisPretaxValue`: the milestone's allotment × its
+                  delivery cost BEFORE tax, with one-time (out-of-pocket)
+                  cost excluded. This is what the penalty is charged ON.
+
+     They are different numbers and charging on the wrong one overstates
+     every penalty by the tax rate. `hasLdBase` records whether the payment
+     page actually returned the pre-tax figure — summing into a 0 cannot
+     say that, since a genuinely-zero milestone and an old payload look
+     identical — and the base falls back to `value` (the previous
+     behaviour) only when it did not. */
   const paymentByMilestone = useMemo(() => {
     const map = new Map();
     const phases = page?.phases || [];
     for (const ph of phases) {
       for (const t of ph.paymentTerms || []) {
         if (!t.milestoneId) continue;
-        map.set(t.milestoneId, num(map.get(t.milestoneId)) + num(t.value));
+        const e = map.get(t.milestoneId) || { value: 0, ldBase: 0, hasLdBase: false };
+        e.value += num(t.value);
+        if (t.ldBasisPretaxValue !== null && t.ldBasisPretaxValue !== undefined && t.ldBasisPretaxValue !== "") {
+          e.hasLdBase = true;
+          e.ldBase += num(t.ldBasisPretaxValue);
+        }
+        map.set(t.milestoneId, e);
       }
     }
     return map;
@@ -379,7 +401,10 @@ export default function PenaltyReportPage() {
         const acts = activitiesForMilestone(m);
         if (!acts.length) continue; // no activities → nothing to score
 
-        const value = num(paymentByMilestone.get(m.id));
+        const money = paymentByMilestone.get(m.id) || { value: 0, ldBase: 0, hasLdBase: false };
+        const value = num(money.value);
+        // Pre-tax, one-time excluded — see paymentByMilestone.
+        const ldBase = money.hasLdBase && money.ldBase > 0 ? num(money.ldBase) : value;
 
         const activityRows = [];
         for (const a of acts) {
@@ -462,13 +487,16 @@ export default function PenaltyReportPage() {
 
         const summedActivityLd = activityRows.reduce((s, r) => s + num(r.activityLdPercent), 0);
         const milestoneLdPercent = Math.min(MILESTONE_LD_CAP, summedActivityLd);
-        const penalty = (value * milestoneLdPercent) / 100;
+        // Charged on the pre-tax base, deducted from the tax-inclusive payment.
+        const penalty = (ldBase * milestoneLdPercent) / 100;
         const maxDelay = activityRows.reduce((mx, r) => Math.max(mx, num(r.delay)), 0);
 
         rows.push({
           milestone: m,
           maxDelay,
           value,
+          ldBase,
+          ldBaseIsPretax: money.hasLdBase && money.ldBase > 0,
           activities: activityRows,
           milestoneLdPercentRaw: summedActivityLd,
           milestoneLdPercent,
@@ -524,11 +552,12 @@ export default function PenaltyReportPage() {
     return <span className={`uidai-pmis-badge ${cls}`}>{STATE_LABEL[state] || state}</span>;
   }
 
-  function Tile({ label, value, accent }) {
+  function Tile({ label, value, accent, hint }) {
     return (
       <div style={{ background: "#f6f9fd", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, padding: "12px 14px" }}>
         <div style={{ fontSize: 11, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 6 }}>{label}</div>
         <div style={{ fontSize: 20, fontWeight: 800, color: accent || "#173e77", lineHeight: 1.1 }}>{value}</div>
+        {hint && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{hint}</div>}
       </div>
     );
   }
@@ -619,11 +648,16 @@ export default function PenaltyReportPage() {
 
                 {/* Money line */}
                 <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 14 }}>
-                  <Tile label="Milestone payment" value={inr(row.value)} />
+                  <Tile
+                    label="Milestone payment"
+                    value={inr(row.value)}
+                    hint={row.ldBaseIsPretax ? `LD base ${inr(row.ldBase)} (pre-tax)` : undefined}
+                  />
                   <Tile
                     label="Applied LD"
                     value={`${row.milestoneLdPercent}%`}
                     accent={row.milestoneLdPercent > 0 ? "#c0392b" : "#173e77"}
+                    hint={row.ldBaseIsPretax ? "of the pre-tax base" : "of the paid amount"}
                   />
                   <Tile label="Penalty" value={inr(row.penalty)} accent="#c0392b" />
                   <Tile label="Net payable" value={inr(row.net)} accent="#1b7a42" />

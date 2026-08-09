@@ -44,8 +44,54 @@ function call(path, { method = "GET", body } = {}) {
 const enc = encodeURIComponent;
 
 /* ───────────────────────── Quarter helpers ─────────────────────────
-   The backend accepts "2026-Q1".."2026-Q4" (calendar quarters) or any ISO
-   date inside the target quarter. These mirror that convention exactly.   */
+   Contract quarters are PROJECT-ANCHORED: they run from the project's own
+   start date, not from a calendar year. Every settlement / NPQP /
+   quarterly-aggregate response now reports one as
+
+       fiscalYear = the 1-based CONTRACT year (1, 2, 3 …) — NOT a calendar year
+       quarter    = 1..4 within that contract year
+       label      = "Y1-Q2"   (a project starting 2025-11-10 has
+                               Y1-Q2 = 2026-02-10 .. 2026-05-09)
+
+   and the ?quarter= param on those endpoints takes the same "Y1-Q2" — or
+   any ISO date inside the quarter, which still resolves to the containing
+   one and is the safer thing to send when T0 is not to hand.
+
+   An UNDATED project has nothing to anchor to, so the backend keeps
+   falling back to calendar quarters ("2026-Q2", fiscalYear = 2026). Both
+   shapes therefore reach the frontend, and everything below handles
+   either: a 4-digit year reads as calendar, anything smaller as a
+   contract year.                                                        */
+
+const CONTRACT_KEY = /^Y(\d{1,3})-Q([1-4])$/i;
+const CALENDAR_KEY = /^(\d{4})-Q([1-4])$/;
+
+/* A fiscalYear of 1..999 is a contract year; a 4-digit one is a calendar
+   year. Nothing else can tell the two apart — the field carries both. */
+export function isContractYear(fiscalYear) {
+    const n = Number(fiscalYear);
+    return Number.isFinite(n) && n > 0 && n < 1000;
+}
+
+/* fiscalYear + quarter → the key the backend uses, in whichever regime
+   the row belongs to. Feed it a settlement / NPQP / aggregate row and it
+   labels itself correctly without the caller having to know which. */
+export function formatQuarterKey(fiscalYear, quarter) {
+    const y = Number(fiscalYear);
+    const q = Number(quarter);
+    if (!Number.isFinite(y) || !Number.isFinite(q)) return "";
+    return isContractYear(y) ? `Y${y}-Q${q}` : `${y}-Q${q}`;
+}
+
+/* A row's quarter key. The backend's own label wins when it sent one —
+   it knows which regime the project is in — and fiscalYear + quarter is
+   the fallback for responses that predate the label. */
+export function quarterKeyOfRow(row) {
+    const given = row?.quarterLabel ?? row?.label ?? row?.quarterKey;
+    const s = String(given || "").trim();
+    if (CONTRACT_KEY.test(s) || CALENDAR_KEY.test(s)) return s;
+    return formatQuarterKey(row?.fiscalYear, row?.quarter);
+}
 
 export function quarterKeyOf(date = new Date()) {
     const d = typeof date === "string" ? new Date(`${date}T00:00:00`) : date;
@@ -53,8 +99,22 @@ export function quarterKeyOf(date = new Date()) {
     return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
 }
 
+/* Parse either shape.
+
+   A CONTRACT key carries no dates of its own — its window depends on the
+   project's T0, which lives on the project and not in the key — so
+   `start` / `end` come back null and the caller pairs it with
+   contractQuarters() from utils/project/slaRollup when it needs bounds.
+   `kind` says which was parsed, so nobody has to sniff the year. */
 export function parseQuarterKey(key) {
-    const m = /^(\d{4})-Q([1-4])$/.exec(String(key || "").trim());
+    const raw = String(key || "").trim();
+
+    const c = CONTRACT_KEY.exec(raw);
+    if (c) {
+        return { kind: "contract", year: Number(c[1]), quarter: Number(c[2]), start: null, end: null };
+    }
+
+    const m = CALENDAR_KEY.exec(raw);
     if (!m) return null;
     const year = Number(m[1]);
     const quarter = Number(m[2]);
@@ -63,7 +123,19 @@ export function parseQuarterKey(key) {
     const end = new Date(year, startMonth + 3, 0); // day 0 of next block = last day
     const iso = (d) =>
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return { year, quarter, start: iso(start), end: iso(end) };
+    return { kind: "calendar", year, quarter, start: iso(start), end: iso(end) };
+}
+
+/* Does a settlement / aggregate row describe this quarter key?
+
+   Compared numerically because the services disagree on whether
+   fiscalYear comes back as a number or a string — a strict === against a
+   parsed number silently reports an already-closed quarter as open and
+   offers to re-close it. */
+export function rowMatchesQuarter(row, key) {
+    const p = parseQuarterKey(key);
+    if (!p || !row) return false;
+    return Number(row.fiscalYear) === p.year && Number(row.quarter) === p.quarter;
 }
 
 // The last N quarters ending at the current one, newest first — drives the
@@ -100,6 +172,7 @@ export function getActivityCompliance(activityId) {
 
 // Phase B — per-SLA quarterly rollup (points → LD % per SLA). Refreshes the
 // rollup server-side before responding. totalLdPercentUncapped is pre-cap.
+// `quarter` is a contract key ("Y1-Q2") or any ISO date inside the quarter.
 export function getQuarterlyAggregate(projectId, quarter) {
     const qs = quarter ? `?quarter=${enc(quarter)}` : "";
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/quarterly-aggregate${qs}`);

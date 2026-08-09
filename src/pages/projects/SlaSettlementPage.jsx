@@ -26,7 +26,13 @@ export default function SlaSettlementPage() {
             </div>
 
             {projectId ? (
-                <SlaSettlementPanel projectId={projectId} />
+                /* T0 anchors the quarter list — quarters run from the project's
+                   start date now, not from the calendar. */
+                <SlaSettlementPanel
+                    projectId={projectId}
+                    projectStartDate={project?.startDate || ""}
+                    projectEndDate={project?.endDate || ""}
+                />
             ) : (
                 <div className="uidai-pmis-card">No project in the URL.</div>
             )}
