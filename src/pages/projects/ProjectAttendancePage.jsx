@@ -244,6 +244,10 @@ const sandwichOf = (c) => {
    read as 21 rather than as a suspiciously precise 21.00. */
 const days = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
 
+/* Rows whose designation the report didn't carry. Grouped under one heading
+   rather than dropped — they are real people on the activity. */
+const UNTITLED_DESIGNATION = "No designation";
+
 const money = (v) =>
   `₹${num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -714,6 +718,12 @@ export default function ProjectAttendancePage() {
     (id) => setFilter({ activity: id }),
     [setFilter]
   );
+
+  /* Which of the two views is showing. In the URL with the filter, for the
+     same reason: coming back from an employee detail should land on the view
+     you left, not reset to the employee list. */
+  const viewMode = searchParams.get("view") === "designation" ? "designation" : "employee";
+  const setViewMode = useCallback((v) => setFilter({ view: v === "designation" ? v : "" }), [setFilter]);
 
   const [filterActivities, setFilterActivities] = useState([]);
   const [filterActivitiesLoading, setFilterActivitiesLoading] = useState(false);
@@ -1232,6 +1242,69 @@ export default function ProjectAttendancePage() {
     return sum;
   }, [quarterlyCost, quarterlyCostById, quarterlyRows, filterActive]);
 
+  /* ── the by-designation view ──────────────────────────────────────────
+     Grouped from the rows already on screen rather than from another request:
+     every row carries its designation, and grouping server-side would give a
+     second list free to disagree with the table beside it.
+
+     resource-details is fetched per designation when one is opened — it is
+     the only source for which ACTIVITIES a person worked and between what
+     dates, which the activity-scoped report can't say. */
+  const designationGroups = useMemo(() => {
+    const map = new Map();
+    quarterlyRows.forEach((r) => {
+      const key = (r.designation || "").trim() || UNTITLED_DESIGNATION;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return [...map.entries()]
+      .map(([designation, rows]) => ({ designation, rows }))
+      .sort((a, b) => {
+        /* Rows with no designation last — it's a data gap, not a team. */
+        if (a.designation === UNTITLED_DESIGNATION) return 1;
+        if (b.designation === UNTITLED_DESIGNATION) return -1;
+        return a.designation.localeCompare(b.designation);
+      });
+  }, [quarterlyRows]);
+
+  /* Keyed by designation. Each entry is { loading, error, byResourceId } —
+     resource-details answers one designation per call (verified: omitting it
+     is a 400), so this fills in as groups are opened rather than up front. */
+  const [designationDetail, setDesignationDetail] = useState({});
+
+  const loadDesignationDetail = useCallback(async (designation) => {
+    if (!projectId || !designation || designation === UNTITLED_DESIGNATION) return;
+    setDesignationDetail((prev) => {
+      if (prev[designation]?.byResourceId || prev[designation]?.loading) return prev;
+      return { ...prev, [designation]: { loading: true, error: null, byResourceId: null } };
+    });
+    try {
+      const token = getToken();
+      const qs = new URLSearchParams({ projectId, designation });
+      const res = await fetch(
+        `${API_BASE}/api/attendance/report/activity/resource-details?${qs}`,
+        { cache: "no-store", headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (!res.ok) throw new Error(await readErrorMessage(res, "Couldn't load this designation."));
+      const data = await readJsonBody(res, "Couldn't load this designation.");
+      const rows = Array.isArray(data?.resources) ? data.resources : [];
+      const byResourceId = new Map(rows.map((r) => [String(r.resourceId), r]));
+      setDesignationDetail((prev) => ({
+        ...prev,
+        [designation]: { loading: false, error: null, byResourceId },
+      }));
+    } catch (err) {
+      const msg = requestErrorMessage(err, "Couldn't load this designation.");
+      setDesignationDetail((prev) => ({
+        ...prev,
+        [designation]: { loading: false, error: msg, byResourceId: new Map() },
+      }));
+    }
+  }, [projectId]);
+
+  /* A new activity means new rows, so anything cached describes the old one. */
+  useEffect(() => { setDesignationDetail({}); }, [projectId, filterActivityId, refreshKey]);
+
   /* ── the downloadable report ──────────────────────────────────────────
      Built from the same rows and cost map the table on screen renders, so
      the file can't state different numbers than the page it came from. */
@@ -1420,6 +1493,28 @@ export default function ProjectAttendancePage() {
             header, this row and the section heading, which made the page read
             as three separate toolbars for one report. */}
         <div className="att-toolbar-actions">
+          {/* Same data, two readings: one row per person, or grouped by the
+              role each fills. Only offered once there are rows to arrange. */}
+          {selectionComplete && quarterlyRows.length > 0 && (
+            <div className="att-seg" role="group" aria-label="View">
+              <button
+                type="button"
+                className={`att-seg-btn${viewMode === "employee" ? " is-on" : ""}`}
+                onClick={() => setViewMode("employee")}
+                aria-pressed={viewMode === "employee"}
+              >
+                Employees
+              </button>
+              <button
+                type="button"
+                className={`att-seg-btn${viewMode === "designation" ? " is-on" : ""}`}
+                onClick={() => setViewMode("designation")}
+                aria-pressed={viewMode === "designation"}
+              >
+                Designations
+              </button>
+            </div>
+          )}
           {/* Only once an activity is chosen — there is nothing to ask for
               before that, and a disabled button would just be noise. The modal
               carries its own loading and error states, so the button stays put
@@ -1484,6 +1579,10 @@ export default function ProjectAttendancePage() {
             uploadBlocked={uploadBlocked}
             uploadHint={uploadHint}
             filterActive={filterActive}
+            viewMode={viewMode}
+            designationGroups={designationGroups}
+            designationDetail={designationDetail}
+            onOpenDesignation={loadDesignationDetail}
           />
         )}
       </section>
@@ -1851,10 +1950,206 @@ function AttendanceTable({
 /* =====================================================================
    Quarterly leave panel
    ===================================================================== */
+/* ─────────────────────────────────────────────────────────────────────────
+   By-designation view — the team grouped by the role each person fills.
+
+   The employee table answers "how did this person do"; this one answers
+   "what am I paying for this role, and who has filled it". Each heading opens
+   into a table of its people: the dates they worked, the day counts, and what
+   they cost — so a designation can be read as one line item.
+   ───────────────────────────────────────────────────────────────────────── */
+function DesignationView({ period, groups, detail, costById, onOpen, onRowClick }) {
+  const [open, setOpen] = useState(() => new Set());
+
+  const toggle = (designation) => {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(designation)) next.delete(designation);
+      else { next.add(designation); onOpen(designation); }
+      return next;
+    });
+  };
+
+  if (!groups.length) {
+    return <EmptyState icon={<LayersIcon />} title="No designations" hint="These rows carry no designation to group by." />;
+  }
+
+  return (
+    <div className="uidai-pmis-card att-card">
+      <div className="att-card-head">
+        <div className="att-period">
+          <span className="att-period-lbl">By designation</span>
+          <span className="att-period-range">
+            <span className="att-period-date">{groups.length} {groups.length === 1 ? "role" : "roles"}</span>
+          </span>
+          <span className="att-period-days">{period}</span>
+        </div>
+      </div>
+      <div className="att-desig-list">
+        {groups.map((g) => (
+          <DesignationGroup
+            key={g.designation}
+            group={g}
+            isOpen={open.has(g.designation)}
+            detail={detail[g.designation]}
+            costById={costById}
+            onToggle={() => toggle(g.designation)}
+            onRowClick={onRowClick}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DesignationGroup({ group, isOpen, detail, costById, onToggle, onRowClick }) {
+  const { designation, rows } = group;
+  const costFor = (e) => (costById ? costById.get(String(e.attendanceId)) : null);
+  const active = rows.filter((r) => r.active !== false).length;
+  const groupCost = rows.reduce((t, r) => t + num(costFor(r)?.totalCost), 0);
+  const hasCost = !!costById && costById.size > 0;
+
+  /* The worked-from/to for a resource, from resource-details. A person can
+     hold the same designation across several activities, so the span is the
+     earliest start to the latest end, with the activities themselves on the
+     row's title. Falls back to the joining / last-working dates the report
+     carries when the detail hasn't loaded or the payload has none. */
+  const spanFor = (r) => {
+    const d = detail?.byResourceId?.get(String(r.attendanceId));
+    const acts = Array.isArray(d?.activities) ? d.activities : [];
+    if (!acts.length) {
+      return { from: r.joiningDate, to: r.lastWorkingDate, acts: [], fallback: true };
+    }
+    const iso = (v) => reportDateISO(v);
+    const froms = acts.map((a) => iso(a.workedFrom)).filter(Boolean).sort();
+    const tos = acts.map((a) => iso(a.workedTo)).filter(Boolean).sort();
+    return {
+      from: froms[0] || r.joiningDate,
+      to: tos.length ? tos[tos.length - 1] : r.lastWorkingDate,
+      acts,
+      fallback: false,
+    };
+  };
+
+  return (
+    <section className={`att-desig-grp${isOpen ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="att-desig-head"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+      >
+        <span className={`att-desig-caret${isOpen ? " is-open" : ""}`} aria-hidden="true">›</span>
+        <span className="att-desig-name">{designation}</span>
+        <span className="att-desig-meta">
+          {rows.length} {rows.length === 1 ? "person" : "people"}
+          {active !== rows.length && <> · {active} active</>}
+        </span>
+        {hasCost && (
+          <span className="att-desig-cost" title={rupeesInWords(groupCost)}>{money(groupCost)}</span>
+        )}
+      </button>
+
+      {/* Names stay visible closed, so the tree reads as a list of roles and
+          who fills them without having to open every one. */}
+      {!isOpen && (
+        <div className="att-desig-peek">
+          {rows.map((r) => (
+            <button
+              key={r.attendanceId}
+              type="button"
+              className={`att-desig-chip${r.active === false ? " is-off" : ""}`}
+              onClick={() => onRowClick && onRowClick(r)}
+              title={`View ${r.employeeName}'s leave detail`}
+            >
+              {r.employeeName}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isOpen && (
+        <div className="att-desig-body">
+          {detail?.loading && <div className="att-muted att-desig-note">Loading worked dates…</div>}
+          {detail?.error && <div className="att-error att-desig-note">{detail.error}</div>}
+          <div className="att-table-wrap">
+            <table className="att-table att-desig-table">
+              <thead>
+                <tr>
+                  <th className="att-th">ID</th>
+                  <th className="att-th">Resource</th>
+                  <th className="att-th">Status</th>
+                  <th className="att-th" title="First day worked on this project under this designation. From the resource-details report; falls back to the joining date the attendance report carries.">Worked From</th>
+                  <th className="att-th" title="Last day worked. Blank for anyone still on the project.">Worked To</th>
+                  <th className="att-th att-num" title="Activities this person worked under this designation.">Activities</th>
+                  <th className="att-th att-num" title="Calendar days in the reporting period this person was on the project.">Calendar Days</th>
+                  <th className="att-th att-num" title="Working days in the period, excluding weekends and holidays.">Working Days</th>
+                  <th className="att-th att-num" title="Days present. Half days count as 0.5.">Present</th>
+                  <th className="att-th att-num" title="Days billed to the client = days on the project − unpaid leave.">Billable Days</th>
+                  {hasCost && <th className="att-th att-num">Cost</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const c = costFor(r);
+                  const span = spanFor(r);
+                  const off = r.active === false;
+                  return (
+                    <tr
+                      key={r.attendanceId}
+                      className={`att-row att-row-click${off ? " att-row--off" : ""}`}
+                      onClick={() => onRowClick && onRowClick(r)}
+                      title="View leave detail"
+                    >
+                      <td className="att-td"><code className="att-code">{r.attendanceId}</code></td>
+                      <td className="att-td att-strong">{r.employeeName}</td>
+                      <td className="att-td">
+                        <span className={`att-rep-pill${off ? " is-off" : ""}`}>
+                          {off ? "Inactive" : "Active"}
+                        </span>
+                      </td>
+                      <td className="att-td" title={span.fallback ? "Joining date — the activity history hasn't loaded" : undefined}>
+                        {formatReportDate(span.from) || "—"}
+                      </td>
+                      <td className={`att-td${span.to ? "" : " att-dim"}`}>
+                        {formatReportDate(span.to) || "—"}
+                      </td>
+                      <td
+                        className={`att-td att-num${span.acts.length ? "" : " att-dim"}`}
+                        title={span.acts.length
+                          ? span.acts.map((a) => `${a.activityName || a.activityId} · ${formatReportDate(a.workedFrom)} → ${formatReportDate(a.workedTo) || "present"}`).join("\n")
+                          : undefined}
+                      >
+                        {span.acts.length || "—"}
+                      </td>
+                      <td className="att-td att-num">{c ? days(num(c.activeCalendarDays ?? c.calendarDays)) : "—"}</td>
+                      <td className="att-td att-num">{num(r.workingDays)}</td>
+                      <td className="att-td att-num">{num(r.presentDays)}</td>
+                      <td className="att-td att-num">
+                        {billableDaysOf(c) == null ? "—" : days(billableDaysOf(c))}
+                      </td>
+                      {hasCost && (
+                        <td className={`att-td att-num${c ? " att-cost-total" : " att-dim"}`}
+                            title={c ? rupeesInWords(c.totalCost) : undefined}>
+                          {c ? money(c.totalCost) : "—"}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function QuarterlyPanel({
   data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
   costById, costTotal, costError, holidayTitle, onUpload, uploadBlocked, uploadHint,
-  filterActive,
+  filterActive, viewMode, designationGroups, designationDetail, onOpenDesignation,
 }) {
   const employees = data ?? [];
   const period = periodProp || employees[0]?.period || `Q${quarter} ${year}`;
@@ -1890,15 +2185,26 @@ function QuarterlyPanel({
     <>
       <MetricsRow metrics={metrics} costTotal={hasCost ? costTotal : null} />
       {costError && <div className="att-error">{costError}</div>}
-      <AttendanceTable
-        period={period}
-        employees={employees}
-        milestoneName={milestoneName}
-        holidayTitle={holidayTitle}
-        costById={costById}
-        costTotal={costTotal}
-        onRowClick={onRowClick}
-      />
+      {viewMode === "designation" ? (
+        <DesignationView
+          period={period}
+          groups={designationGroups}
+          detail={designationDetail}
+          costById={costById}
+          onOpen={onOpenDesignation}
+          onRowClick={onRowClick}
+        />
+      ) : (
+        <AttendanceTable
+          period={period}
+          employees={employees}
+          milestoneName={milestoneName}
+          holidayTitle={holidayTitle}
+          costById={costById}
+          costTotal={costTotal}
+          onRowClick={onRowClick}
+        />
+      )}
     </>
   );
 }
@@ -3465,6 +3771,34 @@ const ATT_CSS = `
 .att-modal-sub { color: ${C.muted}; font-size: 14px; margin-bottom: 16px; }
 .att-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
 .att-modal-head-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+
+/* ── by-designation view ─────────────────────────────────────────────── */
+.att-desig-list { border-top: 1px solid ${C.divider}; }
+.att-desig-grp { border-bottom: 1px solid ${C.divider}; }
+.att-desig-grp.is-open { background: ${C.surface}; }
+.att-desig-head { display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 13px 16px; border: none; background: transparent; cursor: pointer;
+  font-family: inherit; text-align: left; }
+.att-desig-head:hover { background: ${C.surfaceAlt}; }
+.att-desig-caret { color: ${C.faint}; font-size: 17px; line-height: 1; flex: 0 0 auto;
+  transition: transform .15s ease; display: inline-block; }
+.att-desig-caret.is-open { transform: rotate(90deg); }
+.att-desig-name { font-size: 14px; font-weight: 700; color: ${C.ink}; }
+.att-desig-meta { font-size: 12px; color: ${C.muted}; }
+.att-desig-cost { margin-left: auto; font-size: 13px; font-weight: 700; color: ${C.primary};
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The people, visible without opening the group — the point of the view is
+   seeing who fills each role, so that shouldn't need a click. */
+.att-desig-peek { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px 38px; }
+.att-desig-chip { border: 1px solid ${C.border}; background: #fff; color: ${C.ink2};
+  border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: border-color .15s ease, color .15s ease; }
+.att-desig-chip:hover { border-color: ${C.primary}; color: ${C.primary}; }
+.att-desig-chip.is-off { color: ${C.faint}; text-decoration: line-through; }
+.att-desig-body { padding: 0 16px 14px; background: #fff; }
+.att-desig-note { margin-bottom: 10px; }
+.att-desig-table { font-size: 13px; }
 
 /* ── report format picker ────────────────────────────────────────────── */
 .att-report-picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
