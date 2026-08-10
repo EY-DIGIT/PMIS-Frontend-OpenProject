@@ -354,7 +354,7 @@ export function recheckSla(item, master, { severityScale: scale, ldBands, period
             note: bad.length
                 ? `${bad.length} of ${checked.length} occurrence(s) do not match `
                   + `${esc.ratePerUnitPercent}% per ${esc.unit} or part thereof `
-                  + `(§5.28.2 charges each ${esc.unit} "or part thereof", i.e. rounded up)`
+                  + `(each ${esc.unit} "or part thereof" is charged, i.e. rounded up)`
                 : null,
         };
     }
@@ -462,7 +462,7 @@ export function recheckSla(item, master, { severityScale: scale, ldBands, period
                 ? notes.join(" ")
                 : `Measured ${cadence}, reported ${String(master.reportingInterval).toLowerCase()} — `
                   + `${expected.length} measurement intervals, each scored once and capped at severity `
-                  + `${scale?.capLevel ?? "—"} (§5.28.1.b), their points accumulating into the quarter (§5.28.1.a).`,
+                  + `${scale?.capLevel ?? "—"}, their points accumulating into the quarter.`,
         };
     }
 

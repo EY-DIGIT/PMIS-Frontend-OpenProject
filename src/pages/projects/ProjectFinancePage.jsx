@@ -183,13 +183,32 @@ function termMoney(t) {
 /* The headline number for a term under the current mode. */
 const shownOf = (m, withTax) => (withTax ? m.total : m.preTax);
 
-/* A phase's 100% base, in the current mode. `phaseBasePretax` is the new
-   additive field; the post-tax total keeps its existing fallback chain
-   for backends that predate phaseBaseTotal. */
-function phaseBaseOf(phase, withTax) {
+/* Before-tax share of a project-level bucket, e.g. oneTimeCostPretax /
+   oneTimeCost. null when the backend sent no pre-tax figure for it. */
+function pretaxRatioOf(totals, bucket) {
+  const post = Number(totals?.[bucket]) || 0;
+  const pre = amt(totals?.[`${bucket}Pretax`]);
+  if (pre === null || post <= 0) return null;
+  return pre / post;
+}
+
+/* A phase's 100% base — the figure every percentOfPayment is taken from.
+
+   That is `effectivePhaseTotal`: the deliverable base PLUS the phase's Out
+   of Pocket share. `phaseBaseTotal` is the deliverables alone, so using it
+   here under-reported the base by the Out of Pocket amount while the term
+   rows were still ₹-for-₹ percentages of the larger figure (5% of the
+   ₹7,52,01,400 effective total, not of the ₹6,93,01,400 base).
+
+   Before tax the phase carries `phaseBasePretax` for the deliverables but
+   nothing for its Out of Pocket share, so that part is taken down with the
+   one-time bucket's own ratio — exact while the bucket sits on a single tax
+   rate, which is how the page builds it (one Out of Pocket row per
+   project). */
+function phaseBaseOf(phase, withTax, totals) {
   const postTax =
-    Number(phase?.phaseBaseTotal) ||
     Number(phase?.effectivePhaseTotal) ||
+    Number(phase?.phaseBaseTotal) ||
     Number(phase?.phaseFixedTotal) ||
     0;
   if (withTax) return postTax;
@@ -198,7 +217,11 @@ function phaseBaseOf(phase, withTax) {
      Falling through to the post-tax figure would silently mix the two
      modes on one screen, so the total is used and the panel labels the
      mode as unavailable rather than pretending. */
-  return pre ?? postTax;
+  if (pre === null) return postTax;
+  const oneTime = amt(phase?.oneTimeAllocated) ?? 0;
+  if (oneTime <= 0) return pre;
+  const ratio = pretaxRatioOf(totals, "oneTimeCost");
+  return Math.round((pre + oneTime * (ratio ?? 1)) * 100) / 100;
 }
 
 /* totals.<bucket> / totals.<bucket>Pretax — e.g. totalContractCost →
@@ -2605,6 +2628,7 @@ export default function ProjectFinancePage() {
                     oneTimeBusy={oneTimeSaving}
                     onSetOneTime={setOneTimeForPhase}
                     onShowInSummary={revealPhaseInSummary}
+                    totals={totals}
                     taxMode={taxMode}
                   />
                 )}
@@ -3410,6 +3434,9 @@ function PhasePanel({
      base and the running Remaining — reads from the same side of the
      split, so the Breakup column keeps reconciling either way. */
   taxMode = TAX_MODE.WITH,
+  /* Project totals — needed to take the phase's Out of Pocket share down to
+     before-tax, which the phase payload has no field for. */
+  totals = null,
 }) {
   const withTax = taxMode === TAX_MODE.WITH;
   /* Which payment-term rows are expanded to reveal their activity-wise
@@ -3494,8 +3521,14 @@ function PhasePanel({
 
      `phaseBasePretax` is the additive before-tax twin; phaseBaseOf picks
      whichever side the page is showing. */
-  const phaseBase = phaseBaseOf(phase, withTax);
-  const phaseBaseTax = amt(phase.phaseBaseTax);
+  const phaseBase = phaseBaseOf(phase, withTax, totals);
+  /* Tax sitting on that base, for the before-tax mode's "· + ₹x tax" hint.
+     Derived as post-tax base − pre-tax base rather than read from
+     `phaseBaseTax`, which covers the deliverables only and would leave the
+     Out of Pocket share's tax out of a base that now includes it. */
+  const phaseBaseTax = withTax
+    ? amt(phase.phaseBaseTax)
+    : Math.round((phaseBaseOf(phase, true, totals) - phaseBase) * 100) / 100;
   const phaseRemaining = phaseBase - totalValue;
   const canToggleCarry = typeof onSetCarryForward === "function";
 
@@ -4076,7 +4109,7 @@ function PhasePanel({
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, lineHeight: 1.4 }}>
                           <span style={muted} title={wordsHint(phaseBase)}>
                             Total: <strong style={{ color: "#173e77" }}>{inr(phaseBase)}</strong>
-                            {!withTax && phaseBaseTax !== null && <span style={muted}> · + {inr(phaseBaseTax)} tax</span>}
+                            {!withTax && phaseBaseTax > 0 && <span style={muted}> · + {inr(phaseBaseTax)} tax</span>}
                           </span>
                           {/* "{pct}% of Total Payment" states that the % produced
                               the ₹. True for a fixed milestone; backwards for a
@@ -4865,22 +4898,13 @@ function CarryForwardSummarySection({
 
   const withTax = taxMode === TAX_MODE.WITH;
 
-  /* Before-tax share of a project-level bucket, e.g. oneTimeCostPretax /
-     oneTimeCost. The phase payload carries a pre-tax figure for the
-     deliverable base only (phaseBasePretax) — there is none for the phase's
-     Out of Pocket / recurring / total, so those are taken down to before-tax
-     with the bucket's own ratio. Exact while a bucket sits on one tax rate,
-     which is how the page builds them (a project has a single Out of Pocket
-     row). Returns null when the backend sent no pre-tax figure at all, and
-     the caller then leaves the amount as-is. */
-  const pretaxRatio = (bucket) => {
-    const post = Number(totals?.[bucket]) || 0;
-    const pre = amt(totals?.[`${bucket}Pretax`]);
-    if (pre === null || post <= 0) return null;
-    return pre / post;
-  };
-  const oneTimeRatio = pretaxRatio("oneTimeCost");
-  const recurringRatio = pretaxRatio("recurringCost");
+  /* The phase payload carries a pre-tax figure for the deliverable base only
+     (phaseBasePretax) — there is none for its Out of Pocket / recurring /
+     total, so those are taken down to before-tax with the bucket's own
+     ratio. null means the backend sent no pre-tax figure and the amount is
+     left as it came. */
+  const oneTimeRatio = pretaxRatioOf(totals, "oneTimeCost");
+  const recurringRatio = pretaxRatioOf(totals, "recurringCost");
   const money2 = (n) => Math.round(n * 100) / 100;
 
   /* Remaining balance = Total Contract Cost minus everything already

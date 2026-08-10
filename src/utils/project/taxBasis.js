@@ -232,7 +232,7 @@ export function reconcileSlaDeductions({ paymentPage, period, totals, chain, qua
         row.overrideReason ? `Finance's figure carries a reason: "${row.overrideReason}".` : "");
     compare("fin-capped-ld", "LD % after the quarter cap", totals?.cappedLdPercent, row.cappedLdPercent, pctStr);
     compare("fin-npqp", "Payment base (PQP)", chain?.npqp, row.npqp, fmt,
-        "Tax-exclusive on both sides (§5.27.6).");
+        "Tax-exclusive on both sides.");
     compare("fin-ld-amount", "Liquidated damages", chain?.ldAmount, row.ldAmount, fmt);
     compare("fin-aqp", "Final payment (AQP)", quarterlyNet, row.aqpAmount, fmt);
 
@@ -248,7 +248,7 @@ export function reconcileSlaDeductions({ paymentPage, period, totals, chain, qua
         const ok = Math.abs(expected - aqp) <= EPS;
         checks.push({
             id: "fin-aqp-formula",
-            title: ok ? "Finance's AQP follows §5.28.1.d(h)" : "Finance's AQP does not follow §5.28.1.d(h)",
+            title: ok ? "Finance's AQP follows the formula" : "Finance's AQP does not follow the formula",
             severity: ok ? SEVERITY.OK : SEVERITY.ERROR,
             detail: ok
                 ? `(PA ${fmt(pa)} − LD ${fmt(ld)}) + QGR ${fmt(qgr)} = ${fmt(aqp)}.`
@@ -281,7 +281,7 @@ export function reconcileTaxBasis({ finance, payables, statement, cumulative, ex
             title: "Payment page has no pre-tax split",
             severity: SEVERITY.WARN,
             detail: "Every term returns only its tax-inclusive value, so penalties are charged on a "
-                + "tax-inclusive base. §5.28.2 charges on the deliverable's cost, not on the tax collected on it.",
+                + "tax-inclusive base. Penalties are charged on the deliverable's cost, not on the tax collected on it.",
         });
     } else if (finance.anomalies.length) {
         add({
@@ -317,7 +317,7 @@ export function reconcileTaxBasis({ finance, payables, statement, cumulative, ex
     } else if (legacy === 0) {
         add({ id: "ld-base", title: "Deliverable LD charged before tax", severity: SEVERITY.OK,
             detail: `All ${rowCount} deliverable(s) charge LD on the pre-tax delivery value `
-                + `(${fmt(payables?.totals?.totalLdBase)}), which is what §5.28.2 asks for.` });
+                + `(${fmt(payables?.totals?.totalLdBase)}), which is the correct base.` });
     } else {
         add({ id: "ld-base", title: "Some deliverable LD charged on a tax-inclusive base", severity: SEVERITY.ERROR,
             detail: `${legacy} of ${rowCount} deliverable(s) have no pre-tax base and fall back to the `
@@ -331,7 +331,7 @@ export function reconcileTaxBasis({ finance, payables, statement, cumulative, ex
     if (dNet !== null && qNet !== null && finance.hasSplit && !finance.taxFree) {
         add({ id: "mixed-basis-invoice", title: "Invoice adds GST across two different bases", severity: SEVERITY.ERROR,
             detail: `Section A's ${fmt(dNet)} is tax-inclusive — LD is charged pre-tax but deducted from the `
-                + `payment, which carries tax. Section B's ${fmt(qNet)} is tax-exclusive (§5.27.6). Section C then `
+                + `payment, which carries tax. Section B's ${fmt(qNet)} is tax-exclusive. Section C then `
                 + `applies ${expectedGstPercent ?? "GST"}% to their sum, so the deliverable half is taxed twice. `
                 + "Either A should carry its pre-tax net into C, or C should tax only B." });
     }
@@ -355,7 +355,7 @@ export function reconcileTaxBasis({ finance, payables, statement, cumulative, ex
         const onPre = finance.preTax > 0 ? (paid / finance.preTax) * 100 : null;
         add({ id: "ceiling-basis", title: "Ceiling and payments sit on different tax bases", severity: SEVERITY.WARN,
             detail: `The ceiling follows Finance — ${finance.ccnPercent ?? 25}% CCN headroom on the tax-inclusive `
-                + `${fmt(finance.postTax)}, matching its own ccn.value. But AQP is tax-exclusive (§5.27.6), so `
+                + `${fmt(finance.postTax)}, matching its own ccn.value. But AQP is tax-exclusive, so `
                 + `${fmt(paid)} paid reads as ${pctStr(onPost)} of that ceiling when like-for-like against the `
                 + `pre-tax ${fmt(finance.preTax)} it is ${pctStr(onPre)}. Usage is understated, not overstated.` });
     }

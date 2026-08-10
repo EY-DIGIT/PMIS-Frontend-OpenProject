@@ -440,7 +440,7 @@ function EdgeDate({ caption, iso, align = "left" }) {
     );
 }
 
-function PeriodStrip({ period, contractStart }) {
+function PeriodStrip({ period }) {
     const total = daysBetween(period?.start, period?.end);
     const now = todayIso();
 
@@ -520,12 +520,6 @@ function PeriodStrip({ period, contractStart }) {
                 <EdgeDate caption="To" iso={period?.end} align="right" />
             </div>
 
-            {contractStart && (
-                <div style={{ fontSize: 11, ...muted, marginTop: 12, paddingTop: 10, borderTop: "1px dashed var(--uidai-pmis-border)" }}>
-                    Contract quarters are counted from the project start,{" "}
-                    <b style={{ color: INK }}>{longDate(contractStart)}</b> — not from the calendar year.
-                </div>
-            )}
         </div>
     );
 }
@@ -633,8 +627,8 @@ function PayableRow({ row, open, onToggle, activityDates }) {
                             : row.ldBaseSource === "ldBasisPretaxValue"
                                 /* Tax-free and one-time-free: the LD is charged on the
                                    work, not on the GST or the reimbursed expense. */
-                                ? `${pct(row.ldBasisPercent)} allotment · pre-tax · §5.23.1`
-                                : `${pct(row.paymentPercent)} of phase · §5.23.1`}
+                                ? `${pct(row.ldBasisPercent)} allotment · pre-tax`
+                                : `${pct(row.paymentPercent)} of phase`}
                     </div>
                     {row.hasBase && row.ldBaseSource === "ldBasisPretaxValue" && (
                         <div
@@ -662,9 +656,9 @@ function PayableRow({ row, open, onToggle, activityDates }) {
                         <div
                             style={{ fontSize: 10.5, color: AMBER, fontWeight: 700 }}
                             title={"The base charged (" + money(row.ldBase) + ") differs from this deliverable's own "
-                                + "pre-tax payment (" + money(row.paymentPreTaxValue) + "). §5.23.1 pays each "
+                                + "pre-tax payment (" + money(row.paymentPreTaxValue) + "). The schedule pays each "
                                 + "deliverable its own cost, so those should agree. A gap usually means the LD Basis % "
-                                + "is still on the backend's even split rather than the §5.23.1 schedule, or that a "
+                                + "is still on the backend's even split rather than the payment schedule, or that a "
                                 + "one-time share makes up part of the milestone."}
                         >
                             ⚠ base ≠ pre-tax payment
@@ -679,8 +673,7 @@ function PayableRow({ row, open, onToggle, activityDates }) {
                     <CapPair
                         before={Math.round(row.ldPercent * 100) / 100}
                         after={Math.round(row.ldPercentCapped * 100) / 100}
-                        clause="§5.27.6"
-                        noCapClause="no row cap · §5.28.2"
+                        noCapClause="no row cap"
                         compact
                     />
                 </td>
@@ -703,7 +696,7 @@ function PayableRow({ row, open, onToggle, activityDates }) {
                     {overrun && (
                         <div
                             style={{ fontSize: 10.5, color: RED, fontWeight: 700 }}
-                            title={"Accrued LD has exceeded this deliverable's entire cost. §5.28.2 sets no ceiling "
+                            title={"Accrued LD has exceeded this deliverable's entire cost. There is no ceiling "
                                 + "of its own, so the figure is shown as calculated rather than clamped to zero."}
                         >
                             LD exceeds deliverable cost
@@ -1550,7 +1543,7 @@ function RelaxationModal({ scoredPercent, npqp, quarterLabel, quarterDates, onCa
             }}>
                 <div style={{ background: INK, color: "#fff", padding: "14px 18px" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", opacity: .65 }}>
-                        §5.28.1.d · quarterly LD only
+                        quarterly LD only
                     </div>
                     <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>Grant LD relaxation</div>
                     <div style={{ fontSize: 11.5, opacity: .8, marginTop: 2 }}>
@@ -1720,7 +1713,7 @@ function RecheckNote({ recheck }) {
                                         <td style={{ padding: "2px 14px 2px 0", fontVariantNumeric: "tabular-nums" }}>
                                             {b.severities.length ? b.severities.join(", ") : "—"}
                                             {b.capApplied && (
-                                                <span style={{ color: AMBER, marginLeft: 4 }} title="SLA Cap applied in this interval (§5.28.1.b)">▲</span>
+                                                <span style={{ color: AMBER, marginLeft: 4 }} title="SLA Cap applied in this interval">▲</span>
                                             )}
                                         </td>
                                         <td style={{ padding: "2px 0", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
@@ -1733,7 +1726,7 @@ function RecheckNote({ recheck }) {
                         <tfoot>
                             <tr style={{ borderTop: "1px solid #d7e0ee" }}>
                                 <td colSpan={3} style={{ padding: "4px 14px 0 0", fontWeight: 700, color: INK }}>
-                                    Accumulated over the reporting interval (§5.28.1.a)
+                                    Accumulated over the reporting interval
                                 </td>
                                 <td style={{ padding: "4px 0 0 0", textAlign: "right", fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>
                                     {num(recheck.backendPoints, 0)}
@@ -1908,7 +1901,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                     {item.capHits > 0 && (
                         <span
                             className="uidai-pmis-badge uidai-pmis-badge-orange"
-                            title="Severity above the configured ceiling was capped before scoring — RFP §5.28.1.b"
+                            title="Severity above the configured ceiling was capped before scoring"
                         >
                             SLA cap ×{item.capHits}
                         </span>
@@ -1931,7 +1924,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                             <Metric
                                 label="Highest LD %"
                                 wide
-                                value={<CapPair before={item.maxLdPercent} after={item.maxLdPercent} noCapClause="§5.28.2" compact />}
+                                value={<CapPair before={item.maxLdPercent} after={item.maxLdPercent} compact />}
                             />
                             <Metric label="Penalty amount" value={money(item.totalLdAmount)} accent={costing ? RED : GREEN} />
                         </>
@@ -1948,13 +1941,12 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                                 ? item.accumulatedPoints - item.excessPoints
                                                 : item.accumulatedPoints}
                                             format={(v) => num(v, 0)}
-                                            clause="§5.28.1.b"
                                             noCapClause={null}
                                             compact
                                         />
                                     }
                                     flag={item.capHits > 0}
-                                    flagTitle={`Severity was capped on ${item.capHits} measurement(s) before these points were scored — §5.28.1.b`}
+                                    flagTitle={`Severity was capped on ${item.capHits} measurement(s) before these points were scored`}
                                 />
                             ) : (
                                 <Metric label="Delay" value={`${num(item.totalDelayDays, 0)}d`} />
@@ -1969,7 +1961,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                     <CapPair
                                         before={item.ldPercent}
                                         after={item.ldPercent}
-                                        noCapClause={item.pointsCapped ? "at top band" : isPoints ? "within band" : "§5.28.3.a"}
+                                        noCapClause={item.pointsCapped ? "at top band" : isPoints ? "within band" : "no cap"}
                                         compact
                                     />
                                 }
@@ -1988,7 +1980,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                     <div style={{ fontSize: 12, ...muted, marginBottom: 10, lineHeight: 1.6 }}>
                         {isDeliverable ? (
                             <>
-                                Charged per deliverable on <b style={{ color: INK }}>that deliverable&rsquo;s own cost</b> (§5.28.2),
+                                Charged per deliverable on <b style={{ color: INK }}>that deliverable&rsquo;s own cost</b>,
                                 not on PQP — so the amounts below add up but the percentages do not, and the
                                 quarter&rsquo;s {"≤"}10% PQP ceiling does not apply here.
                                 {item.unpricedCount > 0 && (
@@ -2005,7 +1997,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                         , which falls in band <b style={{ color: INK }}>{item.band.label}</b> (threshold{" "}
                                         {num(item.band.points_threshold, 0)}) → <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of PQP.
                                         {item.pointsCapped && (
-                                            <> The top band is the per-SLA ceiling (§5.28.1.b), so the extra{" "}
+                                            <> The top band is the per-SLA ceiling, so the extra{" "}
                                                 <b style={{ color: AMBER }}>{num(item.excessPoints, 0)} points</b> add nothing.</>
                                         )}
                                     </>
@@ -2018,7 +2010,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                             </>
                         ) : (
                             <>
-                                Escalates linearly with delay rather than through severity points (§5.28.3.a):{" "}
+                                Escalates linearly with delay rather than through severity points:{" "}
                                 <b style={{ color: INK }}>{num(item.totalDelayDays, 0)} days</b> across{" "}
                                 {item.scoredCount} occurrence{item.scoredCount === 1 ? "" : "s"} →{" "}
                                 <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of PQP.
@@ -2082,7 +2074,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                         {isPoints && (
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: severityAccent(o.cappedLevel) }}>
                                                 {o.capApplied ? (
-                                                    <span title={`Raw severity ${o.severityLevel} capped to ${o.cappedLevel} (§5.28.1.b)`}>
+                                                    <span title={`Raw severity ${o.severityLevel} capped to ${o.cappedLevel}`}>
                                                         <s style={{ ...muted, fontWeight: 500, marginRight: 4 }}>{num(o.severityLevel, 0)}</s>
                                                         {num(o.cappedLevel, 0)}
                                                     </span>
@@ -3617,23 +3609,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                     title="Reporting interval"
                     sub="The contract quarter every figure below is measured over."
                 >
-                    <PeriodStrip period={period} contractStart={startDate} />
+                    <PeriodStrip period={period} />
                 </PageSection>
-            )}
-
-            {period && overlaps.length > 1 && (
-                <div style={{ fontSize: 12, ...muted, marginTop: 10, lineHeight: 1.7 }}>
-                    PQP is published per calendar quarter, so the payment base is blended across the{" "}
-                    {overlaps.length} calendar quarters this contract quarter covers, weighted by days:{" "}
-                    {overlaps.map((o, i) => (
-                        <React.Fragment key={o.key}>
-                            {i > 0 && " + "}
-                            <b style={{ color: INK }}>{o.key}</b>
-                            {" "}({o.days}d · {Math.round(o.weight * 1000) / 10}%)
-                        </React.Fragment>
-                    ))}
-                    .
-                </div>
             )}
 
             {/* Only assert a missing T0 once the tree has actually answered —
@@ -3770,7 +3747,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             <SectionHead
                                 title="Quarterly SLAs"
                                 count={visibleQuarterly.reduce((n, c) => n + c.items.length, 0)}
-                                clause="§5.28.3–4"
                                 sub="Charged as a % of the quarter's payment base. Resources, query resolution, recommendations."
                             />
 
@@ -3800,7 +3776,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             value={<CapPair
                                                 before={totals.sumLdPercent}
                                                 after={totals.cappedLdPercent}
-                                                clause="§5.27.6"
                                                 noCapClause={`under the ${totals.quarterCapPercent}% ceiling`}
                                             />}
                                             accent={RED}
@@ -3873,7 +3848,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="The payment base"
                                         count={plan.activityCount}
-                                        clause="§5.28.1.d(c)"
                                         sub="What the planned resources cost — the figure the penalty % is applied to."
                                         onToggle={() => setShowPlanDetail((v) => !v)}
                                         toggleLabel={showPlanDetail ? "Hide activities" : "Show activities"}
@@ -3894,7 +3868,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             value={money(endpointF)}
                                             hint={endpointF === null
                                                 ? "not available"
-                                                : "after §5.25.2.b"}
+                                                : "after leave adjustment"}
                                             accent={endpointF === null ? AMBER : undefined}
                                         />
                                         <Tile
@@ -3926,11 +3900,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 + `Every LD amount above is a percentage of PQP = F + QGR, so this moves all of them.\n`
                                                 + (fCheck.planHigher
                                                     ? `The plan is HIGHER. Usually an approved resource that was never onboarded, or unpaid `
-                                                      + `leave: §5.25.2.b pays MP = R(1 − L/N), so leave beyond the 6 permissible days per `
+                                                      + `leave: MP = R(1 − L/N), so leave beyond the 6 permissible days per `
                                                       + `quarter reduces the endpoint's F below the plan.`
                                                     : `The endpoint is HIGHER than the plan. That is the unusual direction — the plan may be `
                                                       + `missing allocations, or resources are being paid for outside the deployment plan `
-                                                      + `(CCN resources, which §5.28.1.d(c) includes in F, are the common cause).`)
+                                                      + `(CCN resources, which are included in F, are the common cause).`)
                                             }
                                         />
                                     )}
@@ -4070,7 +4044,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     )}
 
                                     <div style={{ fontSize: 11.5, ...muted, marginTop: 8, lineHeight: 1.6 }}>
-                                        The two are expected to differ slightly &mdash; attendance applies §5.25.2.b&rsquo;s{" "}
+                                        The two are expected to differ slightly &mdash; attendance applies the leave formula&rsquo;s{" "}
                                         <b>MP = R(1 &minus; L/N)</b> for leave beyond the 6 permissible days. PQP uses the
                                         attendance figure; the plan is the check on it.
                                     </div>
@@ -4093,7 +4067,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Resource deployment"
                                         count={occupancy.designationCount}
-                                        clause="§5.28.3 · SLA 007"
+                                        clause="SLA 007"
                                         sub="Who was actually on the seats. Vacant days lower the headcount SLA 007 is scored against."
                                         onToggle={() => setShowStaffingDetail((v) => !v)}
                                         toggleLabel={showStaffingDetail ? "Hide designations" : "Show designations"}
@@ -4250,7 +4224,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Carried forward"
                                         count={carried.length}
-                                        clause="§5.28.3.f–g"
                                         sub="Still-open breaches from earlier quarters. They keep scoring until fixed — shown for information, not counted above."
                                         style={{ marginTop: 26 }}
                                     />
@@ -4331,7 +4304,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             <SectionHead
                                 title="Deliverable-linked SLAs"
                                 count={visibleDeliverable.reduce((n, c) => n + c.items.length, 0)}
-                                clause="§5.28.2"
                                 sub="Charged on the deliverable's own cost — no per-deliverable ceiling. Submission, defect rectification, governance tool."
                                 style={{ marginTop: 26 }}
                             />
@@ -4412,7 +4384,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Deliverable payment"
                                         count={payables.rows.length}
-                                        clause="§5.28.2"
                                         sub="What each deliverable was due, less penalties."
                                         style={{ marginTop: 26 }}
                                     />
@@ -4445,8 +4416,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     label="LD base"
                                                     value={money(payables.totals.totalLdBase)}
                                                     hint={payables.totals.legacyBaseCount
-                                                        ? `pre-tax · §5.23.1 · ${payables.totals.legacyBaseCount} row(s) still post-tax`
-                                                        : "pre-tax, one-time excluded · §5.23.1"}
+                                                        ? `pre-tax · ${payables.totals.legacyBaseCount} row(s) still post-tax`
+                                                        : "pre-tax, one-time excluded"}
                                                 />
                                                 <Tile
                                                     label="LD deducted"
@@ -4495,7 +4466,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Paid so far across the contract"
                                         count={cumulative.quarterCount}
-                                        clause="§5.26.2"
                                         style={{ marginTop: 26 }}
                                     />
                                     <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
@@ -4526,7 +4496,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <Banner
                                             kind="error"
                                             text={
-                                                `Settled payments (${formatINR(ceiling.paid)}) have passed §5.26.2's ceiling of `
+                                                `Settled payments (${formatINR(ceiling.paid)}) have passed the contract ceiling of `
                                                 + `${formatINR(ceiling.ceiling)} — ${ceiling.multiplier}× the contract value of `
                                                 + `${formatINR(ceiling.contractValue)}. No further payment is permitted under the contract `
                                                 + `without a variation.`
@@ -4536,7 +4506,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     {ceiling.intoCcn && (
                                         <div style={{ fontSize: 11.5, color: AMBER, marginTop: 8, fontWeight: 600, lineHeight: 1.6 }}>
                                             ⚠ Settled payments have passed the base contract value ({money(ceiling.contractValue)})
-                                            and are now drawing on the 25% CCN headroom. Permitted by §5.26.2, but the headroom is
+                                            and are now drawing on the 25% CCN headroom. Permitted, but the headroom is
                                             finite — {money(ceiling.remaining)} remains.
                                         </div>
                                     )}
@@ -4582,7 +4552,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             : combinedCap.unvalued ? AMBER : GREEN,
                                     }}>
                                         {combinedCap.capApplied ? "⚠ " : combinedCap.unvalued ? "◍ " : "✓ "}
-                                        §5.27.6 — the quarter&rsquo;s cumulative LD ceiling
+                                        The quarter&rsquo;s cumulative LD ceiling
                                         {combinedCap.capApplied ? " has been reached"
                                             : combinedCap.unvalued ? " cannot be valued"
                                                 : " holds"}
@@ -4612,16 +4582,16 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <>
                                             {" "}<b style={{ color: AMBER }}>No PQP is available for this quarter</b>,
                                             so 10% of it cannot be valued and the LD above stands uncapped. PQP is
-                                            defined (§5.28.1.c) as the monthly payment of the resources in the
+                                            defined as the monthly payment of the resources in the
                                             deployment plan, which a deliverable-paid Phase-1 quarter does not have.
-                                            The RFP does not carve Phase 1 out of §5.27.6, so this is worth settling
+                                            Phase 1 is not carved out of the ceiling, so this is worth settling
                                             with the contract owner before the quarter is invoiced.
                                         </>
                                     )}
                                     <br />
                                     <span style={{ ...muted }}>
                                         The cap is cumulative: one ceiling over the quarter&rsquo;s whole LD bill.
-                                        There is no per-SLA and no per-deliverable ceiling — §5.28.1.f sums the
+                                        There is no per-SLA and no per-deliverable ceiling — the rule sums the
                                         percentages before applying them, and a per-milestone cap was asked for
                                         in the pre-bid queries and refused.
                                     </span>
@@ -4662,19 +4632,16 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         {/* ── 1 · scoring ─────────────────────────── */}
                                         <FormulaTable
                                             title="1 · Scoring one SLA — quarterly track"
-                                            subtitle="§5.28.3–4"
                                         >
                                             <FormulaRow
                                                 step="Aggregate"
                                                 formula="one figure per interval, across all resources in scope"
-                                                clause="§5.28.1.b"
                                                 when="each measurement interval"
                                                 note="All resources combine into a single measurement — not one score per resource."
                                             />
                                             <FormulaRow
                                                 step="① SLA Cap"
                                                 formula={`severity = min(severity, ${scale.capLevel ?? "?"})`}
-                                                clause="§5.28.1.b"
                                                 when="each measurement interval"
                                                 note={scale.capLevel === null
                                                     ? "No severity master configured for this project, so no cap level is known."
@@ -4685,7 +4652,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 formula={scale.rows.length
                                                     ? scale.rows.map((r) => `L${r.level}→${r.points}`).join("  ")
                                                     : "not configured"}
-                                                clause="§5.28.1.a"
                                                 when="each measurement interval"
                                                 note={scale.rows.some((r) => r.points < 0)
                                                     ? "A clean interval scores negative points, pulling the quarter's total down."
@@ -4694,7 +4660,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             <FormulaRow
                                                 step="Accumulate"
                                                 formula="points = Σ points over every measurement interval"
-                                                clause="§5.28.1.a"
                                                 when="reporting interval"
                                                 note="Summed, never averaged. M1 + M2 + M3 for a monthly SLA over a quarter."
                                             />
@@ -4704,20 +4669,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     ? [...ldBands].sort((a, b) => b.points_threshold - a.points_threshold)
                                                         .map((b) => `≥${b.points_threshold}→${b.ld_percent}%`).join("  ")
                                                     : "not configured"}
-                                                clause="§5.28.1.c"
                                                 when="reporting interval"
                                             />
                                             <FormulaRow
                                                 step="② Per-SLA cap"
                                                 formula={`LD % ≤ ${topBand === null ? "?" : `${topBand}%`}  (the top band)`}
-                                                clause="§5.28.1.b"
                                                 when="reporting interval"
                                                 note="The band table IS the ceiling — points past the top threshold earn nothing further."
                                             />
                                             <FormulaRow
                                                 step="Reset"
                                                 formula="points → 0"
-                                                clause="§5.28.1.c"
                                                 when="end of reporting interval"
                                             />
                                         </FormulaTable>
@@ -4725,28 +4687,26 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         {/* ── 2 · the quarter's money ─────────────── */}
                                         <FormulaTable
                                             title="2 · The quarter's money"
-                                            subtitle="§5.28.1.d"
                                         >
-                                            <FormulaRow step="MP" formula="R × (1 − L / N)" clause="§5.25.2.b" when="per resource, per month"
+                                            <FormulaRow step="MP" formula="R × (1 − L / N)" when="per resource, per month"
                                                 note="L = leave beyond the 6 permissible days per quarter; N = calendar days in that month." />
-                                            <FormulaRow step="PA" formula="Σ AMP over the quarter's 3 months" clause="§5.25.2.h" when="quarter"
+                                            <FormulaRow step="PA" formula="Σ AMP over the quarter's 3 months" when="quarter"
                                                 note="Payable on ACTUAL deployment. Resolved from attendance when the quarter is closed." />
-                                            <FormulaRow step="F" formula="Σ monthly cost of resources in the deployment plan + CCN" clause="§5.28.1.d(c)" when="quarter" />
-                                            <FormulaRow step="QGR" formula="35% of (Phase-1 fixed + one-time) ÷ Phase 2&3 quarters" clause="§5.23.2" when="quarter"
+                                            <FormulaRow step="F" formula="Σ monthly cost of resources in the deployment plan + CCN" when="quarter" />
+                                            <FormulaRow step="QGR" formula="35% of (Phase-1 fixed + one-time) ÷ Phase 2&3 quarters" when="quarter"
                                                 note="Guaranteed regardless of deployment." />
-                                            <FormulaRow step="PQP" formula="F + QGR" clause="§5.28.1.d(e)" when="quarter"
+                                            <FormulaRow step="PQP" formula="F + QGR" when="quarter"
                                                 note="The LD base. QGR is inside it, so LD is charged on QGR too." />
-                                            <FormulaRow step="Σ LD %" formula="sum of every quarterly SLA's LD %" clause="§5.28.1.d(f)" when="quarter" />
+                                            <FormulaRow step="Σ LD %" formula="sum of every quarterly SLA's LD %" when="quarter" />
                                             <FormulaRow
                                                 step="③ Quarter cap"
                                                 formula={`LD % = min(Σ LD %, ${totals.quarterCapPercent}%)`}
-                                                clause="§5.27.6"
                                                 when="quarter"
                                                 note="Caps the TOTAL, never the individual SLAs — so the per-SLA figures above stay as scored."
                                             />
-                                            <FormulaRow step="LD ₹" formula="capped LD % × PQP" clause="§5.28.1.d(f)" when="quarter" />
-                                            <FormulaRow step="AQP" formula="(PA − LD ₹) + QGR" clause="§5.28.1.d(h)" when="quarter"
-                                                note="QGR is added back after the deduction because §5.23.2 guarantees it." />
+                                            <FormulaRow step="LD ₹" formula="capped LD % × PQP" when="quarter" />
+                                            <FormulaRow step="AQP" formula="(PA − LD ₹) + QGR" when="quarter"
+                                                note="QGR is added back after the deduction because it is guaranteed." />
                                             <FormulaRow
                                                 step="Effective rate"
                                                 formula="LD ₹ ÷ PA × 100"
@@ -4754,25 +4714,25 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 when="quarter"
                                                 note="Not an RFP term. Charged on planned, paid from actual — so when PA is below F the real bite exceeds the headline %."
                                             />
-                                            <FormulaRow step="On the invoice" formula="X + 18%·X − 10%·X = 1.08·X" clause="§5.28.1.e" when="each invoice"
-                                                note="GST added, TDS withheld, both on the invoice value. Applied after the LD deduction — §5.27.6 makes LD and PQP tax-exclusive." />
-                                            <FormulaRow step="④ Contract ceiling" formula="Σ all payments ≤ 1.25 × contract value" clause="§5.26.2" when="whole contract"
+                                            <FormulaRow step="On the invoice" formula="X + 18%·X − 10%·X = 1.08·X" when="each invoice"
+                                                note="GST added, TDS withheld, both on the invoice value. Applied after the LD deduction — LD and PQP are tax-exclusive." />
+                                            <FormulaRow step="④ Contract ceiling" formula="Σ all payments ≤ 1.25 × contract value" when="whole contract"
                                                 note="Contract value plus 25% CCN headroom." />
                                         </FormulaTable>
 
                                         {/* ── 3 · deliverable track ───────────────── */}
                                         <FormulaTable
                                             title="3 · Deliverable-linked SLAs"
-                                            subtitle="§5.28.2 — no severity, no points, no per-deliverable ceiling"
+                                            subtitle="no severity, no points, no per-deliverable ceiling"
                                         >
-                                            <FormulaRow step="SLA 001" formula="0.5% × ⌈days / 7⌉ × that deliverable's cost" clause="§5.28.2.b" when="per deliverable"
+                                            <FormulaRow step="SLA 001" formula="0.5% × ⌈days / 7⌉ × that deliverable's cost" when="per deliverable"
                                                 note="Non-submission. “Each week OR PART THEREOF” — the weeks round UP." />
-                                            <FormulaRow step="SLA 002" formula="1% × ⌈days / 7⌉ × that deliverable's cost" clause="§5.28.2.c" when="per deliverable"
+                                            <FormulaRow step="SLA 002" formula="1% × ⌈days / 7⌉ × that deliverable's cost" when="per deliverable"
                                                 note="Not accepted / defects not rectified." />
-                                            <FormulaRow step="Net payable" formula="deliverable cost − LD ₹" clause="§5.25.1.b" when="per deliverable" />
-                                            <FormulaRow step="Cap" formula={`Σ quarter LD ≤ ${QUARTER_LD_CAP_PERCENT}% × PQP`} clause="§5.27.6" when="per quarter"
-                                                note="The ONLY ceiling: cumulative across both tracks, every SLA and every deliverable, pre-tax. No per-SLA or per-deliverable cap exists — §5.28.1.f sums the percentages first, and a per-milestone cap was refused in the pre-bid queries. An individual deliverable may therefore exceed 10% of its own cost. Net payable can go negative and is shown as calculated." />
-                                            <FormulaRow step="Not applicable" formula="resource-based SLAs do not apply in Phase 1" clause="§5.28.2.a" when="—" />
+                                            <FormulaRow step="Net payable" formula="deliverable cost − LD ₹" when="per deliverable" />
+                                            <FormulaRow step="Cap" formula={`Σ quarter LD ≤ ${QUARTER_LD_CAP_PERCENT}% × PQP`} when="per quarter"
+                                                note="The ONLY ceiling: cumulative across both tracks, every SLA and every deliverable, pre-tax. No per-SLA or per-deliverable cap exists — the rule sums the percentages first, and a per-milestone cap was refused in the pre-bid queries. An individual deliverable may therefore exceed 10% of its own cost. Net payable can go negative and is shown as calculated." />
+                                            <FormulaRow step="Not applicable" formula="resource-based SLAs do not apply in Phase 1" when="—" />
                                         </FormulaTable>
 
                                         <div style={{ fontSize: 11, ...muted, marginTop: 14, lineHeight: 1.6 }}>
@@ -4939,7 +4899,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <StatementSection
                                             letter="A"
                                             title="Deliverables completed this quarter"
-                                            clause="§5.23.1 · §5.28.2 · before tax"
+                                            clause="before tax"
                                             first
                                         />
                                 {/* Where "completed" came from. Worth stating: the
@@ -5012,9 +4972,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 <ChainRow
                                                     label="Liquidated damages"
                                                     clause={combinedCap.capApplied
-                                                        ? `SLA 001 / 002 · capped at ${QUARTER_LD_CAP_PERCENT}% of PQP (§5.27.6)`
+                                                        ? `SLA 001 / 002 · capped at ${QUARTER_LD_CAP_PERCENT}% of PQP`
                                                         : combinedCap.unvalued
-                                                            ? "SLA 001 / 002 · §5.27.6 ceiling unvalued — no PQP"
+                                                            ? "SLA 001 / 002 · ceiling unvalued — no PQP"
                                                             : `SLA 001 / 002 · within the ${QUARTER_LD_CAP_PERCENT}% quarterly ceiling`}
                                                     sign="−"
                                                     value={money(quarterPayment.totals.ldAmount)}
@@ -5083,7 +5043,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <StatementSection
                                             letter="B"
                                             title="Quarterly resource payment"
-                                            clause="§5.28.1.d"
                                         />
                                 <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 620 }}>
                                     <tbody>
@@ -5162,7 +5121,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", ...muted }}>
                                                         Guaranteed amount
                                                     </span>
-                                                    <ClauseChip clause="§5.23.2" />
                                                     {qgr.number !== null && qgr.count !== null && (
                                                         <span style={{ fontSize: 11, fontWeight: 700, color: INK, marginLeft: "auto" }}>
                                                             Instalment {qgr.number} of {qgr.count}
@@ -5267,7 +5225,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <StatementSection
                                             letter="C"
                                             title="The invoice"
-                                            clause="§5.28.1.e"
                                         />
                                 <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 620 }}>
                                     <tbody>
@@ -5291,13 +5248,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         />
                                         <ChainRow
                                             label="Net paid"
-                                            clause="§5.28.1.e"
                                             sign="="
                                             value={money(statement.tax.net)}
                                             strong
                                             rule
                                             tone={GREEN}
-                                            hint="Tax applies after the LD deduction — §5.27.6."
+                                            hint="Tax applies after the LD deduction."
                                         />
                                     </tbody>
                                 </table>
@@ -5325,7 +5281,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <StatementSection
                                             letter="D"
                                             title="Contract to date"
-                                            clause="§5.26.2"
                                             first
                                         />
                                 <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 620 }}>
@@ -5402,7 +5357,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             <span style={{ fontSize: 12, fontWeight: 800, color: INK, letterSpacing: ".2px", textTransform: "uppercase" }}>
                                                 Cross-check against Finance
                                             </span>
-                                            <ClauseChip clause="§5.27.6 · §5.28.1.e" />
                                             <span style={{ flex: 1, height: 1, background: "var(--uidai-pmis-border)" }} />
                                             {/* Counted across BOTH groups — a reader glancing
                                                 at the header wants "is anything wrong here",
