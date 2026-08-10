@@ -10,18 +10,18 @@
        PA    = AMP(m1) + AMP(m2) + AMP(m3)     ← ACTUAL deployment
        F     = planned quarterly resource cost + CCN
        QGR   = 35% of Phase-1 fixed + one-time, ÷ Phase 2&3 quarters
-       NPQP  = F + QGR                         ← the LD BASE
-       LD    = min(Σ LD%, 10%) × NPQP          (§5.27.6 ceiling)
+       PQP  = F + QGR                         ← the LD BASE
+       LD    = min(Σ LD%, 10%) × PQP          (§5.27.6 ceiling)
        AQP   = (PA − LD) + QGR
 
    The RFP's own worked example, which the tests pin to:
-       F=100, QGR=10, NPQP=110, ΣLD%=3% → LD=3.30
+       F=100, QGR=10, PQP=110, ΣLD%=3% → LD=3.30
        PA=90 → AQP = (90 − 3.30) + 10 = 96.70
 
    ── The asymmetry that matters ─────────────────────────────────────
-   LD is computed on NPQP — the PLANNED figure — and then deducted from
+   LD is computed on PQP — the PLANNED figure — and then deducted from
    PA, the ACTUAL one. §5.28.1.d is explicit: "The applicable LD
-   calculated above on Net Planned Quarterly Payment (NPQP) will be
+   calculated above on Net Planned Quarterly Payment (PQP) will be
    deducted from Payable amount for actual resource deployment PA".
 
    So whenever actual deployment runs below plan, the penalty bites
@@ -32,7 +32,7 @@
    actually affordable, and nothing else on the screen shows it.
 
    ── QGR appears twice, and that is correct ─────────────────────────
-   It is inside NPQP (so LD is charged on it) and added back after the
+   It is inside PQP (so LD is charged on it) and added back after the
    deduction (because it is guaranteed revenue — §5.23.2 pays it as an
    equal instalment regardless of deployment). Dropping the add-back
    understates every Phase 2/3 quarter by exactly one instalment, which
@@ -81,7 +81,7 @@ export function buildSettlementChain({
     // or the rollup's raw sum.
     const capped = num(cappedLdPercent) ?? (sumLd === null ? null : Math.min(sumLd, quarterCapPercent));
 
-    // NPQP = F + QGR. Both the stated and the derived value are kept: a
+    // PQP = F + QGR. Both the stated and the derived value are kept: a
     // disagreement means one of the three fields is stale at source.
     const derivedNpqp = f !== null && qgr !== null ? f + qgr : null;
     const base = statedNpqp ?? derivedNpqp;

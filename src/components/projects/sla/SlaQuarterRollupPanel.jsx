@@ -3,7 +3,7 @@
    which activities caused it?"
 
    The Settlement page answers the money question (one flat row per SLA,
-   then NPQP and the cap). It cannot answer the audit question, because
+   then PQP and the cap). It cannot answer the audit question, because
    the evidence — which deliverable breached, by how many days, scored at
    what severity — only exists per ACTIVITY. This panel joins the two:
    group by SLA, expand to the activities underneath, and show the points
@@ -77,6 +77,12 @@ import {
 } from "../../../utils/project/settlementChain";
 import { buildDeliverablePayables } from "../../../utils/project/deliverablePayable";
 import {
+    indexMilestoneCompletion,
+    buildQuarterDeliverablePayment,
+    readActivityCompletion,
+} from "../../../utils/project/quarterDeliverablePayment";
+import { getActivityApprovalStatus } from "../../../api/activityWorkflow";
+import {
     detectFinanceBasis,
     reconcileTaxBasis,
     reconcileSlaDeductions,
@@ -96,6 +102,62 @@ const INK = "#173e77";
    browser's connection pool and can trip backend rate limits. Six keeps
    the wall-clock short without flooding anything. */
 const FAN_OUT_CONCURRENCY = 6;
+
+/* ─── the quarter's LD ceiling (§5.27.6) ──────────────────────────
+   10% of PQP, pre-tax, over the quarter's CUMULATIVE liquidated
+   damages — both tracks together, all SLAs, all deliverables.
+
+   There is deliberately no per-deliverable and no per-SLA ceiling: the
+   RFP has neither, and a bidder who asked for a per-milestone cap was
+   refused (pre-bid query 138, "No Change"). An individual deliverable
+   may therefore exceed 10% of its own cost, as long as the quarter's
+   total stays inside 10% of PQP.
+
+   The arithmetic lives in `combinedCapCheck`; this constant exists so
+   the screen quotes the same figure the maths uses. */
+const QUARTER_LD_CAP_PERCENT = 10;
+
+/* ─── printing the statement ──────────────────────────────────────
+   The statement is the audit record for the quarter, so it has to leave
+   the screen as a filed document. `window.print()` plus a stylesheet
+   that hides everything else is the whole mechanism — no dependency, no
+   second rendering path that can drift from what is on screen, and
+   "Save as PDF" in the browser's own dialog produces the file.
+
+   Injected once at module scope rather than per render: a second copy of
+   these rules would fight the first over which `visibility` wins. */
+const PRINT_ROOT_ID = "sla-payment-statement-print";
+const PRINT_STYLE_ID = "sla-payment-statement-print-style";
+const PRINT_CSS = `
+@media print {
+  /* Hide the page, then re-show only the statement's subtree. Done with
+     visibility rather than display so the element keeps its box and can
+     be repositioned to the top of the sheet. */
+  body * { visibility: hidden !important; }
+  #${PRINT_ROOT_ID}, #${PRINT_ROOT_ID} * { visibility: visible !important; }
+  #${PRINT_ROOT_ID} {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100% !important; margin: 0 !important; padding: 0 !important;
+    box-shadow: none !important;
+  }
+  /* The masthead is a gradient on ink — without this browsers drop the
+     background and print white text on white. */
+  #${PRINT_ROOT_ID} * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  #${PRINT_ROOT_ID} > div { box-shadow: none !important; border-radius: 0 !important; }
+  /* A lettered section should not be split across a page break. */
+  #${PRINT_ROOT_ID} table { break-inside: avoid; page-break-inside: avoid; }
+  @page { margin: 12mm; }
+}
+`;
+
+function ensurePrintStyle() {
+    if (typeof document === "undefined") return;
+    if (document.getElementById(PRINT_STYLE_ID)) return;
+    const el = document.createElement("style");
+    el.id = PRINT_STYLE_ID;
+    el.textContent = PRINT_CSS;
+    document.head.appendChild(el);
+}
 
 /* The folded "N things to check" diagnostics panel. Off for now.
    The `issues` memo behind it still runs — it also feeds the blocking
@@ -180,12 +242,26 @@ function pick(source, names) {
     return null;
 }
 /* ─── SLA categories ──────────────────────────────────────────────
-   The library stores a category code per SLA; the rollup groups and
-   filters by it. Both sentinels are strings that cannot collide with a
-   real code, because a project that genuinely named a category "ALL"
-   would otherwise hijack the tab. */
-const ALL_CATEGORIES = "__all__";
+   The library stores a category code per SLA. The page no longer filters
+   by it — there are two sections, matching the RFP's two charging bases —
+   but it still GROUPS by it inside each, so resource deployment and query
+   resolution do not run together just because both are quarterly.
+
+   A string that cannot collide with a real code, so a project that
+   genuinely names a category "NONE" is still told apart from one that
+   sent no category at all. */
 const UNCATEGORISED = "__none__";
+
+/* The governance tool (D11) is listed with the deliverables because that
+   is where people look for it. Matched on the CATEGORY rather than on a
+   ref number, so a project that numbers its governance SLAs differently
+   still groups them right — and a project with no such category simply
+   leaves everything where the track put it.
+
+   Display only. The track still decides how it is charged. */
+function isGovernanceCategory(cat) {
+    return /GOVERNANCE/i.test(String(cat?.code || ""));
+}
 
 /* DELIVERABLE_SUBMISSION → "Deliverable Submission". Read off the code
    rather than a lookup table so a category added to the library needs no
@@ -206,81 +282,6 @@ function humanizeCategory(code) {
    "this cost money". */
 const CATEGORY_DOTS = ["#2f6fd0", "#1f8a4c", "#8a5cd6", "#c77700", "#0f8ea3", "#c0392b", "#6b7a8f"];
 const categoryDot = (i) => CATEGORY_DOTS[i % CATEGORY_DOTS.length];
-
-/* One pill per category, plus All. Counts and cost sit on the pill so the
-   bar answers "where did this quarter's penalty come from" before anything
-   is clicked — which is the question most readers arrive with. */
-function CategoryTabs({ categories, active, onSelect, dotFor }) {
-    if (!categories.length) return null;
-    const total = categories.reduce((n, c) => n + c.items.length, 0);
-
-    const pill = (isActive, accent) => ({
-        display: "inline-flex", alignItems: "center", gap: 7,
-        border: `1px solid ${isActive ? accent : "var(--uidai-pmis-border)"}`,
-        background: isActive ? accent : "#fff",
-        color: isActive ? "#fff" : INK,
-        borderRadius: 999, padding: "6px 13px", cursor: "pointer",
-        font: "inherit", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
-        boxShadow: isActive ? "0 1px 3px rgba(23,62,119,.25)" : "none",
-        transition: "background .12s ease, border-color .12s ease",
-    });
-    const countChip = (isActive) => ({
-        background: isActive ? "rgba(255,255,255,.25)" : "#eef3fb",
-        color: isActive ? "#fff" : "#1f4e87",
-        borderRadius: 999, padding: "0 7px", fontSize: 11, fontWeight: 800,
-    });
-
-    return (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14, alignItems: "center" }}>
-            <button type="button" style={pill(active === ALL_CATEGORIES, INK)} onClick={() => onSelect(ALL_CATEGORIES)}>
-                All
-                <span style={countChip(active === ALL_CATEGORIES)}>{total}</span>
-            </button>
-
-            {categories.map((c, i) => {
-                const isActive = active === c.code;
-                const accent = dotFor(i);
-                const costs = c.track === TRACK.DELIVERABLE ? c.ldAmount > 0 : c.ldPercent > 0;
-                return (
-                    <button
-                        key={c.code}
-                        type="button"
-                        style={pill(isActive, accent)}
-                        onClick={() => onSelect(isActive ? ALL_CATEGORIES : c.code)}
-                        title={`${c.label} · ${c.items.length} SLA(s) · ${c.breached} breach(es)`}
-                    >
-                        <span style={{
-                            width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto",
-                            background: isActive ? "#fff" : accent,
-                        }} />
-                        {c.label}
-                        <span style={countChip(isActive)}>{c.items.length}</span>
-                        {/* Only shown when it cost something — a zero here would
-                            be noise on every clean category. */}
-                        {costs && (
-                            <span style={{ fontSize: 11, fontWeight: 800, color: isActive ? "#fff" : RED }}>
-                                {c.track === TRACK.DELIVERABLE ? money(c.ldAmount) : pct(Math.round(c.ldPercent * 100) / 100)}
-                            </span>
-                        )}
-                    </button>
-                );
-            })}
-        </div>
-    );
-}
-
-/* A one-line "what you are looking at is wider than what you filtered to"
-   marker. Only rendered while a filter is on: on the unfiltered view there
-   is nothing to disambiguate and it would just be another line of text. */
-function FilterScopeNote({ active, text }) {
-    if (!active) return null;
-    return (
-        <div style={{ fontSize: 11, ...muted, marginTop: 10, display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 10 }}>◍</span>
-            {text}
-        </div>
-    );
-}
 
 /* The sub-header above one category's SLA groups. Deliberately lighter
    than SectionHead — this sits INSIDE a track section, and giving it the
@@ -317,7 +318,7 @@ function CategoryBlock({ cat, accent }) {
                 {cat.mixedTrack && (
                     <span
                         className="uidai-pmis-badge uidai-pmis-badge-orange"
-                        title="This category holds SLAs charged on different bases — one on a deliverable's cost, one on NPQP. Check the category on those SLAs in the library."
+                        title="This category holds SLAs charged on different bases — one on a deliverable's cost, one on PQP. Check the category on those SLAs in the library."
                     >
                         ⚠ mixed base
                     </span>
@@ -475,7 +476,7 @@ function PeriodStrip({ period, contractStart }) {
                     </div>
                     {/* The quarter's own name. Contract-anchored, so "Y2" is the
                         second CONTRACT year measured from T0 — never 2026. This
-                        is also the value the settlement / NPQP / aggregate
+                        is also the value the settlement / PQP / aggregate
                         endpoints take as ?quarter=. */}
                     {period?.key && (
                         <span
@@ -540,8 +541,53 @@ function PeriodStrip({ period, contractStart }) {
    tax-inclusive. So the deduction is a smaller slice of the payment
    than of the base, and the payment column names both rather than
    letting one stand in for the other. */
-function PayableRow({ row, open, onToggle }) {
+function PayableRow({ row, open, onToggle, activityDates }) {
     const overrun = row.netPayable !== null && row.netPayable < 0;
+
+    /* Dates keyed by activity id AND by code — a contribution carries
+       whichever of the two the evaluation happened to record, and matching
+       on one alone silently drops the dates for the other half. */
+    const byActivity = useMemo(() => {
+        const m = new Map();
+        for (const a of activityDates || []) {
+            if (a.activityId) m.set(String(a.activityId), a);
+            if (a.code) m.set(String(a.code), a);
+        }
+        return m;
+    }, [activityDates]);
+
+    /* First row per activity only — an activity that breached two SLAs gets
+       two contribution rows, and printing the same four dates on both is
+       noise rather than evidence.
+
+       Resolved ONCE, into an array parallel to `contributions`, rather than
+       by a function called from the JSX. A "have I shown this yet" function
+       is not idempotent, and `f(c) && <X d={f(c)} />` calls it twice: the
+       first call claims the activity, the second returns null, and the
+       component renders nothing at all. */
+    const datesByContribution = useMemo(() => {
+        const seen = new Set();
+        return (row.contributions || []).map((c) => {
+            const id = c.activityId ? String(c.activityId) : "";
+            const code = c.activityCode ? String(c.activityCode) : "";
+            const hit = (id && byActivity.get(id)) || (code && byActivity.get(code)) || null;
+            if (!hit) return null;
+            const key = hit.activityId || hit.code || id || code;
+            if (seen.has(key)) return null;
+            seen.add(key);
+            return hit;
+        });
+    }, [row.contributions, byActivity]);
+
+    /* Activities with no SLA evaluation at all — nothing above will show
+       their dates, so they are listed after the contributions. */
+    const scoredKeys = new Set(
+        (row.contributions || []).flatMap((c) => [c.activityId, c.activityCode].filter(Boolean).map(String))
+    );
+    const unscoredActivities = (activityDates || []).filter(
+        (a) => !scoredKeys.has(String(a.activityId)) && !scoredKeys.has(String(a.code))
+    );
+
     return (
         <>
             <tr style={open ? { background: "#eef5ff" } : undefined}>
@@ -626,15 +672,15 @@ function PayableRow({ row, open, onToggle }) {
                     )}
                 </td>
                 <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 800, color: row.ldPercent > 0 ? RED : GREEN }}>
-                    {/* Both figures, always. §5.28.2 sets no ceiling, so these
-                        are normally equal — and saying that outright beats a
-                        lone number that could equally mean "capped" or
-                        "nothing capped it". */}
+                    {/* Σ across this deliverable's SLAs. No per-deliverable
+                        ceiling exists (§5.28.2), so before and after are equal
+                        here by construction — the quarter's 10%-of-PQP cap acts
+                        on the total, in the payment statement. */}
                     <CapPair
                         before={Math.round(row.ldPercent * 100) / 100}
                         after={Math.round(row.ldPercentCapped * 100) / 100}
                         clause="§5.27.6"
-                        noCapClause="§5.28.2"
+                        noCapClause="no row cap · §5.28.2"
                         compact
                     />
                 </td>
@@ -657,8 +703,8 @@ function PayableRow({ row, open, onToggle }) {
                     {overrun && (
                         <div
                             style={{ fontSize: 10.5, color: RED, fontWeight: 700 }}
-                            title={"Accrued LD has exceeded this deliverable's entire cost. §5.28.2 sets no ceiling, "
-                                + "so the figure is shown as calculated rather than clamped to zero."}
+                            title={"Accrued LD has exceeded this deliverable's entire cost. §5.28.2 sets no ceiling "
+                                + "of its own, so the figure is shown as calculated rather than clamped to zero."}
                         >
                             LD exceeds deliverable cost
                         </div>
@@ -673,6 +719,10 @@ function PayableRow({ row, open, onToggle }) {
                             {c.activityCode || c.activityId || "—"}
                         </span>
                         <div style={{ fontSize: 10.5, ...muted }}>{c.evaluatedOn || "no evaluation date"}</div>
+                        {/* The activity's own dates, under the activity. Resolved
+                            above so this is a plain lookup, not a call with a
+                            side effect. */}
+                        <ActivityDateLines activity={datesByContribution[i]} />
                     </td>
                     <td>
                         <span style={{ fontFamily: "monospace", fontSize: 11.5, fontWeight: 700, color: INK }}>{c.slaRef}</span>
@@ -688,6 +738,23 @@ function PayableRow({ row, open, onToggle }) {
                     <td />
                 </tr>
             ))}
+
+            {/* Activities under this deliverable that no SLA fired on — they
+                have no contribution row to hang their dates from, but a
+                deliverable is only delivered when all of them are, so a
+                reader checking why it is or is not payable needs them. */}
+            {open && unscoredActivities.map((a) => (
+                <tr key={`${row.milestoneId}-a-${a.activityId || a.code}`} style={{ background: "#f6faff" }}>
+                    <td style={{ borderLeft: "3px solid #cbd5e1", paddingLeft: 18 }}>
+                        <span style={{ fontSize: 12, color: "#0b3c88", fontWeight: 600 }} title={a.name || ""}>
+                            {a.code}
+                        </span>
+                        <div style={{ fontSize: 10.5, ...muted }}>no SLA evaluated</div>
+                        <ActivityDateLines activity={a} />
+                    </td>
+                    <td colSpan={5} />
+                </tr>
+            ))}
         </>
     );
 }
@@ -695,6 +762,44 @@ function PayableRow({ row, open, onToggle }) {
 /* Heading for one of the two LD regimes. The subtitle carries the RFP
    clause and the money base, because "which of these two lists does this
    SLA belong in" is the question the whole screen exists to answer. */
+/* ─── a top-level section of the page ─────────────────────────────
+   The rollup has three: the quarter's dates, the SLA breakup, and the
+   payment statement. Only the statement stood out, so the other two read
+   as one long undifferentiated column — a reader could not see where the
+   evidence ended and the money began.
+
+   A numbered band, a rule, and real space above each. Deliberately
+   heavier than the sub-headers inside them: the point is that these
+   three are different KINDS of thing, not three more headings. */
+function PageSection({ index, title, sub, right, children, id }) {
+    return (
+        <section id={id} style={{ marginTop: 30 }}>
+            <div style={{
+                display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap",
+                paddingBottom: 10, borderBottom: "2px solid #dbe6f5",
+            }}>
+                <span style={{
+                    width: 26, height: 26, borderRadius: 8, background: INK, color: "#fff",
+                    fontSize: 12, fontWeight: 800, flex: "0 0 auto",
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                }}>
+                    {index}
+                </span>
+                <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 15, fontWeight: 800, color: INK, letterSpacing: "-.2px" }}>
+                        {title}
+                    </span>
+                    {sub && (
+                        <span style={{ display: "block", fontSize: 11.5, ...muted, marginTop: 2 }}>{sub}</span>
+                    )}
+                </span>
+                {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
+            </div>
+            {children}
+        </section>
+    );
+}
+
 /* The clause reference is a citation, not a sentence — it belongs in a
    chip beside the title rather than trailing the subtitle, where it made
    every section end in a string of section numbers. */
@@ -786,6 +891,66 @@ function Metric({ label, value, accent, flag, flagTitle, wide }) {
                 )}
             </span>
         </span>
+    );
+}
+
+/* ─── planned vs actual, per activity ─────────────────────────────
+   The evidence behind a deliverable's completion date. Four dates
+   because they answer four different questions, and a deliverable can
+   easily be late on one and fine on another:
+
+     Planned start / Actual start   — a resourcing problem
+     Planned end   / Actual end     — what SLA 001 actually charges for
+
+   Slip is signed and shown only when both ends of the pair are known.
+   A blank is "we cannot tell", which is not the same as "on time" and
+   must not read like it. */
+function slipLabel(days) {
+    if (days === null || days === undefined) return null;
+    if (days === 0) return { text: "on time", tone: GREEN };
+    if (days < 0) return { text: `${Math.abs(days)}d early`, tone: GREEN };
+    return { text: `${days}d late`, tone: days > 7 ? RED : AMBER };
+}
+
+/* Four labelled lines, stacked under the activity they belong to.
+
+   A six-column table off to the side made the reader carry the activity
+   code across the screen and back. Planned and actual sit on adjacent
+   lines instead, so each pair is read as a comparison without moving
+   the eye — which is the only thing anyone is doing with these dates. */
+function ActivityDateLines({ activity }) {
+    if (!activity) return null;
+    const startSlip = slipLabel(activity.startSlipDays);
+    const endSlip = slipLabel(activity.endSlipDays);
+
+    const line = (label, value, slip, missing) => (
+        <div style={{ display: "flex", gap: 6, alignItems: "baseline", lineHeight: 1.5 }}>
+            <span style={{ ...muted, fontSize: 9.5, fontWeight: 700, letterSpacing: ".3px", textTransform: "uppercase", minWidth: 74 }}>
+                {label}
+            </span>
+            <span style={{ fontSize: 11, color: value ? "#334155" : undefined, fontVariantNumeric: "tabular-nums" }}>
+                {value ? longDate(value) : <span style={{ ...muted }}>{missing}</span>}
+            </span>
+            {slip && (
+                <span style={{ fontSize: 9.5, color: slip.tone, fontWeight: 700 }}>{slip.text}</span>
+            )}
+        </div>
+    );
+
+    return (
+        <div style={{ marginTop: 5, borderLeft: "2px solid #dbe6f5", paddingLeft: 8 }}>
+            {line("Planned start", activity.plannedStart, null, "—")}
+            {line("Actual start", activity.actualStart, startSlip, "not started")}
+            {line("Planned end", activity.plannedEnd, null, "—")}
+            {line("Actual end", activity.actualEnd, endSlip,
+                activity.done ? "not recorded" : "open")}
+            {activity.done && activity.completedVia && (
+                <div style={{ ...muted, fontSize: 9.5, marginTop: 2 }}>
+                    accepted via {activity.completedVia}
+                    {activity.acceptedBy ? ` · ${activity.acceptedBy}` : ""}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -929,7 +1094,7 @@ function ObservationCell({ occurrence, targetRows, onSave, onClear }) {
    pay. Everything below this card explains those three; none of it
    should be needed to read them.
 
-   Deliberately free of acronyms — NPQP, PA and AQP are defined in the
+   Deliberately free of acronyms — PQP, PA and AQP are defined in the
    glossary and used from the sections downward, but the headline says
    "you pay" because that is what it means. */
 function HeadlineFigure({ caption, value, tone, note, noteTone }) {
@@ -1018,7 +1183,7 @@ const GLOSSARY = [
     ["Reporting interval", "What the penalty is charged for — the quarter. Points add up, then reset."],
     ["F", "Planned resource cost for the quarter."],
     ["QGR", "Guaranteed quarterly amount, paid whatever the deployment."],
-    ["NPQP", "F + QGR — the planned base the penalty % applies to."],
+    ["PQP", "F + QGR — the planned base the penalty % applies to."],
     ["PA", "What was actually earned, from real attendance."],
     ["AQP", "Final payment: (PA − penalty) + QGR."],
 ];
@@ -1443,7 +1608,7 @@ function RelaxationModal({ scoredPercent, npqp, quarterLabel, quarterDates, onCa
                                         value={pct(Math.round(next * 100) / 100)}
                                         strong rule
                                         hint={amountOf(next) !== null
-                                            ? `${money(amountOf(next))} of NPQP — down from ${money(amountOf(scored))}.`
+                                            ? `${money(amountOf(next))} of PQP — down from ${money(amountOf(scored))}.`
                                             : null}
                                     />
                                 </tbody>
@@ -1752,7 +1917,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
 
                 {/* Deliverable SLAs are charged in rupees on each deliverable's own
                     cost, so a percentage headline would be comparing unlike bases.
-                    Points-scored SLAs lead with points; the linear NPQP one (SLA
+                    Points-scored SLAs lead with points; the linear PQP one (SLA
                     003) has no points, so it leads with the delay that drove it. */}
                 <span style={{ marginLeft: "auto", display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
                     {/* Every type shows its cap the same way — what was scored,
@@ -1824,8 +1989,8 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                         {isDeliverable ? (
                             <>
                                 Charged per deliverable on <b style={{ color: INK }}>that deliverable&rsquo;s own cost</b> (§5.28.2),
-                                not on NPQP — so the amounts below add up but the percentages do not, and the
-                                quarter&rsquo;s {"≤"}10% NPQP ceiling does not apply here.
+                                not on PQP — so the amounts below add up but the percentages do not, and the
+                                quarter&rsquo;s {"≤"}10% PQP ceiling does not apply here.
                                 {item.unpricedCount > 0 && (
                                     <> <span style={{ color: AMBER }}>{item.unpricedCount} occurrence
                                         {item.unpricedCount === 1 ? " has" : "s have"} no deliverable cost resolved yet.</span></>
@@ -1838,7 +2003,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                 {item.band ? (
                                     <>
                                         , which falls in band <b style={{ color: INK }}>{item.band.label}</b> (threshold{" "}
-                                        {num(item.band.points_threshold, 0)}) → <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of NPQP.
+                                        {num(item.band.points_threshold, 0)}) → <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of PQP.
                                         {item.pointsCapped && (
                                             <> The top band is the per-SLA ceiling (§5.28.1.b), so the extra{" "}
                                                 <b style={{ color: AMBER }}>{num(item.excessPoints, 0)} points</b> add nothing.</>
@@ -1856,7 +2021,7 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                 Escalates linearly with delay rather than through severity points (§5.28.3.a):{" "}
                                 <b style={{ color: INK }}>{num(item.totalDelayDays, 0)} days</b> across{" "}
                                 {item.scoredCount} occurrence{item.scoredCount === 1 ? "" : "s"} →{" "}
-                                <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of NPQP.
+                                <b style={{ color: costing ? RED : GREEN }}>{pct(item.ldPercent)}</b> of PQP.
                             </>
                         )}
                     </div>
@@ -1975,12 +2140,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     const [allResults, setAllResults] = useState([]);
     const [severityMaster, setSeverityMaster] = useState([]);
     const [ldBands, setLdBands] = useState([]);
-    /* NPQP is published per CALENDAR quarter while everything else here is
+    /* PQP is published per CALENDAR quarter while everything else here is
        measured from T0, so a contract quarter usually straddles two of
        them. Both are fetched and blended by day overlap — see
        `overlappingCalendarQuarters`. `npqpParts` keeps each quarter's raw
        payload so a per-quarter failure can be named rather than folded
-       into one useless "NPQP unavailable". */
+       into one useless "PQP unavailable". */
     const [npqpParts, setNpqpParts] = useState([]);
     const [npqpError, setNpqpError] = useState("");
     const [mastersError, setMastersError] = useState("");
@@ -2020,10 +2185,15 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     const [financeDenied, setFinanceDenied] = useState(false);
     // activityId → { milestoneId, milestoneName, code, name }
     const [activityIndex, setActivityIndex] = useState(() => new Map());
+    // milestoneId → { complete, completedOn, code, name, … }
+    const [milestoneCompletion, setMilestoneCompletion] = useState(() => new Map());
+    // Kept so the workflow pass can re-index the same tree without refetching it.
+    const [treeMilestones, setTreeMilestones] = useState([]);
+    const [completionSource, setCompletionSource] = useState("tree");
     /* The resource deployment plan, distilled from the same project tree the
        fan-out already walks. §5.28.1.d defines F as the aggregate monthly
        payment of the resources deployed per this plan, so it gives an
-       independent read on the NPQP base every LD here is charged against. */
+       independent read on the PQP base every LD here is charged against. */
     const [resourceActivities, setResourceActivities] = useState([]);
 
     /* T0 comes in as a prop, but `useProject` only reads an in-memory list
@@ -2095,7 +2265,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         [quarters, selected]
     );
     /* Every calendar quarter this contract quarter touches, with the share
-       of its days in each. One entry means the two align and the NPQP base
+       of its days in each. One entry means the two align and the PQP base
        is exact; two means it is blended. */
     const overlaps = useMemo(() => overlappingCalendarQuarters(period), [period]);
     const overlapKeys = useMemo(() => overlaps.map((o) => o.key).join(","), [overlaps]);
@@ -2251,6 +2421,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             setActivityIndex(actIndex);
             // Same tree, different question: what is deployed and what it costs.
             setResourceActivities(collectResourceActivities(treeRes.value?.milestones || []));
+            /* And a third: which deliverables are DONE, and when — which
+               decides the quarter each one's payment falls in.
+
+               The tree alone cannot answer it. On a live project every
+               milestone reads `not_completed` and every actualEndDate is
+               null, while the approval workflow has the activity closed
+               months earlier; the workflow is where completion actually
+               lives. So the tree is indexed first (so the section renders
+               immediately) and the workflow fills it in below. */
+            setTreeMilestones(treeRes.value?.milestones || []);
+            setMilestoneCompletion(indexMilestoneCompletion(treeRes.value?.milestones || []));
             setProgress({ done: 0, total: activities.length });
 
             const collected = [];
@@ -2314,8 +2495,69 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     }, [projectId]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => { ensurePrintStyle(); }, []);
 
-    /* NPQP is per calendar quarter and only needed for the money line, so it
+    /* ── when each deliverable was actually accepted ──────────────────
+       Read from the approval workflow, because that is where completion
+       lives: the Milestone Configuration screen's "Activity Completed on
+       …" is the owner division's decision timestamp, and neither the
+       activity's `status` nor its `actualEndDate` is set when that
+       happens.
+
+       Scoped to activities under NON-resource milestones — D1–D8, the
+       deliverables §5.28.2 charges against. D9/D10 are resource
+       milestones with twenty activities apiece and are paid per quarter
+       from attendance, not per acceptance, so asking about their
+       approvals would be twenty pointless requests each. */
+    const deliverableActivityIds = useMemo(() => {
+        const ids = [];
+        for (const m of treeMilestones) {
+            if (m?.isResourceBased) continue;
+            for (const a of m?.activities || []) if (a?.apiId) ids.push(String(a.apiId));
+        }
+        return ids;
+    }, [treeMilestones]);
+
+    const deliverableActivityKey = deliverableActivityIds.join(",");
+
+    useEffect(() => {
+        if (!deliverableActivityKey) return undefined;
+        const ids = deliverableActivityKey.split(",");
+        let cancelled = false;
+
+        (async () => {
+            const flow = new Map();
+            let cursor = 0;
+            async function worker() {
+                for (;;) {
+                    const i = cursor++;
+                    if (i >= ids.length || cancelled) return;
+                    try {
+                        const summary = await getActivityApprovalStatus(ids[i]);
+                        const done = readActivityCompletion(summary?.data ?? summary);
+                        if (done.completed) flow.set(ids[i], done);
+                    } catch {
+                        /* An activity with no workflow yet answers 404, which
+                           is the ordinary case for one never submitted. The
+                           tree's own signals still apply to it. */
+                    }
+                }
+            }
+            await Promise.all(
+                Array.from({ length: Math.min(FAN_OUT_CONCURRENCY, ids.length) }, worker)
+            );
+            if (cancelled) return;
+            setMilestoneCompletion(indexMilestoneCompletion(treeMilestones, { activityCompletion: flow }));
+            setCompletionSource(flow.size > 0 ? "workflow" : "tree");
+        })();
+
+        return () => { cancelled = true; };
+        // treeMilestones is what deliverableActivityKey is derived from;
+        // depending on the array itself would refetch on every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [deliverableActivityKey]);
+
+    /* PQP is per calendar quarter and only needed for the money line, so it
        is fetched separately as the selection moves rather than in the fan-out.
        The failure message is kept rather than swallowed: "no payment base"
        is not an answer anyone can act on, and the backend's own message is
@@ -2432,7 +2674,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
     /* ── SLAs by category ─────────────────────────────────────────────
        The two TRACKS say what an LD is charged on — a deliverable's own
-       cost, or NPQP. That is the right split for the money and the wrong
+       cost, or PQP. That is the right split for the money and the wrong
        one for a reader: it puts resource deployment, query resolution and
        the governance tool in one undifferentiated pile because they happen
        to share a charging base.
@@ -2483,32 +2725,26 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         });
     }, [quarterlyItems, deliverableItems]);
 
-    const [activeCategory, setActiveCategory] = useState(ALL_CATEGORIES);
+    /* Two sections, not one per category. The per-category tabs split
+       "the resource SLAs" from "query resolution" cleanly enough, but
+       they also split the page into six places to look — and the RFP's
+       own division is two: charged on a deliverable's cost, or charged
+       on PQP. Categories survive as the sub-headers WITHIN each.
 
-    /* A tab that no longer exists — the quarter changed, or the SLA that
-       carried the only instance of that category was not evaluated this
-       time — falls back to All rather than rendering nothing at all. */
-    useEffect(() => {
-        if (activeCategory === ALL_CATEGORIES) return;
-        if (!categories.some((c) => c.code === activeCategory)) setActiveCategory(ALL_CATEGORIES);
-    }, [categories, activeCategory]);
-
-    const visibleCategories = useMemo(
-        () => (activeCategory === ALL_CATEGORIES
-            ? categories
-            : categories.filter((c) => c.code === activeCategory)),
-        [categories, activeCategory]
-    );
+       The governance tool is listed under deliverables because that is
+       where people look for it. It is a display move only: it still
+       scores on the quarterly track, still counts into the §5.27.6
+       ceiling, and its figures still reach `totals` unchanged. */
     const visibleQuarterly = useMemo(
-        () => visibleCategories.filter((c) => c.track !== TRACK.DELIVERABLE),
-        [visibleCategories]
+        () => categories.filter((c) => c.track !== TRACK.DELIVERABLE && !isGovernanceCategory(c)),
+        [categories]
     );
     const visibleDeliverable = useMemo(
-        () => visibleCategories.filter((c) => c.track === TRACK.DELIVERABLE),
-        [visibleCategories]
+        () => categories.filter((c) => c.track === TRACK.DELIVERABLE || isGovernanceCategory(c)),
+        [categories]
     );
 
-    /* The NPQP endpoint answers 200 even when it could not compute a base,
+    /* The PQP endpoint answers 200 even when it could not compute a base,
        flagging why in `status` — so an absent base has to be read off that
        field rather than off a thrown error. Only `leave_mgmt_unavailable`
        actually means the leave service is unreachable; any other status is
@@ -2534,13 +2770,21 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        screen while looking like a real number. */
     const npqpIssue = useMemo(() => {
         if (npqpBlend.complete) return null;
-        if (!npqpParts.length) return npqpError ? `NPQP call failed — ${npqpError}` : null;
+        if (!npqpParts.length) return npqpError ? `PQP call failed — ${npqpError}` : null;
         const reasons = npqpParts
             .filter((p) => !(p.data && (!p.data.status || p.data.status === "ok")))
             .map((p) => {
                 if (p.error) return `${p.key}: ${p.error}`;
                 if (p.data?.status === "leave_mgmt_unavailable") {
                     return `${p.key}: leave-management unreachable, so F could not be computed`;
+                }
+                /* Not an outage: the quarter priced out at zero because no
+                   resource is deployed in it (perMonth comes back empty).
+                   Deliberately NOT usable as a base — a PQP of 0 would make
+                   the §5.27.6 ceiling 10% x 0 = 0 and silently cap every LD
+                   in the quarter down to nothing. */
+                if (p.data?.status === "no_resources") {
+                    return `${p.key}: no resource deployed in the quarter, so PQP is nil`;
                 }
                 return `${p.key}: status ${p.data?.status ?? "no data"}`;
             });
@@ -2555,7 +2799,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     /* ── F from the resource deployment plan (§5.28.1.d) ──────────────
        The plan is scoped to the CONTRACT quarter, so the endpoint's F has
        to be blended across the same calendar quarters and by the same day
-       weights as NPQP itself — otherwise the two sides would be describing
+       weights as PQP itself — otherwise the two sides would be describing
        different windows and any difference between them would say nothing. */
     const plan = useMemo(
         () => deriveQuarterlyResourcePlan(resourceActivities, period),
@@ -2703,7 +2947,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     /* PA only exists once a quarter has been settled — it is the actual
        deployment payable, computed from attendance. Everything else the
        chain needs, this page already has, so an unsettled quarter still
-       shows F, QGR, NPQP and LD and simply names PA as pending. */
+       shows F, QGR, PQP and LD and simply names PA as pending. */
     const chain = useMemo(() => buildSettlementChain({
         fAmount: settlementRow?.fAmount ?? endpointF,
         qgrAmount: settlementRow?.qgrAmount ?? npqpParts.find((p) => p.data?.qgrAmount != null)?.data?.qgrAmount,
@@ -2723,7 +2967,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
     /* ── QGR, and where this quarter's instalment sits ────────────────
        §5.23.2 guarantees 35% of the Phase-1 fixed + one-time cost, paid as
-       equal instalments across the Phase 2/3 quarters. The NPQP endpoint
+       equal instalments across the Phase 2/3 quarters. The PQP endpoint
        carries that basis; the field names are read from a candidate list
        because the services do not agree on casing or on which spelling of
        "instal(l)ment" to use.
@@ -3007,9 +3251,35 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        apart deliberately. No ceiling is imposed: §5.28.2 states none, and
        the §5.27.6 / §5.28.1.b ceilings govern the quarterly track only. */
     const payables = useMemo(
+        /* No capPercent: §5.27.6's ceiling is on the QUARTER's cumulative
+           total, not on any single deliverable. Applied once, in
+           `combinedCap`, after both tracks are summed. */
         () => buildDeliverablePayables({ deliverableItems, paymentPage, activityIndex }),
         [deliverableItems, paymentPage, activityIndex]
     );
+
+    /* ── this quarter's deliverable payment (statement section A) ─────
+       Deliberately NOT the payable report above. That one answers "every
+       deliverable an SLA touched, and what it would net" — a project-wide
+       view. An invoice is narrower: only what COMPLETED inside this
+       quarter, priced pre-tax, with LD charged on the LD basis and
+       deducted from the payment.
+
+       A deliverable still open is not payable however much LD it has
+       accrued, so it is listed separately rather than counted or
+       hidden. */
+    const ldByMilestone = useMemo(() => {
+        const m = new Map();
+        for (const r of payables.rows) m.set(String(r.milestoneId), r);
+        return m;
+    }, [payables.rows]);
+
+    const quarterPayment = useMemo(() => buildQuarterDeliverablePayment({
+        paymentPage,
+        milestoneCompletion,
+        ldByMilestone,
+        period,
+    }), [paymentPage, milestoneCompletion, ldByMilestone, period]);
 
     /* Severity/band configuration is only needed by the points-scored SLAs.
        A project running nothing but deliverable and linear SLAs is fully
@@ -3028,7 +3298,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        The two streams brought together into one invoice.
 
        They are computed separately and never mixed — deliverable LD is
-       charged on a deliverable's own cost, quarterly LD on NPQP — but
+       charged on a deliverable's own cost, quarterly LD on PQP — but
        they are PAID together, and tax applies to the invoice as a whole
        (§5.28.1.e), not to each stream separately. So the tax is taken on
        the combined figure here rather than on AQP alone.
@@ -3044,23 +3314,31 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     const draftAffectsPayment = draftCount > 0 && !settlementRow;
 
     const statement = useMemo(() => {
-        const deliverableNet = Number.isFinite(payables.totals.totalNetPayable)
-            ? payables.totals.totalNetPayable : null;
+        /* This quarter's completed deliverables, PRE-TAX. The payable
+           report's project-wide, tax-inclusive total used to feed this,
+           which both overstated the quarter and made section C add GST to
+           a figure that already carried it. */
+        const deliverableNet = quarterPayment.available && quarterPayment.paid.length
+            ? quarterPayment.totals.net
+            : null;
         const quarterlyNet = Number.isFinite(chain.aqp) ? chain.aqp : null;
 
         const present = [deliverableNet, quarterlyNet].filter((v) => v !== null);
         const grossDue = present.length ? present.reduce((a, b) => a + b, 0) : null;
 
         const pending = [];
-        if (deliverableItems.length > 0 && deliverableNet === null) pending.push("deliverable payments");
+        /* Only a deliverable COMPLETED this quarter is owed anything, so a
+           quarter with none is complete rather than pending — the old check
+           read "an SLA fired somewhere" and reported a quarter as unfinished
+           because a deliverable in a different one had a penalty. */
         if (quarterlyItems.length > 0 && quarterlyNet === null) pending.push("the quarterly resource payment");
 
         /* What the SLAs took off, across BOTH regimes. They are computed
            separately and never mixed — one on a deliverable's own cost, one
-           on NPQP — but a reader asking "what did service levels cost us
+           on PQP — but a reader asking "what did service levels cost us
            this quarter" wants the one figure, and it is only ever presented
            as a total, never fed back into either regime's arithmetic. */
-        const ldParts = [payables.totals.totalLdAmount, chain.ldAmount]
+        const ldParts = [quarterPayment.totals.ldAmount, chain.ldAmount]
             .filter((v) => Number.isFinite(v));
         const totalLd = ldParts.reduce((a, b) => a + b, 0);
 
@@ -3071,15 +3349,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             totalLd,
             pending,
             complete: pending.length === 0 && grossDue !== null,
+            /* GST now lands on a genuinely pre-tax base on both sides:
+               section A is the pre-tax net of this quarter's deliverables,
+               section B is tax-exclusive by §5.27.6. */
             tax: taxBreakdown(grossDue),
         };
-    }, [payables.totals.totalNetPayable, payables.totals.totalLdAmount, chain.aqp, chain.ldAmount,
-        deliverableItems.length, quarterlyItems.length]);
+    }, [quarterPayment, chain.aqp, chain.ldAmount, quarterlyItems.length]);
 
     /* ── does this page agree with Finance about tax? ─────────────────
        The rollup draws from two services that keep money on different
        bases: the payment page returns each term pre-tax AND post-tax,
-       while the contracts service keeps NPQP, PA, LD and AQP exclusive of
+       while the contracts service keeps PQP, PA, LD and AQP exclusive of
        tax (§5.27.6) and taxes once at the invoice (§5.28.1.e).
 
        That is fine as long as nothing compares across the line. This
@@ -3330,11 +3610,20 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 </div>
             </div>
 
-            {period && <PeriodStrip period={period} contractStart={startDate} />}
+            {/* ══ SECTION 1 · the window everything below is measured over ══ */}
+            {period && (
+                <PageSection
+                    index="1"
+                    title="Reporting interval"
+                    sub="The contract quarter every figure below is measured over."
+                >
+                    <PeriodStrip period={period} contractStart={startDate} />
+                </PageSection>
+            )}
 
             {period && overlaps.length > 1 && (
                 <div style={{ fontSize: 12, ...muted, marginTop: 10, lineHeight: 1.7 }}>
-                    NPQP is published per calendar quarter, so the payment base is blended across the{" "}
+                    PQP is published per calendar quarter, so the payment base is blended across the{" "}
                     {overlaps.length} calendar quarters this contract quarter covers, weighted by days:{" "}
                     {overlaps.map((o, i) => (
                         <React.Fragment key={o.key}>
@@ -3457,36 +3746,32 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         </div>
                     ) : (
                         <>
-                            {/* ══ Category tabs ════════════════════════════════════
-                                One pill per SLA category present this quarter. The
-                                two TRACKS below still decide how an SLA is CHARGED —
-                                that is the RFP's split and it does not move — but a
-                                reader looking for "the resource SLAs" wants the
-                                category, and lumping resource deployment in with
-                                query resolution because they share a charging base
-                                is exactly the confusion this removes. */}
-                            <CategoryTabs
-                                categories={categories}
-                                active={activeCategory}
-                                onSelect={setActiveCategory}
-                                dotFor={categoryDot}
-                            />
-
-                            {/* ══ Quarterly track (§5.28.3 / §5.28.4) ══════════════
-                                Resource, recommendation and governance-tool SLAs. All
-                                measured and reported quarterly and charged against
-                                NPQP, so these — and only these — sum into the §5.27.6
-                                quarter ceiling. */}
-                            {(activeCategory === ALL_CATEGORIES || visibleQuarterly.length > 0) && (
+                            {/* ══ SECTION 2 · the SLA breakup ══════════════════════
+                                Two sub-sections inside it, matching the RFP's two
+                                charging bases: on a deliverable's own cost, or on
+                                PQP. Categories group the SLAs within each. */}
+                            <PageSection
+                                index="2"
+                                title="Service levels this quarter"
+                                sub="What each SLA scored, and what it cost. Grouped by how the penalty is charged."
+                                right={
+                                    <button
+                                        type="button"
+                                        className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                                        style={{ marginTop: 0 }}
+                                        onClick={() => setExpandAll((v) => !v)}
+                                    >
+                                        {expandAll ? "Collapse all" : "Expand all"}
+                                    </button>
+                                }
+                            >
+                            {(
                             <>
                             <SectionHead
                                 title="Quarterly SLAs"
                                 count={visibleQuarterly.reduce((n, c) => n + c.items.length, 0)}
                                 clause="§5.28.3–4"
-                                sub="Charged as a % of the quarter's payment base."
-                                onToggle={() => setExpandAll((v) => !v)}
-                                toggleLabel={expandAll ? "Collapse all" : "Expand all"}
-                                showToggle={quarterlyItems.length > 0 || deliverableItems.length > 0}
+                                sub="Charged as a % of the quarter's payment base. Resources, query resolution, recommendations."
                             />
 
                             {quarterlyItems.length === 0 ? (
@@ -3500,10 +3785,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         together, so a per-category subtotal here would be
                                         a number the RFP never uses. Said out loud only
                                         when a filter is on and the two could be confused. */}
-                                    <FilterScopeNote
-                                        active={activeCategory !== ALL_CATEGORIES}
-                                        text="Totals below cover every quarterly SLA, not just this category — the 10% ceiling applies to them together."
-                                    />
                                     <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
                                         <Tile label="SLAs scored" value={num(totals.slaCount, 0)} hint={`${num(totals.totalOccurrences, 0)} occurrences`} />
                                         <Tile label="Breaches" value={num(totals.totalBreaches, 0)} accent={totals.totalBreaches > 0 ? RED : GREEN} />
@@ -3525,10 +3806,10 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             accent={RED}
                                             hint={totals.capApplied
                                                 ? `the ${totals.quarterCapPercent}% quarter ceiling bit`
-                                                : `ceiling ${totals.quarterCapPercent}% of NPQP`}
+                                                : `ceiling ${totals.quarterCapPercent}% of PQP`}
                                         />
                                         <Tile
-                                            label="NPQP"
+                                            label="PQP"
                                             value={money(totals.npqp)}
                                             hint={npqpIssue
                                                 || (fCheck.diverges
@@ -3542,12 +3823,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             label="Penalty amount"
                                             value={money(totals.ldAmount)}
                                             accent={RED}
-                                            hint={totals.npqp === null ? "needs an NPQP base" : "capped LD % × NPQP"}
+                                            hint={totals.npqp === null ? "needs a PQP base" : "capped LD % × PQP"}
                                         />
                                     </div>
                                     {/* Grouped under their own category rather than run
                                         together: resource deployment and query resolution
-                                        are both quarterly and both charged on NPQP, and
+                                        are both quarterly and both charged on PQP, and
                                         that is the only thing they have in common. */}
                                     {visibleQuarterly.map((cat) => (
                                         <React.Fragment key={cat.code}>
@@ -3579,13 +3860,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             </>
                             )}
 
-                            {/* ══ NPQP base — the resource deployment plan ═════════
-                                Every LD % above is a percentage of NPQP, and
-                                NPQP = F + QGR. §5.28.1.d(c) defines F as the aggregate
+                            {/* ══ PQP base — the resource deployment plan ═════════
+                                Every LD % above is a percentage of PQP, and
+                                PQP = F + QGR. §5.28.1.d(c) defines F as the aggregate
                                 monthly payment of all resources to be deployed as per
                                 the resource deployment plan — which is exactly what the
                                 activities' allocation rows hold. Summing them gives F
-                                independently of the NPQP endpoint, so the base the whole
+                                independently of the PQP endpoint, so the base the whole
                                 page charges against becomes checkable. */}
                             {(plan.activityCount > 0 || fCheck.comparable) && (
                                 <>
@@ -3640,9 +3921,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <Banner
                                             kind="error"
                                             text={
-                                                `The deployment plan and the NPQP endpoint disagree about F for this quarter by `
+                                                `The deployment plan and the PQP endpoint disagree about F for this quarter by `
                                                 + `${formatINR(Math.abs(fCheck.difference))} (${Math.round(fCheck.percent * 100) / 100}%). `
-                                                + `Every LD amount above is a percentage of NPQP = F + QGR, so this moves all of them.\n`
+                                                + `Every LD amount above is a percentage of PQP = F + QGR, so this moves all of them.\n`
                                                 + (fCheck.planHigher
                                                     ? `The plan is HIGHER. Usually an approved resource that was never onboarded, or unpaid `
                                                       + `leave: §5.25.2.b pays MP = R(1 − L/N), so leave beyond the 6 permissible days per `
@@ -3790,7 +4071,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
                                     <div style={{ fontSize: 11.5, ...muted, marginTop: 8, lineHeight: 1.6 }}>
                                         The two are expected to differ slightly &mdash; attendance applies §5.25.2.b&rsquo;s{" "}
-                                        <b>MP = R(1 &minus; L/N)</b> for leave beyond the 6 permissible days. NPQP uses the
+                                        <b>MP = R(1 &minus; L/N)</b> for leave beyond the 6 permissible days. PQP uses the
                                         attendance figure; the plan is the check on it.
                                     </div>
                                 </>
@@ -4044,14 +4325,14 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             {/* ══ Deliverable track (§5.28.2) ══════════════════════
                                 SLA 001/002 fire on a deliverable's completion and are
                                 charged on that deliverable's cost, so they are totalled
-                                in rupees and kept out of the NPQP ceiling entirely. */}
-                            {(activeCategory === ALL_CATEGORIES || visibleDeliverable.length > 0) && (
+                                in rupees and kept out of the PQP ceiling entirely. */}
+                            {(
                             <>
                             <SectionHead
                                 title="Deliverable-linked SLAs"
                                 count={visibleDeliverable.reduce((n, c) => n + c.items.length, 0)}
                                 clause="§5.28.2"
-                                sub="Charged on the deliverable's own cost — no quarter ceiling."
+                                sub="Charged on the deliverable's own cost — no per-deliverable ceiling. Submission, defect rectification, governance tool."
                                 style={{ marginTop: 26 }}
                             />
 
@@ -4073,10 +4354,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 </div>
                             ) : (
                                 <>
-                                    <FilterScopeNote
-                                        active={activeCategory !== ALL_CATEGORIES}
-                                        text="Totals below cover every deliverable-linked SLA, not just this category."
-                                    />
                                     <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
                                         <Tile label="SLAs triggered" value={num(dTotals.slaCount, 0)} hint={`${num(dTotals.totalOccurrences, 0)} occurrences`} />
                                         <Tile label="Deliverables hit" value={num(dTotals.affectedActivities, 0)} accent={dTotals.affectedActivities > 0 ? RED : GREEN} />
@@ -4130,7 +4407,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 where the reason lives. It is gated on the tab,
                                 because this table IS the deliverable categories'
                                 detail view and has nothing to say under Resource. */}
-                            {(activeCategory === ALL_CATEGORIES || visibleDeliverable.length > 0) && (
+                            {(
                             <>
                                     <SectionHead
                                         title="Deliverable payment"
@@ -4175,9 +4452,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     label="LD deducted"
                                                     value={money(payables.totals.totalLdAmount)}
                                                     accent={RED}
-                                                    hint={payables.totals.capAppliedCount > 0
-                                                        ? `${payables.totals.capAppliedCount} capped`
-                                                        : "before = after · §5.28.2 sets no ceiling"}
+                                                    hint={`charged per deliverable · the ${QUARTER_LD_CAP_PERCENT}% ceiling `
+                                                        + "acts on the quarter's total"}
                                                 />
                                                 <Tile label="Net payable" value={money(payables.totals.totalNetPayable)} accent={GREEN} hint={`paid ${money(payables.totals.totalPayment)} − LD`} />
                                             </div>
@@ -4201,6 +4477,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                                 row={row}
                                                                 open={openPayables.has(row.milestoneId)}
                                                                 onToggle={() => togglePayable(row.milestoneId)}
+                                                                activityDates={milestoneCompletion.get(String(row.milestoneId))?.activities}
                                                             />
                                                         ))}
                                                     </tbody>
@@ -4279,48 +4556,75 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
                             {/* ══ §5.27.6 when both regimes charge at once ═════════
                                 The ceiling is applied to the quarterly track alone, on
-                                the reasoning that Phase 1 has no NPQP for a 10% of it to
+                                the reasoning that Phase 1 has no PQP for a 10% of it to
                                 bite on. That holds only while the phases do not overlap
                                 — which is exactly what a quarter charging on both tracks
                                 means. Reported rather than resolved: which reading
                                 applies is a contract question, not a code one. */}
-                            {combinedCap.bothTracksCharged && (
+                            {/* ── the quarter's only LD ceiling (§5.27.6) ──
+                                One cap, over both tracks, on the quarter's
+                                cumulative LD. Shown whenever any LD was charged
+                                — a ceiling that held is as much a result as one
+                                that bit, and an auditor needs to see it was
+                                tested rather than assume it. */}
+                            {combinedCap.applies && (
                                 <div style={{
                                     marginTop: 20,
-                                    background: combinedCap.exceedsIfCombined ? "#fdf4f2" : "#fffaf0",
-                                    border: `1px solid ${combinedCap.exceedsIfCombined ? "#f0c9c2" : "#f0dfc0"}`,
+                                    background: combinedCap.capApplied ? "#fdf4f2"
+                                        : combinedCap.unvalued ? "#fffaf0" : "#f2f9f4",
+                                    border: `1px solid ${combinedCap.capApplied ? "#f0c9c2"
+                                        : combinedCap.unvalued ? "#f0dfc0" : "#cfe6d8"}`,
                                     borderRadius: 10, padding: "12px 15px", fontSize: 12,
                                     color: "#334155", lineHeight: 1.7,
                                 }}>
-                                    <b style={{ color: combinedCap.exceedsIfCombined ? RED : AMBER }}>
-                                        {combinedCap.exceedsIfCombined ? "⚠ " : "◍ "}
-                                        Both LD regimes charged this quarter — §5.27.6&rsquo;s ceiling is ambiguous here.
+                                    <b style={{
+                                        color: combinedCap.capApplied ? RED
+                                            : combinedCap.unvalued ? AMBER : GREEN,
+                                    }}>
+                                        {combinedCap.capApplied ? "⚠ " : combinedCap.unvalued ? "◍ " : "✓ "}
+                                        §5.27.6 — the quarter&rsquo;s cumulative LD ceiling
+                                        {combinedCap.capApplied ? " has been reached"
+                                            : combinedCap.unvalued ? " cannot be valued"
+                                                : " holds"}
                                     </b>
                                     <br />
                                     Quarterly track <b style={{ color: INK }}>{money(combinedCap.quarterlyLd)}</b>
                                     {" "}+ deliverable track <b style={{ color: INK }}>{money(combinedCap.deliverableLd)}</b>
-                                    {" "}= <b style={{ color: INK }}>{money(combinedCap.combined)}</b>.
-                                    {combinedCap.ceiling !== null ? (
+                                    {" "}= <b style={{ color: INK }}>{money(combinedCap.combined)}</b> cumulative,
+                                    before tax.
+                                    {combinedCap.ceilingKnown ? (
                                         <>
-                                            {" "}§5.27.6&rsquo;s {combinedCap.capPercent}% of NPQP is{" "}
+                                            {" "}The ceiling is {combinedCap.capPercent}% of a PQP of{" "}
+                                            <b style={{ color: INK }}>{money(combinedCap.pqp)}</b> ={" "}
                                             <b style={{ color: INK }}>{money(combinedCap.ceiling)}</b>.
+                                            {combinedCap.capApplied ? (
+                                                <>
+                                                    {" "}The total is over by{" "}
+                                                    <b style={{ color: RED }}>{money(combinedCap.excess)}</b>, so{" "}
+                                                    <b style={{ color: RED }}>{money(combinedCap.chargeable)}</b> is
+                                                    chargeable and the excess is not recoverable this quarter.
+                                                </>
+                                            ) : (
+                                                <> The total is inside it, so nothing is capped.</>
+                                            )}
                                         </>
                                     ) : (
-                                        <> No NPQP base is available, so the ceiling cannot be valued.</>
-                                    )}
-                                    <br />
-                                    The figures above apply the ceiling to the <b>quarterly track only</b> — §5.28.2 states
-                                    no ceiling, and §5.27.6&rsquo;s 10% is 10% of NPQP, which Phase 1 (D1&ndash;D8) does not
-                                    have. That reasoning assumes the phases do not overlap. They do in this quarter.
-                                    {combinedCap.exceedsIfCombined && (
                                         <>
-                                            {" "}Read literally &mdash; &ldquo;the cumulative liquidated damages for each
-                                            quarter shall under no circumstances exceed 10% of the NPQP&rdquo; &mdash; the
-                                            combined total is over by{" "}
-                                            <b style={{ color: RED }}>{money(combinedCap.excess)}</b>.
+                                            {" "}<b style={{ color: AMBER }}>No PQP is available for this quarter</b>,
+                                            so 10% of it cannot be valued and the LD above stands uncapped. PQP is
+                                            defined (§5.28.1.c) as the monthly payment of the resources in the
+                                            deployment plan, which a deliverable-paid Phase-1 quarter does not have.
+                                            The RFP does not carve Phase 1 out of §5.27.6, so this is worth settling
+                                            with the contract owner before the quarter is invoiced.
                                         </>
                                     )}
-                                    {" "}Worth settling with the contract owner before this quarter is invoiced.
+                                    <br />
+                                    <span style={{ ...muted }}>
+                                        The cap is cumulative: one ceiling over the quarter&rsquo;s whole LD bill.
+                                        There is no per-SLA and no per-deliverable ceiling — §5.28.1.f sums the
+                                        percentages before applying them, and a per-milestone cap was asked for
+                                        in the pre-bid queries and refused.
+                                    </span>
                                 </div>
                             )}
 
@@ -4430,7 +4734,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             <FormulaRow step="F" formula="Σ monthly cost of resources in the deployment plan + CCN" clause="§5.28.1.d(c)" when="quarter" />
                                             <FormulaRow step="QGR" formula="35% of (Phase-1 fixed + one-time) ÷ Phase 2&3 quarters" clause="§5.23.2" when="quarter"
                                                 note="Guaranteed regardless of deployment." />
-                                            <FormulaRow step="NPQP" formula="F + QGR" clause="§5.28.1.d(e)" when="quarter"
+                                            <FormulaRow step="PQP" formula="F + QGR" clause="§5.28.1.d(e)" when="quarter"
                                                 note="The LD base. QGR is inside it, so LD is charged on QGR too." />
                                             <FormulaRow step="Σ LD %" formula="sum of every quarterly SLA's LD %" clause="§5.28.1.d(f)" when="quarter" />
                                             <FormulaRow
@@ -4440,7 +4744,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 when="quarter"
                                                 note="Caps the TOTAL, never the individual SLAs — so the per-SLA figures above stay as scored."
                                             />
-                                            <FormulaRow step="LD ₹" formula="capped LD % × NPQP" clause="§5.28.1.d(f)" when="quarter" />
+                                            <FormulaRow step="LD ₹" formula="capped LD % × PQP" clause="§5.28.1.d(f)" when="quarter" />
                                             <FormulaRow step="AQP" formula="(PA − LD ₹) + QGR" clause="§5.28.1.d(h)" when="quarter"
                                                 note="QGR is added back after the deduction because §5.23.2 guarantees it." />
                                             <FormulaRow
@@ -4451,7 +4755,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 note="Not an RFP term. Charged on planned, paid from actual — so when PA is below F the real bite exceeds the headline %."
                                             />
                                             <FormulaRow step="On the invoice" formula="X + 18%·X − 10%·X = 1.08·X" clause="§5.28.1.e" when="each invoice"
-                                                note="GST added, TDS withheld, both on the invoice value. Applied after the LD deduction — §5.27.6 makes LD and NPQP tax-exclusive." />
+                                                note="GST added, TDS withheld, both on the invoice value. Applied after the LD deduction — §5.27.6 makes LD and PQP tax-exclusive." />
                                             <FormulaRow step="④ Contract ceiling" formula="Σ all payments ≤ 1.25 × contract value" clause="§5.26.2" when="whole contract"
                                                 note="Contract value plus 25% CCN headroom." />
                                         </FormulaTable>
@@ -4459,15 +4763,15 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         {/* ── 3 · deliverable track ───────────────── */}
                                         <FormulaTable
                                             title="3 · Deliverable-linked SLAs"
-                                            subtitle="§5.28.2 — no severity, no points, no ceiling"
+                                            subtitle="§5.28.2 — no severity, no points, no per-deliverable ceiling"
                                         >
                                             <FormulaRow step="SLA 001" formula="0.5% × ⌈days / 7⌉ × that deliverable's cost" clause="§5.28.2.b" when="per deliverable"
                                                 note="Non-submission. “Each week OR PART THEREOF” — the weeks round UP." />
                                             <FormulaRow step="SLA 002" formula="1% × ⌈days / 7⌉ × that deliverable's cost" clause="§5.28.2.c" when="per deliverable"
                                                 note="Not accepted / defects not rectified." />
                                             <FormulaRow step="Net payable" formula="deliverable cost − LD ₹" clause="§5.25.1.b" when="per deliverable" />
-                                            <FormulaRow step="Cap" formula="none" clause="§5.28.2" when="—"
-                                                note="§5.28.2 states no ceiling; §5.27.6's 10% is 10% of NPQP, which Phase 1 does not have (F starts at D9, QGR at Phase 2). Net payable can go negative and is shown as calculated." />
+                                            <FormulaRow step="Cap" formula={`Σ quarter LD ≤ ${QUARTER_LD_CAP_PERCENT}% × PQP`} clause="§5.27.6" when="per quarter"
+                                                note="The ONLY ceiling: cumulative across both tracks, every SLA and every deliverable, pre-tax. No per-SLA or per-deliverable cap exists — §5.28.1.f sums the percentages first, and a per-milestone cap was refused in the pre-bid queries. An individual deliverable may therefore exceed 10% of its own cost. Net payable can go negative and is shown as calculated." />
                                             <FormulaRow step="Not applicable" formula="resource-based SLAs do not apply in Phase 1" clause="§5.28.2.a" when="—" />
                                         </FormulaTable>
 
@@ -4489,6 +4793,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     </div>
                                 )}
                             </div>
+                            </PageSection>
 
                             {/* ══ PAYMENT STATEMENT ════════════════════════════════
                                 The conclusion of the page, and the only part of it
@@ -4501,9 +4806,23 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 its own rule above it, a dark masthead carrying the two
                                 figures that matter, and lettered sections with real
                                 headers instead of bold rows inside one long table. */}
-                            <div style={{
-                                marginTop: 34, borderTop: "3px solid #dbe6f5", paddingTop: 22,
-                            }}>
+                            <PageSection
+                                index="3"
+                                title="Payment statement"
+                                sub="The quarter's audit record — what was earned, what was penalised, what is paid."
+                                right={
+                                    <button
+                                        type="button"
+                                        className="uidai-pmis-btn uidai-pmis-btn-small"
+                                        style={{ marginTop: 0 }}
+                                        onClick={() => window.print()}
+                                        title="Opens the print dialog. Only the statement is printed — choose 'Save as PDF' for a filed copy."
+                                    >
+                                        ⭳ Download / print
+                                    </button>
+                                }
+                            >
+                            <div id={PRINT_ROOT_ID} style={{ marginTop: 16 }}>
                                 <div style={{
                                     borderRadius: 14, overflow: "hidden",
                                     border: "1px solid #c8d6ee",
@@ -4619,40 +4938,146 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
                                         <StatementSection
                                             letter="A"
-                                            title="Phase-1 deliverables"
-                                            clause="§5.23.1 · §5.28.2"
+                                            title="Deliverables completed this quarter"
+                                            clause="§5.23.1 · §5.28.2 · before tax"
                                             first
                                         />
+                                {/* Where "completed" came from. Worth stating: the
+                                    milestone's own status field says not_completed on
+                                    every deliverable of a live project, while the
+                                    approval workflow has them closed — so a reader
+                                    comparing this against the milestone list needs to
+                                    know which of the two this section believes. */}
+                                <div style={{ fontSize: 11, ...muted, marginBottom: 8, lineHeight: 1.6 }}>
+                                    {completionSource === "workflow"
+                                        ? "Completion is taken from each activity's approval workflow — the date the owner division accepted it."
+                                        : "No activity approval workflow was readable, so completion falls back to the milestone status and actual end dates."}
+                                </div>
+                                {/* One line per deliverable, then the total —
+                                    not a single "deliverable cost" figure. An
+                                    audit reader has to be able to see which
+                                    deliverables were paid for and what each
+                                    one's penalty was, without leaving the
+                                    statement. */}
                                 <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 620 }}>
                                     <tbody>
-                                        {deliverableItems.length === 0 ? (
-                                            <ChainRow label="none evaluated this quarter" value="—" />
+                                        {quarterPayment.paid.length === 0 ? (
+                                            <ChainRow
+                                                label="No deliverable completed in this quarter"
+                                                value="—"
+                                                hint="A deliverable becomes payable in the quarter its activities finish, however late that is."
+                                            />
                                         ) : (
                                             <>
+                                                {/* The statement stays a money document — the
+                                                    dates behind each completion live in the
+                                                    Deliverable payment table above, where the
+                                                    row can be expanded. */}
+                                                {quarterPayment.paid.map((d) => (
+                                                    <ChainRow
+                                                        key={d.milestoneId}
+                                                        label={`${d.code ? `${d.code} · ` : ""}${d.name || "—"}`}
+                                                        clause={d.completedOn ? `completed ${longDate(d.completedOn)}` : undefined}
+                                                        value={money(d.payment)}
+                                                        hint={!d.paymentIsPreTax
+                                                            ? "⚠ tax-inclusive — the payment page returned no pre-tax split for this milestone."
+                                                            : null}
+                                                    />
+                                                ))}
                                                 <ChainRow
-                                                    label="Deliverable cost"
-                                                    value={money(payables.totals.totalPayment)}
-                                                />
-                                                <ChainRow
-                                                    label="Liquidated damages"
-                                                    clause="SLA 001 / 002"
-                                                    sign="−"
-                                                    value={money(payables.totals.totalLdAmount)}
-                                                    tone={RED}
-                                                />
-                                                <ChainRow
-                                                    label="Net payable"
+                                                    label={`Deliverable cost · ${quarterPayment.paid.length} completed`}
                                                     sign="="
-                                                    value={money(statement.deliverableNet)}
+                                                    value={money(quarterPayment.totals.payment)}
                                                     strong
                                                     rule
-                                                    hint={`LD before any ceiling ${money(payables.totals.totalLdAmountUncapped)}, after ${money(payables.totals.totalLdAmount)} — §5.28.2 sets no ceiling, so these agree and the net can go negative.`}
+                                                />
+
+                                                {/* Each penalty on its own line, with the base it
+                                                    was charged on — §5.28.2 charges on the LD
+                                                    basis, which is not the payment, and a reader
+                                                    checking the arithmetic needs both. */}
+                                                {quarterPayment.paid.filter((d) => d.ldAmount > 0).map((d) => (
+                                                    /* Σ across this deliverable's SLAs, uncapped —
+                                                       §5.27.6's ceiling acts on the quarter's total
+                                                       below, not on any single line here. */
+                                                    <ChainRow
+                                                        key={`ld-${d.milestoneId}`}
+                                                        label={`LD on ${d.code || d.name}`}
+                                                        clause={`${pct(Math.round(d.ldPercent * 100) / 100)} of ${money(d.ldBase)}`}
+                                                        sign="−"
+                                                        value={money(d.ldAmount)}
+                                                        tone={RED}
+                                                    />
+                                                ))}
+                                                <ChainRow
+                                                    label="Liquidated damages"
+                                                    clause={combinedCap.capApplied
+                                                        ? `SLA 001 / 002 · capped at ${QUARTER_LD_CAP_PERCENT}% of PQP (§5.27.6)`
+                                                        : combinedCap.unvalued
+                                                            ? "SLA 001 / 002 · §5.27.6 ceiling unvalued — no PQP"
+                                                            : `SLA 001 / 002 · within the ${QUARTER_LD_CAP_PERCENT}% quarterly ceiling`}
+                                                    sign="−"
+                                                    value={money(quarterPayment.totals.ldAmount)}
+                                                    tone={RED}
+                                                    rule
+                                                />
+                                                <ChainRow
+                                                    label="Net payable, before tax"
+                                                    sign="="
+                                                    value={money(quarterPayment.totals.net)}
+                                                    strong
+                                                    rule
+                                                    hint={`Charged on the LD basis, deducted from the payment. The quarter’s cumulative LD is capped at ${QUARTER_LD_CAP_PERCENT}% of PQP; the net can still go negative.`}
                                                 />
                                             </>
                                         )}
-
                                     </tbody>
                                 </table>
+
+                                {/* Accrued but not chargeable. Listed because the
+                                    penalty is real and growing — it simply lands on
+                                    the quarter the deliverable finally completes in,
+                                    not this one. */}
+                                {quarterPayment.accruing.length > 0 && (
+                                    <div style={{
+                                        marginTop: 10, padding: "10px 12px", borderRadius: 9, maxWidth: 620,
+                                        background: "#fffaf0", border: "1px solid #e8d9b0",
+                                    }}>
+                                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".5px", textTransform: "uppercase", color: AMBER, marginBottom: 6 }}>
+                                            Not yet chargeable · {quarterPayment.accruing.length} incomplete
+                                        </div>
+                                        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                                            <tbody>
+                                                {quarterPayment.accruing.map((d) => (
+                                                    <ChainRow
+                                                        key={`acc-${d.milestoneId}`}
+                                                        label={`${d.code ? `${d.code} · ` : ""}${d.name || "—"}`}
+                                                        clause={`${d.reason} · ${d.completedActivityCount}/${d.activityCount} activities`}
+                                                        value={money(d.ldAmount)}
+                                                        tone={AMBER}
+                                                    />
+                                                ))}
+                                                <ChainRow
+                                                    label="LD accrued so far"
+                                                    value={money(quarterPayment.totals.accruingLd)}
+                                                    strong
+                                                    rule
+                                                    tone={AMBER}
+                                                    hint="Charged in whichever quarter the deliverable completes — not in this one, and not counted above."
+                                                />
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+
+                                {quarterPayment.undated.length > 0 && (
+                                    <div style={{ fontSize: 11, ...muted, marginTop: 8, lineHeight: 1.6, maxWidth: 620 }}>
+                                        ◍ {quarterPayment.undated.length} deliverable(s) are marked complete but no
+                                        activity carries an actual end date, so they cannot be placed in a quarter:{" "}
+                                        {quarterPayment.undated.slice(0, 4).map((d) => d.code || d.name).join(", ")}
+                                        {quarterPayment.undated.length > 4 ? ` …and ${quarterPayment.undated.length - 4} more` : ""}.
+                                    </div>
+                                )}
 
                                         {/* ── B · quarterly stream ────────────────── */}
                                         <StatementSection
@@ -4671,12 +5096,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             sign="+"
                                             value={money(chain.qgr)}
                                         />
-                                        <ChainRow label="Payment base" clause="NPQP" sign="=" value={money(chain.npqp)} />
+                                        <ChainRow label="Payment base" clause="PQP" sign="=" value={money(chain.npqp)} />
                                         <ChainRow
                                             label={relaxation.applied ? "Liquidated damages as scored" : "Liquidated damages"}
                                             clause={relaxation.applied
-                                                ? `${pct(Math.round(relaxation.scoredPercent * 100) / 100)} of NPQP`
-                                                : `${pct(chain.cappedLdPercent)} of NPQP`}
+                                                ? `${pct(Math.round(relaxation.scoredPercent * 100) / 100)} of PQP`
+                                                : `${pct(chain.cappedLdPercent)} of PQP`}
                                             sign={chain.ldAmount === null ? undefined : "−"}
                                             value={chain.ldAmount === null ? "—" : money(chain.ldAmount)}
                                             tone={RED}
@@ -4723,7 +5148,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         {/* ── QGR, broken down ───────────────────────
                                             §5.23.2's guarantee, and where this quarter's
                                             instalment sits in it. Every line is read from
-                                            the NPQP payload or derived by exact division —
+                                            the PQP payload or derived by exact division —
                                             the block only appears when the basis is
                                             actually there, rather than showing an
                                             instalment number nobody can stand behind. */}
@@ -4790,7 +5215,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     </tbody>
                                                 </table>
                                                 <div style={{ fontSize: 11, ...muted, marginTop: 7, lineHeight: 1.55 }}>
-                                                    Paid whatever the deployment. It sits inside NPQP so LD is charged on it,
+                                                    Paid whatever the deployment. It sits inside PQP so LD is charged on it,
                                                     then is added back after the deduction.
                                                 </div>
                                             </div>
@@ -4952,7 +5377,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     that keep money on different sides of the
                                     tax line: the payment page returns each term
                                     pre-tax and post-tax, the contracts service
-                                    keeps NPQP / PA / LD / AQP tax-exclusive
+                                    keeps PQP / PA / LD / AQP tax-exclusive
                                     (§5.27.6) and taxes once at the invoice.
 
                                     Fine until something compares across that
@@ -5036,6 +5461,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     </div>
                                 )}
                             </div>
+                            </PageSection>
                         </>
                     )}
                 </>

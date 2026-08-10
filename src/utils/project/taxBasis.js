@@ -7,7 +7,7 @@
      · /payment-page returns every term twice — `preTaxValue` and
        `totalValue` — and every bucket twice on `totals`
        (`fixedCost` / `fixedCostPretax` / `fixedCostTax`).
-     · The contracts service keeps NPQP, PA, LD and AQP EXCLUSIVE of tax
+     · The contracts service keeps PQP, PA, LD and AQP EXCLUSIVE of tax
        (§5.27.6 says so outright) and taxes once at the invoice
        (§5.28.1.e).
 
@@ -231,7 +231,7 @@ export function reconcileSlaDeductions({ paymentPage, period, totals, chain, qua
     compare("fin-sum-ld", "Σ LD % before the cap", totals?.sumLdPercent, row.sumLdPercent, pctStr,
         row.overrideReason ? `Finance's figure carries a reason: "${row.overrideReason}".` : "");
     compare("fin-capped-ld", "LD % after the quarter cap", totals?.cappedLdPercent, row.cappedLdPercent, pctStr);
-    compare("fin-npqp", "Payment base (NPQP)", chain?.npqp, row.npqp, fmt,
+    compare("fin-npqp", "Payment base (PQP)", chain?.npqp, row.npqp, fmt,
         "Tax-exclusive on both sides (§5.27.6).");
     compare("fin-ld-amount", "Liquidated damages", chain?.ldAmount, row.ldAmount, fmt);
     compare("fin-aqp", "Final payment (AQP)", quarterlyNet, row.aqpAmount, fmt);

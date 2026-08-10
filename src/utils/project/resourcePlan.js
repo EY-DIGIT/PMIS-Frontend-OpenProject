@@ -1,15 +1,15 @@
 /* ══════════════════════════════════════════════════════════════════
    F — the planned quarterly resource cost (RFP §5.28.1.d).
 
-   Every LD figure on the rollup is a percentage of NPQP, and
+   Every LD figure on the rollup is a percentage of PQP, and
 
-       NPQP = F + QGR              (§5.28.1.d, steps c–e)
+       PQP = F + QGR              (§5.28.1.d, steps c–e)
 
    where F is "the Planned Quarterly Payment applicable (aggregate of
    monthly payment of all resources to be deployed as per resource
    deployment plan Plus CCN resources, if any)".
 
-   Until now F arrived only as a number from the NPQP endpoint, which
+   Until now F arrived only as a number from the PQP endpoint, which
    computes it from leave-management. The deployment plan itself is now
    on the project tree: a resource-based milestone's activities each
    carry allocation rows of
@@ -217,7 +217,7 @@ export function collectResourceActivities(milestones) {
     return out;
 }
 
-/* ─── plan vs the NPQP endpoint ───────────────────────────────────
+/* ─── plan vs the PQP endpoint ───────────────────────────────────
    `endpointF` is the blended fAmount for the same contract quarter, so
    both sides describe the same window.
 
@@ -235,7 +235,7 @@ export function compareFToPlan(planF, endpointF, { tolerancePercent = 1 } = {}) 
             plan, endpoint,
             reason: plan === null
                 ? "the deployment plan has no priced allocation in this quarter"
-                : "the NPQP endpoint returned no F for this quarter",
+                : "the PQP endpoint returned no F for this quarter",
         };
     }
     const difference = plan - endpoint;

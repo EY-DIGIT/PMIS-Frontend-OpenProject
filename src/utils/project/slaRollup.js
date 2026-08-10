@@ -105,14 +105,14 @@ export function contractQuarterFor(quarters, on = new Date()) {
    `calendarQuarterFor` above picks ONE quarter by midpoint, which is an
    admitted approximation: a contract quarter of equal length straddling
    two calendar quarters is charged entirely against whichever one holds
-   its middle day. Since NPQP is only published per calendar quarter and
+   its middle day. Since PQP is only published per calendar quarter and
    the RFP measures everything from T0, the honest answer is to take
    both and weight them by actual day overlap:
 
        Y2-Q1 = 15 Feb → 14 May (89 days)
          2026-Q1  45 days  50.6%
          2026-Q2  44 days  49.4%
-       NPQP = 0.506 × NPQP(2026-Q1) + 0.494 × NPQP(2026-Q2)
+       PQP = 0.506 × PQP(2026-Q1) + 0.494 × PQP(2026-Q2)
 
    A contract quarter spans at most four months, so it can touch at most
    two calendar quarters — but the loop is written generally rather than
@@ -160,10 +160,10 @@ export function overlappingCalendarQuarters(window) {
     return out;
 }
 
-/* Blend per-quarter NPQP figures by day weight. `values` maps a calendar
-   quarter key to its NPQP.
+/* Blend per-quarter PQP figures by day weight. `values` maps a calendar
+   quarter key to its PQP.
 
-   A quarter whose NPQP could not be read is NOT treated as zero — that
+   A quarter whose PQP could not be read is NOT treated as zero — that
    would quietly halve the base and understate every LD on the screen.
    The blend is instead reported as incomplete, with the missing keys
    named, and the caller decides whether to show a number at all.      */
@@ -242,15 +242,15 @@ export function topBandThreshold(ldBands) {
 
    §5.28.2 (Phase 1, deliverables D1–D8). SLA 001 deducts 0.5% and SLA
    002 deducts 1% "of the total cost of that deliverable" per week of
-   delay. No severity, no points, no NPQP. §5.28.2.a is explicit that
+   delay. No severity, no points, no PQP. §5.28.2.a is explicit that
    resource-based SLAs do not apply in this phase at all.
 
    §5.28.3–5.28.4 (Phase 2/3 and the governance tool). Severity →
-   points → LD band → a percentage of NPQP, accumulated over a quarter.
+   points → LD band → a percentage of PQP, accumulated over a quarter.
 
    §5.28.3.a (SLA 003) is the hybrid that forces two axes rather than
    one: it escalates linearly (0.1% per day, no points) but is charged
-   against NPQP. So the TRACK is decided by what the LD is charged on,
+   against PQP. So the TRACK is decided by what the LD is charged on,
    and the SCORING by how the percentage is derived.
 
    Both facts already travel on every evaluation result — `ldBaseKind`
@@ -302,7 +302,7 @@ export function classifyResult(result) {
 
        The category is the safer authority because it DERIVES the base:
        DELIVERABLE_SUBMISSION is charged on the deliverable's cost, and
-       every other category on NPQP. The base is only consulted when no
+       every other category on PQP. The base is only consulted when no
        category came through at all.                                    */
     let track;
     let basis;
@@ -477,7 +477,7 @@ export function rollupBySla(results, { severityMaster, ldBands } = {}) {
         }
 
         /* ── Quarterly track, linear scoring (§5.28.3.a — SLA 003) ────
-           A per-day escalation charged on NPQP. No severity and no band,
+           A per-day escalation charged on PQP. No severity and no band,
            so the quarter's LD % is simply what its occurrences reached. */
         if (g.scoring === SCORING.LINEAR) {
             const scored = occurrences.filter((o) => num(o.ldPercent) !== null);
@@ -558,12 +558,12 @@ export function rollupBySla(results, { severityMaster, ldBands } = {}) {
 
 /* ─── quarter totals (§5.28.1.d and §5.27.6) ─────────────────────────
    The RFP sums every SLA's LD % for the quarter and multiplies that sum
-   by NPQP once. It never apportions the ceiling back onto individual
+   by PQP once. It never apportions the ceiling back onto individual
    SLAs, so neither does this: the only two ceilings are the per-SLA
-   band (applied in the rollup) and the §5.27.6 cumulative 10% of NPQP
+   band (applied in the rollup) and the §5.27.6 cumulative 10% of PQP
    applied here.
 
-   NPQP may legitimately be absent — its F component comes from leave
+   PQP may legitimately be absent — its F component comes from leave
    management — so the amount stays null rather than reporting zero.   */
 export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } = {}) {
     const items = Array.isArray(quarterlyItems) ? quarterlyItems : [];
@@ -591,60 +591,79 @@ export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } =
     };
 }
 
-/* ─── the two tracks meeting in one quarter (§5.27.6) ────────────────
-   §5.27.6 says "the cumulative liquidated damages for each quarter
-   shall under no circumstances exceed 10% of the Net Planned Quarterly
-   Payment". `quarterTotals` applies that ceiling to the quarterly track
-   only, on the reasoning documented in deliverablePayable.js: SLA
-   001/002 apply to D1–D8, i.e. Phase 1, where neither F (staff cost,
-   from D9 per §5.25.2) nor QGR (§5.23.2, Phase 2–3) exists, so there is
-   no NPQP for a 10% of it to bite on.
+/* ─── the quarter's one and only LD ceiling (§5.27.6) ────────────────
+   As amended by the corrigendum of 21-Jul-2025 (s.no. 47):
 
-   That reasoning holds only while the phases do not overlap. A D1–D8
-   deliverable that slips into a quarter where Phase 2 is already
-   running produces BOTH kinds of LD in one quarter, and the literal
-   reading of "cumulative liquidated damages for each quarter" then
-   covers the combined figure.
+     "Liquidated damages will be calculated on a quarterly basis. The
+      cumulative 'liquidated damages' for each quarter shall under no
+      circumstances exceed 10% of the Planned Quarterly Payment (PQP)
+      (exclusive of applicable taxes, duties and levies)."
 
-   This does not resolve the ambiguity — it detects the one situation in
-   which it becomes a live question, and reports the numbers on both
-   readings so a human can decide before the invoice is raised.       */
+   Three things that sentence settles, and that this function encodes:
+
+     · CUMULATIVE — one ceiling over the quarter's whole LD bill, both
+       tracks together. Not per SLA: §5.28.1.f sums the percentages
+       first, `(1%+2%) × PQP`. Not per deliverable either — a bidder
+       asked for exactly that (query 138, "cap to 5% of respective
+       milestone") and UIDAI answered "No Change".
+     · 10% OF PQP — §5.28.1.c defines PQP as the aggregate monthly
+       payment of all resources in the deployment plan plus any CCN
+       resources. NPQP was deleted outright (s.no. 49), so QGR is no
+       longer part of the base.
+     · EXCLUSIVE OF TAX — the ceiling and the charge are both pre-tax.
+
+   PQP is a RESOURCE figure, and Phase 1 (D1–D8) is paid on deliverables
+   against no deployment plan. So a Phase-1 quarter can charge LD while
+   having no PQP to take 10% of. The RFP does not resolve that: §5.27.6
+   says "each quarter" without carving Phase 1 out, and §5.28.1.c hands
+   it a base that does not exist yet.
+
+   Where the base is unknown the ceiling is reported as UNVALUED and the
+   LD stands uncapped. Inventing a base — falling back on the contract
+   value, or on the deliverable payments — would silently move invoiced
+   money onto a rule nobody wrote.                                     */
 export function combinedCapCheck(totals, dTotals) {
     const quarterly = Number(totals?.ldAmount);
     const deliverable = Number(dTotals?.totalLdAmount);
-    const hasQuarterly = Number.isFinite(quarterly) && quarterly > 0;
-    const hasDeliverable = Number.isFinite(deliverable) && deliverable > 0;
+    const q = Number.isFinite(quarterly) ? Math.max(0, quarterly) : 0;
+    const d = Number.isFinite(deliverable) ? Math.max(0, deliverable) : 0;
+    const combined = q + d;
 
-    // Only interesting when both regimes actually charged something in the
-    // same quarter. One track alone is unambiguous.
-    if (!hasQuarterly || !hasDeliverable) {
-        return { applies: false, bothTracksCharged: false };
-    }
-
-    const npqp = Number(totals?.npqp);
+    const pqp = Number(totals?.npqp);
     const capPercent = Number(totals?.quarterCapPercent ?? 10);
-    const ceiling = Number.isFinite(npqp) && npqp > 0 ? (npqp * capPercent) / 100 : null;
-    const combined = quarterly + deliverable;
+    const ceilingKnown = Number.isFinite(pqp) && pqp > 0;
+    const ceiling = ceilingKnown ? (pqp * capPercent) / 100 : null;
+
+    /* Guarded on `> ceiling` rather than `>=` so a quarter landing exactly
+       on the ceiling reports "at the ceiling", not "capped" — the figure
+       does not move, and saying it was capped would misdescribe it. */
+    const exceeds = ceilingKnown && combined > ceiling;
 
     return {
-        applies: true,
-        bothTracksCharged: true,
-        quarterlyLd: quarterly,
-        deliverableLd: deliverable,
+        applies: combined > 0,
+        bothTracksCharged: q > 0 && d > 0,
+        quarterlyLd: q,
+        deliverableLd: d,
         combined,
+        pqp: ceilingKnown ? pqp : null,
         ceiling,
+        ceilingKnown,
         capPercent,
-        // Under the strict reading the combined total is already over the
-        // ceiling, so the two readings give materially different invoices.
-        exceedsIfCombined: ceiling !== null && combined > ceiling,
-        excess: ceiling !== null ? Math.max(0, combined - ceiling) : null,
+        /* What may actually be charged. Equal to `combined` unless the
+           ceiling is both known and breached — never a clamp to zero. */
+        chargeable: exceeds ? ceiling : combined,
+        capApplied: exceeds,
+        excess: exceeds ? combined - ceiling : 0,
+        /* Charging LD with no valued ceiling is the reportable state: it
+           is not a breach, but nobody has checked that it isn't one. */
+        unvalued: combined > 0 && !ceilingKnown,
     };
 }
 
 /* Deliverable-track totals (§5.28.2). Each SLA here is charged on its
    own deliverable's cost, so only rupee amounts aggregate — summing
    percentages taken against different bases would be meaningless — and
-   the §5.27.6 NPQP ceiling does not reach this track. */
+   the §5.27.6 PQP ceiling does not reach this track. */
 export function deliverableTotals(deliverableItems) {
     const items = Array.isArray(deliverableItems) ? deliverableItems : [];
     return {
