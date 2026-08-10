@@ -3917,7 +3917,6 @@ function PhasePanel({
                 <tr style={{ verticalAlign: "middle" }}>
                   <th style={{ minWidth: 240 }}>Milestone</th>
                   <th style={{ width: 150 }}>Activity</th>
-                  <th style={{ width: 80, textAlign: "center" }}>INTERVAL</th>
                   <th style={{ width: 110, textAlign: "right" }}>
                     % of Payment
                     <span style={{
@@ -3955,7 +3954,7 @@ function PhasePanel({
               <tbody>
                 {terms.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
+                    <td colSpan={7} style={{ textAlign: "center", padding: 18, color: "var(--uidai-pmis-muted)" }}>
                       No payment terms — terms are auto-created from the cost rows on this phase.
                     </td>
                   </tr>
@@ -3972,11 +3971,6 @@ function PhasePanel({
                           </span>
                         </td>
                         <td><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
-                        <td style={{ textAlign: "center" }}>
-                          {t.cycleCount != null
-                            ? <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600, border: "1px solid #c4e9d0" }}>{t.cycleCount}</span>
-                            : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
-                        </td>
                         <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                         {/* Recurring costs carry no % and therefore no LD basis. */}
                         <td style={{ textAlign: "right" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
@@ -4049,15 +4043,6 @@ function PhasePanel({
                         ) : (
                           <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>
                         )}
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        {t.cycleCount != null
-                          ? <span style={{
-                              display: "inline-block", padding: "2px 8px", borderRadius: 999,
-                              background: "#eef9f0", color: "#1b7a42", fontSize: 12, fontWeight: 600,
-                              border: "1px solid #c4e9d0",
-                            }}>{t.cycleCount}</span>
-                          : <span style={{ color: "var(--uidai-pmis-muted)" }}>—</span>}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         {t.percentOfPayment == null
@@ -4212,7 +4197,6 @@ function PhasePanel({
                               </span>
                             </span>
                           </td>
-                          <td style={{ textAlign: "center" }}><span style={{ color: "var(--uidai-pmis-muted)" }}>—</span></td>
                           <td style={{ textAlign: "right" }}>
                             <strong style={{ color: "#173e77" }}>{aPct} %</strong>
                             {/* On a resource milestone this % is derived from
@@ -4308,7 +4292,7 @@ function PhasePanel({
                 })}
                 {terms.length > 0 && !isSyntheticOnly && (
                   <tr style={{ background: "#f1f6fd" }}>
-                    <td colSpan={4} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
+                    <td colSpan={3} style={{ fontWeight: 800, color: "#173e77", textAlign: "right" }}>
                       Total
                     </td>
                     {/* Allotments must total exactly 100% for the phase — flag
