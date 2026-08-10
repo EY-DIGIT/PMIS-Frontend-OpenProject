@@ -133,35 +133,117 @@ const SHOW_FINANCE_CROSSCHECK = false;
    these rules would fight the first over which `visibility` wins. */
 const PRINT_ROOT_ID = "sla-payment-statement-print";
 const PRINT_STYLE_ID = "sla-payment-statement-print-style";
+
+/* The whole rollup, top to bottom, as opposed to the statement alone.
+   Both buttons run the same `window.print()`; which subtree survives is
+   decided by this class on <body>, set for the duration of the dialog.
+   One stylesheet, two modes — a second print path would be free to drift
+   from the first. */
+const PAGE_PRINT_ROOT_ID = "sla-rollup-print";
+const PRINT_ALL_CLASS = "sla-printing-all";
 const PRINT_CSS = `
 @media print {
-  /* Hide the page, then re-show only the statement's subtree. Done with
+  /* ── unwind the app shell first ──────────────────────────────────
+     The shell is a fixed-height CLIPPED scroller: .pmis-wrap is
+     height:100vh + overflow:hidden, and .pmis-main / .pmis-content
+     scroll inside it. Left alone, the sheet comes out BLANK — the
+     statement below is positioned to the top of the page, which is
+     outside those ancestors' clip rectangle, and anything past the
+     first viewport is cut off anyway.
+
+     So the shell has to lay out at its natural height before any of
+     the rules below can matter. */
+  html, body {
+    height: auto !important; max-height: none !important;
+    overflow: visible !important;
+  }
+  .pmis-wrap, .pmis-shell-row, .pmis-main, .pmis-content {
+    display: block !important;
+    height: auto !important; max-height: none !important;
+    overflow: visible !important; position: static !important;
+  }
+  /* Chrome is removed outright rather than hidden. Left visible-but-
+     hidden it keeps its box, and a sticky header's box reserves space
+     on every sheet — which is how a "blank first page" happens. */
+  .pmis-sidebar, .pmis-header, .site-header, .pmis-footer { display: none !important; }
+
+  /* Hide the page, then re-show only the chosen subtree. Done with
      visibility rather than display so the element keeps its box and can
-     be repositioned to the top of the sheet. */
+     be repositioned to the top of the sheet.
+
+     Which subtree that is depends on the mode: the statement alone by
+     default, the whole rollup when <body> carries the print-all class. */
   body * { visibility: hidden !important; }
-  #${PRINT_ROOT_ID}, #${PRINT_ROOT_ID} * { visibility: visible !important; }
-  #${PRINT_ROOT_ID} {
+
+  body:not(.${PRINT_ALL_CLASS}) #${PRINT_ROOT_ID},
+  body:not(.${PRINT_ALL_CLASS}) #${PRINT_ROOT_ID} * { visibility: visible !important; }
+  body:not(.${PRINT_ALL_CLASS}) #${PRINT_ROOT_ID} {
     position: absolute !important; left: 0 !important; top: 0 !important;
     width: 100% !important; margin: 0 !important; padding: 0 !important;
     box-shadow: none !important;
   }
+
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID},
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID} * { visibility: visible !important; }
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID} {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100% !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; box-shadow: none !important;
+  }
+  /* Controls are dead on paper and the reload button reads as a defect
+     in a filed document. The pickers' CURRENT values matter, though, so
+     the quarter heading below carries them instead. */
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID} button,
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID} select { display: none !important; }
+  body.${PRINT_ALL_CLASS} #${PAGE_PRINT_ROOT_ID} .sla-print-only { display: block !important; }
+  /* Nested inside the page root, the statement must not also be pulled
+     to top:0 — that would stack it over the sections above it. */
+  body.${PRINT_ALL_CLASS} #${PRINT_ROOT_ID} { position: static !important; }
+
   /* The masthead is a gradient on ink — without this browsers drop the
      background and print white text on white. */
-  #${PRINT_ROOT_ID} * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  #${PRINT_ROOT_ID} *, #${PAGE_PRINT_ROOT_ID} * {
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+  }
   #${PRINT_ROOT_ID} > div { box-shadow: none !important; border-radius: 0 !important; }
   /* A lettered section should not be split across a page break. */
-  #${PRINT_ROOT_ID} table { break-inside: avoid; page-break-inside: avoid; }
+  #${PRINT_ROOT_ID} table, #${PAGE_PRINT_ROOT_ID} table { break-inside: avoid; page-break-inside: avoid; }
   @page { margin: 12mm; }
 }
 `;
 
+/* Runs the browser's print dialog with the whole rollup selected rather
+   than the statement. The class is cleared on `afterprint` rather than
+   straight after `print()` returns, because print() does not block in
+   every browser — removing it early would take the rollup back off the
+   sheet mid-dialog. */
+function printWholePage() {
+    const body = document.body;
+    const done = () => {
+        body.classList.remove(PRINT_ALL_CLASS);
+        window.removeEventListener("afterprint", done);
+    };
+    window.addEventListener("afterprint", done);
+    body.classList.add(PRINT_ALL_CLASS);
+    window.print();
+}
+
+/* Idempotent by CONTENT, not merely by presence.
+   Returning early whenever the id existed meant a tab that had already
+   loaded an older build kept that build's rules for the rest of its
+   life — hot reload swaps the module but never the injected <style>.
+   That is not cosmetic: it silently printed the wrong subtree, because
+   the older stylesheet had no notion of the print-all mode and showed
+   the statement unconditionally. Refresh when the text differs. */
 function ensurePrintStyle() {
     if (typeof document === "undefined") return;
-    if (document.getElementById(PRINT_STYLE_ID)) return;
-    const el = document.createElement("style");
-    el.id = PRINT_STYLE_ID;
-    el.textContent = PRINT_CSS;
-    document.head.appendChild(el);
+    let el = document.getElementById(PRINT_STYLE_ID);
+    if (!el) {
+        el = document.createElement("style");
+        el.id = PRINT_STYLE_ID;
+        document.head.appendChild(el);
+    }
+    if (el.textContent !== PRINT_CSS) el.textContent = PRINT_CSS;
 }
 
 /* The folded "N things to check" diagnostics panel. Off for now.
@@ -3565,11 +3647,19 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         && !settlementRow;
 
     return (
-        <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
+        <div id={PAGE_PRINT_ROOT_ID} className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
             {/* ── header + period pickers ───────────────────────────── */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
                 <div>
                     <div style={{ fontSize: 16, fontWeight: 800, color: INK }}>SLA Rollup by Quarter</div>
+                    {/* The pickers are dropped from the printed copy, so the
+                        quarter they were set to has to be stated instead —
+                        otherwise the sheet does not say what it covers. */}
+                    <div className="sla-print-only" style={{ display: "none", fontSize: 12, ...muted, marginTop: 4 }}>
+                        {period
+                            ? `${period.key} · ${longDate(period.start)} to ${longDate(period.end)}`
+                            : "No quarter selected"}
+                    </div>
                 </div>
 
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -3612,6 +3702,16 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         disabled={loading}
                     >
                         {loading ? "Loading…" : "↻ Reload"}
+                    </button>
+                    <button
+                        type="button"
+                        className="uidai-pmis-btn uidai-pmis-btn-small"
+                        style={{ marginTop: 0 }}
+                        onClick={printWholePage}
+                        disabled={loading || !period}
+                        title="Opens the print dialog with the whole rollup — every section, top to bottom. Choose 'Save as PDF' for a filed copy. Collapsed rows print collapsed."
+                    >
+                        ⭳ Download / print full page
                     </button>
                 </div>
             </div>
