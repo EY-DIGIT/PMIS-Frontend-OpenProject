@@ -287,15 +287,17 @@ function buildAttendanceReportHtml({
     ...(employees.some((e) => e.lastWorkingDate)
       ? [{ h: "Last Working Day", get: (e) => formatReportDate(e.lastWorkingDate) }] : []),
     { h: "Holiday", num: true, get: (e) => num(e.holidayDays) },
+    /* Same order as the table on screen — a report whose columns were
+       arranged differently would be needlessly hard to check against it. */
+    ...(showBillable ? [{ h: "Billable Days", num: true, get: (e) => billableDaysOf(costFor(e)) ?? 0 }] : []),
     { h: "Working", num: true, get: (e) => num(e.workingDays) },
     { h: "Present", num: true, get: (e) => num(e.presentDays) },
-    { h: "Leave Taken", num: true, get: (e) => leaveTakenOf(e) },
     ...(splitLeave ? [
       { h: "Paid Leave", num: true, get: (e) => num(e.paidLeaveDays) },
       { h: "Unpaid Leave", num: true, get: (e) => num(e.unpaidLeaveDays) },
     ] : []),
     ...(showSandwich ? [{ h: "Sandwich", num: true, get: (e) => sandwichOf(costFor(e)) ?? 0 }] : []),
-    ...(showBillable ? [{ h: "Billable Days", num: true, get: (e) => billableDaysOf(costFor(e)) ?? 0 }] : []),
+    { h: "Total Leave Taken", num: true, get: (e) => leaveTakenOf(e) },
     { h: "Attendance %", num: true, get: (e) => `${num(e.attendancePercentage).toFixed(2)}%` },
     ...(showCost ? [{ h: "Cost (INR)", num: true, get: (e) => num(costFor(e)?.totalCost).toFixed(2) }] : []),
   ];
@@ -315,7 +317,7 @@ function buildAttendanceReportHtml({
     if (h === "Billable Days") return days(employees.reduce((t, e) => t + (billableDaysOf(costFor(e)) ?? 0), 0));
     if (h === "Sandwich") return days(employees.reduce((t, e) => t + (sandwichOf(costFor(e)) ?? 0), 0));
     if (h === "Present") return days(employees.reduce((t, e) => t + num(e.presentDays), 0));
-    if (h === "Leave Taken") return days(employees.reduce((t, e) => t + leaveTakenOf(e), 0));
+    if (h === "Total Leave Taken") return days(employees.reduce((t, e) => t + leaveTakenOf(e), 0));
     if (h === "Paid Leave") return days(employees.reduce((t, e) => t + num(e.paidLeaveDays), 0));
     if (h === "Unpaid Leave") return days(employees.reduce((t, e) => t + num(e.unpaidLeaveDays), 0));
     if (h === "Cost (INR)") return num(costTotal).toFixed(2);
@@ -1735,13 +1737,25 @@ function AttendanceTable({
               {/* The dates behind the count sit on both the header and each
                   cell — whichever the pointer lands on, the answer is there. */}
               <th className="att-th att-num" title={holidayTitle}>Holiday</th>
+              {/* Beside Holiday rather than at the end of the day counts: it
+                  is the other figure that says how much of the period this row
+                  was actually on the project, before the attendance counts
+                  start measuring what they did with it. */}
+              {showBillable && (
+                <th
+                  className="att-th att-num"
+                  title="Days billed to the client = days on the project − unpaid leave days. Paid leave and holidays stay billable. Summed across the period's monthly bands, so anyone who joined or left partway is counted only for the days they were on it."
+                >
+                  Billable Days
+                </th>
+              )}
               <th className="att-th att-num" title="Working days = calendar days − week offs − holidays. This is the denominator of Attendance %.">Working</th>
               <th className="att-th att-num" title="Days present = full days present + (half days × 0.5).">Present</th>
               {/* Half-day column withdrawn — half days already count as 0.5
                   inside Present, so the separate tally was double-reporting. */}
-              {/* Total first, then the split it breaks into — "6 taken, of
-                  which 6 paid and 0 unpaid" reads in the order it's spoken. */}
-              <th className="att-th att-num">Leave Taken</th>
+              {/* The parts first, then the total they add up to — the run
+                  reads left to right as paid, unpaid, sandwich, and what they
+                  come to. */}
               {splitLeave && (
                 <>
                   <th className="att-th att-num">Paid Leave</th>
@@ -1760,20 +1774,10 @@ function AttendanceTable({
                   Sandwich
                 </th>
               )}
+              <th className="att-th att-num" title="Paid leave plus unpaid leave plus sandwich days — every day of leave in the period.">Total Leave Taken</th>
               {/* Week off hidden for now — uncomment with the matching <td> below.
               <th className="att-th att-num">Week off</th>
               */}
-              {/* Last of the day counts, closing the run that starts at
-                  Holiday — so every column measured in days sits together and
-                  Attendance, the only percentage, is what breaks the run. */}
-              {showBillable && (
-                <th
-                  className="att-th att-num"
-                  title="Days billed to the client = days on the project − unpaid leave days. Paid leave and holidays stay billable. Summed across the period's monthly bands, so anyone who joined or left partway is counted only for the days they were on it."
-                >
-                  Billable Days
-                </th>
-              )}
               <th
                 className="att-th att-num att-th-att"
                 title="Attendance % = (present days + paid leave) ÷ working days × 100. Half days count as 0.5; weekends and holidays are excluded from working days. Example: (46 present + 6 paid) ÷ 59 × 100 = 88.14%."
@@ -1848,11 +1852,16 @@ function AttendanceTable({
                 <td className="att-td att-num att-dim" title={holidayTitle}>
                   {emp.holidayDays}
                 </td>
+                {showBillable && (() => {
+                  const b = billableDaysOf(costFor(emp));
+                  return (
+                    <td className={`att-td att-num${b == null ? " att-dim" : ""}`}>
+                      {b == null ? "—" : days(b)}
+                    </td>
+                  );
+                })()}
                 <td className="att-td att-num att-dim">{emp.workingDays}</td>
                 <td className="att-td att-num">{emp.presentDays}</td>
-                <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
-                  {leaveTakenOf(emp)}
-                </td>
                 {splitLeave && (
                   <>
                     <td className="att-td att-num">{num(emp.paidLeaveDays)}</td>
@@ -1869,17 +1878,12 @@ function AttendanceTable({
                     </td>
                   );
                 })()}
+                <td className={`att-td att-num${leaveTakenOf(emp) > 0 ? "" : " att-dim"}`}>
+                  {leaveTakenOf(emp)}
+                </td>
                 {/* Week off hidden for now — uncomment with the matching <th> above.
                 <td className="att-td att-num att-dim">{emp.weekOffDays}</td>
                 */}
-                {showBillable && (() => {
-                  const b = billableDaysOf(costFor(emp));
-                  return (
-                    <td className={`att-td att-num${b == null ? " att-dim" : ""}`}>
-                      {b == null ? "—" : days(b)}
-                    </td>
-                  );
-                })()}
                 <td className="att-td att-num att-att-cell">
                   <AttendanceBar value={emp.attendancePercentage} />
                 </td>
@@ -1903,34 +1907,32 @@ function AttendanceTable({
           {showCost && (
             <tfoot>
               <tr className="att-row att-foot-row">
-                {/* The label spans everything up to Billable Days: six fixed
-                    columns — ID, Name, Holiday, Working, Present, Leave Taken —
-                    plus Milestone when the rows differ, Joined when the report
-                    carries it, the paid/unpaid pair when leave is split, and
-                    Sandwich when it's reported. Every optional column before
-                    Billable needs its term here, or both totals shift left. */}
+                {/* Billable Days now sits early, so the row is three spans, not
+                    two. First: everything before it — ID, Name and Holiday,
+                    plus Milestone and Joined when they show. */}
                 <td
                   className="att-td att-strong"
                   colSpan={
-                    6 +
+                    3 +
                     (showMilestoneCol ? 1 : 0) +
-                    (showJoined ? 1 : 0) +
-                    (splitLeave ? 2 : 0) +
-                    (showSandwich ? 1 : 0)
+                    (showJoined ? 1 : 0)
                   }
                 >
                   Total for {period}
                 </td>
-                {/* Its own cell rather than another term in the colSpan above —
-                    the days total is worth stating, and folding it into the
-                    label would push the cost total a column off Cost. */}
+                {/* The days total, under its own column. */}
                 {showBillable && (
                   <td className="att-td att-num att-strong">{days(billableTotal)}</td>
                 )}
-                {/* Attendance now sits between Billable Days and Cost, and an
-                    average of percentages doesn't belong on a totals row — so
-                    the column is held open and left blank. */}
-                <td className="att-td" />
+                {/* Then everything between it and Cost, held open and blank:
+                    Working, Present, Total Leave Taken and Attendance, plus the
+                    paid/unpaid pair and Sandwich when shown. Summing attendance
+                    counts here would invite reading an average of percentages
+                    as a total. */}
+                <td
+                  className="att-td"
+                  colSpan={4 + (splitLeave ? 2 : 0) + (showSandwich ? 1 : 0)}
+                />
                 <td
                   className="att-td att-num att-strong att-cost-total"
                   title={rupeesInWords(costTotal)}
