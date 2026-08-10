@@ -267,11 +267,26 @@ function withHalves(dates, halves) {
 function monthLeave(m) {
   const paid =
     m.paidLeaveDays != null ? num(m.paidLeaveDays) : num(m.paidLeaveDaysApplied);
+  /* The raw unpaid-leave count. NOT what the Unpaid Leave column shows — that
+     is `totalUnpaidDays`, the charged figure. Kept separate because the two
+     differ, and using the charged one here would count sandwich days twice.
+
+     Verified across 33 live month rows:
+       totalUnpaidDays = unpaidLeaveDays + sandwichLeave − relaxationDays
+     so sandwich is already inside it, net of any day waived. */
   const unpaid =
     m.unpaidLeaveDays != null
       ? num(m.unpaidLeaveDays)
       : Math.max(0, num(m.workingDays) - num(m.effectivePaidDays));
-  return { paid, unpaid, total: paid + unpaid };
+  const sandwich = num(m.sandwichLeave);
+  /* Days charged against the resource, and the figure Billable Days is
+     derived from — `billableDays = activeCalendarDays − totalUnpaidDays`
+     holds for all 33 rows, where the raw unpaid count does not. */
+  const charged = m.totalUnpaidDays != null ? num(m.totalUnpaidDays) : unpaid;
+  /* Every day of leave taken, each counted once: paid, unpaid and sandwich.
+     Deliberately not paid + charged + sandwich — `charged` already contains
+     sandwich, so that would double it. */
+  return { paid, unpaid, sandwich, charged, total: paid + unpaid + sandwich };
 }
 
 /* Every calendar month a window touches, as {year, month} — the grids the
@@ -1687,11 +1702,11 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                 <th className="ld-num" title="Billable days in the period — normally the full span of the Start and End dates, but fewer for anyone who joined or left partway through. Per Day Rate is still divided over the whole span.">Calendar Days</th>
                 <th className="ld-num" title="Working days = calendar days − week offs − holidays. Note this is NOT the divisor behind Per Day Rate — money is spread over calendar days, not working days.">Working Days</th>
                 <th className="ld-num" title="Days present = full days present + (half days × 0.5).">Present Days</th>
-                <th className="ld-num" title="Paid leave plus unpaid leave for the month. Derived here — the report sends the parts but no total. Relaxation days are not included.">Total Leave</th>
+                <th className="ld-num" title="Every day of leave taken in the cycle: paid + unpaid + sandwich, each counted once. Derived here — the report sends the parts but no total. Note this can be more than Unpaid Leave + Paid Leave, because Unpaid Leave is the charged figure and nets off any relaxation granted.">Total Leave</th>
                 {/* The two halves of Total Leave. Unpaid leads because it is
                     the one that costs money — it reads straight across into
                     Billable Days and Deducted Amount. */}
-                <th className="ld-num" title="Leave beyond the allowance. These are the days Deducted Amount is charged on.">Unpaid Leave</th>
+                <th className="ld-num" title="Days actually charged for — unpaid leave plus sandwich days, less any relaxation granted. This is the figure Deducted Amount is charged on and the one Billable Days is derived from (days on the project − this).">Unpaid Leave</th>
                 <th className="ld-num" title="Leave within the permissible allowance — nothing is deducted for these days.">Paid Leave</th>
                 {/* Its own category rather than part of the paid/unpaid split:
                     a sandwich day is a non-working day caught between leave
@@ -1730,15 +1745,30 @@ function CostReportSection({ loading, error, report, totals, joiningDate }) {
                   <td className="ld-num">{show(m.presentDays)}</td>
                   <td
                     className="ld-num"
-                    title={`${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid`}
+                    title={
+                      `${dayCount(leave.paid)} paid + ${dayCount(leave.unpaid)} unpaid` +
+                      `${leave.sandwich > 0 ? ` + ${dayCount(leave.sandwich)} sandwich` : ""}` +
+                      ` = ${dayCount(leave.total)}`
+                    }
                   >
                     {dayCount(leave.total)}
                   </td>
-                  {/* The two halves of Total Leave, each sent outright. Unpaid
-                      is the one that costs money, so it carries the warning
-                      tone the attendance table uses for the same figure. */}
-                  <td className={`ld-num${num(m.unpaidLeaveDays) > 0 ? " ld-unpaid" : " ld-dim"}`}>
-                    {dayCount(m.unpaidLeaveDays)}
+                  {/* The CHARGED figure — totalUnpaidDays — not the raw unpaid
+                      count: it is what Deducted Amount is billed on and what
+                      Billable Days subtracts, so showing the raw one here left
+                      the row unable to reconcile with either. */}
+                  <td
+                    className={`ld-num${leave.charged > 0 ? " ld-unpaid" : " ld-dim"}`}
+                    title={
+                      leave.charged !== leave.unpaid
+                        ? `${dayCount(leave.unpaid)} unpaid` +
+                          `${leave.sandwich > 0 ? ` + ${dayCount(leave.sandwich)} sandwich` : ""}` +
+                          `${num(m.relaxationDays) > 0 ? ` − ${dayCount(m.relaxationDays)} relaxation` : ""}` +
+                          ` = ${dayCount(leave.charged)} charged`
+                        : undefined
+                    }
+                  >
+                    {dayCount(leave.charged)}
                   </td>
                   <td className="ld-num">{dayCount(m.paidLeaveDays)}</td>
                   {showSandwich && (

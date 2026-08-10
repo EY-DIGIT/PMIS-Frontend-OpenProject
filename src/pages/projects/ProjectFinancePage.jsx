@@ -147,8 +147,19 @@ function termMoney(t) {
     };
   };
 
-  const delivery = part(t?.deliveryPreTaxValue, t?.deliveryTaxValue, t?.deliveryValue);
-  const oneTime = part(t?.oneTimePreTaxValue, t?.oneTimeTaxValue, t?.oneTimeValue);
+  /* /payment-page spells these `Pretax` (lowercase t); the camelCased
+     spelling is accepted too so either casing binds rather than silently
+     falling through to the total-minus-tax derivation. */
+  const delivery = part(
+    t?.deliveryPretaxValue ?? t?.deliveryPreTaxValue,
+    t?.deliveryTaxValue,
+    t?.deliveryValue,
+  );
+  const oneTime = part(
+    t?.oneTimePretaxValue ?? t?.oneTimePreTaxValue,
+    t?.oneTimeTaxValue,
+    t?.oneTimeValue,
+  );
 
   return {
     total,
@@ -2729,7 +2740,7 @@ export default function ProjectFinancePage() {
                 phases={phases}
                 totals={totals}
                 carryMethods={carryMethods}
-                costItems={costItems}
+                taxMode={taxMode}
                 focus={summaryFocus}
               />
             </div>
@@ -4817,7 +4828,7 @@ function CalculatorPanel({ calc }) {
    panel and briefly highlighted.
    ────────────────────────────────────────────────────────────────── */
 function CarryForwardSummarySection({
-  phases, totals, carryMethods = [], costItems = [], focus = null,
+  phases, totals, carryMethods = [], taxMode = TAX_MODE.WITH, focus = null,
 }) {
   /* Card nodes by phase key, so the focus effect can find the one to
      scroll to. Hooks run before the empty-phases bail-out below. */
@@ -4852,13 +4863,34 @@ function CarryForwardSummarySection({
 
   if (!phases || phases.length === 0) return null;
 
+  const withTax = taxMode === TAX_MODE.WITH;
+
+  /* Before-tax share of a project-level bucket, e.g. oneTimeCostPretax /
+     oneTimeCost. The phase payload carries a pre-tax figure for the
+     deliverable base only (phaseBasePretax) — there is none for the phase's
+     Out of Pocket / recurring / total, so those are taken down to before-tax
+     with the bucket's own ratio. Exact while a bucket sits on one tax rate,
+     which is how the page builds them (a project has a single Out of Pocket
+     row). Returns null when the backend sent no pre-tax figure at all, and
+     the caller then leaves the amount as-is. */
+  const pretaxRatio = (bucket) => {
+    const post = Number(totals?.[bucket]) || 0;
+    const pre = amt(totals?.[`${bucket}Pretax`]);
+    if (pre === null || post <= 0) return null;
+    return pre / post;
+  };
+  const oneTimeRatio = pretaxRatio("oneTimeCost");
+  const recurringRatio = pretaxRatio("recurringCost");
+  const money2 = (n) => Math.round(n * 100) / 100;
+
   /* Remaining balance = Total Contract Cost minus everything already
-     scheduled through the payment terms (sum of each term's ₹ value
-     across all phases). It's the portion of the contract not yet
-     committed to a payment term. */
-  const totalContractCost = Number(totals?.totalContractCost) || 0;
+     scheduled through the payment terms, both in the current mode. Terms are
+     summed on termMoney() — the legacy `value` is post-tax on a fixed term
+     but PRE-tax on a resource one, so summing it mixes the two and
+     under-reports the schedule. */
+  const totalContractCost = totalOf(totals, "totalContractCost", withTax);
   const totalScheduled = phases.reduce(
-    (s, p) => s + (p.paymentTerms || []).reduce((a, t) => a + (Number(t.value) || 0), 0),
+    (s, p) => s + (p.paymentTerms || []).reduce((a, t) => a + shownOf(termMoney(t), withTax), 0),
     0
   );
   const totalRemaining = totalContractCost - totalScheduled;
@@ -4867,7 +4899,7 @@ function CarryForwardSummarySection({
      amount so the column reads as a sum; `rule` marks the line as a
      sub-total (heavier top border + darker label). */
   const stat = (label, value, opts = {}) => (
-    <div style={{
+    <div key={opts.key || label} style={{
       display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8,
       fontSize: 12, padding: opts.rule ? "7px 0 5px" : "5px 0",
       borderTop: opts.first
@@ -4908,10 +4940,18 @@ function CarryForwardSummarySection({
         display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
         fontSize: 14, fontWeight: 800, color: "#173e77",
         letterSpacing: 0.5, textTransform: "uppercase",
-        paddingBottom: 12, marginBottom: 14,
+        paddingBottom: 12, marginBottom: 4,
         borderBottom: "1px solid var(--uidai-pmis-border)",
       }}>
         Phase Summary
+      </div>
+      {/* Which mode the cards are reading in, so a figure here is never
+          mistaken for the other one. */}
+      <div style={{
+        fontSize: 10, color: "#93a2b8", textAlign: "center",
+        marginBottom: 12, fontWeight: 600,
+      }}>
+        All amounts {withTax ? "include tax" : "exclude tax"}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -4919,58 +4959,123 @@ function CarryForwardSummarySection({
           const isLast = i === phases.length - 1;
           const terms = p.paymentTerms || [];
           const totalPercent = terms.reduce((s, r) => s + (Number(r.percentOfPayment) || 0), 0);
-          const scheduledAmount = terms.reduce((s, r) => s + (Number(r.value) || 0), 0);
-          /* baseTotal = the phase's own delivery cost (cost + tax on its cost
-             rows). effectivePhaseTotal is the backend's authoritative phase
-             total and is already INCLUSIVE — it folds in the Out of Pocket
-             Expense share (and any carry-forward received), which is why the
-             payment terms take their percentages from it. So it's used as-is;
-             adding the parts again would double-count them. */
-          const baseTotal = Number(p.phaseFixedTotal) || Number(p.effectivePhaseTotal) || 0;
-          const oneTimeAllocated = Number(p.oneTimeAllocated) || 0;
+          /* termMoney(), not `value` — see the note on totalScheduled. */
+          const scheduledAmount = terms.reduce((s, r) => s + shownOf(termMoney(r), withTax), 0);
+
+          /* Straight off /payment-page — the backend sends every rung of the
+             tax-inclusive ladder, so nothing there is derived:
+               phaseBasePretax + phaseBaseTax = phaseBaseTotal   (deliverables)
+               phaseBaseTotal + oneTimeAllocated + recurringTotal = phaseTotal
+             (effectivePhaseTotal is phaseBaseTotal + oneTimeAllocated only —
+             it leaves recurring out, which is why phaseTotal is the total.) */
+          const basePretax = amt(p.phaseBasePretax);
+          const baseTax = amt(p.phaseBaseTax);
+          const basePostTax =
+            amt(p.phaseBaseTotal)
+            ?? amt(p.effectivePhaseTotal)
+            ?? amt(p.phaseFixedTotal)
+            ?? 0;
+          const onePostTax = amt(p.oneTimeAllocated) ?? 0;
+          const recPostTax = amt(p.recurringTotal) ?? 0;
+          const phaseTotalPostTax =
+            amt(p.phaseTotal) ?? basePostTax + onePostTax + recPostTax;
+
+          /* Before-tax mode: the deliverable base has its own backend field;
+             Out of Pocket and recurring are scaled by their bucket ratio, and
+             the phase total is then the sum of the three rungs — so the card
+             still adds up in whichever mode it is read. */
+          const baseTotal = withTax ? basePostTax : (basePretax ?? basePostTax);
+          const oneTimeAllocated = withTax || oneTimeRatio === null
+            ? onePostTax
+            : money2(onePostTax * oneTimeRatio);
+          const recurringTotal = withTax || recurringRatio === null
+            ? recPostTax
+            : money2(recPostTax * recurringRatio);
+          const phaseTotalCost = withTax
+            ? phaseTotalPostTax
+            : money2(baseTotal + oneTimeAllocated + recurringTotal);
+          /* Same scaling for the leftover leaving the phase — carriedOut is
+             post-tax only. Falls back to the post-tax figure if the phase
+             total is zero (nothing to take a ratio against). */
           const cf = p.carryForward || {};
           const yes = !!cf.enabled;
           const cfMethodName =
             carryMethods.find((m) => m.code === cf.methodCode)?.name || cf.methodCode || "";
-          const carriedOut = Number(cf.carriedOut) || 0;
-          const received = (Number(cf.received) || 0) + (Number(cf.receivedMilestone) || 0);
-          const declared = Number(p.effectivePhaseTotal);
-          const phaseTotalCost = Number.isFinite(declared) && declared > 0
-            ? declared
-            : baseTotal + oneTimeAllocated;
+          const carriedOutPostTax = amt(cf.carriedOut) ?? 0;
+          const carriedOut = withTax || phaseTotalPostTax <= 0
+            ? carriedOutPostTax
+            : money2(carriedOutPostTax * (phaseTotalCost / phaseTotalPostTax));
+          const receivedPostTax = (amt(cf.received) ?? 0) + (amt(cf.receivedMilestone) ?? 0);
+          const received = withTax || phaseTotalPostTax <= 0
+            ? receivedPostTax
+            : money2(receivedPostTax * (phaseTotalCost / phaseTotalPostTax));
 
-          /* Work out which addends the declared total is actually made of, so
-             only the lines that genuinely sum to it get a "+" in front. What
-             the total doesn't contain is reported below it instead — the
-             column always has to add up. */
-          const gap = Math.round((phaseTotalCost - baseTotal) * 100) / 100;
-          const near = (a, b) => Math.abs(a - b) <= 1;
-          const opeInTotal = oneTimeAllocated > 0
-            && (near(gap, oneTimeAllocated) || near(gap, oneTimeAllocated + received));
-          const receivedInTotal = received > 0
-            && (near(gap, received) || near(gap, oneTimeAllocated + received));
-          /* True when Deliverable Total + the flagged addends land exactly on
-             the declared total; if not, the signs are dropped and the lines
-             read as plain facts rather than a sum that doesn't work out. */
-          const ladderOk = near(
-            gap,
-            (opeInTotal ? oneTimeAllocated : 0) + (receivedInTotal ? received : 0)
-          );
+          /* The cost/tax split is a with-tax idea — before tax the two lines
+             are the same number, so only the total renders. The ladder's "+"
+             signs only appear when the rungs land exactly on the total, so the
+             column can never show a sum that is out. */
+          const splitOk = withTax && basePretax !== null && baseTax !== null
+            && Math.abs(basePretax + baseTax - basePostTax) <= 1;
+          const ladderOk =
+            Math.abs(baseTotal + oneTimeAllocated + recurringTotal - phaseTotalCost) <= 1;
+          /* A phase with no payment terms but a recurring cost is billed off
+             its dated schedule, so "Scheduled 0%" would be a lie. */
+          const recurringOnly = terms.length === 0 && recurringTotal > 0;
 
-          /* Cost/tax split for the ladder's first two lines, summed from this
-             phase's cost rows (one-time is a project-level pool, not a phase
-             row). Shown only when it reconciles with the backend's phase
-             total — a split that doesn't add up is worse than none. */
-          const rows = (costItems || []).filter(
-            (c) => c.costTypeCode !== "one_time" && String(c.phase ?? "") === String(p.phase)
-          );
-          const rowCost = rows.reduce((s, c) => s + (Number(c.cost) || 0), 0);
-          const rowTax = rows.reduce((s, c) => {
-            if (c.taxAmount != null) return s + (Number(c.taxAmount) || 0);
-            if (c.taxPercent != null) return s + ((Number(c.cost) || 0) * (Number(c.taxPercent) || 0)) / 100;
-            return s;
-          }, 0);
-          const splitOk = rows.length > 0 && Math.abs(rowCost + rowTax - baseTotal) <= 1;
+          /* The build-up is assembled as a list so a phase that carries no
+             deliverable cost at all (a recurring-only phase) starts at its
+             first real rung instead of leading with a row of zeroes. */
+          const hasBase = baseTotal > 0 || (basePretax ?? 0) > 0;
+          const ladder = [];
+          if (hasBase) {
+            if (splitOk) {
+              ladder.push(stat("Deliverable Cost", inr(basePretax), {
+                first: true, hint: wordsHint(basePretax),
+              }));
+              ladder.push(stat("Tax", inr(baseTax), { op: "+", hint: wordsHint(baseTax) }));
+              ladder.push(stat("Deliverable Total", inr(baseTotal), {
+                rule: true, hint: wordsHint(baseTotal),
+              }));
+            } else {
+              ladder.push(stat("Deliverable Total", inr(baseTotal), {
+                first: true, hint: wordsHint(baseTotal),
+              }));
+            }
+          }
+          if (oneTimeAllocated > 0) {
+            ladder.push(stat(
+              isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
+              inr(oneTimeAllocated),
+              {
+                key: "ope",
+                first: ladder.length === 0,
+                op: ladder.length && ladderOk ? "+" : "",
+                color: "#0b6b8f",
+                hint: wordsHint(oneTimeAllocated),
+              }
+            ));
+          }
+          /* Recurring is billed off its own dated schedule, but it is part of
+             what the phase costs — phaseTotal counts it. */
+          if (recurringTotal > 0) {
+            ladder.push(stat("Recurring Cost", inr(recurringTotal), {
+              key: "recurring",
+              first: ladder.length === 0,
+              op: ladder.length && ladderOk ? "+" : "",
+              color: "#0b6b8f",
+              hint: wordsHint(recurringTotal),
+            }));
+          }
+          ladder.push(stat("Phase Total Cost", inr(phaseTotalCost), {
+            key: "phase-total",
+            first: ladder.length === 0,
+            rule: ladder.length > 0,
+            hint: wordsHint(phaseTotalCost),
+          }));
+          const inclusions = [
+            oneTimeAllocated > 0 ? "Out of Pocket Expense" : null,
+            recurringTotal > 0 ? "Recurring Cost" : null,
+          ].filter(Boolean);
           return (
             <div
               key={p.phase}
@@ -5003,32 +5108,10 @@ function CarryForwardSummarySection({
 
               {/* Cost build-up — each line adds into the one below it. */}
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {splitOk ? (
-                  <>
-                    {stat("Deliverable Cost", inr(rowCost), { first: true, hint: wordsHint(rowCost) })}
-                    {stat("Tax", inr(rowTax), { op: "+", hint: wordsHint(rowTax) })}
-                    {stat("Deliverable Total", inr(baseTotal), { rule: true, hint: wordsHint(baseTotal) })}
-                  </>
-                ) : (
-                  stat("Deliverable Total", inr(baseTotal), { first: true, hint: wordsHint(baseTotal) })
-                )}
-
-                {receivedInTotal && stat("Carry Forward Received", inr(received), {
-                  op: ladderOk ? "+" : "", color: "#1b7a42", hint: wordsHint(received),
-                })}
-
-                {opeInTotal && stat(
-                  isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
-                  inr(oneTimeAllocated),
-                  { op: ladderOk ? "+" : "", color: "#0b6b8f", hint: wordsHint(oneTimeAllocated) }
-                )}
-
-                {stat("Phase Total Cost", inr(phaseTotalCost), {
-                  rule: true, hint: wordsHint(phaseTotalCost),
-                })}
-                {opeInTotal && (
+                {ladder}
+                {hasBase && inclusions.length > 0 && (
                   <div style={{ fontSize: 10, color: "#93a2b8", textAlign: "right", marginTop: -2 }}>
-                    including Out of Pocket Expense
+                    including {inclusions.join(" + ")}
                   </div>
                 )}
               </div>
@@ -5036,11 +5119,17 @@ function CarryForwardSummarySection({
               {/* How that total is split across payment terms vs carried out. */}
               {groupHead("Payment Schedule")}
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {stat("Scheduled", `${totalPercent}%`, {
-                  first: true,
-                  color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
-                })}
-                {stat("Scheduled Amount", inr(scheduledAmount), { hint: wordsHint(scheduledAmount) })}
+                {recurringOnly ? (
+                  stat("Billing", "Recurring schedule", { first: true, color: "#0b6b8f" })
+                ) : (
+                  <>
+                    {stat("Scheduled", `${totalPercent}%`, {
+                      first: true,
+                      color: totalPercent > 100 ? "var(--uidai-pmis-red)" : "#173e77",
+                    })}
+                    {stat("Scheduled Amount", inr(scheduledAmount), { hint: wordsHint(scheduledAmount) })}
+                  </>
+                )}
                 {/* No "+": the carried-out amount is the leftover LEAVING this
                     phase, not another addend on top of Scheduled Amount. */}
                 {stat("Carried Forward", yes ? inr(carriedOut) : "—", {
@@ -5048,14 +5137,10 @@ function CarryForwardSummarySection({
                   hint: yes ? wordsHint(carriedOut) : "",
                 })}
                 {cfMethodName && yes ? stat("Type", cfMethodName, { color: "#0b6b8f" }) : null}
-                {/* Anything the phase total didn't already account for is
-                    reported here, so no allocated figure goes missing. */}
-                {oneTimeAllocated > 0 && !opeInTotal && stat(
-                  isLast ? "Out of Pocket Expense (auto)" : "Out of Pocket Expense",
-                  inr(oneTimeAllocated),
-                  { color: "#0b6b8f", hint: wordsHint(oneTimeAllocated) }
-                )}
-                {!receivedInTotal && stat("Carry Forward Received",
+                {/* Received is money arriving from an earlier phase's carry
+                    forward. It is NOT part of phaseTotal, so it stays out of
+                    the ladder above and is reported on its own here. */}
+                {stat("Carry Forward Received",
                   received > 0 ? inr(received) : "—",
                   { color: received > 0 ? "#173e77" : "#a3afc1", hint: received > 0 ? wordsHint(received) : "" })}
               </div>
