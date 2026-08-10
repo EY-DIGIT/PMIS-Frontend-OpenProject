@@ -117,6 +117,11 @@ const FAN_OUT_CONCURRENCY = 6;
    the screen quotes the same figure the maths uses. */
 const QUARTER_LD_CAP_PERCENT = 10;
 
+/* Hides the "Cross-check against Finance" block at the foot of the
+   payment statement. Hidden on request, not deleted — `taxCheck` still
+   runs, so flipping this back to true restores the section as it was. */
+const SHOW_FINANCE_CROSSCHECK = false;
+
 /* ─── printing the statement ──────────────────────────────────────
    The statement is the audit record for the quarter, so it has to leave
    the screen as a filed document. `window.print()` plus a stylesheet
@@ -1925,6 +1930,9 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                 label="Highest LD %"
                                 wide
                                 value={<CapPair before={item.maxLdPercent} after={item.maxLdPercent} compact />}
+                                flag={item.capHits > 0}
+                                flagTitle={`Severity was capped to level ${item.severityCapLevel} on ${item.capHits} `
+                                    + `reporting interval(s). The cap does not change the amount charged.`}
                             />
                             <Metric label="Penalty amount" value={money(item.totalLdAmount)} accent={costing ? RED : GREEN} />
                         </>
@@ -1986,6 +1994,12 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                                 {item.unpricedCount > 0 && (
                                     <> <span style={{ color: AMBER }}>{item.unpricedCount} occurrence
                                         {item.unpricedCount === 1 ? " has" : "s have"} no deliverable cost resolved yet.</span></>
+                                )}
+                                {item.capHits > 0 && (
+                                    <> <span style={{ color: AMBER }}>
+                                        Severity was capped to level {item.severityCapLevel} on {item.capHits}{" "}
+                                        reporting interval{item.capHits === 1 ? "" : "s"} — the amount charged is unchanged.
+                                    </span></>
                                 )}
                             </>
                         ) : isPoints ? (
@@ -5341,7 +5355,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     find by eye. Reported, never silently
                                     corrected: which basis a project uses is a
                                     contract fact, not a screen's decision. */}
-                                {taxCheck.checked && taxCheck.checks.length > 0 && (
+                                {SHOW_FINANCE_CROSSCHECK && taxCheck.checked && taxCheck.checks.length > 0 && (
                                     <div style={{ marginTop: 18 }}>
                                         <div style={{
                                             display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap",

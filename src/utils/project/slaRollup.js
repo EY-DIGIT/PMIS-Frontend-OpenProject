@@ -463,15 +463,37 @@ export function rollupBySla(results, { severityMaster, ldBands } = {}) {
            comparable and are deliberately never summed. Only the rupee
            amounts aggregate. */
         if (g.track === TRACK.DELIVERABLE) {
-            const priced = occurrences.filter((o) => num(o.ldAmount) !== null);
+            /* PROVISIONAL — severity capping on the deliverable track.
+               Added on the contract team's instruction: "each SLA has a
+               cap on severity for each reporting interval". One occurrence
+               IS one reporting interval's measurement, so the §5.28.1.b
+               cap is applied per occurrence exactly as on the quarterly
+               points track.
+
+               This does NOT follow from the RFP as read here: §5.28.2
+               scores SLA 001/002 linearly in weeks of delay, with no
+               severity input, and §5.28.2.a keeps the resource regime out
+               of Phase 1 entirely. It is applied because the contract team
+               says the contract requires it, and is to be revisited.
+
+               Deliberately NOT wired into the money. `ldAmount` stays the
+               backend's figure, because no clause maps a capped severity
+               back to a deliverable LD percentage — inventing that mapping
+               would silently change what gets charged. The cap is scored
+               and surfaced; if it is meant to reduce LD, the mapping has
+               to come from the contract, not from here. */
+            const scored = occurrences.map((o) => scoreOccurrence(o, scale));
+            const priced = scored.filter((o) => num(o.ldAmount) !== null);
             deliverableItems.push({
                 ...g,
-                occurrences,
+                occurrences: scored,
                 ...counts,
                 totalDelayDays,
                 totalLdAmount: priced.reduce((n, o) => n + num(o.ldAmount), 0),
-                unpricedCount: occurrences.length - priced.length,
-                maxLdPercent: occurrences.reduce((m, o) => Math.max(m, num(o.ldPercent) ?? 0), 0),
+                unpricedCount: scored.length - priced.length,
+                maxLdPercent: scored.reduce((m, o) => Math.max(m, num(o.ldPercent) ?? 0), 0),
+                capHits: scored.filter((o) => o.capApplied).length,
+                severityCapLevel: scale.configured ? scale.capLevel : null,
             });
             continue;
         }
