@@ -424,9 +424,11 @@ export default function Layout({ children }) {
             <div className="pmis-nav-user"
               onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}>
               <span className="pmis-nav-user-av">{initials}</span>
+              {/* Top line (bold) is the ROLE, bottom line (plain) is the EMAIL —
+                  the class names read the other way round for historical reasons. */}
               <span className="pmis-nav-user-meta">
-                <span className="pmis-nav-user-name">{displayName}</span>
-                <span className="pmis-nav-user-role">{roleLabel}</span>
+                <span className="pmis-nav-user-name">{roleLabel}</span>
+                <span className="pmis-nav-user-role">{currentUser.email || displayName}</span>
               </span>
               <div className={`pmis-profile-menu${profileOpen ? " open" : ""}`}>
                 <div onClick={() => { setProfileOpen(false); navigate("/profile"); }}>Profile</div>
