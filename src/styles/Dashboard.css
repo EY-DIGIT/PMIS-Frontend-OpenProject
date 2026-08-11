@@ -562,6 +562,10 @@
   font-variant-numeric: tabular-nums;
 }
 .dashboard-wrap .dash-donut-caption { font-size: 11px; color: var(--dash-text-muted); margin-top: 2px; }
+/* Long center readouts (money totals) step down so they clear the ring.
+   Must stay after the base rule above — equal specificity, last one wins. */
+.dashboard-wrap .dash-donut-total--sm { font-size: 21px; }
+.dashboard-wrap .dash-donut-total--xs { font-size: 18px; }
 
 /* Gauge center overlay */
 .dashboard-wrap .dash-gauge-center {

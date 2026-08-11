@@ -97,6 +97,13 @@ export function DonutChart({ counts, keys, height = 230, centerLabel = "items", 
     .filter((d) => d.value > 0);
   const total = data.reduce((s, d) => s + d.value, 0);
   if (!total) return <NoData height={height} />;
+  // A money total ("₹ 240.75 Cr") is far wider than the plain counts most
+  // donuts show, and at the base size it runs into the ring. Step the font
+  // down by text length so long readouts fit and short ones stay large.
+  const centerText = money ? formatINR(total) : String(total);
+  const sizeClass = centerText.length >= 10 ? " dash-donut-total--xs"
+                  : centerText.length >= 8  ? " dash-donut-total--sm"
+                  : "";
   return (
     <div className="dash-chart-flex">
       <div className="dash-chart-canvas" style={{ height }}>
@@ -113,7 +120,7 @@ export function DonutChart({ counts, keys, height = 230, centerLabel = "items", 
           </PieChart>
         </ResponsiveContainer>
         <div className="dash-donut-center">
-          <span className="dash-donut-total">{money ? formatINR(total) : total}</span>
+          <span className={`dash-donut-total${sizeClass}`}>{centerText}</span>
           <span className="dash-donut-caption">{centerLabel}</span>
         </div>
       </div>
