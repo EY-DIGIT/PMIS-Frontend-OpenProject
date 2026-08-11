@@ -10,6 +10,7 @@ import {
   parseYear, parseQuarter, parseISODate, daysBetween, MIN_YEAR, MAX_YEAR,
 } from "../../utils/apiMessage";
 import { rupeesInWords } from "../../utils/moneyWords";
+import { fetchActivityHolidays } from "../../api/activityHolidays";
 import { getToken } from "../../api/auth";
 import { API_BASE as GATEWAY_BASE, authorizedFetch } from "../../api/client";
 import { ENDPOINTS } from "../../api/endpoint";
@@ -561,6 +562,25 @@ function buildHolidayTitle(holidays, range) {
   return [`Holidays in ${range.label}:`, ...lines].join("\n");
 }
 
+/* Tooltip for the Holiday column, from the activity's own holiday report.
+   Says the weekday/weekend split outright: a holiday landing on a week-off is
+   in this list but costs no working day, which is why a row's count can be
+   smaller than the number of dates below it. The old year-wide list couldn't
+   tell the two apart, so it could only hedge. */
+function buildActivityHolidayTitle(h) {
+  if (!h || !h.list.length) return undefined;
+  const lines = h.list.map((x) => {
+    const d = Number(x.iso.slice(8, 10));
+    const m = MONTH_NAMES[Number(x.iso.slice(5, 7))];
+    const dow = x.day ? x.day.slice(0, 3) : weekdayShort(x.iso);
+    return `${d} ${m} (${dow}) — ${x.name}${x.weekend ? " · on a week-off" : ""}`;
+  });
+  const head = h.weekend > 0
+    ? `${h.total} holidays in this activity — ${h.weekday} on working days, ${h.weekend} on a week-off:`
+    : `${h.total} ${h.total === 1 ? "holiday" : "holidays"} in this activity:`;
+  return [head, ...lines].join("\n");
+}
+
 function buildMonthGrid(year, month) {
   const startDay = new Date(year, month - 1, 1).getDay();
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -590,6 +610,11 @@ export default function ProjectAttendancePage() {
      over to another. The attendance table shows a departed resource and their
      replacement as two unrelated rows; this is the only place that says they
      are the same seat. */
+  /* The activity's own holidays. Replaces filtering a year-wide list by the
+     milestone window: the server knows the activity's dates, and it separates
+     holidays that cost a working day from those landing on a week-off. */
+  const [activityHolidays, setActivityHolidays] = useState(null);
+
   const [replacements, setReplacements] = useState(null);
   const [replacementsError, setReplacementsError] = useState(null);
   const [replacementsLoading, setReplacementsLoading] = useState(false);
@@ -1070,6 +1095,29 @@ export default function ProjectAttendancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, filterMilestoneId, filterActivityId, paramError, refreshKey]);
 
+  /* The activity's holidays. projectId + activityId, both required. */
+  useEffect(() => {
+    if (paramError || !projectId || !filterActivityId) {
+      setActivityHolidays(null);
+      return undefined;
+    }
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const data = await fetchActivityHolidays(projectId, filterActivityId, {
+          signal: controller.signal,
+        });
+        if (active) setActivityHolidays(data);
+      } catch {
+        /* Non-fatal: the Holiday column keeps its count and simply loses the
+           tooltip that lists the dates behind it. */
+        if (active) setActivityHolidays(null);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, filterActivityId, paramError, refreshKey]);
+
   /* Replacements. Unlike the two above this needs no milestone — the endpoint
      takes projectId + activityId only, and the activity already implies its
      milestone. */
@@ -1202,9 +1250,12 @@ export default function ProjectAttendancePage() {
   /* One range for everything on the page now: the template the header hands
      out, and the dates the Holiday column counts over. */
   const activeRange = templateRange;
+  /* The activity's own list when the server has it; otherwise the year-wide
+     calendar filtered by the milestone window, which is what this did before
+     the endpoint existed. */
   const quarterlyHolidayTitle = useMemo(
-    () => buildHolidayTitle(holidays, milestoneRange),
-    [holidays, milestoneRange]
+    () => buildActivityHolidayTitle(activityHolidays) || buildHolidayTitle(holidays, milestoneRange),
+    [activityHolidays, holidays, milestoneRange]
   );
 
   const quarterlyRows = useMemo(

@@ -16,6 +16,7 @@ import {
   FiPlay, FiFlag, FiLayers, FiInfo, FiUmbrella,
   FiShield, FiCreditCard, FiPieChart, FiClock, FiUploadCloud, FiDownload,
 } from "react-icons/fi";
+import { fetchActivityHolidays } from "../../api/activityHolidays";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import { rupeesInWords } from "../../utils/moneyWords";
@@ -519,6 +520,26 @@ export default function LeaveDetailPage() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Quarterly cost report — shown at the bottom of the page.
+  /* The activity's holidays, so the calendar can mark them. Without this a
+     holiday reads as an ordinary working day with no leave on it, which is
+     the wrong story — nobody was expected in. */
+  const [activityHolidays, setActivityHolidays] = useState(null);
+  useEffect(() => {
+    if (paramError || !projectId || !activityId) { setActivityHolidays(null); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const data = await fetchActivityHolidays(projectId, activityId, { signal: controller.signal });
+        if (active) setActivityHolidays(data);
+      } catch {
+        // Non-fatal: the calendar simply doesn't mark them.
+        if (active) setActivityHolidays(null);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, activityId, paramError, refreshKey]);
+
   const [costReport, setCostReport] = useState(null);
   const [costTotals, setCostTotals] = useState(null);
   const [costLoading, setCostLoading] = useState(false);
@@ -880,6 +901,7 @@ export default function LeaveDetailPage() {
             unpaidDates={unpaidDates}
             halfDayDates={halfDayDates}
             sandwichDates={sandwichDates}
+            holidays={activityHolidays}
             windowStart={d.windowStart}
             windowEnd={d.windowEnd}
             note={
@@ -1103,7 +1125,7 @@ function DateList({ color, chipBg, title, dates, note, halfSet }) {
    TEMPORARY — the three candidates. Keep one, delete the rest.
    ═══════════════════════════════════════════════════════════════════ */
 
-function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, halfOnlySet, from, to }) {
+function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, halfOnlySet, from, to, holidayMap }) {
   const cells = buildMonthGrid(year, month);
   return (
     <div className="ld-cal">
@@ -1136,22 +1158,35 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
           /* Sandwich is checked before the weekend fallback: a sandwich day IS
              normally a weekend, and the fact that it's being charged as leave
              outranks the fact that it's a Saturday. */
+          /* Ranked below every kind of leave and above the weekend fallback:
+             a holiday that was also taken as leave is still leave (and still
+             charged), so that has to win the cell — but an ordinary holiday
+             outranks "weekend", and a plain working day with a holiday on it
+             must not read as an unexplained absence. */
+          const holiday = holidayMap?.get(key) || null;
           const cls = outside ? " is-outside"
             : paid ? " is-paid"
             : unpaid ? " is-unpaid"
             : sandwich ? " is-sandwich"
             : halfOnly ? " is-halfonly"
+            : holiday ? " is-holiday"
             : weekend ? " is-weekend" : "";
           // "Taken Leave" rather than "Paid Leave", matching the legend below.
           const kind = paid ? "Taken Leave"
             : unpaid ? "Unpaid Leave"
             : sandwich ? "Sandwich Leave"
             : halfOnly ? "Half day — paid or unpaid not stated" : "";
+          /* The holiday's name rides along even when leave won the cell — the
+             two facts don't conflict, and knowing a leave day fell on Holi is
+             exactly the sort of thing a disputed row turns on. */
+          const holidayNote = holiday
+            ? ` · ${holiday.name}${holiday.weekend ? " (holiday on a week-off)" : " (holiday)"}`
+            : "";
           const title = outside
             ? `${key} · outside this period`
             : kind
-              ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}`
-              : key;
+              ? `${key} · ${kind}${half ? " · Half day (0.5)" : sandwich ? "" : " · Full day (1)"}${holidayNote}`
+              : `${key}${holidayNote}`;
           return (
             <span
               key={i}
@@ -1171,7 +1206,7 @@ function MonthGrid({ year, month, paidSet, unpaidSet, halfSet, sandwichSet, half
    between two unpaid days is visible, which is what sandwich leave is. */
 function QuarterCalendar({
   windowStart, windowEnd, paidDates, unpaidDates,
-  halfDayDates = [], sandwichDates = [], unassignedHalves = [],
+  halfDayDates = [], sandwichDates = [], unassignedHalves = [], holidays = null,
 }) {
   const paidSet = new Set(paidDates.map(dateKey).filter(Boolean));
   const unpaidSet = new Set(unpaidDates.map(dateKey).filter(Boolean));
@@ -1181,6 +1216,9 @@ function QuarterCalendar({
      neutral tone — an unclassified leave day is a day the reader needs to
      see, and leaving the cell blank is the failure this whole change fixes. */
   const halfOnlySet = new Set(unassignedHalves.map(dateKey).filter(Boolean));
+  /* Already keyed by yyyy-MM-dd by the api module, so the cells can look up
+     directly. Empty when the holiday report hasn't loaded or has none. */
+  const holidayMap = holidays?.byDate ?? new Map();
   // Normalised once — every cell compares against these.
   const winFrom = dateKey(windowStart);
   const winTo = dateKey(windowEnd);
@@ -1207,6 +1245,7 @@ function QuarterCalendar({
             halfSet={halfSet}
             sandwichSet={sandwichSet}
             halfOnlySet={halfOnlySet}
+            holidayMap={holidayMap}
             from={winFrom}
             to={winTo}
           />
@@ -1222,6 +1261,20 @@ function QuarterCalendar({
             a legend entry with nothing to point at is just noise. */}
         {hasHalf && <span><i className="ld-cal-key is-halfkey" /> Half Day (0.5)</span>}
         {sandwichSet.size > 0 && <span><i className="ld-cal-key is-sandwich" /> Sandwich Leave</span>}
+        {/* Carries the count, which is the other half of what was asked for —
+            the weekday/weekend split is spelled out because only the weekday
+            ones cost a working day. */}
+        {holidayMap.size > 0 && (
+          <span
+            title={holidays?.list
+              ?.map((h) => `${h.iso} — ${h.name}${h.weekend ? " (on a week-off)" : ""}`)
+              .join("\n")}
+          >
+            <i className="ld-cal-key is-holiday" />{" "}
+            {holidays?.total ?? holidayMap.size} {(holidays?.total ?? holidayMap.size) === 1 ? "Holiday" : "Holidays"}
+            {holidays?.weekend > 0 && ` (${holidays.weekday} on working days)`}
+          </span>
+        )}
         <span><i className="ld-cal-key is-weekend" /> Weekend</span>
       </div>
       {/* An unreadable date format would silently mark nothing — say so
@@ -1270,7 +1323,7 @@ function DateChipLists({
    it goes when one is picked. */
 function LeaveDatesSection({
   paidDates, unpaidDates, note, windowStart, windowEnd,
-  halfDayDates = [], sandwichDates = [], unassignedHalves = [],
+  halfDayDates = [], sandwichDates = [], unassignedHalves = [], holidays = null,
 }) {
   const [view, setView] = useState("calendar");
   const [open, setOpen] = useState(true);
@@ -1311,6 +1364,7 @@ function LeaveDatesSection({
       {view === "calendar" && (
         <div className="uidai-pmis-card ld-card">
           <QuarterCalendar
+          holidays={holidays}
             windowStart={windowStart}
             windowEnd={windowEnd}
             paidDates={paidDates}
@@ -2591,6 +2645,11 @@ const LD_CSS = `
   border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: ${C.ink}; }
 .ld-cal-cell.is-blank { visibility: hidden; }
 .ld-cal-cell.is-weekend { color: ${C.faint}; background: ${C.surface}; }
+/* A holiday is not leave and not a weekend — a third thing, so it gets its own
+   quiet tint plus an underline, which survives a greyscale print where a
+   colour-only cue would not. */
+.ld-cal-cell.is-holiday { color: #0f766e; background: #e6f5f2;
+  box-shadow: inset 0 -2px 0 #0f766e; font-weight: 600; }
 /* Outside the reporting window — drawn only so the month keeps its shape.
    Faded well past the weekend tone so it reads as "not part of this", not as
    "a quiet day": the window opens on the 7th, and 1–6 January are days this
@@ -2629,6 +2688,7 @@ const LD_CSS = `
 .ld-cal-key { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
 .ld-cal-key.is-leave { background: #e34948; }
 .ld-cal-key.is-weekend { background: ${C.surface}; border: 1px solid ${C.border}; }
+.ld-cal-key.is-holiday { background: #e6f5f2; box-shadow: inset 0 -2px 0 #0f766e; }
 .ld-cal-key.is-sandwich { background: repeating-linear-gradient(135deg, #f3e6cd 0 3px, ${C.surface} 3px 6px);
   border: 1px solid ${C.border}; }
 /* Mirrors the cell's half-height band, in neutral tones so the key reads as
