@@ -1,9 +1,8 @@
 /* ══════════════════════════════════════════════════════════════════
    Local observation drafts — a stopgap, not a store.
 
-   Resource SLAs (005–009) and the count-driven ones (004, 011) are not
-   date-derivable: the backend cannot score them without a human stating
-   what was observed. Today that reading has nowhere to go —
+   Some SLAs cannot be scored from dates alone: the backend needs a human
+   to state what was observed. That reading has nowhere to go —
    `POST /activities/{id}/sla-evaluate` computes a severity and returns
    it, but nothing in the app calls
    `POST /sla-compliance/observations`, so the compliance store keeps
@@ -11,6 +10,15 @@
 
    This module parks those readings in localStorage so a quarter can be
    worked through end to end while that gap is open.
+
+   ── Scope shrank on 2026-08-11 ────────────────────────────────────
+   This used to cover the resource SLAs (005–009) as well. It no longer
+   does: `/on-complete` now returns those under `autoEvaluated` with a
+   point_accumulation result, and `manualNeeded` comes back empty. The
+   module is kept for the count-driven SLAs (004, 011) and for any row
+   the backend still cannot score. Before extending it, check whether
+   the backend has since learned to score that SLA too — a local draft
+   shadowing a real backend result is worse than no draft at all.
 
    ── What is deliberately NOT done here ────────────────────────────
    Only the RAW OBSERVED VALUE is stored — never the severity, points

@@ -81,8 +81,12 @@ export default function ActivityCompliancePanel({ activityId, activityLabel }) {
 
     useEffect(() => { load(); }, [load]);
 
-    // Fires the completion hook: date-derivable SLAs are scored immediately,
-    // the rest are emailed to their owners for a manual observation.
+    // Fires the completion hook. The backend scores what it can — since
+    // 2026-08-11 that includes the resource SLAs (005–009), which come
+    // back under `autoEvaluated` with a point_accumulation result — and
+    // emails the owners of anything left in `manualNeeded`, now usually
+    // empty. Both counts are still reported: `manualNeeded` shrinking to
+    // nothing is a backend behaviour, not a guarantee to hard-code.
     async function runOnComplete() {
         if (!activityId) { setError("Missing activity id."); return; }
         setTriggering(true);
@@ -96,7 +100,8 @@ export default function ActivityCompliancePanel({ activityId, activityLabel }) {
             const manual = res?.manualNeeded?.length || 0;
             const errs = res?.errors?.length || 0;
             setNotice(
-                `Evaluated on ${res?.evaluatedOn || "—"}: ${auto} auto-evaluated, ${manual} awaiting manual input`
+                `Evaluated on ${res?.evaluatedOn || "—"}: ${auto} auto-evaluated`
+                + (manual ? `, ${manual} awaiting manual input` : "")
                 + (errs ? `, ${errs} error(s).` : ".")
                 + (manual ? " Owners have been emailed." : "")
             );

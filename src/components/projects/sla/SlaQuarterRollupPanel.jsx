@@ -1195,9 +1195,10 @@ function HeadlineFigure({ caption, value, tone, note, noteTone }) {
 
 function Headline({ period, breaches, measured, awaiting, ldPercent, ldAmount, deliverableLd, finalPayment, pending }) {
     /* "No breaches" is only true if everything was actually read. With SLAs
-       still awaiting a manual observation the quarter is unmeasured, not
-       clean — and every resource SLA needs a manual reading, so this is the
-       normal state of an open quarter rather than an edge case. */
+       still unscored the quarter is unmeasured, not clean. Since 005–009
+       now score automatically on activity completion this should be rare,
+       so an unclean headline here is a real signal rather than the normal
+       state of an open quarter. */
     const clean = !breaches && !awaiting;
     const totalPenalty = (Number(ldAmount) || 0) + (Number(deliverableLd) || 0);
 
@@ -3419,7 +3420,16 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
            quarter with none is complete rather than pending — the old check
            read "an SLA fired somewhere" and reported a quarter as unfinished
            because a deliverable in a different one had a penalty. */
-        if (quarterlyItems.length > 0 && quarterlyNet === null) pending.push("the quarterly resource payment");
+        /* Naming the CAUSE, not just the gap. "the quarterly resource
+           payment pending" sends a reader hunting through resource data
+           that is usually fine — the payment is missing because PQP had
+           no usable base, and `npqpIssue` already knows why (leave
+           management unreachable, no resources deployed, and so on). */
+        if (quarterlyItems.length > 0 && quarterlyNet === null) {
+            pending.push(npqpIssue
+                ? `the quarterly resource payment (${npqpIssue})`
+                : "the quarterly resource payment");
+        }
 
         /* What the SLAs took off, across BOTH regimes. They are computed
            separately and never mixed — one on a deliverable's own cost, one
@@ -3442,7 +3452,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                section B is tax-exclusive by §5.27.6. */
             tax: taxBreakdown(grossDue),
         };
-    }, [quarterPayment, chain.aqp, chain.ldAmount, quarterlyItems.length]);
+    }, [quarterPayment, chain.aqp, chain.ldAmount, quarterlyItems.length, npqpIssue]);
 
     /* ── does this page agree with Finance about tax? ─────────────────
        The rollup draws from two services that keep money on different
@@ -3478,9 +3488,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         quarterlyNet: statement?.quarterlyNet,
     }), [paymentPage, period, totals, chain, statement?.quarterlyNet]);
 
-    /* Occurrences that were evaluated but never read. Every resource SLA
-       (005–009) is manual by definition — the backend cannot derive
-       attendance — so these do not resolve by waiting.
+    /* Occurrences that were evaluated but never read.
+
+       Resource SLAs 005–009 are now scored by the backend on activity
+       completion, so this list should normally be EMPTY. A row landing
+       here means that SLA genuinely could not be scored — worth chasing
+       rather than the expected state it used to be.
 
        The activity is captured alongside the SLA ref because the fix is
        per-activity: Activity SLA Mapping is reached with an `activityId`
@@ -3599,11 +3612,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         if (awaitingObservation > 0) {
             out.push({
                 level: "blocking",
-                title: `${awaitingObservation} SLA result(s) are awaiting a manual observation`,
-                detail: "The evaluation ran and created these rows, but the SLA is not date-derivable so the backend "
-                    + "could not score it. Every resource SLA (005–009) is manual — it reads from the biometric "
-                    + "attendance system — so waiting will not resolve them. Until they are entered these score "
-                    + "nothing, and this quarter is understated rather than clean.",
+                title: `${awaitingObservation} SLA result(s) could not be scored`,
+                detail: "The evaluation ran and created these rows, but the backend returned no reading for them. "
+                    + "Resource SLAs 005–009 are now scored automatically when the activity completes, so this is "
+                    + "no longer the expected state — a row sitting here points at something that actually failed "
+                    + "to evaluate. Until it is resolved these score nothing, and this quarter is understated "
+                    + "rather than clean.",
                 // Rendered as links straight to the activity that needs the input.
                 actions: awaiting.activities.map((a) => ({
                     label: `${a.activityCode || a.activityId} — ${a.slaRefs.join(", ")}`,

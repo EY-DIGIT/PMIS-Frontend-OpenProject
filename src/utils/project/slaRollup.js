@@ -370,11 +370,20 @@ function scoreOccurrence(result, scale) {
    module originally matched, and the extra ones are not cosmetic:
 
      · `pending_observation` — the evaluation ran and made a row, but the
-       SLA is not date-derivable so it is waiting on a manual reading.
-       Every resource SLA (005–009) lands here permanently; the backend
-       cannot derive attendance. Matching only the bare string "pending"
-       counted these as zero of everything, so an activity with two
-       unread SLAs reported a clean quarter.
+       backend could not score it and is waiting on a reading. Matching
+       only the bare string "pending" counted these as zero of
+       everything, so an activity with two unread SLAs reported a clean
+       quarter.
+
+       This used to be the PERMANENT state of every resource SLA
+       (005–009), on the basis that attendance could not be derived. That
+       is no longer true: as of 2026-08-11 `/on-complete` returns
+       005–009 in `autoEvaluated` with `formula_type:
+       "point_accumulation"` and a real met/breached status, and
+       `manualNeeded` comes back empty. So a pending row is now an
+       EXCEPTION worth chasing rather than the expected resting state —
+       which is why the code still handles it, and why the screens no
+       longer describe it as normal.
 
      · `excluded` — the occurrence is deliberately outside the
        calculation. SLA 007's Note is the case the RFP spells out:
