@@ -266,7 +266,7 @@ const esc = (v) =>
 
 function buildAttendanceReportHtml({
   projectName, period, periodRange, milestoneLabel, activityLabel,
-  employees, costById, metrics, costTotal, generatedAt,
+  employees, costById, metrics, costTotal, generatedAt, holidayCount = null,
 }) {
   const costFor = (e) => (costById ? costById.get(String(e.attendanceId)) : null);
   const has = (fn) => employees.some((e) => fn(e) != null);
@@ -287,7 +287,9 @@ function buildAttendanceReportHtml({
     ...(showJoined ? [{ h: "Joined", get: (e) => formatReportDate(e.joiningDate) }] : []),
     ...(employees.some((e) => e.lastWorkingDate)
       ? [{ h: "Last Working Day", get: (e) => formatReportDate(e.lastWorkingDate) }] : []),
-    { h: "Holiday", num: true, get: (e) => num(e.holidayDays) },
+    /* Same figure the table shows — the activity's total holidays, falling
+       back to the row's own count when the holiday report isn't available. */
+    { h: "Holiday", num: true, get: (e) => holidayCount ?? num(e.holidayDays) },
     /* Same order as the table on screen — a report whose columns were
        arranged differently would be needlessly hard to check against it. */
     ...(showBillable ? [{ h: "Billable Days", num: true, get: (e) => billableDaysOf(costFor(e)) ?? 0 }] : []),
@@ -1374,11 +1376,13 @@ export default function ProjectAttendancePage() {
       costById: quarterlyCostById,
       metrics: quarterlyMetrics,
       costTotal: quarterlyCostTotal,
+      holidayCount: activityHolidays?.total ?? null,
       generatedAt: new Date().toLocaleString("en-IN"),
     });
   }, [
     project?.projectName, quarterly?.period, selectedMilestone, filterActivities,
     filterActivityId, quarterlyRows, quarterlyCostById, quarterlyMetrics, quarterlyCostTotal,
+    activityHolidays,
   ]);
 
   const reportFileName = () => {
@@ -1624,6 +1628,7 @@ export default function ProjectAttendancePage() {
             year={year}
             milestoneName={milestoneName}
             holidayTitle={quarterlyHolidayTitle}
+            holidayCount={activityHolidays?.total ?? null}
             costById={quarterlyCostById}
             costTotal={quarterlyCostTotal}
             costError={quarterlyCostError}
@@ -1686,7 +1691,7 @@ export default function ProjectAttendancePage() {
    Shared attendance table — used by both monthly and quarterly views.
    ===================================================================== */
 function AttendanceTable({
-  period, employees, onRowClick, milestoneName, costById, costTotal, holidayTitle,
+  period, employees, onRowClick, milestoneName, costById, costTotal, holidayTitle, holidayCount,
 }) {
   const clickable = typeof onRowClick === "function";
   /* Cost only exists for the quarterly view, so the column appears only when
@@ -1900,8 +1905,12 @@ function AttendanceTable({
                     {formatReportDate(emp.joiningDate) || "—"}
                   </td>
                 )}
+                {/* The activity's total holiday count when the holiday
+                    report has it — including any that fall on a week-off,
+                    which the report row's own figure leaves out. Falls back to
+                    the row's figure when that report isn't available. */}
                 <td className="att-td att-num att-dim" title={holidayTitle}>
-                  {emp.holidayDays}
+                  {holidayCount ?? emp.holidayDays}
                 </td>
                 {showBillable && (() => {
                   const b = billableDaysOf(costFor(emp));
@@ -2201,7 +2210,7 @@ function DesignationGroup({ group, isOpen, detail, costById, onToggle, onRowClic
 
 function QuarterlyPanel({
   data, metrics, period: periodProp, quarter, year, onRowClick, milestoneName,
-  costById, costTotal, costError, holidayTitle, onUpload, uploadBlocked, uploadHint,
+  costById, costTotal, costError, holidayTitle, holidayCount, onUpload, uploadBlocked, uploadHint,
   filterActive, viewMode, designationGroups, designationDetail, onOpenDesignation,
 }) {
   const employees = data ?? [];
@@ -2253,6 +2262,7 @@ function QuarterlyPanel({
           employees={employees}
           milestoneName={milestoneName}
           holidayTitle={holidayTitle}
+          holidayCount={holidayCount}
           costById={costById}
           costTotal={costTotal}
           onRowClick={onRowClick}
