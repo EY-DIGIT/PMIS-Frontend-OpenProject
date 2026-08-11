@@ -513,12 +513,12 @@ const showAllTickets =
         {/* Assistant — full-page "Aadhaar Genius" chat (no submenu).
             Pinned at the bottom of the menu. */}
         <a
-          title="Aadhar Genius"
+          title="Aadhaar Genius"
           className={assistantActive ? "active" : ""}
           onClick={() => navigate("/assistant")}
         >
           <FiMessageSquare size={ICON_SIZE} />
-          <span className="pmis-text">Aadhar Genius</span>
+          <span className="pmis-text">Aadhaar Genius</span>
         </a>
       </div>
 
