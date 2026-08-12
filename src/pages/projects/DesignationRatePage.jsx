@@ -45,6 +45,22 @@ function validateSheetFile(f) {
   return "";
 }
 
+/* The optional year-on-year uplift. Blank is valid and means "don't send it".
+   Returns "" when the value is usable.
+
+   Bounded at 100 because this is a percentage applied compounding across
+   every rate year: at 7 years a mistyped 500 would multiply Year-1 rates by
+   over 78,000, and the sheet would upload without complaint. */
+function validateIncreasePct(raw) {
+  const s = String(raw ?? "").trim();
+  if (s === "") return "";
+  if (!/^\d+(\.\d+)?$/.test(s)) return "Enter a number, like 5 or 7.5.";
+  const n = Number(s);
+  if (!Number.isFinite(n)) return "Enter a number, like 5 or 7.5.";
+  if (n > 100) return "That's over 100%. Enter the yearly increase, not the multiplier.";
+  return "";
+}
+
 // ---------- formatting helpers ----------
 const money = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -275,6 +291,22 @@ button.dr-th-btn:hover { color: var(--dr-primary); }
 .dr-modal-head h2 { margin: 2px 0 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; color: var(--dr-ink); }
 .dr-modal-body { padding: 0 24px 22px; overflow-y: auto; flex: 1; }
 .dr-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--dr-line); background: var(--dr-surface-2); }
+
+/* upload options — the annual increase */
+.dr-optlabel { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--dr-muted); margin-bottom: 6px; }
+.dr-optrow { display: flex; align-items: center; gap: 8px; }
+.dr-optinput { width: 130px; height: 40px; padding: 0 12px; border-radius: 10px;
+  border: 1px solid var(--dr-line); background: #fff; color: var(--dr-ink);
+  font-size: 15px; font-family: inherit; font-variant-numeric: tabular-nums; outline: none; }
+.dr-optinput:focus { border-color: var(--dr-primary); box-shadow: 0 0 0 3px rgba(11,60,136,.10); }
+.dr-optinput.is-bad { border-color: #d64545; }
+.dr-optsuffix { font-size: 15px; font-weight: 700; color: var(--dr-muted); }
+.dr-opterr { margin-top: 8px; font-size: 12.5px; color: #b91c1c; }
+/* The compounding spelled out — seven years of a percentage is not something
+   most people can evaluate before committing to it. */
+.dr-optpreview { margin-top: 10px; font-size: 12px; color: var(--dr-muted);
+  font-variant-numeric: tabular-nums; line-height: 1.6; }
 .dr-close {
   border: none; background: var(--dr-line-2); color: var(--dr-muted); width: 30px; height: 30px;
   border-radius: 8px; cursor: pointer; font-size: 17px; line-height: 1; display: flex;
@@ -437,6 +469,15 @@ export default function DesignationRatePage() {
   const [rateYearsError, setRateYearsError] = useState(null);
   const [rateYearOpen, setRateYearOpen] = useState(false);
 
+  /* The year-on-year uplift the server applies when building Year-2 onward
+     from the sheet's Year-1 rates. Optional — held as the raw string so the
+     field can be left empty, which means "don't send it" rather than "0%".
+     Asked for at upload time rather than kept in the toolbar: it describes one
+     upload, not a standing setting, and a stale value sitting in a filter row
+     would quietly re-apply itself to the next sheet. */
+  const [uploadOptsOpen, setUploadOptsOpen] = useState(false);
+  const [increasePct, setIncreasePct] = useState("");
+
   useEffect(() => {
     // All four params are required — without the dates the endpoint 400s.
     if (!projectId || !organisationId || !hasProjectWindow) {
@@ -510,6 +551,14 @@ export default function DesignationRatePage() {
       pushToast({ type: "error", title: "Can't upload this file", msg: fileError });
       return;
     }
+    /* Checked here as well as in the dialog: the dialog is the only way in
+       today, but this is the function that builds the request, and a bad
+       percentage would be silently coerced by Number() into the URL. */
+    const pctError = validateIncreasePct(increasePct);
+    if (pctError) {
+      pushToast({ type: "error", title: "Check the annual increase", msg: pctError });
+      return;
+    }
     setUploading(true);
 
     const formData = new FormData();
@@ -522,7 +571,11 @@ export default function DesignationRatePage() {
           projectId,
           organisationId,
           projectStartDate,
-          projectEndDate
+          projectEndDate,
+          /* Empty means the field was left blank — the param is dropped
+             entirely rather than sent as 0, so the server applies whatever it
+             defaults to instead of being told "no uplift". */
+          increasePct.trim() === "" ? null : Number(increasePct)
         )}`,
         {
           method: "POST",
@@ -852,9 +905,12 @@ export default function DesignationRatePage() {
             <CalendarIcon />
             Rate Year Card
           </button>
+          {/* Opens the options step rather than the file picker directly: the
+              annual increase has to be settled before the sheet is sent, and
+              a browser file dialog can't carry a field alongside it. */}
           <button
             className="dr-btn dr-btn-primary"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setUploadOptsOpen(true)}
             disabled={!canUpload}
             title={uploadHint}
           >
@@ -910,7 +966,7 @@ export default function DesignationRatePage() {
                 </button>
                 <button
                   className="dr-btn dr-btn-primary"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => setUploadOptsOpen(true)}
                   disabled={!canUpload}
                 >
                   <UploadIcon /> Upload Excel
@@ -982,6 +1038,22 @@ export default function DesignationRatePage() {
         )}
       </div>
 
+      {uploadOptsOpen && (
+        <UploadOptionsModal
+          value={increasePct}
+          onChange={setIncreasePct}
+          yearCount={rateYears.length}
+          onCancel={() => setUploadOptsOpen(false)}
+          onContinue={() => {
+            setUploadOptsOpen(false);
+            /* The picker is opened after the dialog closes: some browsers
+               ignore a file dialog raised from a click that also unmounted
+               the element underneath it. */
+            setTimeout(() => fileInputRef.current?.click(), 0);
+          }}
+        />
+      )}
+
       {apiResponse && (
         <ApiResponseModal response={apiResponse} onClose={() => setApiResponse(null)} />
       )}
@@ -1030,6 +1102,80 @@ export default function DesignationRatePage() {
    rather than derived from the project window here, so the bands on screen
    are the same ones the rates were actually filed against.
    ===================================================================== */
+/* Step before the file picker: the optional year-on-year uplift the server
+   applies when it builds Year-2 onward from the sheet's Year-1 rates.
+
+   Its own step rather than a toolbar field, because it belongs to one upload.
+   Left blank it isn't sent at all, and the server applies whatever it does by
+   default — which is not the same as being told 0%. */
+function UploadOptionsModal({ value, onChange, yearCount, onCancel, onContinue }) {
+  const error = validateIncreasePct(value);
+  const pct = String(value ?? "").trim();
+
+  /* What the uplift actually does, in the one place it can be checked before
+     committing: a rate of 100 compounded across the project's own rate years.
+     Shown because a percentage compounding over seven years is not something
+     most people can evaluate in their head. */
+  const preview = !error && pct !== "" && yearCount > 1
+    ? Array.from({ length: Math.min(yearCount, 7) }, (_, i) =>
+        `Year-${i + 1} ${(100 * (1 + Number(pct) / 100) ** i).toFixed(2)}`
+      ).join("  ·  ")
+    : "";
+
+  return (
+    <div className="dr dr-modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="dr-modal" role="dialog" aria-modal="true" aria-label="Upload options">
+        <div className="dr-modal-head">
+          <div>
+            <div className="dr-eyebrow" style={{ marginBottom: "4px" }}>Before uploading</div>
+            <h2>Annual increase</h2>
+          </div>
+          <button className="dr-close" onClick={onCancel} aria-label="Close">✕</button>
+        </div>
+
+        <div className="dr-modal-body">
+          <p className="dr-caption" style={{ margin: "0 0 14px" }}>
+            The year-on-year increase applied to the sheet&rsquo;s rates when building
+            <b> Year-2</b> onward. Leave it blank to upload the rates exactly as they are
+            in the file.
+          </p>
+          <label className="dr-optlabel" htmlFor="dr-increase">Increase per year</label>
+          <div className="dr-optrow">
+            <input
+              id="dr-increase"
+              className={`dr-optinput${error ? " is-bad" : ""}`}
+              type="text"
+              inputMode="decimal"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="e.g. 5"
+              aria-invalid={!!error}
+              autoFocus
+            />
+            <span className="dr-optsuffix">%</span>
+          </div>
+          {error
+            ? <div className="dr-opterr">{error}</div>
+            : preview && (
+                <div className="dr-optpreview">
+                  A rate of 100 becomes: {preview}
+                  {yearCount > 7 ? "  ·  …" : ""}
+                </div>
+              )}
+        </div>
+
+        <div className="dr-modal-foot">
+          <button className="dr-btn dr-btn-ghost" onClick={onCancel}>Cancel</button>
+          <button className="dr-btn dr-btn-primary" onClick={onContinue} disabled={!!error}>
+            <UploadIcon />
+            Choose file
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RateYearModal({ rows, loading, error, projectWindow, onClose }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();

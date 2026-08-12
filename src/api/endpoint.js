@@ -420,9 +420,17 @@ export const ENDPOINTS = {
        into the Year-1..Year-N bands the sheet's columns are rated against and
        returns the resulting `yearMappings`. Without it there is nothing to
        anchor "Year-1" to. */
-    upload: (projectId, organisationId, projectStartDate, projectEndDate) =>
+    /* `increasePercentage` is optional: the year-on-year uplift the server
+       applies when building Year-2 onward from the sheet's Year-1 rates.
+       Omitted entirely when not given rather than sent as an empty or zero
+       value — "no uplift stated" and "an uplift of 0%" are different
+       instructions, and only the server knows what it defaults to. */
+    upload: (projectId, organisationId, projectStartDate, projectEndDate, increasePercentage) =>
       `/api/designation-rates/upload?projectId=${enc(projectId)}&organisationId=${enc(organisationId)}` +
-      `&projectStartDate=${enc(projectStartDate)}&projectEndDate=${enc(projectEndDate)}`,
+      `&projectStartDate=${enc(projectStartDate)}&projectEndDate=${enc(projectEndDate)}` +
+      (increasePercentage === null || increasePercentage === undefined || increasePercentage === ""
+        ? ""
+        : `&increasePercentage=${enc(increasePercentage)}`),
     /* The Year-1..Year-N bands the project window is sliced into, as
        [{ rateYear, effectiveFrom, effectiveTo }] — the same mapping the
        upload returns, but readable without uploading anything. All four
