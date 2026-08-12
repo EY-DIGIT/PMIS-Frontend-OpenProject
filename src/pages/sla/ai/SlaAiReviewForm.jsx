@@ -187,7 +187,7 @@ const BODY_HTML = `
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">SLA Number <span class="required">*</span></div>
-        <div class="field-help">RFP table header. e.g. PMU-SLA001.</div>
+        <div class="field-help">RFP table header. Capitals only — A–Z, 0–9, - and _. e.g. PMU-SLA001.</div>
       </div>
       <div class="dyn-cell-value"><input id="s_sla_ref" type="text" placeholder="PMU-SLA001" oninput="window.__slaAiOnb._syncContractType()"></div>
       <div class="dyn-cell-delete"></div>
@@ -1190,6 +1190,12 @@ export default function SlaAiReviewForm({
             if (!payload.target_rows && !payload.linear_escalation) {
                 errors.push({ label: "Target / Applied Severity level", message: "Add a severity table or linear LD escalation." });
                 markIds.push("#s_target_container");
+            }
+            // The API enforces ^[A-Z0-9_-]+$ on sla_ref; catch it here so a lowercase
+            // ref fails as a normal field error instead of a raw schema dump.
+            if (payload.sla_ref && !/^[A-Z0-9_-]+$/.test(payload.sla_ref)) {
+                errors.push({ label: "SLA Number", message: "Use capital letters, digits, - and _ only — e.g. PMU-SLA001." });
+                markIds.push("#s_sla_ref");
             }
             if (errors.length) {
                 markIds.forEach(_markField);

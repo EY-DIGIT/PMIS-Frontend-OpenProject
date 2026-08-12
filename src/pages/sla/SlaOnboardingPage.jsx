@@ -171,7 +171,7 @@ const BODY_HTML = `
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">SLA Number <span class="required">*</span></div>
-        <div class="field-help">RFP table header. e.g. PMU-SLA001.</div>
+        <div class="field-help">RFP table header. Capitals only — A–Z, 0–9, - and _. e.g. PMU-SLA001.</div>
       </div>
       <div class="dyn-cell-value"><input id="s_sla_ref" type="text" placeholder="PMU-SLA001" oninput="window.__slaOnb._syncContractType()"></div>
       <div class="dyn-cell-delete"></div>
@@ -426,6 +426,10 @@ export default function SlaOnboardingPage() {
                     // fallback so the dropdown isn't empty.
                     const fb = new Map(_FALLBACK_RFP_FIELDS.map((f) => [f.key, f]));
                     live.forEach((f) => {
+                        // The live catalog leaves attachments optional, but this form
+                        // refuses to onboard without an RFP image — keep the * in sync
+                        // with the rule submitSla actually enforces.
+                        if (f.key === "attachments") f.required = true;
                         if (f.input_type === "select" && (!Array.isArray(f.options) || !f.options.length)) {
                             const src = fb.get(f.key);
                             if (src) {
@@ -986,7 +990,9 @@ export default function SlaOnboardingPage() {
             const presentKeys = new Set(
                 Array.from(host.querySelectorAll("#dynBody .dyn-row")).map((r) => r.dataset.fieldKey).filter(Boolean)
             );
-            RFP_FIELDS.filter((f) => f.required).forEach((f) => {
+            // attachments is required for create only, and its value never lands in
+            // payload (files are stashed on __files) — the explicit check below owns it.
+            RFP_FIELDS.filter((f) => f.required && f.key !== "attachments").forEach((f) => {
                 const v = payload[f.key];
                 const missing = v == null || v === "" || (Array.isArray(v) && v.length === 0);
                 if (!missing) return;
@@ -997,6 +1003,12 @@ export default function SlaOnboardingPage() {
             if (!payload.target_rows && !payload.linear_escalation) {
                 errors.push({ label: "Target / Applied Severity level", message: "Add a severity table or linear LD escalation." });
                 markIds.push("s_target_container");
+            }
+            // The API enforces ^[A-Z0-9_-]+$ on sla_ref; catch it here so a lowercase
+            // ref fails as a normal field error instead of a raw schema dump.
+            if (!editingId && payload.sla_ref && !/^[A-Z0-9_-]+$/.test(payload.sla_ref)) {
+                errors.push({ label: "SLA Number", message: "Use capital letters, digits, - and _ only — e.g. PMU-SLA001." });
+                markIds.push("s_sla_ref");
             }
             if (!editingId) {
                 const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
