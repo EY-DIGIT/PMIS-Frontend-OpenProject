@@ -67,6 +67,7 @@ import SeverityPage from "./pages/severity/severity";
 import ActivitySlasPage from "./pages/projects/ActivitySlasPage";
 import SlaMastersPage from "./pages/sla/SlaMastersPage";
 import SlaOnboardingPage from "./pages/sla/SlaOnboardingPage";
+import SlaAiOnboardingPage from "./pages/sla/SlaAiOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
@@ -929,6 +930,7 @@ export default function MainApp() {
                                                 {/*SLA Masters*/}
                                                 <Route path="sla-masters" element={<SlaMastersPage />} />
                                                 <Route path="sla-masters/onboard" element={<SlaOnboardingPage />} />
+                                                <Route path="sla-masters/onboard-ai" element={<SlaAiOnboardingPage />} />
                                                 <Route path="sla-masters/view/:slaId" element={<SlaMastersPage />} />
                                                 <Route path="meetings/:id/tasks" element={<RequirePermission action="viewMeetings"><LinkedTaskMeeting /></RequirePermission>} />
                                                 <Route path="meetings/:id" element={<RequirePermission action="viewMeetings"><MeetingDetailPage /></RequirePermission>} />

@@ -244,6 +244,7 @@ export default function SlaMastersPage() {
                                 {loading ? "Loading…" : "↻ Refresh"}
                             </button>
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => navigate("/sla-masters/onboard")}>+ Onboard New SLA</button>
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => navigate("/sla-masters/onboard-ai")}>⚡ Onboard via AI</button>
                         </div>
                     </div>
 
