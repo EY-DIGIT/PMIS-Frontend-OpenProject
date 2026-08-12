@@ -842,34 +842,29 @@ export default function SlaOnboardingPage() {
             _addSevRow(cell.querySelector("button"));
             _addSevRow(cell.querySelector("button"));
         }
-        function _sevInputVarOptions(selected, excludeSevRow) {
-            const used = new Set();
-            const parent = excludeSevRow && excludeSevRow.parentElement;
-            if (parent) {
-                parent.querySelectorAll(".sev-row").forEach((r) => {
-                    if (r === excludeSevRow) return;
-                    const sel = r.querySelector('[data-k="input_variable"]');
-                    if (sel && sel.value && sel.value !== "__custom__") used.add(sel.value);
-                });
-            }
+        // Rows are a list, not a keyed map — the same input variable may repeat
+        // across severity bands (e.g. delay ≤7d → L1, 8–14 → L2), so the options
+        // are not filtered by what sibling rows already picked.
+        function _sevInputVarOptions(selected) {
             const opts = [`<option value="" ${!selected ? "selected" : ""}>— Primary measurement —</option>`];
             for (const v of INPUT_VARIABLES) {
-                if (used.has(v.key) && v.key !== selected) continue;
                 const lbl = `${v.label}${v.unit ? " (" + v.unit + ")" : ""}`;
                 opts.push(`<option value="${esc(v.key)}" ${selected === v.key ? "selected" : ""}>${esc(lbl)}</option>`);
             }
             opts.push('<option value="__custom__">+ Type a new variable…</option>');
-            if (selected && !INPUT_VARIABLES.find((v) => v.key === selected) && !used.has(selected)) {
+            if (selected && !INPUT_VARIABLES.find((v) => v.key === selected)) {
                 opts.splice(1, 0, `<option value="${esc(selected)}" selected>${esc(selected)} (custom)</option>`);
             }
             return opts.join("");
         }
+        // Only needed after "+ Type a new variable…" adds a key to the catalog,
+        // so the other rows pick it up.
         function _refreshSevDropdowns(hostEl) {
             hostEl.querySelectorAll(".sev-row").forEach((row) => {
                 const sel = row.querySelector('[data-k="input_variable"]');
                 if (!sel) return;
                 const cur = sel.value;
-                sel.innerHTML = _sevInputVarOptions(cur === "__custom__" ? "" : cur, row);
+                sel.innerHTML = _sevInputVarOptions(cur === "__custom__" ? "" : cur);
                 if (cur && cur !== "__custom__") sel.value = cur;
             });
         }
@@ -882,13 +877,12 @@ export default function SlaOnboardingPage() {
             r.innerHTML = `
                 <span class="sev-pill" style="background:${_SEV_COLOUR[sev]};">L${sev}</span>
                 <select data-k="severity" onchange="window.__slaOnb._updateSevPill(this)">${_severityOptions(sev)}</select>
-                <select data-k="input_variable" onchange="window.__slaOnb._onSevInputVarChange(this)">${_sevInputVarOptions("", r)}</select>
+                <select data-k="input_variable" onchange="window.__slaOnb._onSevInputVarChange(this)">${_sevInputVarOptions("")}</select>
                 <input data-k="threshold_label" type="text" placeholder="e.g. ≤ 21 days">
                 <input data-k="from_value" type="number" step="any" placeholder="—">
                 <input data-k="to_value" type="number" step="any" placeholder="—">
                 <button type="button" class="dyn-delete-btn" onclick="window.__slaOnb._deleteSevRow(this)">✕</button>`;
             body.appendChild(r);
-            _refreshSevDropdowns(hostEl);
         }
         function _updateSevPill(sel) {
             const row = sel.closest(".sev-row");
@@ -909,9 +903,7 @@ export default function SlaOnboardingPage() {
             return _refreshSevDropdowns(sel.closest(".sub-form"));
         }
         function _deleteSevRow(btn) {
-            const hostEl = btn.closest(".sub-form");
             btn.parentElement.remove();
-            _refreshSevDropdowns(hostEl);
         }
 
         /* ── linear LD escalation widget ── */
@@ -1360,7 +1352,7 @@ export default function SlaOnboardingPage() {
                     // options with it selected so it can't blank itself out.
                     const ivSel = sevRow.querySelector('[data-k="input_variable"]');
                     if (tr.input_variable && ivSel) {
-                        ivSel.innerHTML = _sevInputVarOptions(tr.input_variable, sevRow);
+                        ivSel.innerHTML = _sevInputVarOptions(tr.input_variable);
                         ivSel.value = tr.input_variable;
                     }
                     sevRow.querySelector('[data-k="threshold_label"]').value = tr.threshold_label ?? "";

@@ -1922,7 +1922,39 @@ function StaffingNote({ staffing }) {
    One component serves both regimes because the shell is identical; only
    the header figures and the occurrence columns differ, and splitting it
    in two would duplicate the badges, the chrome and the empty states. */
-function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraft, onClearDraft }) {
+/* The SLA's own reference image from the SLA Library, shown beside its ref.
+
+   Rendered as a plain <img> rather than fetched: the attachment files are
+   served as public static content and answer 200 with no Authorization
+   header, so a blob round-trip would buy nothing.
+
+   Hides itself on a load error instead of leaving a broken-image icon.
+   The URL is stored on the master and the file lives in a different
+   service, so a record can outlive its file — and a row of broken icons
+   would read as a fault in the rollup rather than in the library. Not
+   interactive: the header is already a <button>, and nesting a link
+   inside it is invalid and steals the row's own click. */
+function SlaThumb({ image }) {
+    const [failed, setFailed] = useState(false);
+    if (!image?.url || failed) return null;
+    const label = image.caption || image.name || "";
+    return (
+        <img
+            src={image.url}
+            alt={label || "SLA reference image"}
+            title={label ? `${label} — from the SLA Library` : "Reference image from the SLA Library"}
+            onError={() => setFailed(true)}
+            loading="lazy"
+            style={{
+                width: 34, height: 34, flex: "0 0 auto",
+                objectFit: "cover", borderRadius: 6, background: "#fff",
+                border: "1px solid var(--uidai-pmis-border)",
+            }}
+        />
+    );
+}
+
+function SlaGroup({ item, image, onViewImage, recheck, staffing, defaultOpen, targetRows, onSaveDraft, onClearDraft }) {
     const [open, setOpen] = useState(!!defaultOpen);
 
     const isDeliverable = item.track === TRACK.DELIVERABLE;
@@ -1938,16 +1970,28 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                 borderRadius: 10, marginTop: 10, background: "#fff", overflow: "hidden",
             }}
         >
+            {/* The toggle and "View SLA" are SIBLINGS, not nested. The header
+                used to be one full-width <button>; a second button inside it
+                would be invalid markup and its click would also toggle the
+                row. So the strip is a flex row and each control owns its own
+                hit area. */}
+            <div style={{
+                display: "flex", alignItems: "stretch", gap: 8,
+                background: costing ? "#fdf4f2" : "#f6f9fd",
+            }}>
             <button
                 type="button"
                 onClick={() => setOpen((o) => !o)}
                 style={{
-                    width: "100%", textAlign: "left", border: "none", font: "inherit", cursor: "pointer",
-                    background: costing ? "#fdf4f2" : "#f6f9fd", padding: "11px 14px",
+                    flex: "1 1 auto", minWidth: 0,
+                    textAlign: "left", border: "none", font: "inherit", cursor: "pointer",
+                    background: "transparent", padding: "11px 14px",
                     display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
                 }}
             >
                 <span style={{ transition: "transform .15s ease", transform: open ? "rotate(90deg)" : "none", ...muted, fontSize: 11 }}>▶</span>
+
+                <SlaThumb image={image} />
 
                 <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                     <span
@@ -2062,6 +2106,22 @@ function SlaGroup({ item, recheck, staffing, defaultOpen, targetRows, onSaveDraf
                     )}
                 </span>
             </button>
+
+            {image?.url && (
+                <button
+                    type="button"
+                    className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                    onClick={() => onViewImage?.({ slaRef: item.slaRef, slaTitle: item.slaTitle, image })}
+                    title="Show this SLA's reference image from the SLA Library"
+                    style={{
+                        alignSelf: "center", marginRight: 12, marginTop: 0,
+                        flex: "0 0 auto", whiteSpace: "nowrap",
+                    }}
+                >
+                    View SLA
+                </button>
+            )}
+            </div>
 
             {open && (
                 <div style={{ padding: "12px 14px" }}>
@@ -2242,6 +2302,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        re-check needs the target tables and cadence long after `load` has
        returned — not just to fill gaps on incoming results. */
     const [mastersByRef, setMastersByRef] = useState(() => new Map());
+
+    /* The SLA reference image, shown full size on demand. Holds the whole
+       row rather than just a URL so the dialog can caption itself with the
+       ref and title without looking anything back up. */
+    const [previewSla, setPreviewSla] = useState(null);
     /* The backend's own quarterly aggregate, fetched purely to be compared
        against what this page computed. Two independent calculations of the
        same LD % are only worth having if a divergence is surfaced. */
@@ -3943,6 +4008,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 <SlaGroup
                                                     key={`q:${it.slaRef}:${expandAll}`}
                                                     item={it}
+                                                    image={mastersByRef.get(String(it.slaRef))?.image}
+                                                    onViewImage={setPreviewSla}
                                                     recheck={rechecks.get(String(it.slaRef))}
                                                     staffing={isResourceDeploymentSla(it) ? staffing : null}
                                                     defaultOpen={expandAll}
@@ -4477,6 +4544,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 <SlaGroup
                                                     key={`d:${it.slaRef}:${expandAll}`}
                                                     item={it}
+                                                    image={mastersByRef.get(String(it.slaRef))?.image}
+                                                    onViewImage={setPreviewSla}
                                                     recheck={rechecks.get(String(it.slaRef))}
                                                     defaultOpen={expandAll}
                                                     targetRows={mastersByRef.get(String(it.slaRef))?.targetRows}
@@ -5561,6 +5630,78 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         setRelaxOpen(false);
                     }}
                 />
+            )}
+
+            {/* ══ SLA reference image ══════════════════════════════════
+                Same dialog the SLA mapping screen uses, so the image looks
+                the same wherever it is opened from. No fetch on open: the
+                URL already travelled on the master and the files are public
+                static content.
+
+                Backdrop closes only on a mousedown that both starts AND
+                ends on the backdrop itself — a drag that begins on the
+                image and releases outside would otherwise close it. */}
+            {previewSla && (
+                <div
+                    onMouseDown={(e) => { if (e.target === e.currentTarget) setPreviewSla(null); }}
+                    style={{
+                        position: "fixed", inset: 0, background: "rgba(7,26,52,.55)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        zIndex: 2000, padding: 20,
+                    }}
+                >
+                    <div style={{
+                        position: "relative", background: "#fff", borderRadius: 12, overflow: "hidden",
+                        boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+                        maxWidth: "min(900px, 95vw)", maxHeight: "90vh",
+                        display: "flex", flexDirection: "column",
+                    }}>
+                        <div style={{
+                            display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                            padding: "12px 14px", borderBottom: "1px solid var(--uidai-pmis-border)",
+                        }}>
+                            <div style={{
+                                fontWeight: 800, color: INK, fontSize: 14, minWidth: 0,
+                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>
+                                {previewSla.slaTitle || previewSla.slaRef || "SLA"}
+                                <span style={{ fontFamily: "monospace", fontWeight: 400, fontSize: 12, ...muted, marginLeft: 8 }}>
+                                    {previewSla.slaRef}
+                                </span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewSla(null)}
+                                title="Close"
+                                style={{
+                                    width: 30, height: 30, borderRadius: "50%", background: "#fdecec",
+                                    border: "none", color: "#b42318", cursor: "pointer",
+                                    fontSize: 15, fontWeight: 700, flex: "0 0 auto",
+                                }}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div style={{
+                            padding: 14, overflow: "auto", background: "#f6f9fd", minHeight: 140,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>
+                            <img
+                                src={previewSla.image?.url}
+                                alt={previewSla.image?.caption || previewSla.slaRef || "SLA"}
+                                style={{
+                                    display: "block", maxWidth: "100%", borderRadius: 8,
+                                    border: "1px solid var(--uidai-pmis-border)",
+                                }}
+                            />
+                        </div>
+                        {(previewSla.image?.caption || previewSla.image?.name) && (
+                            <div style={{ padding: "9px 14px", borderTop: "1px solid var(--uidai-pmis-border)", fontSize: 11.5, ...muted }}>
+                                {previewSla.image.caption || previewSla.image.name}
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -43,6 +43,29 @@ function call(path, { method = "GET", body } = {}) {
 
 const enc = encodeURIComponent;
 
+/* The FIRST image attachment on an SLA master, or null.
+
+   `attachments[]` carries { file_url, mime_type, original_filename,
+   caption } and is served as public static content — the files answer
+   200 without an Authorization header, so an <img src> works directly
+   and no blob fetch is needed.
+
+   Filtered on `mime_type` starting "image/" rather than taken blindly:
+   the field is a general attachment list, and a PDF rendered into an
+   <img> would show as a broken icon next to every SLA that has one.
+   Only the first is taken — no record currently carries more than one,
+   and a row header has space for exactly one thumbnail. */
+function pickSlaImage(s) {
+    const list = Array.isArray(s?.attachments) ? s.attachments : [];
+    const hit = list.find((a) => String(a?.mime_type || "").toLowerCase().startsWith("image/"));
+    if (!hit?.file_url) return null;
+    return {
+        url: hit.file_url,
+        name: hit.original_filename || "",
+        caption: hit.caption || "",
+    };
+}
+
 /* ───────────────────────── Quarter helpers ─────────────────────────
    Contract quarters are PROJECT-ANCHORED: they run from the project's own
    start date, not from a calendar year. Every settlement / NPQP /
@@ -366,6 +389,7 @@ export function getSlaMaster(slaId) {
         linearEscalation: pickLinearEscalation(s),
         calculationMethod: s.calculation ?? s.calculation_method ?? "",
         assumptions: s.assumptions ?? "",
+        image: pickSlaImage(s),
     }));
 }
 
@@ -435,6 +459,7 @@ export function listSlaMasters(projectId, { pageSize = 200 } = {}) {
             // confirm averaging is what the SLA actually asks for.
             calculationMethod: s.calculation_method ?? s.calculationMethod ?? "",
             assumptions: s.assumptions ?? "",
+            image: pickSlaImage(s),
         }));
     });
 }
