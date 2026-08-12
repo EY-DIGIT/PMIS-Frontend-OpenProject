@@ -297,7 +297,13 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
             <Widget title="SLA Compliance" sub={name}>
               {sla.available ? (
                 <div className="dp-gauge-wrap">
-                  <GaugeRing value={sla.compliance} label="SLA Compliance" color={DOMAIN.finance} height={170} />
+                  {/* Cap the gauge at its natural aspect ratio (170 × 200/118 ≈ 288px).
+                      GaugeRing offsets its centre text with padding-bottom: 16%, which
+                      resolves against width — unconstrained in this full-width widget it
+                      overshot and pushed the % up into the arc. */}
+                  <div style={{ width: "100%", maxWidth: 288 }}>
+                    <GaugeRing value={sla.compliance} label="SLA Compliance" color={DOMAIN.finance} height={170} />
+                  </div>
                   <SplitBars rows={[
                     { label: "Met", a: sla.met, b: 0, aColor: DOMAIN.finance, aLabel: `${sla.compliance}%` },
                     { label: "Breached", a: sla.breached, b: 0, aColor: "#e11d48", aLabel: `${100 - sla.compliance}%` },
