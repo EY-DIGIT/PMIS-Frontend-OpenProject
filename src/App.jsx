@@ -141,6 +141,7 @@ function Breadcrumbs() {
         users: "Users",
         divisions: "Divisions",
         master: "Master Data",
+        holidays: "Holidays",
         resources: "Resource Data",
         "document-access": "Document Access",
         new: "New",
