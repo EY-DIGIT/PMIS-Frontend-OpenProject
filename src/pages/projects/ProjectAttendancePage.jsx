@@ -3081,6 +3081,11 @@ function ReplacementsModal({ data, loading, error, onClose }) {
                           table — the two are read side by side. */}
                       <th className="att-th">ID</th>
                       <th className="att-th">Resource</th>
+                      {/* Which activity this person held the seat on. The
+                          report is requested for one activity and every row
+                          belongs to it, so the envelope's name is the answer
+                          unless a row states its own. */}
+                      <th className="att-th" title="The activity this resource was deployed on.">Activity</th>
                       <th className="att-th">Joined</th>
                       <th className="att-th">Last Working Day</th>
                       <th className="att-th">Status</th>
@@ -3129,6 +3134,14 @@ function ReplacementsModal({ data, loading, error, onClose }) {
                               ? r.employeeName || "—"
                               : <span className="att-dim">No one assigned</span>}
                           </td>
+                          {(() => {
+                            const a = resourceActivity(r, data);
+                            return (
+                              <td className={`att-td${a.name ? "" : " att-dim"}`} title={a.title}>
+                                {a.name || "—"}
+                              </td>
+                            );
+                          })()}
                           <td className="att-td">{formatReportDate(r?.joiningDate) || "—"}</td>
                           <td className={`att-td${isOff ? "" : " att-dim"}`}>
                             {formatReportDate(r?.lastWorkingDate) || "—"}
@@ -3157,6 +3170,37 @@ function ReplacementsModal({ data, loading, error, onClose }) {
       </div>
     </div>
   );
+}
+
+/* The activity a replacement row belongs to.
+
+   The report is requested for one activity and the envelope echoes it, so
+   every row belongs to that activity by construction — that is the answer
+   unless a row carries its own, which is read first so a payload that starts
+   reporting across activities is shown correctly rather than being labelled
+   with the envelope's.
+
+   A row's own `activities` array (the shape resource-details uses) is handled
+   too: several activities are named together rather than one being picked. */
+function resourceActivity(r, envelope) {
+  if (!r) return { name: "", title: undefined };
+
+  const own = Array.isArray(r.activities) ? r.activities : null;
+  if (own && own.length) {
+    const names = own.map((a) => a?.activityName || a?.activityId).filter(Boolean);
+    return {
+      name: names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0] || "",
+      title: own
+        .map((a) => `${a?.activityName || "—"}${a?.activityId ? `\n${a.activityId}` : ""}`)
+        .join("\n\n"),
+    };
+  }
+
+  const name = r.activityName || envelope?.activityName || "";
+  const id = r.activityId || envelope?.activityId || "";
+  /* The id on hover, not in the cell: it is a UUID, and a column of them
+     would push everything else off the width for no benefit. */
+  return { name: name || id, title: [name, id].filter(Boolean).join("\n") || undefined };
 }
 
 /* Ordered by joining date so a seat's rows read as a handover. Anyone without a
@@ -3894,7 +3938,7 @@ const ATT_CSS = `
   background: ${C.primary}; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
 .att-rep-sub { color: ${C.muted}; font-size: 13px; margin-top: 4px; }
 .att-rep-tablewrap { max-height: 62vh; overflow: auto; }
-.att-rep-table { min-width: 960px; }
+.att-rep-table { min-width: 1060px; }
 .att-rep-table th { position: sticky; top: 0; z-index: 1; background: #fff; }
 /* The spanned designation cells already group the rows; this line makes the
    boundary readable when a group's people run to three or more. */
