@@ -655,12 +655,11 @@ export default function ManageTeam() {
       });
     });
 
-    if (missing.length) {
-      const first = missing[0];
-      const more = missing.length > 1 ? ` (+ ${missing.length - 1} more)` : '';
-      showToast(`Please complete: ${first}${more}`, 'error');
-      return;
-    }
+    /* Partial saves are allowed — a team is filled in over several sittings and
+       blocking the PUT meant losing every slot already assigned. The gaps are
+       reported as a warning instead, and an incomplete team stays on this page
+       rather than being pushed on to milestone config. */
+    const incomplete = missing.length > 0;
 
     // PUT body must only carry { roleLabel, users, single? } — strip displayLabel
     // (UI-only field) before sending so the server contract stays clean.
@@ -677,14 +676,21 @@ export default function ManageTeam() {
         projectOwner: stripDisplay(state.projectOwner),
         activities: state.activities,
       });
-      showToast('Team saved successfully.', 'success');
+      if (incomplete) {
+        const first = missing[0];
+        const more = missing.length > 1 ? ` (+ ${missing.length - 1} more)` : '';
+        showToast(`Saved. Still to complete: ${first}${more}`, 'warning');
+      } else {
+        showToast('Team saved successfully.', 'success');
+      }
       /* Drop edit mode on a successful save — the dropdowns lock and
          the Submit/Cancel toolbar collapses back to just Edit. */
       setEditMode(false);
-      /* After a successful team save, send the user to milestone config
-         so they can continue configuring the project. Short delay so the
-         success toast is visible before the route changes. */
-      if (projectId) {
+      /* After a COMPLETE team save, send the user to milestone config so they
+         can continue configuring the project. Short delay so the success toast
+         is visible before the route changes. A partial save stays put — the
+         remaining slots are right here. */
+      if (projectId && !incomplete) {
         setTimeout(() => {
           navigate(`/projects/${encodeURIComponent(projectId)}/config`);
         }, 1200);

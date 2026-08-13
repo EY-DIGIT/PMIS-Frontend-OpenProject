@@ -372,14 +372,39 @@ const categoryDot = (i) => CATEGORY_DOTS[i % CATEGORY_DOTS.length];
 
 /* The sub-header above one category's SLA groups. Deliberately lighter
    than SectionHead — this sits INSIDE a track section, and giving it the
-   same weight would make the page read as twice as many sections. */
-function CategoryBlock({ cat, accent }) {
+   same weight would make the page read as twice as many sections.
+
+   Collapsible, and it OWNS its rows rather than sitting beside them, so
+   folding one shut actually hides the SLAs underneath it. CLOSED by
+   default: the page then opens as a one-screen index of the quarter —
+   every category, what it holds and what it cost — and the reader opens
+   only the one they came for.
+
+   That only works because the counts and the LD figure live in the
+   header. Collapsed, the strip still answers "did anything in here cost
+   money", which is the whole question worth asking before deciding to
+   open it. */
+function CategoryBlock({ cat, accent, children, defaultOpen = false }) {
+    const [open, setOpen] = useState(defaultOpen);
     const costs = cat.track === TRACK.DELIVERABLE ? cat.ldAmount > 0 : cat.ldPercent > 0;
     return (
-        <div style={{
-            display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap",
-            marginTop: 16, paddingBottom: 6, borderBottom: "1px solid var(--uidai-pmis-border)",
-        }}>
+        <div style={{ marginTop: 16 }}>
+        <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            title={open ? `Hide the ${cat.label} SLAs` : `Show the ${cat.label} SLAs`}
+            style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap",
+                font: "inherit", cursor: "pointer", textAlign: "left",
+                background: "transparent", border: "none", margin: 0, padding: "0 0 6px",
+                borderBottom: "1px solid var(--uidai-pmis-border)",
+            }}
+        >
+            <span style={{
+                ...muted, fontSize: 10, display: "inline-block", flex: "0 0 auto",
+                transition: "transform .15s ease", transform: open ? "rotate(90deg)" : "none",
+            }}>▶</span>
             <span style={{ width: 9, height: 9, borderRadius: "50%", background: accent, flex: "0 0 auto" }} />
             <span style={{ fontSize: 12.5, fontWeight: 800, color: INK }}>{cat.label}</span>
             <span style={{ fontSize: 11, ...muted }}>
@@ -411,6 +436,8 @@ function CategoryBlock({ cat, accent }) {
                     </span>
                 )}
             </span>
+        </button>
+        {open && children}
         </div>
     );
 }
@@ -896,12 +923,46 @@ function ClauseChip({ clause }) {
     );
 }
 
-function SectionHead({ title, count, sub, clause, onToggle, toggleLabel, showToggle, style }) {
+/* The two TRACKS are the page's real division: one is charged as a
+   percentage of PQP, the other in rupees on a deliverable's own cost,
+   and they share no ceiling. Plain text headings gave them the same
+   weight as the category rows beneath them, so the page read as one
+   continuous list of sections and the boundary was invisible.
+
+   A banner — tinted, bordered, with an accent rail down its left edge —
+   makes each track announce itself as a region. The hue differs only to
+   tell the two apart at a glance; neither is good or bad, so the
+   semantic red/amber/green of the badges is left untouched. */
+const TRACK_BANNER = {
+    quarterly: { accent: "#2f6db5", bg: "#f2f7fd", border: "#cfe0f5" },
+    deliverable: { accent: "#5b52b5", bg: "#f5f4fd", border: "#d8d5f2" },
+};
+
+function SectionHead({ title, count, sub, clause, onToggle, toggleLabel, showToggle, style, track }) {
+    const banner = track ? TRACK_BANNER[track] || TRACK_BANNER.quarterly : null;
+
     return (
-        <div style={{ marginTop: 18, ...style }}>
+        <div style={banner
+            ? {
+                marginTop: 18, borderRadius: 10, padding: "12px 16px",
+                background: banner.bg, border: `1px solid ${banner.border}`,
+                borderLeft: `4px solid ${banner.accent}`, ...style,
+            }
+            : { marginTop: 18, ...style }}
+        >
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 13.5, fontWeight: 800, color: INK }}>{title}</div>
-                <span style={{ background: "#dceafe", color: "#1f4e87", borderRadius: 999, padding: "1px 8px", fontSize: 11, fontWeight: 800 }}>
+                <div style={{
+                    fontSize: banner ? 15 : 13.5, fontWeight: 800,
+                    color: banner ? banner.accent : INK,
+                }}>
+                    {title}
+                </div>
+                <span style={{
+                    background: banner ? "#fff" : "#dceafe",
+                    border: banner ? `1px solid ${banner.border}` : "none",
+                    color: banner ? banner.accent : "#1f4e87",
+                    borderRadius: 999, padding: "1px 8px", fontSize: 11, fontWeight: 800,
+                }}>
                     {count}
                 </span>
                 <ClauseChip clause={clause} />
@@ -916,7 +977,11 @@ function SectionHead({ title, count, sub, clause, onToggle, toggleLabel, showTog
                     </button>
                 )}
             </div>
-            {sub && <div style={{ fontSize: 11.5, ...muted, marginTop: 3 }}>{sub}</div>}
+            {sub && (
+                <div style={{ fontSize: 11.5, ...muted, marginTop: banner ? 4 : 3, lineHeight: 1.55 }}>
+                    {sub}
+                </div>
+            )}
         </div>
     );
 }
@@ -959,8 +1024,10 @@ function IntervalBar({ interval, occupancy, configuredSeats }) {
 
 /* A small right-aligned figure in the group header. */
 function Metric({ label, value, accent, flag, flagTitle, wide }) {
+    /* `wide` sizes for the LABEL now, not for a trailing cap phrase — the
+       value under it is a bare figure unless a cap actually bit. */
     return (
-        <span style={{ textAlign: "right", minWidth: wide ? 132 : 74 }}>
+        <span style={{ textAlign: "right", minWidth: wide ? 100 : 74 }}>
             <span style={{ display: "block", fontSize: 10.5, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".3px" }}>
                 {label}
             </span>
@@ -1034,6 +1101,34 @@ function ActivityDateLines({ activity }) {
     );
 }
 
+/* The qualifier beside a capped figure is a status, not prose: "under
+   the cap" and "no cap · within band" both name which ceiling applied.
+   Set as a chip it reads as one glanceable token instead of a grey
+   sentence competing with the number it qualifies — and the tone says
+   whether a cap actually bit without the reader parsing the words. */
+const CHIP_TONE = {
+    neutral: { bg: "#f1f5fb", border: "#d7e0ee", fg: "var(--uidai-pmis-muted)" },
+    capped: { bg: "#fdf3e3", border: "#f0d7a8", fg: AMBER },
+};
+
+function StatusChip({ children, tone = "neutral", title }) {
+    const t = CHIP_TONE[tone] || CHIP_TONE.neutral;
+    return (
+        <span
+            title={title}
+            style={{
+                display: "inline-block", background: t.bg,
+                border: `1px solid ${t.border}`, color: t.fg,
+                borderRadius: 999, padding: "1px 7px",
+                fontSize: 10, fontWeight: 700, lineHeight: 1.7,
+                whiteSpace: "nowrap", letterSpacing: ".1px",
+            }}
+        >
+            {children}
+        </span>
+    );
+}
+
 /* ─── before the cap → after the cap ──────────────────────────────
    Every SLA type is capped by something different — the top LD band for
    a points SLA, nothing at all for a deliverable one, the 10% quarter
@@ -1068,7 +1163,7 @@ function CapPair({ before, after, format = pct, clause, noCapClause, compact }) 
     }
 
     return (
-        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5, flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
             {bit ? (
                 <>
                     {/* The pre-cap figure is struck through rather than dropped:
@@ -1079,15 +1174,27 @@ function CapPair({ before, after, format = pct, clause, noCapClause, compact }) 
                     </span>
                     <span style={{ ...muted, fontSize: compact ? 10 : 11 }}>→</span>
                     <b style={{ color: RED }}>{format(a)}</b>
-                    {clause && <span style={{ ...muted, fontSize: 10 }}>{clause}</span>}
+                    {clause && (
+                        <StatusChip tone="capped" title={`Capped by ${clause}`}>
+                            {clause}
+                        </StatusChip>
+                    )}
                 </>
             ) : (
-                <>
-                    <b style={{ color: INK }}>{format(a)}</b>
-                    <span style={{ ...muted, fontSize: 10 }}>
-                        {noCapClause ? `no cap · ${noCapClause}` : "under the cap"}
-                    </span>
-                </>
+                /* Nothing was capped — which is the ordinary case on nearly
+                   every row, so saying so earns no space. The figure alone
+                   IS the statement "this is what was charged"; a chip
+                   repeating "under the cap" on all twelve rows only made
+                   the one row where a cap DID bite harder to find.
+                   The fact survives on the tooltip for anyone checking. */
+                <b
+                    style={{ color: INK }}
+                    title={noCapClause
+                        ? `No ceiling applies to this figure — ${noCapClause}`
+                        : "Below the ceiling that applies to it"}
+                >
+                    {format(a)}
+                </b>
             )}
         </span>
     );
@@ -3938,6 +4045,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             {(
                             <>
                             <SectionHead
+                                track="quarterly"
                                 title="Quarterly SLAs"
                                 count={visibleQuarterly.reduce((n, c) => n + c.items.length, 0)}
                                 sub="Charged as a % of the quarter's payment base. Resources, query resolution, recommendations."
@@ -3999,11 +4107,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         are both quarterly and both charged on PQP, and
                                         that is the only thing they have in common. */}
                                     {visibleQuarterly.map((cat) => (
-                                        <React.Fragment key={cat.code}>
-                                            <CategoryBlock
-                                                cat={cat}
-                                                accent={categoryDot(categories.indexOf(cat))}
-                                            />
+                                        <CategoryBlock
+                                            key={`${cat.code}:${expandAll}`}
+                                            cat={cat}
+                                            accent={categoryDot(categories.indexOf(cat))}
+                                            defaultOpen={expandAll}
+                                        >
                                             {cat.items.map((it) => (
                                                 <SlaGroup
                                                     key={`q:${it.slaRef}:${expandAll}`}
@@ -4018,7 +4127,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     onClearDraft={clearObservationDraft}
                                                 />
                                             ))}
-                                        </React.Fragment>
+                                        </CategoryBlock>
                                     ))}
                                     {visibleQuarterly.length === 0 && (
                                         <div className="uidai-pmis-filter-shell" style={{ marginTop: 10, padding: 16, fontSize: 12.5, ...muted, fontStyle: "italic" }}>
@@ -4496,11 +4605,16 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 in rupees and kept out of the PQP ceiling entirely. */}
                             {(
                             <>
+                            {/* A rule as well as the gap: the quarterly track ends in
+                                its own tiles and tables, so without a hard break the
+                                deliverable banner reads as one more block inside it. */}
+                            <div style={{ borderTop: "1px solid var(--uidai-pmis-border)", marginTop: 30 }} />
                             <SectionHead
+                                track="deliverable"
                                 title="Deliverable-linked SLAs"
                                 count={visibleDeliverable.reduce((n, c) => n + c.items.length, 0)}
                                 sub="Charged on the deliverable's own cost — no per-deliverable ceiling. Submission, defect rectification, governance tool."
-                                style={{ marginTop: 26 }}
+                                style={{ marginTop: 22 }}
                             />
 
                             {deliverableItems.length === 0 ? (
@@ -4535,11 +4649,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         />
                                     </div>
                                     {visibleDeliverable.map((cat) => (
-                                        <React.Fragment key={cat.code}>
-                                            <CategoryBlock
-                                                cat={cat}
-                                                accent={categoryDot(categories.indexOf(cat))}
-                                            />
+                                        <CategoryBlock
+                                            key={`${cat.code}:${expandAll}`}
+                                            cat={cat}
+                                            accent={categoryDot(categories.indexOf(cat))}
+                                            defaultOpen={expandAll}
+                                        >
                                             {cat.items.map((it) => (
                                                 <SlaGroup
                                                     key={`d:${it.slaRef}:${expandAll}`}
@@ -4553,7 +4668,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                     onClearDraft={clearObservationDraft}
                                                 />
                                             ))}
-                                        </React.Fragment>
+                                        </CategoryBlock>
                                     ))}
                                     {visibleDeliverable.length === 0 && (
                                         <div className="uidai-pmis-filter-shell" style={{ marginTop: 10, padding: 16, fontSize: 12.5, ...muted, fontStyle: "italic" }}>

@@ -269,6 +269,17 @@ export const ENDPOINTS = {
        per file; GET returns only these documents. */
     actualStartAttachments: (uuid) =>
       `/projects/api/v3/projects/${enc(uuid)}/actual-start-attachments`,
+    /* Same deal for the other three dates — each date change carries its own
+       reason (`startDateRemarks` / `endDateRemarks` / `actualEndRemarks` on the
+       project PATCH) plus its own document list, so a schedule slip can be
+       justified per-date instead of in one shared note. All four lists are
+       excluded from the general `attachments` GET. */
+    startDateAttachments: (uuid) =>
+      `/projects/api/v3/projects/${enc(uuid)}/start-date-attachments`,
+    endDateAttachments: (uuid) =>
+      `/projects/api/v3/projects/${enc(uuid)}/end-date-attachments`,
+    actualEndAttachments: (uuid) =>
+      `/projects/api/v3/projects/${enc(uuid)}/actual-end-attachments`,
     discussionFeed: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/discussion-feed`,
     criticalPathDependencies: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/dependencies`,
     criticalPathAnalysis: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/critical-path/analysis`,

@@ -211,6 +211,16 @@ const BODY_HTML = `
     </div>
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Settlement / LD formula rule <span class="required">*</span></div>
+        <div class="field-help">Which LD engine settles this SLA. Pre-selected from the category and Applied On — change it only if the RFP describes a different rule. Leaving it wrong is what makes an SLA settle at ₹0.</div>
+      </div>
+      <div class="dyn-cell-value">
+        <select id="s_ld_formula_rule" onchange="window.__slaOnb._onLdRuleChange(this)"></select>
+      </div>
+      <div class="dyn-cell-delete"></div>
+    </div>
+    <div class="dyn-row">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">Definition of SLA <span class="required">*</span></div>
         <div class="field-help">One-sentence summary — what does this SLA cover?</div>
       </div>
@@ -224,6 +234,32 @@ const BODY_HTML = `
       </div>
       <div class="dyn-cell-value"><textarea id="s_calculation_method" placeholder='Plain-English description (RFP "SLA calculation" row).'></textarea></div>
       <div class="dyn-cell-delete"></div>
+    </div>
+    <div class="dyn-row">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Active From <span class="required">*</span></div>
+        <div class="field-help">Date this SLA starts being enforced (<code>effective_from</code>). LD is computed only for periods on/after this date; it also versions the mapping.</div>
+      </div>
+      <div class="dyn-cell-value"><input id="s_effective_from" type="date"></div>
+      <div class="dyn-cell-delete"></div>
+    </div>
+    <div class="dyn-row">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">What is measured (primary) <span class="required">*</span></div>
+        <div class="field-help">The measurement the severity bands below score. An SLA that measures two things (e.g. business-days AND hours) adds a second metric here.</div>
+      </div>
+      <div class="dyn-cell-value"><div id="s_measurement_container"></div></div>
+      <div class="dyn-cell-delete"></div>
+    </div>
+    <div class="dyn-row" id="s_secondary_row" style="display:none;">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">What is measured (secondary)</div>
+        <div class="field-help">The second metric of a compound SLA. Each metric needs its own severity band(s) below.</div>
+      </div>
+      <div class="dyn-cell-value"><div id="s_secondary_container"></div></div>
+      <div class="dyn-cell-delete">
+        <button class="dyn-delete-btn" title="Remove the second metric" onclick="window.__slaOnb._removeSecondaryMetric()">✕</button>
+      </div>
     </div>
     <div class="dyn-row" style="border-bottom:none;">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
@@ -360,6 +396,20 @@ export default function SlaOnboardingPage() {
             { key: "metric_type", label: "Metric Type", section: "Identification", input_type: "text", help: 'BSP RFP per-metric category — e.g. "Accuracy", "Throughput", "Availability".' },
         ];
 
+        /* Settlement engines the backend accepts for `ld_formula_rule`. A value
+           outside this list is rejected with `unknown_ld_formula_rule` (422);
+           NULL is accepted but derives a default server-side, which is how every
+           SLA onboarded before this field existed ended up settling at ₹0. */
+        const LD_FORMULA_RULES = [
+            { value: "LADDER", label: "Ladder — severity bands (Track B, resource SLAs)" },
+            { value: "PER_UNIT_TIME_DELIVERABLE", label: "Per unit of time — deliverable (Track A)" },
+            { value: "PER_UNIT_TIME_QUARTERLY", label: "Per unit of time — quarterly" },
+            { value: "PER_OCCURRENCE", label: "Per occurrence" },
+            { value: "PER_UNIT_OVER_THRESHOLD", label: "Per unit over threshold" },
+            { value: "AVAILABILITY_UPTIME", label: "Availability / uptime" },
+            { value: "DAYS_WEIGHTED", label: "Days weighted" },
+        ];
+
         const _FALLBACK_CATEGORIES = [
             { code: "DELIVERABLE_SUBMISSION", display_name: "Deliverable Submission", formula_type: "fixed_escalation" },
             { code: "QUERY_RESOLUTION", display_name: "Query Resolution", formula_type: "fixed_escalation" },
@@ -468,21 +518,77 @@ export default function SlaOnboardingPage() {
         }
         async function loadInputVariables() {
             const body = await _safeFetch(CONTRACTS_BASE + "/api/v3/sla-input-variables", "sla-input-variables");
-            if (body) {
-                INPUT_VARIABLES = (body?.data?._embedded?.elements || []).map((el) => el.data || el);
+            // On a failed fetch keep whatever we already have — replacing a good
+            // list with [] empties every dropdown on the page. The connection
+            // banner already offers a Retry.
+            if (!body) return;
+            const live = (body?.data?._embedded?.elements || []).map((el) => el.data || el);
+            if (live.length) INPUT_VARIABLES = _dedupeVariables(live);
+        }
+        /* The catalog ships the same variable twice when a curated key and a
+           free-text slug describe one thing ("Delay (days)" as both delay_days
+           and delay-days), which showed up as duplicate options. First entry
+           wins on both key and label. */
+        function _dedupeVariables(list) {
+            const byKey = new Set();
+            const byLabel = new Set();
+            const out = [];
+            for (const v of list) {
+                if (!v || !v.key) continue;
+                const k = String(v.key);
+                const l = _normKey(v.label || v.key);
+                if (byKey.has(k) || byLabel.has(l)) continue;
+                byKey.add(k);
+                byLabel.add(l);
+                out.push(v);
             }
+            return out;
         }
 
+        /* Keys rendered as always-visible fields in the Identification block, so
+           they must never also appear as an addable dynamic row. effective_from
+           and measurement moved here because both are REQUIRED but used to exist
+           only as rows the user had to know to add — miss one and the only
+           feedback was an opaque "add this RFP row" error at submit. */
         const _STATIC_ID_KEYS = [
             "sla_ref", "title", "project_id", "category_code",
             "description", "calculation_method",
+            "effective_from", "measurement", "secondary_measurement",
             "target_rows", "linear_escalation",
         ];
         const _TEMPLATE_KEYS = [
             "scope_text", "data_source", "reports_submitted_to",
             "measurement_interval", "reporting_interval", "ld_computation_base",
-            "effective_from", "measurement",
         ];
+
+        /* ── settlement / LD formula rule (static field) ── */
+        function _populateLdRuleOptions() {
+            const sel = host.querySelector("#s_ld_formula_rule");
+            if (!sel) return;
+            sel.innerHTML = LD_FORMULA_RULES
+                .map((r) => `<option value="${esc(r.value)}">${esc(r.label)}</option>`)
+                .join("");
+            _syncLdRuleDefault();
+        }
+        /* Deliverable-cost SLAs settle per unit of time against the deliverable;
+           everything else ladders off the severity bands. Mirrors the applied_on
+           derivation in _toFromRfpPayload so the two can't disagree. */
+        function _defaultLdFormulaRule() {
+            const catCode = (host.querySelector("#s_category_code")?.value || "").trim();
+            const row = Array.from(host.querySelectorAll("#dynBody .dyn-row"))
+                .find((r) => r.dataset.fieldKey === "ld_computation_base");
+            const appliedOn = (row?.querySelector("[data-v]")?.value || "").trim()
+                || (catCode === "DELIVERABLE_SUBMISSION" ? "FIXED_AMOUNT" : "QUARTERLY_PAYMENT");
+            return appliedOn === "FIXED_AMOUNT" ? "PER_UNIT_TIME_DELIVERABLE" : "LADDER";
+        }
+        // Re-derive only while the user hasn't picked a rule by hand — once they
+        // have, a category change must not silently overwrite their choice.
+        function _syncLdRuleDefault() {
+            const sel = host.querySelector("#s_ld_formula_rule");
+            if (!sel || sel.dataset.touched === "1") return;
+            sel.value = _defaultLdFormulaRule();
+        }
+        function _onLdRuleChange(sel) { sel.dataset.touched = "1"; }
 
         function useTemplate() {
             const present = new Set(Array.from(host.querySelectorAll("#dynBody .dyn-row")).map((r) => r.dataset.fieldKey).filter(Boolean));
@@ -536,6 +642,7 @@ export default function SlaOnboardingPage() {
             const sel = host.querySelector("#s_category_code");
             const code = (sel.value || "").trim();
             const container = host.querySelector("#s_target_container");
+            _syncLdRuleDefault();
             if (!code) {
                 container.innerHTML = '<div class="dyn-cell-empty">Waiting for category selection above…</div>';
                 return;
@@ -564,6 +671,60 @@ export default function SlaOnboardingPage() {
                     CATEGORIES.map((c) => `<option value="${esc(c.code)}" data-formula="${esc(c.formula_type || "")}">${esc(c.display_name || c.code)}</option>`).join("");
                 if (cur) { cat.value = cur; _onStaticCategoryChange(); }
             }
+            _populateLdRuleOptions();
+            /* The measurement widgets are the same sub-form the dynamic rows
+               used, just mounted into fixed containers. Re-render on every
+               populate so a late catalog load fills their dropdowns. */
+            const mv = host.querySelector("#s_measurement_container");
+            if (mv && !mv.querySelector("[data-mv-host]")) {
+                _widgetMeasurementSet(mv, { key: "measurement" });
+            }
+            const sec = host.querySelector("#s_secondary_container");
+            if (sec && !sec.querySelector("[data-mv-host]")) {
+                _widgetMeasurementSet(sec, { key: "secondary_measurement" });
+            }
+        }
+
+        /* ── compound (multi-metric) SLAs ──────────────────────────────────
+           A single SLA can score two metrics (SLA007: "≥16 business-days AND
+           ≥144 hours"). Collapsing those into one metric with mixed thresholds
+           is what produced the broken live definitions, so the second metric
+           gets its own row and its own bands. `compound_metric_rule` tells the
+           engine whether to score them independently or take the worse of the
+           two — the backend rejects COMBINED when a declared metric has no
+           bands (`combined_metric_without_bands`, 422). */
+        function _addSecondaryMetric() {
+            const row = host.querySelector("#s_secondary_row");
+            if (!row) return;
+            row.style.display = "";
+            _updateCompoundUi();
+        }
+        function _removeSecondaryMetric() {
+            const row = host.querySelector("#s_secondary_row");
+            if (!row) return;
+            row.style.display = "none";
+            const sel = row.querySelector(".mv-picker");
+            if (sel) { sel.value = ""; _onMeasurementPick(sel); }
+            _updateCompoundUi();
+        }
+        function _hasSecondaryMetric() {
+            const row = host.querySelector("#s_secondary_row");
+            return !!row && row.style.display !== "none" && !!_readMeasurement(row);
+        }
+        // The "+ Add another metric" button and the Combine checkbox only make
+        // sense on the primary widget, and the checkbox only once a second
+        // metric actually exists.
+        function _updateCompoundUi() {
+            const addBtn = host.querySelector("#s_measurement_container .mv-add-metric");
+            const secondaryOpen = host.querySelector("#s_secondary_row")?.style.display !== "none";
+            if (addBtn) addBtn.style.display = secondaryOpen ? "none" : "";
+            const combineWrap = host.querySelector("#s_measurement_container .mv-combine-wrap");
+            if (combineWrap) combineWrap.style.display = secondaryOpen ? "" : "none";
+        }
+        function _compoundMetricRule() {
+            if (!_hasSecondaryMetric()) return "INDEPENDENT";
+            const cb = host.querySelector("#s_measurement_container .mv-combine");
+            return cb && cb.checked ? "COMBINED" : "INDEPENDENT";
         }
 
         function cancelOnboarding() {
@@ -583,8 +744,15 @@ export default function SlaOnboardingPage() {
         function _formSnapshot() {
             return Array.from(host.querySelectorAll(
                 "#s_sla_ref, #s_title, #s_project_id, #s_category_code, #s_description, #s_calculation_method," +
+                "#s_ld_formula_rule, #s_effective_from," +
+                "#s_measurement_container input, #s_measurement_container select," +
+                "#s_secondary_container input, #s_secondary_container select," +
                 "#s_target_container [data-k], #dynBody input, #dynBody textarea, #dynBody select"
-            )).map((el) => (el.type === "file" ? String(el.files ? el.files.length : 0) : el.value)).join("");
+            )).map((el) => {
+                if (el.type === "file") return String(el.files ? el.files.length : 0);
+                if (el.type === "checkbox") return el.checked ? "1" : "0";
+                return el.value;
+            }).join("");
         }
 
         /* ── row management ── */
@@ -746,6 +914,17 @@ export default function SlaOnboardingPage() {
                       </div>
                       <input type="hidden" class="mv-metric-key">
                     </div>
+                    ${f.key === "measurement" ? `
+                    <div>
+                      <button type="button" class="small-btn mv-add-metric" onclick="window.__slaOnb._addSecondaryMetric()">+ Add another metric</button>
+                      <div class="mv-combine-wrap" style="display:none;margin-top:8px;padding:8px 10px;border-radius:6px;background:#f1f6fd;border:1px solid var(--border-soft);">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--navy-deep);margin:0;cursor:pointer;">
+                          <input type="checkbox" class="mv-combine" style="margin:0;">
+                          <span><strong>Combine metrics</strong> — score both and take the worse severity</span>
+                        </label>
+                        <div class="hint" style="margin-top:4px;">Leave unticked to score the two metrics independently. Combining requires each metric to have its own severity band(s) below.</div>
+                      </div>
+                    </div>` : ""}
                     <div class="mv-create" style="display:none;background:#fffbeb;padding:10px 12px;border-radius:6px;border:1px dashed #fcd34d;">
                       <div style="font-size:11px;color:#92400e;font-weight:600;margin-bottom:6px;">Define a new measurement variable</div>
                       <div style="display:grid;grid-template-columns:1fr 1.4fr 0.6fr auto auto;gap:8px;align-items:end;">
@@ -761,6 +940,11 @@ export default function SlaOnboardingPage() {
         }
         function _measurementOptions(selectedKey) {
             const opts = [`<option value="" ${!selectedKey ? "selected" : ""}>— Pick a measurement variable —</option>`];
+            // An empty catalog means the fetch failed; say so instead of showing
+            // a dropdown that looks like the catalog is genuinely empty.
+            if (!INPUT_VARIABLES.length) {
+                opts.push('<option value="" disabled>— catalog unavailable, use Retry above —</option>');
+            }
             for (const v of INPUT_VARIABLES) {
                 const lbl = `${v.label}${v.unit ? " (" + v.unit + ")" : ""}`;
                 opts.push(`<option value="${esc(v.key)}" ${v.key === selectedKey ? "selected" : ""}>${esc(lbl)}</option>`);
@@ -770,6 +954,21 @@ export default function SlaOnboardingPage() {
                 opts.splice(1, 0, `<option value="${esc(selectedKey)}" selected>${esc(selectedKey)} (custom)</option>`);
             }
             return opts.join("");
+        }
+        /* Read a measurement widget wherever it's mounted (the two static
+           containers, or a dynamic row's value cell). Returns undefined when
+           nothing has been picked. */
+        function _readMeasurement(scopeEl) {
+            const hostEl = scopeEl && scopeEl.querySelector("[data-mv-host]");
+            if (!hostEl) return undefined;
+            const metricKey = (hostEl.querySelector(".mv-metric-key").value || "").trim();
+            const displayName = (hostEl.querySelector(".mv-label").value || "").trim();
+            if (!metricKey && !displayName) return undefined;
+            const obj = { display_name: displayName, unit: (hostEl.querySelector(".mv-unit").value || "").trim() };
+            if (metricKey) obj.metric_key = metricKey;
+            const tgt = (hostEl.querySelector(".mv-target").value || "").trim();
+            if (tgt) obj.target_value = tgt;
+            return obj;
         }
         function _onMeasurementPick(sel) {
             const hostEl = sel.closest("[data-mv-host]");
@@ -795,6 +994,11 @@ export default function SlaOnboardingPage() {
                 const hint = _cleanExample(v && v.example_value);
                 tgt.placeholder = hint || "0";
             }
+            /* The bands' blank option names the primary metric, and the Combine
+               checkbox only applies once a second metric is picked — both follow
+               from what was just selected. */
+            _refreshSevDropdowns();
+            _updateCompoundUi();
         }
         /* Values the old catalog rows shipped as "examples". They carry no
            meaning, so they're never surfaced — not as a value, not as a
@@ -815,6 +1019,22 @@ export default function SlaOnboardingPage() {
             const safeKey = rawKey.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
             if (!safeKey) { toast("Invalid key", "Use snake_case letters / digits / underscores.", "error"); return; }
             if (INPUT_VARIABLES.find((v) => v.key === safeKey)) { toast("Already exists", `"${safeKey}" is already in the catalog.`, "error"); return; }
+            /* Match on the label too — the same measurement typed under a second
+               key is how the catalog grew duplicate entries in the first place. */
+            const sameLabel = INPUT_VARIABLES.find((v) => _normKey(v.label) === _normKey(rawLabel));
+            if (sameLabel) {
+                toast("Already exists", `"${sameLabel.label}" is already in the catalog as "${sameLabel.key}" — pick it from the list instead.`, "error");
+                return;
+            }
+            /* This variable is created for THIS SLA only; nothing POSTs it to the
+               shared catalog. Say so before it can be banded on, so a typo'd key
+               isn't discovered later in a live LD calculation. */
+            const ok = window.confirm(
+                `Create the measurement variable "${rawLabel}" with key "${safeKey}"?\n\n` +
+                `This variable is not in the shared catalog — it is saved with this SLA only, ` +
+                `and the key becomes part of how the SLA is scored. Check the spelling before continuing.`
+            );
+            if (!ok) return;
             INPUT_VARIABLES.push({ key: safeKey, label: rawLabel, unit: rawUnit || null, source: "custom" });
             const sel = hostEl.querySelector(".mv-picker");
             sel.innerHTML = _measurementOptions(safeKey);
@@ -836,40 +1056,60 @@ export default function SlaOnboardingPage() {
                 <div class="sub-form" data-v="${esc(f.key)}">
                   <div class="sev-header">
                     <span></span><span>Severity</span><span>Input variable</span><span>Threshold (RFP wording)</span>
-                    <span>From <span style="font-weight:400;text-transform:none;color:var(--text-muted);">excl.</span></span>
+                    <span>From <span style="font-weight:400;text-transform:none;color:var(--text-muted);">incl.</span></span>
                     <span>To <span style="font-weight:400;text-transform:none;color:var(--text-muted);">incl.</span></span><span></span>
                   </div>
                   <div class="sev-body"></div>
                   <button type="button" class="small-btn" style="margin-top:6px;" onclick="window.__slaOnb._addSevRow(this)">+ Add severity row</button>
-                  <div class="hint">Leave "From" or "To" blank for unbounded sides (e.g. "≤ 7 days" = leave From blank).</div>
+                  <div class="hint">
+                    Both bounds are <strong>inclusive</strong> — type the RFP's own numbers. "≥ 16 days" is From <strong>16</strong>;
+                    "≤ 7 days" is To <strong>7</strong>; "8–14 days" is From <strong>8</strong>, To <strong>14</strong>.
+                    Leave a side blank for an unbounded band, but never both — a band with no bounds matches everything and
+                    swallows the ones after it.
+                  </div>
                 </div>`;
             _addSevRow(cell.querySelector("button"));
             _addSevRow(cell.querySelector("button"));
         }
-        // Rows are a list, not a keyed map — the same input variable may repeat
-        // across severity bands (e.g. delay ≤7d → L1, 8–14 → L2), so the options
-        // are not filtered by what sibling rows already picked.
+        /* Rows are a list, not a keyed map — the same input variable may repeat
+           across severity bands (e.g. delay ≤7d → L1, 8–14 → L2), so the options
+           are not filtered by what sibling rows already picked.
+
+           The blank default means "the SLA's primary measurement" and serialises
+           as input_variable:null, which is what a single-metric SLA wants; it's
+           labelled with the primary metric so it isn't mistaken for "unset". A
+           band can only name a variable that exists in the catalog — the old
+           "+ Type a new variable…" prompt minted unvalidated client-only keys
+           straight into bands, which is how junk like
+           `minimum_resource_availability` got there. New variables now go
+           through the measurement widget's confirmed create flow. */
         function _sevInputVarOptions(selected) {
-            const opts = [`<option value="" ${!selected ? "selected" : ""}>— Primary measurement —</option>`];
+            const primary = _readMeasurement(host.querySelector("#s_measurement_container"));
+            const primaryLabel = primary && (primary.display_name || primary.metric_key);
+            const defaultLabel = primaryLabel
+                ? `— Primary measurement (${primaryLabel}) —`
+                : "— Primary measurement —";
+            const opts = [`<option value="" ${!selected ? "selected" : ""}>${esc(defaultLabel)}</option>`];
             for (const v of INPUT_VARIABLES) {
                 const lbl = `${v.label}${v.unit ? " (" + v.unit + ")" : ""}`;
                 opts.push(`<option value="${esc(v.key)}" ${selected === v.key ? "selected" : ""}>${esc(lbl)}</option>`);
             }
-            opts.push('<option value="__custom__">+ Type a new variable…</option>');
             if (selected && !INPUT_VARIABLES.find((v) => v.key === selected)) {
                 opts.splice(1, 0, `<option value="${esc(selected)}" selected>${esc(selected)} (custom)</option>`);
             }
             return opts.join("");
         }
-        // Only needed after "+ Type a new variable…" adds a key to the catalog,
-        // so the other rows pick it up.
-        function _refreshSevDropdowns(hostEl) {
-            hostEl.querySelectorAll(".sev-row").forEach((row) => {
+        /* Re-render every band's variable dropdown — after the catalog gains a
+           variable, and after the primary measurement changes (the blank option
+           names it). */
+        function _refreshSevDropdowns(scopeEl) {
+            const root = scopeEl || host;
+            root.querySelectorAll(".sev-row").forEach((row) => {
                 const sel = row.querySelector('[data-k="input_variable"]');
                 if (!sel) return;
                 const cur = sel.value;
-                sel.innerHTML = _sevInputVarOptions(cur === "__custom__" ? "" : cur);
-                if (cur && cur !== "__custom__") sel.value = cur;
+                sel.innerHTML = _sevInputVarOptions(cur);
+                if (cur) sel.value = cur;
             });
         }
         function _addSevRow(btn) {
@@ -881,10 +1121,10 @@ export default function SlaOnboardingPage() {
             r.innerHTML = `
                 <span class="sev-pill" style="background:${_SEV_COLOUR[sev]};">L${sev}</span>
                 <select data-k="severity" onchange="window.__slaOnb._updateSevPill(this)">${_severityOptions(sev)}</select>
-                <select data-k="input_variable" onchange="window.__slaOnb._onSevInputVarChange(this)">${_sevInputVarOptions("")}</select>
+                <select data-k="input_variable">${_sevInputVarOptions("")}</select>
                 <input data-k="threshold_label" type="text" placeholder="e.g. ≤ 21 days">
-                <input data-k="from_value" type="number" step="any" placeholder="—">
-                <input data-k="to_value" type="number" step="any" placeholder="—">
+                <input data-k="from_value" type="number" step="any" placeholder="≥ this">
+                <input data-k="to_value" type="number" step="any" placeholder="≤ this">
                 <button type="button" class="dyn-delete-btn" onclick="window.__slaOnb._deleteSevRow(this)">✕</button>`;
             body.appendChild(r);
         }
@@ -894,17 +1134,6 @@ export default function SlaOnboardingPage() {
             const v = Number(sel.value);
             pill.style.background = _SEV_COLOUR[v];
             pill.textContent = "L" + v;
-        }
-        function _onSevInputVarChange(sel) {
-            if (sel.value === "__custom__") {
-                const key = (window.prompt("New input variable (snake_case):") || "").trim();
-                if (!key) { sel.value = ""; return _refreshSevDropdowns(sel.closest(".sub-form")); }
-                const safe = key.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-                if (!safe) { sel.value = ""; return _refreshSevDropdowns(sel.closest(".sub-form")); }
-                if (!INPUT_VARIABLES.find((v) => v.key === safe)) INPUT_VARIABLES.push({ key: safe, label: safe, unit: null, source: "custom" });
-                sel.value = safe;
-            }
-            return _refreshSevDropdowns(sel.closest(".sub-form"));
         }
         function _deleteSevRow(btn) {
             btn.parentElement.remove();
@@ -1010,6 +1239,7 @@ export default function SlaOnboardingPage() {
                 errors.push({ label: "SLA Number", message: "Use capital letters, digits, - and _ only — e.g. PMU-SLA001." });
                 markIds.push("s_sla_ref");
             }
+            _validateBands(payload, errors, markIds);
             if (!editingId) {
                 const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
                 if (!stashed || !stashed.length) { errors.push({ label: "Image attachment", message: "Upload an RFP image (add the 'Image attachments' row)." }); tableErr = true; }
@@ -1067,6 +1297,73 @@ export default function SlaOnboardingPage() {
                 window.setTimeout(() => goBack(), 800);
             } catch (e) {
                 toast("Network error", e.message, "error");
+            }
+        }
+
+        /* ── band / compound validation ────────────────────────────────────
+           Everything here is a defect the backend guard also refuses (422), but
+           catching it in the form tells the user WHICH band is wrong while the
+           band is still in front of them. Linear-LD categories have no bands,
+           so they're skipped entirely. */
+        function _validateBands(payload, errors, markIds) {
+            const catCode = (host.querySelector("#s_category_code").value || "").trim();
+            const cat = CATEGORIES.find((c) => c.code === catCode);
+            const isLinear = cat ? cat.formula_type === "fixed_escalation"
+                : (catCode === "Deliverable Submission" || catCode === "Query Resolution");
+            if (isLinear) return;
+
+            const targetHost = host.querySelector("#s_target_container");
+            if (!targetHost || !targetHost.querySelector(".sev-row")) return;
+
+            const label = "Target / Applied Severity level";
+            const push = (message) => { errors.push({ label, message }); markIds.push("s_target_container"); };
+
+            /* Read the raw rows rather than payload.target_rows —
+               _collectSeverityFromHost has already dropped the unbounded ones,
+               and a row silently vanishing is exactly what we're preventing. */
+            const raw = Array.from(targetHost.querySelectorAll(".sev-row")).map((r) => ({
+                threshold: (r.querySelector('[data-k="threshold_label"]')?.value || "").trim(),
+                from: (r.querySelector('[data-k="from_value"]')?.value || "").trim(),
+                to: (r.querySelector('[data-k="to_value"]')?.value || "").trim(),
+                variable: (r.querySelector('[data-k="input_variable"]')?.value || "").trim(),
+            }));
+            const filled = raw.filter((b) => b.threshold || b.from || b.to);
+
+            // A band with neither bound matches every value, so it wins for all
+            // inputs and every band after it is unreachable. One-sided bounds
+            // are legitimate ("≤ 1" is To=1 with From blank) and stay allowed.
+            const unbounded = filled.filter((b) => !b.from && !b.to);
+            if (unbounded.length) {
+                push(`${unbounded.length} band${unbounded.length === 1 ? " has" : "s have"} no From and no To. ` +
+                    `A band with no bounds matches everything — give each one at least one bound ` +
+                    `(${unbounded.map((b) => `"${b.threshold || "unnamed band"}"`).join(", ")}).`);
+            }
+            // One band can't escalate against anything — a ladder needs a
+            // baseline plus at least one worse band.
+            if (filled.length && filled.length < 2) {
+                push("A severity ladder needs at least two bands — a baseline and an escalation. Add the next band from the RFP.");
+            }
+
+            if (payload.compound_metric_rule !== "COMBINED") return;
+
+            // COMBINED scores both metrics and takes the worse, so a metric with
+            // no band of its own can never contribute (backend:
+            // combined_metric_without_bands).
+            const primaryKey = payload.measurement?.metric_key;
+            const secondaryKey = payload.secondary_measurement?.metric_key;
+            if (!secondaryKey) {
+                errors.push({ label: "What is measured (secondary)", message: "Combine metrics is ticked but no second metric is picked. Pick one or untick Combine." });
+                markIds.push("s_secondary_container");
+                return;
+            }
+            // A blank variable means "the primary measurement", so it counts for it.
+            const covers = (key, isPrimary) =>
+                filled.some((b) => b.variable === key || (isPrimary && !b.variable));
+            if (!covers(primaryKey, true)) {
+                push(`Combine metrics is ticked, but no band scores the primary metric "${payload.measurement?.display_name || primaryKey}". Add its band(s).`);
+            }
+            if (!covers(secondaryKey, false)) {
+                push(`Combine metrics is ticked, but no band scores the secondary metric "${payload.secondary_measurement?.display_name || secondaryKey}". Add its band(s).`);
             }
         }
 
@@ -1152,6 +1449,18 @@ export default function SlaOnboardingPage() {
             if (catCode) payload.category_code = catCode;
             if (desc) payload.description = desc;
             if (calc) payload.calculation_method = calc;
+            const ldRule = (host.querySelector("#s_ld_formula_rule")?.value || "").trim();
+            if (ldRule) payload.ld_formula_rule = ldRule;
+            const effFrom = (host.querySelector("#s_effective_from")?.value || "").trim();
+            if (effFrom) payload.effective_from = effFrom;
+            const primary = _readMeasurement(host.querySelector("#s_measurement_container"));
+            if (primary) payload.measurement = primary;
+            if (_hasSecondaryMetric()) {
+                payload.secondary_measurement = _readMeasurement(host.querySelector("#s_secondary_container"));
+            }
+            // Always explicit: an omitted rule leaves the engine to guess, and
+            // INDEPENDENT is only the right guess for a single-metric SLA.
+            payload.compound_metric_rule = _compoundMetricRule();
             const targetHost = host.querySelector("#s_target_container");
             const cat = CATEGORIES.find((c) => c.code === catCode);
             const isLinear = cat ? cat.formula_type === "fixed_escalation" : (catCode === "Deliverable Submission" || catCode === "Query Resolution");
@@ -1170,6 +1479,18 @@ export default function SlaOnboardingPage() {
             });
             return payload;
         }
+        /* The engine matches `value > from_value` — an EXCLUSIVE lower bound —
+           while every RFP states its ladder inclusively ("≥ 16 business days").
+           Users type the RFP number and the conversion happens here, so a
+           resource on exactly 16 lands in the band the RFP says it should
+           instead of the one above it. Only whole numbers shift: a fractional
+           bound (99.5% uptime) has no "next" value to step down to, so it is
+           stored as typed. _storedToFromInclusive is the exact inverse, which
+           keeps a saved SLA stable across reopen/save cycles. */
+        const _shiftsBound = (n) => Number.isFinite(n) && Number.isInteger(n);
+        const _fromInclusiveToStored = (n) => (_shiftsBound(n) ? n - 1 : n);
+        const _storedToFromInclusive = (n) => (_shiftsBound(n) ? n + 1 : n);
+
         function _collectSeverityFromHost(hostEl) {
             const rows = [];
             hostEl.querySelectorAll(".sev-row").forEach((r) => {
@@ -1179,10 +1500,16 @@ export default function SlaOnboardingPage() {
                     const k = el.dataset.k;
                     if (k === "severity") o.severity = Number(v);
                     else if (k === "threshold_label") o.threshold_label = v || null;
-                    else if (k === "input_variable") o.input_variable = (v && v !== "__custom__") ? v : null;
+                    else if (k === "input_variable") o.input_variable = v || null;
                     else o[k] = v === "" ? null : Number(v);
                 });
-                if (o.threshold_label || o.from_value != null || o.to_value != null) rows.push(o);
+                if (o.from_value != null) o.from_value = _fromInclusiveToStored(o.from_value);
+                /* A row with neither bound is a match-everything band: it wins
+                   against every value, so the bands after it are dead. Drop it
+                   rather than store it — submitSla blocks first and explains,
+                   so this only catches what validation can't see. */
+                if (o.from_value == null && o.to_value == null) return;
+                rows.push(o);
             });
             return rows.length ? rows : undefined;
         }
@@ -1210,18 +1537,7 @@ export default function SlaOnboardingPage() {
                 const el = cell.querySelector("[data-v]");
                 return el ? (el.value || undefined) : undefined;
             }
-            if (t === "measurement_set") {
-                const hostEl = cell.querySelector("[data-mv-host]");
-                if (!hostEl) return undefined;
-                const metricKey = (hostEl.querySelector(".mv-metric-key").value || "").trim();
-                const displayName = (hostEl.querySelector(".mv-label").value || "").trim();
-                if (!metricKey && !displayName) return undefined;
-                const obj = { display_name: displayName, unit: (hostEl.querySelector(".mv-unit").value || "").trim() };
-                if (metricKey) obj.metric_key = metricKey;
-                const tgt = (hostEl.querySelector(".mv-target").value || "").trim();
-                if (tgt) obj.target_value = tgt;
-                return obj;
-            }
+            if (t === "measurement_set") return _readMeasurement(cell);
             if (t === "severity_table") return _collectSeverityFromHost(cell);
             if (t === "linear_form") return _collectLinearFromHost(cell);
             if (t === "placeholder_table") {
@@ -1276,10 +1592,10 @@ export default function SlaOnboardingPage() {
                 { key: "measurement_interval", value: d.measurement_interval, always: true },
                 { key: "reporting_interval", value: d.reporting_interval, always: true },
                 { key: "ld_computation_base", value: d.ld_computation_base ?? d.applied_on, always: true },
-                { key: "effective_from", value: _asDate(d.effective_from), always: true },
+                /* effective_from, measurement and secondary_measurement are
+                   static Identification fields now — hydrated in loadSlaForEdit,
+                   not as rows. */
                 { key: "effective_until", value: _asDate(d.effective_until), always: true },
-                { key: "measurement", value: d.measurement, always: true },
-                { key: "secondary_measurement", value: d.secondary_measurement },
                 { key: "placeholders", value: d.placeholders },
                 { key: "attachments", value: d.attachments, always: true },
             ];
@@ -1305,6 +1621,24 @@ export default function SlaOnboardingPage() {
                 setStatic("s_description", d.description || d.definition);
                 setStatic("s_calculation_method", d.calculation_method || d.calculation);
                 _setSelect(host.querySelector("#s_project_id"), d.project_id, " (not in project list)");
+
+                setStatic("s_effective_from", _asDate(d.effective_from));
+                /* A record saved before ld_formula_rule existed has none — leave
+                   the derived default rather than inventing a stored value, and
+                   let the lock note explain it can't be fixed here. */
+                const ldSel = host.querySelector("#s_ld_formula_rule");
+                if (ldSel && d.ld_formula_rule) {
+                    _setSelect(ldSel, d.ld_formula_rule, " (not a known rule)");
+                    ldSel.dataset.touched = "1";
+                }
+                _hydrateMeasurement(host.querySelector("#s_measurement_container"), d.measurement);
+                if (_hasValue(d.secondary_measurement)) {
+                    _addSecondaryMetric();
+                    _hydrateMeasurement(host.querySelector("#s_secondary_container"), d.secondary_measurement);
+                }
+                const combine = host.querySelector("#s_measurement_container .mv-combine");
+                if (combine) combine.checked = d.compound_metric_rule === "COMBINED";
+                _updateCompoundUi();
 
                 const catSel = host.querySelector("#s_category_code");
                 _setSelect(catSel, _resolveCategoryCode(d.category_code || d.category));
@@ -1368,7 +1702,10 @@ export default function SlaOnboardingPage() {
                         ivSel.value = tr.input_variable;
                     }
                     sevRow.querySelector('[data-k="threshold_label"]').value = tr.threshold_label ?? "";
-                    if (tr.from_value != null) sevRow.querySelector('[data-k="from_value"]').value = tr.from_value;
+                    // Stored From is exclusive; the column shows it inclusively.
+                    if (tr.from_value != null) {
+                        sevRow.querySelector('[data-k="from_value"]').value = _storedToFromInclusive(Number(tr.from_value));
+                    }
                     if (tr.to_value != null) sevRow.querySelector('[data-k="to_value"]').value = tr.to_value;
                 });
                 return;
@@ -1411,6 +1748,16 @@ export default function SlaOnboardingPage() {
             });
             _lockCell(host.querySelector("#s_target_container").parentElement,
                 "Target / severity bands are fixed at onboarding — re-onboard the SLA to change them.");
+            /* SlaUpdateRequest carries none of these, so leaving them editable
+               would show a change that the PATCH silently drops. */
+            _lockCell(host.querySelector("#s_ld_formula_rule").parentElement,
+                "The settlement rule is fixed at onboarding — re-onboard the SLA to change it.");
+            _lockCell(host.querySelector("#s_effective_from").parentElement,
+                "Active From is fixed at onboarding — it versions the mapping, so changing it means re-onboarding.");
+            _lockCell(host.querySelector("#s_measurement_container").parentElement,
+                "What is measured is fixed at onboarding — re-onboard the SLA to change it.");
+            _lockCell(host.querySelector("#s_secondary_container").parentElement,
+                "What is measured is fixed at onboarding — re-onboard the SLA to change it.");
             host.querySelectorAll("#dynBody .dyn-row").forEach((row) => {
                 const key = row.dataset.fieldKey;
                 if (!key || _PATCHABLE_KEYS.has(key) || key === "attachments") return;
@@ -1460,6 +1807,24 @@ export default function SlaOnboardingPage() {
             form.insertAdjacentHTML("afterbegin", '<label style="display:block;margin-bottom:6px;">Already uploaded</label>');
             form.insertBefore(wrap, form.children[1]);
         }
+        /* Fill a measurement widget from a stored metric, wherever it's mounted.
+           The stored record may carry only a display name, so fall back to the
+           catalog entry with that label and finally to a slug of it — otherwise
+           the picker blanks and the metric silently disappears on save. */
+        function _hydrateMeasurement(scopeEl, value) {
+            const hostEl = scopeEl && scopeEl.querySelector("[data-mv-host]");
+            if (!hostEl || !_hasValue(value)) return;
+            const wantKey = value.metric_key
+                || (INPUT_VARIABLES.find((v) => v.label === value.display_name) || {}).key
+                || (value.display_name || "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+            const sel = hostEl.querySelector(".mv-picker");
+            sel.innerHTML = _measurementOptions(wantKey);
+            sel.value = wantKey;
+            _onMeasurementPick(sel);
+            if (value.display_name) hostEl.querySelector(".mv-label").value = value.display_name;
+            if (value.unit) hostEl.querySelector(".mv-unit").value = value.unit;
+            if (value.target_value != null) hostEl.querySelector(".mv-target").value = value.target_value;
+        }
         function _hydrateRow(key, value) {
             const row = Array.from(host.querySelectorAll("#dynBody .dyn-row")).find((r) => r.dataset.fieldKey === key);
             if (!row) return;
@@ -1484,21 +1849,7 @@ export default function SlaOnboardingPage() {
                 if (Array.isArray(value) && value.length) _renderExistingAttachments(cell, value);
                 return;
             }
-            if (t === "measurement_set") {
-                const hostEl = cell.querySelector("[data-mv-host]");
-                if (!hostEl) return;
-                const wantKey = value.metric_key
-                    || (INPUT_VARIABLES.find((v) => v.label === value.display_name) || {}).key
-                    || (value.display_name || "").toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-                const sel = hostEl.querySelector(".mv-picker");
-                sel.innerHTML = _measurementOptions(wantKey);
-                sel.value = wantKey;
-                _onMeasurementPick(sel);
-                if (value.display_name) hostEl.querySelector(".mv-label").value = value.display_name;
-                if (value.unit) hostEl.querySelector(".mv-unit").value = value.unit;
-                if (value.target_value != null) hostEl.querySelector(".mv-target").value = value.target_value;
-                return;
-            }
+            if (t === "measurement_set") { _hydrateMeasurement(cell, value); return; }
             if (t === "placeholder_table") {
                 cell.querySelector(".ph-body").innerHTML = "";
                 const addBtn = cell.querySelector("button");
@@ -1558,6 +1909,10 @@ export default function SlaOnboardingPage() {
             sla_ref: "s_sla_ref", title: "s_title", project_id: "s_project_id",
             category_code: "s_category_code", description: "s_description",
             calculation_method: "s_calculation_method",
+            ld_formula_rule: "s_ld_formula_rule", effective_from: "s_effective_from",
+            measurement: "s_measurement_container",
+            secondary_measurement: "s_secondary_container",
+            compound_metric_rule: "s_measurement_container",
             target_rows: "s_target_container", linear_escalation: "s_target_container",
             condition_bands: "s_target_container", lookup_table: "s_target_container",
         };
@@ -1610,7 +1965,8 @@ export default function SlaOnboardingPage() {
         window.__slaOnb = {
             boot, _onStaticCategoryChange, _syncContractType, useTemplate, cancelOnboarding, submitSla,
             addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
-            _addSevRow, _updateSevPill, _onSevInputVarChange, _deleteSevRow, _renderLinPreview, _addPhRow,
+            _onLdRuleChange, _addSecondaryMetric, _removeSecondaryMetric,
+            _addSevRow, _updateSevPill, _deleteSevRow, _renderLinPreview, _addPhRow,
         };
 
         /* ── render + boot ── */

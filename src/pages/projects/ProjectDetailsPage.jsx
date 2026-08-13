@@ -103,13 +103,16 @@ function mapApiProject(p) {
     status: p.status ? String(p.status).toUpperCase() : "",
     statusExplanation: p.statusExplanation || "",
     startDate: stripTime(p.startDate),
+    /* Why each date is what it is. Every remark's supporting documents live on
+       their own endpoint (see the *Attachments entries in ENDPOINTS.projects)
+       and are excluded from the general `attachments` list below. */
+    startDateRemarks: p.startDateRemarks || "",
     endDate: stripTime(p.endDate),
+    endDateRemarks: p.endDateRemarks || "",
     actualStartDate: stripTime(p.actualStartDate),
-    /* Why the project started late. Its supporting documents live on their
-       own endpoint (see actualStartAttachments) and are excluded from the
-       general `attachments` list below. */
     actualStartRemarks: p.actualStartRemarks || "",
     actualEndDate: stripTime(p.actualEndDate),
+    actualEndRemarks: p.actualEndRemarks || "",
     /* When the contract was signed (#321). Optional and unrelated to the
        schedule dates — a contract is usually signed before work starts. */
     contractSigningDate: stripTime(p.contractSigningDate),
@@ -137,6 +140,43 @@ function mapApiProject(p) {
   };
 }
 
+/* The four project dates that carry a "why". Each one stores its reason as a
+   plain field on the project PATCH and its supporting files on a dedicated
+   attachments endpoint, so a schedule change can be justified per-date rather
+   than in one shared note. Order here is the order the blocks render in. */
+const DATE_REASON_FIELDS = [
+  {
+    key: "startDate",
+    label: "Expected Start Date",
+    remarkKey: "startDateRemarks",
+    endpoint: (id) => ENDPOINTS.projects.startDateAttachments(id),
+    placeholder: "Why was the expected start date set or changed to this?"
+  },
+  {
+    key: "endDate",
+    label: "Expected End Date",
+    remarkKey: "endDateRemarks",
+    endpoint: (id) => ENDPOINTS.projects.endDateAttachments(id),
+    placeholder: "Why was the expected end date set or changed to this?"
+  },
+  {
+    key: "actualStart",
+    label: "Actual Start Date",
+    remarkKey: "actualStartRemarks",
+    endpoint: (id) => ENDPOINTS.projects.actualStartAttachments(id),
+    placeholder: "Why did the project start on this date?"
+  },
+  {
+    key: "actualEnd",
+    label: "Actual End Date",
+    remarkKey: "actualEndRemarks",
+    endpoint: (id) => ENDPOINTS.projects.actualEndAttachments(id),
+    placeholder: "Why did the project end on this date?"
+  }
+];
+
+const REMARKS_MAX_LENGTH = 2000;
+
 function formatBytes(n) {
   if (typeof n !== "number" || !Number.isFinite(n) || n <= 0) return "";
   if (n < 1024) return `${n} B`;
@@ -159,10 +199,13 @@ function mergeIntoStore(mapped) {
           status: mapped.status,
           statusExplanation: mapped.statusExplanation,
           startDate: mapped.startDate,
+          startDateRemarks: mapped.startDateRemarks,
           endDate: mapped.endDate,
+          endDateRemarks: mapped.endDateRemarks,
           actualStartDate: mapped.actualStartDate,
           actualStartRemarks: mapped.actualStartRemarks,
           actualEndDate: mapped.actualEndDate,
+          actualEndRemarks: mapped.actualEndRemarks,
           contractSigningDate: mapped.contractSigningDate,
           vendors: mapped.vendors,
           parentId: mapped.parentId,
@@ -234,14 +277,15 @@ export default function ProjectDetailsPage() {
   const [docInputKey, setDocInputKey] = useState(0);
   const [docUploading, setDocUploading] = useState(false);
 
-  /* Late-start reason documents (#322) — the evidence backing the Actual
-     Start Date + Remarks. They live on their own endpoint and are excluded
-     from the general project attachments above, so they get their own
-     state and their own section in the UI. */
-  const [startDocs, setStartDocs] = useState([]);
-  const [startDocError, setStartDocError] = useState("");
-  const [startDocInputKey, setStartDocInputKey] = useState(0);
-  const [startDocUploading, setStartDocUploading] = useState(false);
+  /* Date-change reason documents — the evidence backing each date's remark
+     (late start #322, plus the schedule dates and actual end). Each list lives
+     on its own endpoint and is excluded from the general project attachments
+     above, so they get their own state and their own section in the UI. All
+     four are keyed by DATE_REASON_FIELDS[].key. */
+  const [reasonDocs, setReasonDocs] = useState({});
+  const [reasonDocError, setReasonDocError] = useState({});
+  const [reasonDocInputKey, setReasonDocInputKey] = useState({});
+  const [reasonDocUploading, setReasonDocUploading] = useState({});
 
   // Discussion feed (comments + their attachments) for the View
   // Documents modal. Lazy-loaded the first time the modal opens, then
@@ -484,10 +528,13 @@ export default function ProjectDetailsPage() {
       owner: project.owner,
       ownerOther: project.ownerOther || "",
       startDate: project.startDate,
+      startDateRemarks: project.startDateRemarks || "",
       endDate: project.endDate,
+      endDateRemarks: project.endDateRemarks || "",
       actualStartDate: project.actualStartDate || "",
       actualStartRemarks: project.actualStartRemarks || "",
       actualEndDate: project.actualEndDate || "",
+      actualEndRemarks: project.actualEndRemarks || "",
       contractSigningDate: project.contractSigningDate || "",
       vendors: vendorsToNames(project.vendors)
     });
@@ -497,9 +544,12 @@ export default function ProjectDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     project && project.projectId,
+    project && project.startDateRemarks,
+    project && project.endDateRemarks,
     project && project.actualStartDate,
     project && project.actualStartRemarks,
     project && project.actualEndDate,
+    project && project.actualEndRemarks,
     project && project.contractSigningDate,
     project && project.owner,
     project && project.ownerOther,
@@ -555,10 +605,13 @@ export default function ProjectDetailsPage() {
       owner: (form.owner || "").trim(),
       vendor_ids: resolveVendorIds(form.vendors),
       startDate: toIsoDate(form.startDate),
+      startDateRemarks: (form.startDateRemarks || "").trim(),
       endDate: toIsoDate(form.endDate),
+      endDateRemarks: (form.endDateRemarks || "").trim(),
       actualStartDate: form.actualStartDate ? toIsoStartDate(form.actualStartDate) : null,
       actualStartRemarks: (form.actualStartRemarks || "").trim(),
       actualEndDate: form.actualEndDate ? toIsoDate(form.actualEndDate) : null,
+      actualEndRemarks: (form.actualEndRemarks || "").trim(),
       // #321 — null clears it, which is what an emptied date field should do.
       contractSigningDate: form.contractSigningDate ? toIsoStartDate(form.contractSigningDate) : null
     };
@@ -693,13 +746,13 @@ export default function ProjectDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentsOpen, project && project.projectId]);
 
-  /* Pull the late-start reason documents whenever the project changes.
+  /* Pull every date's reason documents whenever the project changes.
      Must sit ABOVE the early returns below — a hook after them would
      change the hook order between renders. */
   useEffect(() => {
-    setStartDocs([]);
-    setStartDocError("");
-    loadStartDocs();
+    setReasonDocs({});
+    setReasonDocError({});
+    DATE_REASON_FIELDS.forEach((field) => loadReasonDocs(field));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project && project.projectId]);
 
@@ -928,16 +981,20 @@ export default function ProjectDetailsPage() {
     }
   }
 
-  /* ── Late-start reason documents (#322) ────────────────────────────
-     Separate from the general project attachments: these upload to
-     POST /projects/{id}/actual-start-attachments (multipart, `files`
+  /* ── Date-change reason documents ──────────────────────────────────
+     Separate from the general project attachments: each date's files upload
+     to its own POST /projects/{id}/<date>-attachments (multipart, `files`
      repeated per file) and are listed by the matching GET. The general
-     /attachments GET deliberately excludes them. */
-  async function loadStartDocs() {
+     /attachments GET deliberately excludes all of them. Both helpers take a
+     DATE_REASON_FIELDS entry so the four dates share one implementation. */
+  const setKeyed = (setter, key, value) =>
+    setter((prev) => ({ ...prev, [key]: value }));
+
+  async function loadReasonDocs(field) {
     if (!project?.projectId || !getToken()) return;
     try {
       const res = await authorizedFetch(
-        `${API_BASE}${ENDPOINTS.projects.actualStartAttachments(project.projectId)}`,
+        `${API_BASE}${field.endpoint(project.projectId)}`,
         { method: "GET", headers: { accept: "application/json" } }
       );
       if (!res.ok) return;
@@ -949,45 +1006,43 @@ export default function ProjectDetailsPage() {
         raw?.attachments ??
         raw?.data ??
         raw;
-      setStartDocs(Array.isArray(list) ? list : []);
+      setKeyed(setReasonDocs, field.key, Array.isArray(list) ? list : []);
     } catch {
       // Leave whatever we already have — the section just won't refresh.
     }
   }
 
-  async function handleStartDocsChange(e) {
+  async function handleReasonDocsChange(field, e) {
     const picked = Array.from(e.target.files || []);
     if (!picked.length) return;
+    const fail = (msg) => {
+      setKeyed(setReasonDocError, field.key, msg);
+      e.target.value = "";
+    };
     const bad = picked.filter(
       (f) => !ALLOWED_FILE_EXTENSIONS.includes(getFileExtension(f.name))
     );
     if (bad.length) {
-      setStartDocError(`Unsupported file type: ${bad.map((f) => f.name).join(", ")}`);
-      e.target.value = "";
-      return;
+      return fail(`Unsupported file type: ${bad.map((f) => f.name).join(", ")}`);
     }
     const oversize = picked.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
     if (oversize.length) {
-      setStartDocError(
+      return fail(
         `File too large (max 25 MB): ${oversize
           .map((f) => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`)
           .join(", ")}`
       );
-      e.target.value = "";
-      return;
     }
     if (!project?.projectId) {
-      setStartDocError("Project must be saved before attaching documents.");
-      e.target.value = "";
-      return;
+      return fail("Project must be saved before attaching documents.");
     }
-    setStartDocError("");
-    setStartDocUploading(true);
+    setKeyed(setReasonDocError, field.key, "");
+    setKeyed(setReasonDocUploading, field.key, true);
     try {
       const fd = new FormData();
       picked.forEach((file) => fd.append("files", file, file.name));
       const res = await authorizedFetch(
-        `${API_BASE}${ENDPOINTS.projects.actualStartAttachments(project.projectId)}`,
+        `${API_BASE}${field.endpoint(project.projectId)}`,
         { method: "POST", headers: { accept: "application/json" }, body: fd }
       );
       if (res.status === 401) {
@@ -1000,12 +1055,15 @@ export default function ProjectDetailsPage() {
         const msg = await readErrorMessage(res);
         throw new Error(msg || "Failed to upload document(s)");
       }
-      await loadStartDocs();
-      setStartDocInputKey((k) => k + 1);
+      await loadReasonDocs(field);
+      setReasonDocInputKey((prev) => ({
+        ...prev,
+        [field.key]: (prev[field.key] || 0) + 1
+      }));
     } catch (err) {
-      setStartDocError(err?.message || "Failed to upload document(s)");
+      setKeyed(setReasonDocError, field.key, err?.message || "Failed to upload document(s)");
     } finally {
-      setStartDocUploading(false);
+      setKeyed(setReasonDocUploading, field.key, false);
       e.target.value = "";
     }
   }
@@ -1431,95 +1489,108 @@ export default function ProjectDetailsPage() {
               disabled={!editing}
             />
           </div>
-          {/* Late-start reason (#322). The remark saves with the project;
-              the supporting files upload to their own endpoint the moment
+          {/* Date-change reasons. Each remark saves with the project; its
+              supporting files upload to that date's own endpoint the moment
               they're picked, so they're listed separately from the general
               project documents below. */}
-          <div className="uidai-field uidai-grid__full">
-            <label className="uidai-field__label">Actual Start Date — Remarks</label>
-            <textarea
-              className="uidai-textarea"
-              maxLength={2000}
-              placeholder="Why did the project start on this date?"
-              value={form.actualStartRemarks || ""}
-              onChange={(e) => setForm((f) => ({ ...f, actualStartRemarks: e.target.value }))}
-              disabled={!editing}
-            />
-            {editing && (
-              <div className="uidai-char-count">
-                {2000 - (form.actualStartRemarks || "").length} characters remaining
-              </div>
-            )}
-            {editing && (
-              <>
-                <input
-                  key={startDocInputKey}
-                  type="file"
-                  multiple
-                  accept={ALLOWED_FILE_ACCEPT}
-                  onChange={handleStartDocsChange}
-                  disabled={startDocUploading}
-                  style={{ marginTop: 8 }}
+          {DATE_REASON_FIELDS.map((field) => {
+            const remark = form[field.remarkKey] || "";
+            const docs = reasonDocs[field.key] || [];
+            const error = reasonDocError[field.key] || "";
+            const uploading = !!reasonDocUploading[field.key];
+            /* Nothing to show a viewer when the date was never justified —
+               only render the empty block while editing. */
+            if (!editing && !remark && docs.length === 0) return null;
+            return (
+              <div className="uidai-field uidai-grid__full" key={field.key}>
+                <label className="uidai-field__label">{field.label} — Remarks</label>
+                <textarea
+                  className="uidai-textarea"
+                  maxLength={REMARKS_MAX_LENGTH}
+                  placeholder={field.placeholder}
+                  value={remark}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, [field.remarkKey]: e.target.value }))
+                  }
+                  disabled={!editing}
                 />
-                <div className="uidai-attach-hint" style={{ marginTop: 4 }}>
-                  {startDocUploading
-                    ? "Uploading…"
-                    : "Optional supporting documents for the actual start date. Files upload immediately on pick; maximum 25 MB per file."}
-                </div>
-                {startDocError && <div className="uidai-attach-error">{startDocError}</div>}
-              </>
-            )}
-            {startDocs.length > 0 && (
-              <ul
-                style={{
-                  listStyle: "none",
-                  padding: 0,
-                  margin: "8px 0 0 0",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4
-                }}
-              >
-                {startDocs.map((d, idx) => {
-                  const name = d?.filename || d?.name || d?.fileName || `Document ${idx + 1}`;
-                  const sizeLabel = formatBytes(d?.sizeBytes);
-                  return (
-                    <li
-                      key={d?.id || `${name}-${idx}`}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 8,
-                        padding: "4px 8px",
-                        background: "#f5f5f5",
-                        borderRadius: 4
-                      }}
-                    >
-                      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {name}
-                        {sizeLabel && (
-                          <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
-                            ({sizeLabel})
-                          </span>
-                        )}
-                      </span>
-                      {(d?.url || d?.href) && (
-                        <button
-                          type="button"
-                          className="uidai-btn"
-                          style={{ padding: "2px 8px", fontSize: 12 }}
-                          onClick={() => downloadAttachment(d)}
+                {editing && (
+                  <div className="uidai-char-count">
+                    {REMARKS_MAX_LENGTH - remark.length} characters remaining
+                  </div>
+                )}
+                {editing && (
+                  <>
+                    <input
+                      key={reasonDocInputKey[field.key] || 0}
+                      type="file"
+                      multiple
+                      accept={ALLOWED_FILE_ACCEPT}
+                      onChange={(e) => handleReasonDocsChange(field, e)}
+                      disabled={uploading}
+                      style={{ marginTop: 8 }}
+                    />
+                    <div className="uidai-attach-hint" style={{ marginTop: 4 }}>
+                      {uploading
+                        ? "Uploading…"
+                        : `Optional supporting documents for the ${field.label.toLowerCase()}. Files upload immediately on pick; maximum 25 MB per file.`}
+                    </div>
+                    {error && <div className="uidai-attach-error">{error}</div>}
+                  </>
+                )}
+                {docs.length > 0 && (
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      padding: 0,
+                      margin: "8px 0 0 0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4
+                    }}
+                  >
+                    {docs.map((d, idx) => {
+                      const name = d?.filename || d?.name || d?.fileName || `Document ${idx + 1}`;
+                      const sizeLabel = formatBytes(d?.sizeBytes);
+                      return (
+                        <li
+                          key={d?.id || `${name}-${idx}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            padding: "4px 8px",
+                            background: "#f5f5f5",
+                            borderRadius: 4
+                          }}
                         >
-                          Download
-                        </button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
+                          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {name}
+                            {sizeLabel && (
+                              <span style={{ color: "#666", fontSize: 12, marginLeft: 6 }}>
+                                ({sizeLabel})
+                              </span>
+                            )}
+                          </span>
+                          {(d?.url || d?.href) && (
+                            <button
+                              type="button"
+                              className="uidai-btn"
+                              style={{ padding: "2px 8px", fontSize: 12 }}
+                              onClick={() => downloadAttachment(d)}
+                            >
+                              Download
+                            </button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <div style={{ marginTop: 18 }} className="uidai-grid">

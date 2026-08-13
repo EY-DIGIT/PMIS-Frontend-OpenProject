@@ -2583,7 +2583,16 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
      Long lists are capped with a count of the remainder rather than being
      discarded. The shared gate still handles the no-array case, where it
      does its real job of keeping HTML pages and stack traces off screen. */
-  const MAX_LISTED_ERRORS = 12;
+  /* A handful of errors is a to-do list — which rows to fix, and how. Past
+     that it stops being one: nobody works through forty validation lines in a
+     modal, and the wall of text buries the one thing that matters, which is
+     that the upload didn't happen. So a short list is still shown in full, and
+     anything longer collapses to the headline and a count.
+
+     Left deliberately low. The previous cap of 12 was chosen to avoid
+     discarding detail, but 12 lines is already past the point where the box
+     reads as an error rather than as a report. */
+  const MAX_LISTED_ERRORS = 5;
   const buildErrorMessage = (data, raw, status) => {
     const list = (Array.isArray(data?.errors) ? data.errors : [])
       .map((e) => (typeof e === "string" ? e : e?.message || e?.defaultMessage || ""))
@@ -2596,17 +2605,20 @@ function LeaveUploadModal({ projectId, milestones = [], onUploaded, onClose }) {
       if (list.every((e) => /does not exist/i.test(e))) {
         return "These resources belong to another project. Please upload the correct attendance file.";
       }
-      const shown = list.slice(0, MAX_LISTED_ERRORS);
-      const rest = list.length - shown.length;
+      /* Too many to act on one by one: say what happened and how many, and
+         stop. The count stays because "47 entries" and "2 entries" call for
+         different responses — re-export the sheet, or fix two cells. */
+      if (list.length > MAX_LISTED_ERRORS) {
+        return [
+          "Failed to upload attendance.",
+          `The server rejected ${list.length} entries. Check the file against the template and upload again.`,
+        ].join("\n");
+      }
       const headline =
         typeof data?.message === "string" && data.message.trim()
           ? data.message.trim()
           : `The server rejected ${list.length} ${list.length === 1 ? "entry" : "entries"}:`;
-      return [
-        headline,
-        ...shown.map((e) => `• ${e}`),
-        rest > 0 ? `…and ${rest} more.` : null,
-      ].filter(Boolean).join("\n");
+      return [headline, ...list.map((e) => `• ${e}`)].join("\n");
     }
 
     return messageFromBody(raw, status, "The upload didn't go through. Please try again.");

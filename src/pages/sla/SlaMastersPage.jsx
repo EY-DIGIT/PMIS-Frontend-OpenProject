@@ -590,6 +590,10 @@ function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) 
                     { label: "Measurement Interval", value: d.measurement_interval ? humanize(d.measurement_interval) : null },
                     { label: "Reporting Interval", value: d.reporting_interval ? humanize(d.reporting_interval) : null },
                     { label: "Applied On", value: appliedOn ? humanize(appliedOn) : null },
+                    /* Which engine settles this SLA. A blank here means the record
+                       predates the field and the server is deriving a default —
+                       worth seeing, because a wrong derivation settles at ₹0. */
+                    { label: "Settlement / LD formula rule", value: d.ld_formula_rule ? humanize(d.ld_formula_rule) : null },
                     { label: "Active From", value: (d.effective_from || "").slice(0, 10) || null },
                     { label: "Active Until", value: d.effective_until ? d.effective_until.slice(0, 10) : null },
                 ]} />
@@ -601,6 +605,16 @@ function SlaDetailSection({ d, loading, onBack, onEdit, onDelete, fallbackId }) 
                     <MeasurementCard title="Primary measurement" m={d.measurement} />
                     {d.secondary_measurement ? <MeasurementCard title="Secondary measurement" m={d.secondary_measurement} /> : null}
                 </div>
+                {/* Only meaningful once there are two metrics to combine. */}
+                {d.secondary_measurement ? (
+                    <div style={{ marginTop: 12 }}>
+                        <Chip tone={d.compound_metric_rule === "COMBINED" ? "cyan" : "slate"}>
+                            {d.compound_metric_rule === "COMBINED"
+                                ? "Combined — both metrics scored, worst severity applies"
+                                : "Independent — each metric scored separately"}
+                        </Chip>
+                    </div>
+                ) : null}
             </DetailCard>
 
             {/* Target */}
