@@ -47,8 +47,17 @@ const STYLE = `
 .sla-ai-onb-root .page-header::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:var(--brand-grad);}
 .sla-ai-onb-root .page-title{font-size:22px;font-weight:800;color:var(--navy-deep);margin:0;line-height:1.3;}
 .sla-ai-onb-root .page-sub{font-size:12px;color:var(--text-muted);margin-top:3px;line-height:1.6;}
-.sla-ai-onb-root .progress-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:99px;
-  background:#eef7fb;border:1px solid var(--cyan);color:var(--navy-deep);font-size:12px;font-weight:800;white-space:nowrap;}
+/* Question-palette style progress: one box per SLA, coloured by state, so the
+   whole batch is visible at a glance instead of just "n of N". */
+.sla-ai-onb-root .sla-palette{display:flex;flex-wrap:wrap;gap:5px;max-width:340px;justify-content:flex-end;}
+.sla-ai-onb-root .pal-box{width:29px;height:29px;border-radius:6px;border:1px solid transparent;
+  font-size:11px;font-weight:800;color:#fff;cursor:pointer;font-family:inherit;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;transition:transform .12s,box-shadow .12s;}
+.sla-ai-onb-root .pal-box:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.18);}
+.sla-ai-onb-root .pal-done{background:#16a34a;}
+.sla-ai-onb-root .pal-pending{background:#dc2626;}
+.sla-ai-onb-root .pal-skipped{background:#f59e0b;}
+.sla-ai-onb-root .pal-box.pal-current{outline:2px solid var(--navy-deep);outline-offset:2px;}
 
 .sla-ai-onb-root main{padding:0;}
 
@@ -106,6 +115,9 @@ const STYLE = `
 .sla-ai-onb-root .btn.primary:hover:not(:disabled){filter:brightness(1.05);}
 .sla-ai-onb-root .btn.cancel{background:#fff;color:var(--navy-deep);border:1px solid var(--border-soft);}
 .sla-ai-onb-root .btn.cancel:hover:not(:disabled){background:#f1f6fd;}
+/* Skip reads as neither cancel nor confirm — it's "come back to this later". */
+.sla-ai-onb-root .btn.skip{background:#fff;color:var(--amber);border:1px solid var(--amber);}
+.sla-ai-onb-root .btn.skip:hover:not(:disabled){background:#fffbeb;}
 
 .sla-ai-onb-root .sub-form{padding:8px 0;}
 .sla-ai-onb-root .sub-form .sub-grid{display:grid;gap:8px;}
@@ -145,6 +157,16 @@ const STYLE = `
 .sla-ai-onb-root #s_target_container.field-error{border-radius:8px;padding:6px;}
 .sla-ai-onb-root .table-error{outline:2px solid var(--red);outline-offset:2px;}
 
+/* Confirmation before an SLA is created — the one irreversible step here. */
+.sla-ai-onb-root .modal-veil{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:3000;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.sla-ai-onb-root .modal-card{background:#fff;border-radius:12px;max-width:440px;width:100%;
+  box-shadow:0 20px 50px rgba(0,0,0,.3);padding:22px 24px;}
+.sla-ai-onb-root .modal-title{font-size:17px;font-weight:800;color:var(--navy-deep);margin-bottom:9px;}
+.sla-ai-onb-root .modal-body{font-size:13px;color:var(--text-soft);line-height:1.65;margin-bottom:20px;}
+.sla-ai-onb-root .modal-ref{font-weight:800;color:var(--navy);}
+.sla-ai-onb-root .modal-actions{display:flex;justify-content:flex-end;gap:10px;}
+
 /* AI-specific: pick the target shape independently of the category. */
 .sla-ai-onb-root .target-mode{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;}
 .sla-ai-onb-root .target-mode-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;
@@ -170,7 +192,7 @@ const BODY_HTML = `
       <h1 class="page-title" id="pageTitle">Review SLA</h1>
       <div class="page-sub" id="pageSub">Read from the uploaded document. Correct anything the parser got wrong, then onboard.</div>
     </div>
-    <div class="progress-pill" id="progressPill"></div>
+    <div class="sla-palette" id="slaPalette"></div>
   </div>
 </div>
 
@@ -293,11 +315,26 @@ const BODY_HTML = `
   <button class="btn cancel" id="prevBtn" onclick="window.__slaAiOnb.goPrev()">← Previous</button>
   <div style="display:flex;gap:10px;align-items:center;">
     <button class="btn cancel" onclick="window.__slaAiOnb.exitReview()">Exit review</button>
-    <button class="btn primary" id="submitBtn" onclick="window.__slaAiOnb.submitSla()">Onboard &amp; Next</button>
+    <button class="btn skip" id="skipBtn" onclick="window.__slaAiOnb.skipSla()" title="Leave this SLA for later and move to the next one">Skip →</button>
+    <button class="btn primary" id="submitBtn" onclick="window.__slaAiOnb.askOnboard()">Onboard &amp; Next</button>
   </div>
 </div>
 
 <div class="toast-stack" id="toastStack"></div>
+
+<div id="confirmVeil" class="modal-veil" style="display:none;">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal-title" id="confirmTitle">Are you sure you want to onboard this SLA?</div>
+    <div class="modal-body">
+      <span id="confirmRef" class="modal-ref"></span> will be created in the SLA library.
+      <div style="margin-top:6px;">You won't be able to edit it once it's onboarded.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn cancel" onclick="window.__slaAiOnb.closeConfirm()">Edit</button>
+      <button class="btn primary" onclick="window.__slaAiOnb.confirmOnboard()">Onboard &amp; Next</button>
+    </div>
+  </div>
+</div>
 `;
 
 const _FALLBACK_RFP_FIELDS = [
@@ -310,7 +347,7 @@ const _FALLBACK_RFP_FIELDS = [
     { key: "data_source", label: "Source of Data / Tool used for SLA monitoring", section: "Source & Calculation", input_type: "text" },
     { key: "calculation_method", label: "SLA Calculation", section: "Source & Calculation", input_type: "textarea" },
     { key: "reports_submitted_to", label: "Reports submitted to", section: "Source & Calculation", input_type: "text" },
-    { key: "measurement_interval", label: "Measurement Interval", section: "Cadence", input_type: "select", options: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ONE_TIME"], default: "MONTHLY" },
+    { key: "measurement_interval", label: "Measurement Interval", section: "Cadence", input_type: "select", options: ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY"], default: "MONTHLY" },
     { key: "reporting_interval", label: "Reporting Interval", section: "Cadence", input_type: "select", options: ["WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"], default: "QUARTERLY" },
     {
         key: "ld_computation_base", label: "Applied On", section: "Cadence", input_type: "select",
@@ -347,8 +384,11 @@ export default function SlaAiReviewForm({
     warnings = [],     // [{ field, label, message }]
     catalogs = {},     // { rfpFields, categories, projects, inputVariables }
     position = {},     // { index, total }  1-based index
+    progress = [],     // status of every SLA in the batch, for the palette
+    onJump,            // (zeroBasedIndex) => void — palette box clicked
     pdfFile = null,    // the uploaded source document, attached as evidence
     onOnboarded,       // (createdId) => void
+    onSkip,            // leave this SLA for later, move to the next
     onPrev,
     onExit,
 }) {
@@ -356,7 +396,7 @@ export default function SlaAiReviewForm({
     // Props are read inside a mount-once effect; the ref keeps the handlers
     // from closing over a stale first render.
     const propsRef = useRef(null);
-    propsRef.current = { record, warnings, catalogs, position, pdfFile, onOnboarded, onPrev, onExit };
+    propsRef.current = { record, warnings, catalogs, position, progress, pdfFile, onOnboarded, onSkip, onJump, onPrev, onExit };
 
     useEffect(() => {
         const host = hostRef.current;
@@ -379,6 +419,13 @@ export default function SlaAiReviewForm({
            entirely. (The manual form keeps its picker; this only affects here.) */
         const RFP_FIELDS = ((catalogs.rfpFields && catalogs.rfpFields.length) ? catalogs.rfpFields : _FALLBACK_RFP_FIELDS)
             .filter((f) => f.input_type !== "file_picker")
+            /* ONE_TIME is not offered as a measurement interval here. The live
+               catalog still lists it, so strip it — cloning the field rather
+               than mutating, since `catalogs` is shared by every review form. */
+            .map((f) => {
+                if (f.key !== "measurement_interval" || !Array.isArray(f.options)) return f;
+                return { ...f, options: f.options.filter((o) => (typeof o === "string" ? o : o.value) !== "ONE_TIME") };
+            })
             .slice();
         const CATEGORIES = (catalogs.categories && catalogs.categories.length) ? catalogs.categories : _FALLBACK_CATEGORIES.slice();
         const PROJECTS = catalogs.projects || [];
@@ -652,16 +699,6 @@ export default function SlaAiReviewForm({
                       <div class="hint">Read from the document — correct them if the parser got them wrong. Keep the unit short (e.g. "days", "%", "count").</div>
                       <input type="hidden" class="mv-metric-key">
                     </div>
-                    <div class="mv-create" style="display:none;background:#fffbeb;padding:10px 12px;border-radius:6px;border:1px dashed #fcd34d;">
-                      <div style="font-size:11px;color:#92400e;font-weight:600;margin-bottom:6px;">Define a new measurement variable</div>
-                      <div style="display:grid;grid-template-columns:1fr 1.4fr 0.6fr auto auto;gap:8px;align-items:end;">
-                        <div><label>Key (snake_case)</label><input type="text" class="mv-new-key" placeholder="e.g. uptime_percent"></div>
-                        <div><label>Display name</label><input type="text" class="mv-new-label" placeholder="e.g. System uptime"></div>
-                        <div><label>Unit</label><input type="text" class="mv-new-unit" placeholder="e.g. %"></div>
-                        <button type="button" class="small-btn" onclick="window.__slaAiOnb._confirmNewMeasurement(this)" style="background:var(--navy);color:#fff;border:none;">Add to catalog</button>
-                        <button type="button" class="small-btn" onclick="window.__slaAiOnb._cancelNewMeasurement(this)">Cancel</button>
-                      </div>
-                    </div>
                   </div>
                 </div>`;
         }
@@ -671,19 +708,17 @@ export default function SlaAiReviewForm({
                 const lbl = `${v.label}${v.unit ? " (" + v.unit + ")" : ""}`;
                 opts.push(`<option value="${esc(v.key)}" ${v.key === selectedKey ? "selected" : ""}>${esc(lbl)}</option>`);
             }
-            opts.push('<option value="__new__">+ Define new measurement variable…</option>');
-            if (selectedKey && !INPUT_VARIABLES.find((v) => v.key === selectedKey)) {
-                opts.splice(1, 0, `<option value="${esc(selectedKey)}" selected>${esc(selectedKey)} (from document)</option>`);
-            }
+            /* Nothing is added to this list by the frontend. The measurement
+               variables are owned by /api/v3/sla-input-variables; the parser's
+               metric_key is NOT a variable the backend knows, so it must not be
+               offered as one. If the parsed key isn't in the catalog the picker
+               stays unselected and the reviewer chooses a real variable. */
             return opts.join("");
         }
         function _onMeasurementPick(sel) {
             const hostEl = sel.closest("[data-mv-host]");
             const detail = hostEl.querySelector(".mv-detail");
-            const create = hostEl.querySelector(".mv-create");
             const key = sel.value;
-            if (key === "__new__") { detail.style.display = "none"; create.style.display = ""; return; }
-            create.style.display = "none";
             if (!key) { detail.style.display = "none"; return; }
             const v = INPUT_VARIABLES.find((x) => x.key === key);
             detail.style.display = "";
@@ -693,30 +728,6 @@ export default function SlaAiReviewForm({
             const tgt = hostEl.querySelector(".mv-target");
             if (tgt) tgt.placeholder = _cleanExample(v && v.example_value) || "0";
         }
-        function _confirmNewMeasurement(btn) {
-            const hostEl = btn.closest("[data-mv-host]");
-            const rawKey = (hostEl.querySelector(".mv-new-key").value || "").trim();
-            const rawLabel = (hostEl.querySelector(".mv-new-label").value || "").trim();
-            const rawUnit = (hostEl.querySelector(".mv-new-unit").value || "").trim();
-            if (!rawKey || !rawLabel) { toast("Missing fields", "Key and Display name are required.", "error"); return; }
-            const safeKey = rawKey.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-            if (!safeKey) { toast("Invalid key", "Use snake_case letters / digits / underscores.", "error"); return; }
-            if (INPUT_VARIABLES.find((v) => v.key === safeKey)) { toast("Already exists", `"${safeKey}" is already in the catalog.`, "error"); return; }
-            INPUT_VARIABLES.push({ key: safeKey, label: rawLabel, unit: rawUnit || null, source: "custom" });
-            const sel = hostEl.querySelector(".mv-picker");
-            sel.innerHTML = _measurementOptions(safeKey);
-            sel.value = safeKey;
-            _onMeasurementPick(sel);
-            toast("Added", `"${rawLabel}" is now in the catalog and selected.`, "success");
-        }
-        function _cancelNewMeasurement(btn) {
-            const hostEl = btn.closest("[data-mv-host]");
-            hostEl.querySelector(".mv-create").style.display = "none";
-            const sel = hostEl.querySelector(".mv-picker");
-            sel.value = "";
-            _onMeasurementPick(sel);
-        }
-
         /* ── severity-table widget ── */
         function _widgetSeverityTable(cell, f) {
             cell.innerHTML = `
@@ -749,10 +760,7 @@ export default function SlaAiReviewForm({
                 const lbl = `${v.label}${v.unit ? " (" + v.unit + ")" : ""}`;
                 opts.push(`<option value="${esc(v.key)}" ${selected === v.key ? "selected" : ""}>${esc(lbl)}</option>`);
             }
-            opts.push('<option value="__custom__">+ Type a new variable…</option>');
-            if (selected && !INPUT_VARIABLES.find((v) => v.key === selected) && !used.has(selected)) {
-                opts.splice(1, 0, `<option value="${esc(selected)}" selected>${esc(selected)} (custom)</option>`);
-            }
+            // API-owned list only — see the note in _measurementOptions.
             return opts.join("");
         }
         function _refreshSevDropdowns(hostEl) {
@@ -789,14 +797,6 @@ export default function SlaAiReviewForm({
             pill.textContent = "L" + v;
         }
         function _onSevInputVarChange(sel) {
-            if (sel.value === "__custom__") {
-                const key = (window.prompt("New input variable (snake_case):") || "").trim();
-                if (!key) { sel.value = ""; return _refreshSevDropdowns(sel.closest(".sub-form")); }
-                const safe = key.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-                if (!safe) { sel.value = ""; return _refreshSevDropdowns(sel.closest(".sub-form")); }
-                if (!INPUT_VARIABLES.find((v) => v.key === safe)) INPUT_VARIABLES.push({ key: safe, label: safe, unit: null, source: "custom" });
-                sel.value = safe;
-            }
             return _refreshSevDropdowns(sel.closest(".sub-form"));
         }
         function _deleteSevRow(btn) {
@@ -1097,8 +1097,12 @@ export default function SlaAiReviewForm({
                 sel.innerHTML = _measurementOptions(wantKey);
                 sel.value = wantKey;
                 _onMeasurementPick(sel);
-                // The parser's own wording wins over the catalog label — these
-                // fields are read-only, so this is the only chance to set them.
+                /* Only carry the document's wording across when the picker
+                   actually accepted the key. If the parser's metric_key isn't a
+                   catalog variable the select falls back to "", and filling the
+                   hidden detail fields would submit a measurement with no
+                   metric_key — the reviewer must pick a real variable instead. */
+                if (!sel.value) return;
                 if (value.display_name) hostEl.querySelector(".mv-label").value = value.display_name;
                 if (value.unit) hostEl.querySelector(".mv-unit").value = value.unit;
                 if (value.target_value != null) hostEl.querySelector(".mv-target").value = value.target_value;
@@ -1125,13 +1129,13 @@ export default function SlaAiReviewForm({
             calculation_method: "#s_calculation_method",
             target_rows: "#s_target_container", linear_escalation: "#s_target_container",
         };
+        /* No summary banner — the per-field notes below say the same thing at
+           the point where it can actually be acted on. The banner element is
+           kept only as a home for warnings whose field isn't on screen. */
         function _renderWarnings(list) {
             if (!list || !list.length) return;
             const banner = host.querySelector("#warnBanner");
-            banner.innerHTML = `<div class="ai-warn-banner">
-                <strong>${list.length} field${list.length === 1 ? "" : "s"} need${list.length === 1 ? "s" : ""} a look.</strong>
-                The parser either couldn't read these or had to reinterpret them. They're marked below.
-              </div>`;
+            banner.innerHTML = "";
             list.forEach((w) => {
                 const note = `<div class="ai-warn-note">${esc(w.message)}</div>`;
                 const sel = _WARN_TARGETS[w.field];
@@ -1234,7 +1238,10 @@ export default function SlaAiReviewForm({
                     createdId = (d && (d.id || d.sla_id)) || null;
                 } catch { /* a bodyless 201 is still a success */ }
                 toast("Onboarded", `${payload.sla_ref || "SLA"} created.`, "success");
-                window.setTimeout(() => { if (P.onOnboarded) P.onOnboarded(createdId); }, 550);
+                // Hand back everything that was actually submitted, not just the
+                // ref — the stored record is still the parser's original, so
+                // without this every edit disappears on the next visit.
+                window.setTimeout(() => { if (P.onOnboarded) P.onOnboarded(createdId, payload); }, 550);
             } catch (e) {
                 toast("Network error", e.message, "error");
             } finally {
@@ -1322,12 +1329,63 @@ export default function SlaAiReviewForm({
             return out;
         }
 
+        /* One box per SLA in the batch, coloured by state — green onboarded,
+           amber skipped, red still to review — with the current one outlined.
+           Clicking a box jumps straight to that SLA. */
+        const _PAL_LABEL = { done: "Onboarded", skipped: "Skipped", pending: "To be reviewed" };
+        function _renderPalette() {
+            const el = host.querySelector("#slaPalette");
+            if (!el) return;
+            const statuses = Array.isArray(P.progress) ? P.progress : [];
+            if (!statuses.length) return;
+            const current = (P.position && P.position.index) || 0;   // 1-based
+            el.innerHTML = statuses.map((st, i) => {
+                const state = st === "done" ? "done" : st === "skipped" ? "skipped" : "pending";
+                const isCurrent = i + 1 === current;
+                return `<button type="button" class="pal-box pal-${state}${isCurrent ? " pal-current" : ""}"
+                    title="SLA ${i + 1} — ${_PAL_LABEL[state]}${isCurrent ? " (viewing)" : ""}"
+                    onclick="window.__slaAiOnb._jump(${i})">${i + 1}</button>`;
+            }).join("");
+        }
+        function _jump(i) { if (P.onJump) P.onJump(i); }
+
+        /* Creating an SLA is the one step here that can't be undone, so the
+           button asks first. These only open and close the dialog — submitSla
+           itself is untouched and still does all the validation and posting. */
+        function askOnboard() {
+            if (submitting) return;
+            const ref = (host.querySelector("#s_sla_ref").value || "").trim();
+            host.querySelector("#confirmRef").textContent = ref || "This SLA";
+            host.querySelector("#confirmVeil").style.display = "";
+        }
+        function closeConfirm() {
+            const veil = host.querySelector("#confirmVeil");
+            if (veil) veil.style.display = "none";
+        }
+        function confirmOnboard() {
+            closeConfirm();
+            submitSla();
+        }
+
+        /* Straightforward navigation, used by an SLA that has already been
+           created — there is nothing to submit, only somewhere to go. */
+        function goNextSla() {
+            const total = (P.position && P.position.total) || 0;
+            const idx = (P.position && P.position.index) || 0;   // 1-based
+            if (idx < total && P.onJump) P.onJump(idx);          // idx == next 0-based
+            else if (P.onExit) P.onExit();
+        }
+
         function goPrev() { if (P.onPrev) P.onPrev(); }
         function exitReview() { if (P.onExit) P.onExit(); }
+        // No validation and no request — skipping is explicitly for SLAs that
+        // cannot be onboarded right now.
+        function skipSla() { if (!submitting && P.onSkip) P.onSkip(); }
 
         window.__slaAiOnb = {
-            _onStaticCategoryChange, _syncContractType, submitSla, goPrev, exitReview, _setTargetMode,
-            addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
+            _onStaticCategoryChange, _syncContractType, submitSla, askOnboard, closeConfirm, confirmOnboard,
+            skipSla, goPrev, goNextSla, exitReview, _setTargetMode, _jump,
+            addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick,
             _addSevRow, _updateSevPill, _onSevInputVarChange, _deleteSevRow, _renderLinPreview, _addPhRow,
         };
 
@@ -1337,9 +1395,28 @@ export default function SlaAiReviewForm({
         hydrate(P.record || {});
         _renderWarnings(P.warnings);
 
-        const pill = host.querySelector("#progressPill");
-        if (pill && P.position && P.position.total) {
-            pill.textContent = `SLA ${P.position.index} of ${P.position.total}`;
+        _renderPalette();
+
+        /* An SLA that has already been created can't be onboarded again — the
+           backend rejects the duplicate ref. Swap the two submit-side buttons
+           for plain navigation so that dead end isn't offered at all. */
+        const _alreadyOnboarded = Array.isArray(P.progress)
+            && P.progress[((P.position && P.position.index) || 0) - 1] === "done";
+        if (_alreadyOnboarded) {
+            const skipBtn = host.querySelector("#skipBtn");
+            if (skipBtn) skipBtn.remove();
+            const submitBtn = host.querySelector("#submitBtn");
+            if (submitBtn) submitBtn.remove();
+            const tail = host.querySelector("#actionBar > div");
+            if (tail) {
+                tail.insertAdjacentHTML("beforeend",
+                    '<button class="btn primary" onclick="window.__slaAiOnb.goNextSla()">Go to next SLA →</button>');
+            }
+            const sub = host.querySelector("#pageSub");
+            if (sub) {
+                sub.innerHTML = '<span style="color:#166534;font-weight:700;">✓ Already onboarded.</span> '
+                    + "Shown for reference — creating it again would be rejected as a duplicate.";
+            }
         }
         const prevBtn = host.querySelector("#prevBtn");
         if (prevBtn && P.position && P.position.index <= 1) prevBtn.disabled = true;

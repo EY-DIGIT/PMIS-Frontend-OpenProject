@@ -48,6 +48,34 @@ function fmtSize(bytes) {
 const STATUS_STYLE = {
     pending: { bg: "#f1f5f9", fg: "#475569", label: "Not reviewed" },
     done: { bg: "#dcfce7", fg: "#166534", label: "✓ Onboarded" },
+    // Skipped is deliberately not a failure state — the SLA is set aside to be
+    // picked up again once whatever blocked it is resolved.
+    skipped: { bg: "#fef3c7", fg: "#92400e", label: "↷ Skipped" },
+};
+
+const FLASH_STYLE = {
+    success: { bg: "#dcfce7", border: "#86efac", fg: "#166534", icon: "✓" },
+    skip: { bg: "#fef3c7", border: "#fcd34d", fg: "#92400e", icon: "↷" },
+    info: { bg: "#eff6ff", border: "#93c5fd", fg: "#1e40af", icon: "✎" },
+    error: { bg: "#fef2f2", border: "#fca5a5", fg: "#991b1b", icon: "⚠" },
+};
+
+// The prefix is the segment before the first "-" in "MSIP-SLA003-20260813074507".
+// The API enforces ^[A-Z0-9_-]+$ on the whole ref; "-" is excluded here because
+// it's the separator this rewrite keys off.
+// Shown on the intake screen so the whole flow is visible before starting —
+// people were being asked to upload a document without knowing what follows.
+const STEPS = [
+    { n: 1, title: "Select project", detail: "The contract these SLAs belong to" },
+    { n: 2, title: "Upload SLA PDF", detail: "One document, read in place" },
+    { n: 3, title: "Review each SLA", detail: "Correct anything the AI got wrong" },
+    { n: 4, title: "Onboard", detail: "Added to the library one at a time" },
+];
+
+const PREFIX_RE = /^[A-Z0-9_]+$/;
+const refPrefix = (ref) => {
+    const i = String(ref || "").indexOf("-");
+    return i > 0 ? String(ref).slice(0, i) : "";
 };
 
 export default function SlaAiOnboardingPage() {
@@ -70,9 +98,13 @@ export default function SlaAiOnboardingPage() {
     const [cursor, setCursor] = useState(0);
     const [catalogs, setCatalogs] = useState(null);
     const [catalogsLoading, setCatalogsLoading] = useState(false);
-    // Success confirmation. Lives here rather than in the review form: the
-    // form unmounts the instant the next SLA loads, taking its toast with it.
-    const [flash, setFlash] = useState("");
+    // Confirmation after each action. Lives here rather than in the review
+    // form: the form unmounts the instant the next SLA loads, taking its toast
+    // with it. { text, kind: "success" | "skip" } or null.
+    const [flash, setFlash] = useState(null);
+    // Bulk prefix rewrite — the parser often reads the contract type wrong for
+    // the whole document, and retyping it on every form is not reasonable.
+    const [prefixInput, setPrefixInput] = useState("");
 
     const selectedProject = useMemo(
         () => projects.find((p) => p.projectId === projectKey) || null,
@@ -108,7 +140,7 @@ export default function SlaAiOnboardingPage() {
     /* ─── the success banner clears itself ─── */
     useEffect(() => {
         if (!flash) return undefined;
-        const t = window.setTimeout(() => setFlash(""), 6000);
+        const t = window.setTimeout(() => setFlash(null), 6000);
         return () => window.clearTimeout(t);
     }, [flash]);
 
@@ -252,44 +284,99 @@ export default function SlaAiOnboardingPage() {
 
     function openReview(idx) { setCursor(idx); setPhase("review"); }
 
-    function handleOnboarded(createdId) {
-        const ref = (items[cursor] && items[cursor].record.sla_ref) || "The SLA";
-        setFlash(`${ref} has been onboarded successfully.`);
-        setItems((prev) => {
-            const next = prev.slice();
-            next[cursor] = { ...next[cursor], status: "done", createdId };
-            return next;
-        });
-        // Advance to the next SLA still awaiting review; fall back to the list.
-        const nextIdx = items.findIndex((it, i) => i > cursor && it.status !== "done");
+    /* Move to the next SLA that hasn't been dealt with yet. Skipped ones are
+       stepped over here — you'd otherwise land straight back on the record you
+       just set aside — and are picked up again from the list at the end. */
+    function advancePast(idx) {
+        const nextIdx = items.findIndex((it, i) => i > idx && it.status === "pending");
         if (nextIdx >= 0) setCursor(nextIdx);
         else setPhase("list");
     }
 
+    function handleOnboarded(createdId, submitted) {
+        const edited = submitted && typeof submitted === "object" ? submitted : {};
+        const ref = edited.sla_ref || (items[cursor] && items[cursor].record.sla_ref) || "The SLA";
+        setFlash({ text: `${ref} has been onboarded successfully.`, kind: "success" });
+        setItems((prev) => {
+            const next = prev.slice();
+            next[cursor] = {
+                ...next[cursor],
+                status: "done",
+                createdId,
+                /* Store what was actually sent, not what the parser produced.
+                   Otherwise reopening this SLA shows the AI's original values
+                   and every correction looks like it was thrown away. */
+                record: { ...next[cursor].record, ...edited },
+            };
+            return next;
+        });
+        advancePast(cursor);
+    }
+
+    function handleSkip() {
+        const ref = (items[cursor] && items[cursor].record.sla_ref) || "The SLA";
+        setFlash({ text: `${ref} was skipped — it's still in the list to come back to.`, kind: "skip" });
+        setItems((prev) => {
+            const next = prev.slice();
+            // Never overwrite an SLA that was already created.
+            if (next[cursor].status !== "done") next[cursor] = { ...next[cursor], status: "skipped" };
+            return next;
+        });
+        advancePast(cursor);
+    }
+
     // Green confirmation shown after each successful create. Rendered above
     // both the review form and the list so it survives the switch between them.
+    const flashStyle = flash ? (FLASH_STYLE[flash.kind] || FLASH_STYLE.success) : null;
     const flashBanner = flash ? (
         <div
             role="status"
             style={{
                 display: "flex", alignItems: "center", gap: 10,
                 margin: "0 0 14px", padding: "12px 16px", borderRadius: 8,
-                background: "#dcfce7", border: "1px solid #86efac", color: "#166534",
+                background: flashStyle.bg, border: `1px solid ${flashStyle.border}`, color: flashStyle.fg,
                 fontSize: 13, fontWeight: 700,
             }}
         >
-            <span style={{ fontSize: 16 }}>✓</span>
-            <span style={{ flex: 1 }}>{flash}</span>
+            <span style={{ fontSize: 16 }}>{flashStyle.icon}</span>
+            <span style={{ flex: 1 }}>{flash.text}</span>
             <button
                 type="button"
-                onClick={() => setFlash("")}
+                onClick={() => setFlash(null)}
                 aria-label="Dismiss"
-                style={{ border: "none", background: "none", color: "#166534", cursor: "pointer", fontSize: 15, fontWeight: 700, padding: 0, lineHeight: 1 }}
+                style={{ border: "none", background: "none", color: flashStyle.fg, cursor: "pointer", fontSize: 15, fontWeight: 700, padding: 0, lineHeight: 1 }}
             >
                 ✕
             </button>
         </div>
     ) : null;
+
+    /* Rewrite the prefix on every SLA that hasn't been created yet. Onboarded
+       ones are left alone — their number is fixed in the library, and changing
+       it here would only make the list lie about what exists. */
+    function applyPrefix() {
+        const next = prefixInput.trim().toUpperCase();
+        if (!next) return;
+        if (!PREFIX_RE.test(next)) {
+            setFlash({ text: `"${next}" isn't a usable prefix — capital letters, digits and _ only.`, kind: "error" });
+            return;
+        }
+        const changed = items.filter(
+            (it) => it.status !== "done" && refPrefix(it.record.sla_ref) && refPrefix(it.record.sla_ref) !== next
+        ).length;
+        if (!changed) {
+            setFlash({ text: `Every SLA still to onboard already starts with ${next}.`, kind: "info" });
+            return;
+        }
+        setItems((prev) => prev.map((it) => {
+            if (it.status === "done") return it;
+            const ref = it.record.sla_ref || "";
+            const i = ref.indexOf("-");
+            if (i <= 0) return it;
+            return { ...it, record: { ...it.record, sla_ref: next + ref.slice(i) } };
+        }));
+        setFlash({ text: `SLA number prefix changed to ${next} on ${changed} SLA${changed === 1 ? "" : "s"}.`, kind: "info" });
+    }
 
     function startOver() {
         setItems(null);
@@ -313,8 +400,11 @@ export default function SlaAiOnboardingPage() {
                     warnings={it.warnings}
                     catalogs={catalogs}
                     position={{ index: cursor + 1, total: items.length }}
+                    progress={items.map((i) => i.status)}
+                    onJump={(i) => setCursor(i)}
                     pdfFile={file}
                     onOnboarded={handleOnboarded}
+                    onSkip={handleSkip}
                     onPrev={() => setCursor((c) => Math.max(0, c - 1))}
                     onExit={() => setPhase("list")}
                 />
@@ -324,8 +414,18 @@ export default function SlaAiOnboardingPage() {
 
     /* ═══════════ list phase ═══════════ */
     if (phase === "list" && items) {
-        const allDone = doneCount === items.length;
-        const firstPending = items.findIndex((i) => i.status !== "done");
+        const skippedCount = items.filter((i) => i.status === "skipped").length;
+        const pendingCount = items.filter((i) => i.status === "pending").length;
+        // Work through the untouched ones first; once they're gone, the button
+        // brings you back to whatever was skipped.
+        const firstPending = pendingCount
+            ? items.findIndex((i) => i.status === "pending")
+            : items.findIndex((i) => i.status === "skipped");
+        const nothingLeft = firstPending < 0;
+        // Distinct prefixes across the SLAs that can still be renamed.
+        const editablePrefixes = Array.from(new Set(
+            items.filter((i) => i.status !== "done").map((i) => refPrefix(i.record.sla_ref)).filter(Boolean)
+        ));
         return (
             <>
                 {flashBanner}
@@ -335,27 +435,73 @@ export default function SlaAiOnboardingPage() {
                             {items.length} SLA{items.length === 1 ? "" : "s"} read from {file ? file.name : "the document"}
                         </div>
                         <div className="uidai-pmis-subtitle" style={{ marginTop: 0 }}>
-                            {doneCount} of {items.length} onboarded. Each SLA is reviewed before it is created.
+                            {doneCount} of {items.length} onboarded
+                            {skippedCount ? `, ${skippedCount} skipped` : ""}
+                            {pendingCount ? `, ${pendingCount} still to review` : ""}.
+                            {nothingLeft && skippedCount
+                                ? " Nothing left to review — the skipped ones were never created."
+                                : " Each SLA is reviewed before it is created."}
                         </div>
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={startOver}>
                             ↩ Upload a different document
                         </button>
-                        {!allDone && (
-                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openReview(firstPending < 0 ? 0 : firstPending)}>
-                                {doneCount ? "Continue review →" : "Start review →"}
+                        {!nothingLeft && (
+                            <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => openReview(firstPending)}>
+                                {!doneCount && !skippedCount
+                                    ? "Start review →"
+                                    : pendingCount ? "Continue review →" : "Revisit skipped →"}
                             </button>
                         )}
-                        {allDone && (
+                        {nothingLeft && (
                             <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={() => navigate("/sla-masters")}>
-                                Done — back to SLA Masters
+                                Back to SLA Masters
                             </button>
                         )}
                     </div>
                 </div>
 
                 <div className="uidai-pmis-card" style={{ marginTop: 16 }}>
+                    {/* Bulk prefix rewrite */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 16, padding: "12px 14px", background: "#f7fafd", border: "1px solid #dbe5f1", borderRadius: 8 }}>
+                        <div style={{ flexBasis: "100%", fontSize: 13, fontWeight: 800, color: "#173e77" }}>
+                            Did the AI read the contract type correctly?
+                        </div>
+                        <div style={{ flexBasis: "100%", fontSize: 12, color: "#41506a", lineHeight: 1.6, marginTop: -4, marginBottom: 4 }}>
+                            {editablePrefixes.length
+                                ? <>
+                                    It numbered {editablePrefixes.length === 1 ? "every SLA" : "these SLAs"} as{" "}
+                                    <code style={{ fontWeight: 700 }}>{editablePrefixes.join(", ")}</code>.
+                                    {" "}If that's the wrong contract, enter the right prefix below and apply it to all of them.
+                                </>
+                                : "Every SLA has been onboarded — nothing left to rename."}
+                        </div>
+                        <input
+                            className="uidai-pmis-filter-input"
+                            style={{ width: 150, textTransform: "uppercase" }}
+                            value={prefixInput}
+                            onChange={(e) => setPrefixInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") applyPrefix(); }}
+                            placeholder="PMC"
+                            disabled={!editablePrefixes.length}
+                            aria-label="New SLA number prefix"
+                        />
+                        <button
+                            type="button"
+                            className="uidai-pmis-btn uidai-pmis-btn-small"
+                            style={{ marginTop: 0 }}
+                            onClick={applyPrefix}
+                            disabled={!prefixInput.trim() || !editablePrefixes.length}
+                        >
+                            Apply to all
+                        </button>
+                        <div style={{ ...helpStyle, flexBasis: "100%", marginTop: 2 }}>
+                            Replaces the first part of every SLA number not yet onboarded — <code>MSIP-SLA003-2026…</code> becomes <code>PMC-SLA003-2026…</code>.
+                            The number and timestamp are untouched, and re-applying the old prefix puts it back.
+                        </div>
+                    </div>
+
                     <div className="uidai-pmis-table-wrap">
                         <table className="uidai-pmis-table">
                             <thead>
@@ -363,8 +509,6 @@ export default function SlaAiOnboardingPage() {
                                     <th style={{ width: 50 }}>#</th>
                                     <th>SLA Number</th>
                                     <th>Title</th>
-                                    <th>Category</th>
-                                    <th>Flags</th>
                                     <th>Status</th>
                                     <th style={{ textAlign: "center" }}>Review</th>
                                 </tr>
@@ -377,12 +521,6 @@ export default function SlaAiOnboardingPage() {
                                             <td>{i + 1}</td>
                                             <td style={{ fontWeight: 600, color: "#2a6fb0" }}>{it.record.sla_ref || "—"}</td>
                                             <td>{it.record.title || "—"}</td>
-                                            <td>{it.record.category_code || "—"}</td>
-                                            <td>
-                                                {it.warnings.length
-                                                    ? <span style={{ color: "#92400e", fontWeight: 700, fontSize: 12 }}>⚠ {it.warnings.length}</span>
-                                                    : <span style={{ color: "#94a3b8", fontSize: 12 }}>—</span>}
-                                            </td>
                                             <td>
                                                 <span style={{ background: st.bg, color: st.fg, padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
                                                     {st.label}
@@ -417,13 +555,10 @@ export default function SlaAiOnboardingPage() {
 
     return (
         <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
-                <div>
-                    <div className="uidai-pmis-title" style={{ marginBottom: 2 }}>Onboard SLAs via AI</div>
-                    <div className="uidai-pmis-subtitle" style={{ marginTop: 0 }}>
-                        Upload the contract SLA document — every SLA it contains is read out for you to review.
-                    </div>
-                </div>
+            {/* No subtitle — the numbered steps inside the card say the same
+                thing, and the card takes the space back. */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                <div className="uidai-pmis-title" style={{ marginBottom: 0 }}>Onboard SLAs via AI</div>
                 <button
                     type="button"
                     className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
@@ -435,10 +570,41 @@ export default function SlaAiOnboardingPage() {
                 </button>
             </div>
 
-            <div className="uidai-pmis-card" style={{ marginTop: 16 }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77", marginBottom: 4 }}>Source document</div>
-                <div style={{ fontSize: 12, color: "#6b7a90", marginBottom: 18 }}>
-                    Nothing is added to the SLA library from this step — the document is only read.
+            <div className="uidai-pmis-card" style={{ marginTop: 12 }}>
+                {/* The four steps replace a prose description — the flow is
+                    easier to take in as a sequence than as a paragraph. */}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                    {STEPS.map((s) => (
+                        <div
+                            key={s.n}
+                            style={{
+                                flex: "1 1 155px", minWidth: 145, padding: "10px 12px",
+                                background: "#f7fafd", border: "1px solid #dbe5f1", borderRadius: 8,
+                            }}
+                        >
+                            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 3 }}>
+                                <span
+                                    style={{
+                                        width: 19, height: 19, borderRadius: "50%", background: "#0b3c88",
+                                        color: "#fff", fontSize: 11, fontWeight: 800, flexShrink: 0,
+                                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                    }}
+                                >
+                                    {s.n}
+                                </span>
+                                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#173e77" }}>{s.title}</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#6b7a90", lineHeight: 1.5 }}>{s.detail}</div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Carries weight through type and colour alone — a panel or icon
+                    here made the page feel crowded. */}
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", lineHeight: 1.55, marginBottom: 20 }}>
+                    <span style={{ textTransform: "uppercase", letterSpacing: ".4px", marginRight: 5 }}>Important:</span>
+                    Values are AI-extracted and may lack accuracy. Please verify every field of each
+                    SLA against the document before onboarding it.
                 </div>
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "flex-start" }}>

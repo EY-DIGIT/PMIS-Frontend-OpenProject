@@ -56,6 +56,18 @@ const LD_BASE_ALIASES = {
     ACV: "ANNUAL_PAYMENT",
 };
 
+// How the form labels each LD base, so warnings can name the option the
+// reviewer actually sees rather than the code behind it.
+const LD_BASE_LABELS = {
+    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (NPQP)",
+    ANNUAL_PAYMENT: "Annual Contract Value",
+    FIXED_AMOUNT: "Deliverable Cost (set per mapping)",
+};
+
+// "DELIVERABLE_COST" → "deliverable cost". Raw enum values in a message are
+// noise to anyone reading the screen.
+const humanize = (v) => String(v == null ? "" : v).replace(/_+/g, " ").trim().toLowerCase();
+
 const str = (v) => (v === null || v === undefined ? "" : String(v).trim());
 const orNull = (v) => (str(v) === "" ? null : str(v));
 const asDate = (v) => (str(v) ? str(v).slice(0, 10) : null);
@@ -140,16 +152,23 @@ export function normalizeAiSla(raw, { projectId } = {}) {
     /* ── cadence + LD base ── */
     const mi = normalizeEnum(r.measurement_interval, MEASUREMENT_INTERVALS);
     record.measurement_interval = mi.value;
-    if (mi.unknown) warn("measurement_interval", "Measurement Interval", `"${r.measurement_interval}" isn't one of the standard intervals — pick the right one.`);
+    if (mi.unknown) warn("measurement_interval", "Measurement Interval", `The document said "${humanize(r.measurement_interval)}", which isn't one of the intervals this field offers — pick the right one.`);
 
     const ri = normalizeEnum(r.reporting_interval, REPORTING_INTERVALS);
     record.reporting_interval = ri.value;
-    if (ri.unknown) warn("reporting_interval", "Reporting Interval", `"${r.reporting_interval}" isn't one of the standard reporting intervals — pick the right one.`);
+    if (ri.unknown) warn("reporting_interval", "Reporting Interval", `The document said "${humanize(r.reporting_interval)}", which isn't one of the intervals this field offers — pick the right one.`);
 
-    const ld = normalizeEnum(r.ld_computation_base ?? r.applied_on, LD_BASES, LD_BASE_ALIASES);
+    const rawLd = r.ld_computation_base ?? r.applied_on;
+    const ld = normalizeEnum(rawLd, LD_BASES, LD_BASE_ALIASES);
     record.ld_computation_base = ld.value;
-    if (ld.changed) warn("ld_computation_base", "Applied On", `Read as "${r.ld_computation_base}" and mapped to the equivalent option — confirm it's right.`);
-    if (ld.unknown) warn("ld_computation_base", "Applied On", `"${r.ld_computation_base}" isn't a known LD base — pick the right one.`);
+    if (ld.changed) {
+        warn("ld_computation_base", "Applied On",
+            `The document said "${humanize(rawLd)}", which isn't one of this field's options. It was set to "${LD_BASE_LABELS[ld.value] || ld.value}", which means the same thing — check that's right.`);
+    }
+    if (ld.unknown) {
+        warn("ld_computation_base", "Applied On",
+            `The document said "${humanize(rawLd)}", which isn't something this field accepts — pick the right option.`);
+    }
 
     /* ── measurement ──
        The parser derives metric_key by slugifying the whole title, which for a
