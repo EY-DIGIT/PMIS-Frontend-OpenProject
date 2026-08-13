@@ -7,9 +7,28 @@
 
    ── Which number the LD is charged on ─────────────────────────────
    SLA 001 and 002 both charge on "the total cost of that deliverable"
-   (§5.28.2.b, §5.28.2.c), and §5.23.1 defines that cost as the
-   deliverable's own share of the Phase-1 fixed + one-time cost —
-   D1..D6 at 5% each, D7 at 15%, D8 at 20%.
+   (§5.28.2.b, §5.28.2.c). That cost is NOT the amount invoiced for the
+   deliverable — the two come from DIFFERENT columns of §5.23.1's table,
+   and confusing them is the easiest way to get this wrong:
+
+     · "Payment Schedule in % of the Fixed cost for Phase-1 and One-time
+       cost" — what is invoiced. D1–D6 5%, D7 15%, D8 20%. Sums to 65%;
+       the other 35% is paid later as QGR.
+     · "% of Phase-1 cost" — the deliverable's actual VALUE, added by
+       corrigendum item 42 and stated by item 41 to be "used for SLA
+       enforcement purposes". D1–D4 8%, D5 10%, D6 8%, D7 20%, D8 30%.
+       Sums to 100%. THIS is the LD base.
+
+   The corrigendum's own illustration (§5.25.1.e, item 46) settles it:
+   Phase-1 cost 100, D1 invoiced at 5% = 5, but LD charged on 8% = 8, so
+   a 4-week delay costs 0.5% x 4 = 2% of 8 = 1.6, and the payment
+   released is 5 - 1.6 + 2.5(one-time) = 5.9.
+
+   Verified against the live payload on 2026-08-14 (project 60c67666…):
+   the payment page returns `percentOfPayment` 5/5/5/5/5/5/15/20 and
+   `ldBasisPercent` 8/8/8/8/10/8/20/30 — i.e. it already supplies the
+   enforcement column, and `ldBasisPretaxValue` is built from that. So
+   the base below is the right one; do not "fix" it to the payment %.
 
    The payment page now computes that base itself and returns it per
    term as `ldBasisPretaxValue` = allotment × delivery PRE-TAX. It is the

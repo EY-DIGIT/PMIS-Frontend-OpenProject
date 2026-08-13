@@ -1,7 +1,7 @@
 /* ──────────────────────────────────────────────────────────────────
    Settlement & LD — the project-level quarter close.
 
-   The settlement panel is project-scoped (aggregate → NPQP → capped LD
+   The settlement panel is project-scoped (aggregate → PQP → capped LD
    → invoice lock) but used to render at the bottom of the ACTIVITY
    mapping page, which meant reaching it required picking an activity
    first. It only ever needed `projectId`, so it lives on its own route
@@ -21,7 +21,7 @@ export default function SlaSettlementPage() {
             <div className="uidai-pmis-title">Settlement &amp; LD</div>
             <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
                 Close a quarter for {project?.projectName || "this project"} — the
-                per-SLA rollup rolls into NPQP, the cap is applied, and the
+                per-SLA rollup rolls into PQP, the cap is applied, and the
                 settlement locks once invoiced.
             </div>
 

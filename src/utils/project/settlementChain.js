@@ -65,14 +65,14 @@ export const CONTRACT_MULTIPLIER = 1.25;
    ₹0 would show a large negative AQP and look like a catastrophe
    instead of like missing data.                                     */
 export function buildSettlementChain({
-    fAmount, qgrAmount, npqp,
+    fAmount, qgrAmount, pqp,
     sumLdPercent, cappedLdPercent,
     quarterCapPercent = 10,
     paAmount,
 } = {}) {
     const f = num(fAmount);
     const qgr = num(qgrAmount);
-    const statedNpqp = num(npqp);
+    const statedPqp = num(pqp);
     const pa = num(paAmount);
 
     const sumLd = num(sumLdPercent);
@@ -81,13 +81,33 @@ export function buildSettlementChain({
     // or the rollup's raw sum.
     const capped = num(cappedLdPercent) ?? (sumLd === null ? null : Math.min(sumLd, quarterCapPercent));
 
-    // PQP = F + QGR. Both the stated and the derived value are kept: a
-    // disagreement means one of the three fields is stale at source.
-    const derivedNpqp = f !== null && qgr !== null ? f + qgr : null;
-    const base = statedNpqp ?? derivedNpqp;
-    const npqpConsistent = statedNpqp === null || derivedNpqp === null
+    /* PQP = F + QGR — the BACKEND's base, which is what this still uses.
+       Both the stated and the derived value are kept: a disagreement
+       means one of the three fields is stale at source.
+
+       ── Agreed change, NOT yet applied (2026-08-14) ────────────────
+       The contract dropped NPQP and QGR is no longer part of the base:
+
+           PQP  = the quarter's RESOURCE payment (F), QGR excluded
+           LD ₹ = LD % × PQP
+           AQP  = (PQP − LD ₹) + QGR      ← QGR still added back after
+
+       Worked example agreed with the contract team: payment 100, QGR 10,
+       LD 10% → LD is 10 (10% of 100), not 11 (10% of 110), and the final
+       payment is 90 + 10. Deliverable SLAs are unaffected; they keep
+       charging on each deliverable's own cost.
+
+       It is deliberately NOT implemented yet. The backend still returns
+       the F + QGR base, and settlement rows are what Settlement actually
+       invoices — so changing it here alone would make this page quote a
+       different figure from the invoice. Change `derivedPqp` to `f` when
+       the backend's `/npqp` stops adding QGR, and check
+       `qgrAmount` is still returned separately for the add-back above. */
+    const derivedPqp = f !== null && qgr !== null ? f + qgr : null;
+    const base = statedPqp ?? derivedPqp;
+    const pqpConsistent = statedPqp === null || derivedPqp === null
         ? null
-        : Math.abs(statedNpqp - derivedNpqp) <= 1;
+        : Math.abs(statedPqp - derivedPqp) <= 1;
 
     const ldAmount = base !== null && capped !== null ? (base * capped) / 100 : null;
     const ldAmountUncapped = base !== null && sumLd !== null ? (base * sumLd) / 100 : null;
@@ -113,10 +133,10 @@ export function buildSettlementChain({
 
     return {
         f, qgr,
-        npqp: base,
-        npqpStated: statedNpqp,
-        npqpDerived: derivedNpqp,
-        npqpConsistent,
+        pqp: base,
+        pqpStated: statedPqp,
+        pqpDerived: derivedPqp,
+        pqpConsistent,
         sumLdPercent: sumLd,
         cappedLdPercent: capped,
         quarterCapPercent,
@@ -217,7 +237,7 @@ export function cumulativePayout(settlements) {
             quarter: r.quarter,
             status: r.status || null,
             invoiced: r.status === "invoiced",
-            npqp: num(r.npqp),
+            pqp: num(r.pqp),
             ldAmount: num(r.ldAmount),
             paAmount: num(r.paAmount),
             qgrAmount: num(r.qgrAmount),

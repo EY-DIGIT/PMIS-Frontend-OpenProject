@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Project-level SLA settlement — Phase B (quarterly aggregate), Phase C (NPQP),
+// Project-level SLA settlement — Phase B (quarterly aggregate), Phase C (PQP),
 // Phase D (settlement / override) and Phase E (mark invoiced) for one quarter.
 //
 // Self-contained and prop-driven (`projectId` only), so it can be dropped onto
@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     getQuarterlyAggregate,
-    getNpqp,
+    getPqp,
     listSettlements,
     getSettlement,
     overrideSettlement,
@@ -95,7 +95,7 @@ function Section({ title, badge, defaultOpen = false, children }) {
 
 export default function SlaSettlementPanel({ projectId, projectStartDate = "", projectEndDate = "" }) {
     const [aggregate, setAggregate] = useState(null);
-    const [npqp, setNpqp] = useState(null);
+    const [pqp, setPqp] = useState(null);
     const [settlement, setSettlement] = useState(null);
     const [history, setHistory] = useState([]);
 
@@ -166,7 +166,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
     const [invoiceRef, setInvoiceRef] = useState("");
     const [invoiceLoading, setInvoiceLoading] = useState(false);
 
-    // Load the two pure reads (aggregate + NPQP) plus the settlement history.
+    // Load the two pure reads (aggregate + PQP) plus the settlement history.
     // The per-quarter settlement is deliberately NOT fetched here: that call
     // auto-closes the quarter as a side effect, so it stays behind a button.
     const load = useCallback(async () => {
@@ -177,17 +177,17 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
         setError("");
         setNotice("");
         setShowOverride(false);
-        const [aggRes, npqpRes, histRes] = await Promise.allSettled([
+        const [aggRes, pqpRes, histRes] = await Promise.allSettled([
             getQuarterlyAggregate(projectId, quarter),
-            getNpqp(projectId, quarter),
+            getPqp(projectId, quarter),
             listSettlements(projectId),
         ]);
         const problems = [];
         if (aggRes.status === "fulfilled") setAggregate(aggRes.value);
         else { setAggregate(null); problems.push(`Quarterly aggregate: ${aggRes.reason?.message || "failed"}`); }
 
-        if (npqpRes.status === "fulfilled") setNpqp(npqpRes.value);
-        else { setNpqp(null); problems.push(`NPQP: ${npqpRes.reason?.message || "failed"}`); }
+        if (pqpRes.status === "fulfilled") setPqp(pqpRes.value);
+        else { setPqp(null); problems.push(`PQP: ${pqpRes.reason?.message || "failed"}`); }
 
         const rows = histRes.status === "fulfilled" ? (histRes.value?.items || []) : [];
         setHistory(rows);
@@ -207,7 +207,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
 
     useEffect(() => { load(); }, [load]);
 
-    // Explicit auto-close: computes rollup + NPQP + cap + AQP and persists the row.
+    // Explicit auto-close: computes rollup + PQP + cap + AQP and persists the row.
     async function closeQuarter() {
         setClosing(true);
         setError("");
@@ -267,9 +267,9 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
 
     const isContractKey = range?.kind === "contract" || /^Y\d+-Q[1-4]$/i.test(quarter);
     const invoiced = settlement?.status === "invoiced";
-    const npqpUnavailable = npqp && npqp.status && npqp.status !== "ok";
+    const pqpUnavailable = pqp && pqp.status && pqp.status !== "ok";
     const aggItems = Array.isArray(aggregate?.items) ? aggregate.items : [];
-    const perMonth = Array.isArray(npqp?.perMonth) ? npqp.perMonth : [];
+    const perMonth = Array.isArray(pqp?.perMonth) ? pqp.perMonth : [];
 
     return (
         <div className="uidai-pmis-card" style={{ marginBottom: 0, width: "100%" }}>
@@ -277,7 +277,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                 <div>
                     <div style={{ fontSize: 16, fontWeight: 800, color: "#173e77" }}>Quarterly LD Settlement</div>
                     <div style={{ fontSize: 12, ...muted, marginTop: 2 }}>
-                        Per-SLA rollup, NPQP and the capped LD deduction for this project&rsquo;s quarter.
+                        Per-SLA rollup, PQP and the capped LD deduction for this project&rsquo;s quarter.
                     </div>
                 </div>
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -320,7 +320,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                         {quarter} has not been closed yet.
                     </div>
                     <div style={{ fontSize: 12, ...muted, marginBottom: 14 }}>
-                        Closing computes the per-SLA rollup, pulls NPQP, applies the quarter cap and persists an
+                        Closing computes the per-SLA rollup, pulls PQP, applies the quarter cap and persists an
                         <b style={{ color: "#173e77" }}> auto_closed</b> settlement row.
                     </div>
                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={closeQuarter} disabled={closing}>
@@ -338,7 +338,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                     <div className="uidai-pmis-grid-4" style={{ gap: 12 }}>
                         <Tile label="Sum LD %" value={pct(settlement.sumLdPercent)} hint="before quarter cap" />
                         <Tile label="Capped LD %" value={pct(settlement.cappedLdPercent)} accent="#c0392b" hint="RFP §5.27.6 cap" />
-                        <Tile label="NPQP" value={money(settlement.npqp)} hint={`F ${money(settlement.fAmount)} + QGR ${money(settlement.qgrAmount)}`} />
+                        <Tile label="PQP" value={money(settlement.pqp)} hint={`F ${money(settlement.fAmount)} + QGR ${money(settlement.qgrAmount)}`} />
                         <Tile label="LD Amount" value={money(settlement.ldAmount)} accent="#c0392b" hint="deducted this quarter" />
                         <Tile label="Payable Amount (PA)" value={money(settlement.paAmount)} />
                         <Tile label="Adjusted Quarterly Payment (AQP)" value={money(settlement.aqpAmount)} accent="#1f8a4c" hint="PA − LD" />
@@ -451,24 +451,24 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                 )}
             </Section>
 
-            {/* ── Phase C: NPQP breakdown ──────────────────────────────────── */}
-            <Section title="NPQP breakdown" badge={perMonth.length || null}>
-                {!npqp ? (
-                    <div style={{ fontSize: 12.5, ...muted, fontStyle: "italic" }}>NPQP not loaded.</div>
+            {/* ── Phase C: PQP breakdown ──────────────────────────────────── */}
+            <Section title="PQP breakdown" badge={perMonth.length || null}>
+                {!pqp ? (
+                    <div style={{ fontSize: 12.5, ...muted, fontStyle: "italic" }}>PQP not loaded.</div>
                 ) : (
                     <>
-                        {npqpUnavailable && (
+                        {pqpUnavailable && (
                             <Banner
                                 kind="error"
-                                text={npqp.status === "leave_mgmt_unavailable"
+                                text={pqp.status === "leave_mgmt_unavailable"
                                     ? "Leave-management is unreachable — F could not be computed, so this quarter cannot be settled from live data."
-                                    : `NPQP status: ${npqp.status}`}
+                                    : `PQP status: ${pqp.status}`}
                             />
                         )}
                         <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 10 }}>
-                            <Tile label="F (resource cost)" value={money(npqp.fAmount)} hint="3 months of per-resource cost" />
-                            <Tile label="QGR" value={money(npqp.qgrAmount)} />
-                            <Tile label="NPQP" value={money(npqp.npqp)} accent="#1f8a4c" hint="F + QGR" />
+                            <Tile label="F (resource cost)" value={money(pqp.fAmount)} hint="3 months of per-resource cost" />
+                            <Tile label="QGR" value={money(pqp.qgrAmount)} />
+                            <Tile label="PQP" value={money(pqp.pqp)} accent="#1f8a4c" hint="F + QGR" />
                         </div>
                         {perMonth.length > 0 && (
                             <div className="uidai-pmis-table-wrap" style={{ marginTop: 12 }}>
@@ -511,7 +511,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                                     <th>Quarter</th><th>Status</th>
                                     <th style={{ textAlign: "right" }}>Sum LD %</th>
                                     <th style={{ textAlign: "right" }}>Capped LD %</th>
-                                    <th style={{ textAlign: "right" }}>NPQP</th>
+                                    <th style={{ textAlign: "right" }}>PQP</th>
                                     <th style={{ textAlign: "right" }}>LD Amount</th>
                                     <th style={{ textAlign: "right" }}>AQP</th>
                                     <th>Updated</th>
@@ -529,7 +529,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                                             <td><StatusBadge status={r.status} /></td>
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{pct(r.sumLdPercent)}</td>
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{pct(r.cappedLdPercent)}</td>
-                                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(r.npqp)}</td>
+                                            <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(r.pqp)}</td>
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#c0392b", fontWeight: 700 }}>{money(r.ldAmount)}</td>
                                             <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(r.aqpAmount)}</td>
                                             <td style={{ fontSize: 12, ...muted, whiteSpace: "nowrap" }}>{dateTime(r.updatedAt)}</td>

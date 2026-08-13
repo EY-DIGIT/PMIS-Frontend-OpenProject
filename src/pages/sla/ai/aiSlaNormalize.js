@@ -50,7 +50,7 @@ export function clampMetricKey(key) {
 const LD_BASE_ALIASES = {
     DELIVERABLE_COST: "FIXED_AMOUNT",
     DELIVERABLE: "FIXED_AMOUNT",
-    NPQP: "QUARTERLY_PAYMENT",
+    PQP: "QUARTERLY_PAYMENT",
     NET_PLANNED_QUARTERLY_PAYMENT: "QUARTERLY_PAYMENT",
     ANNUAL_CONTRACT_VALUE: "ANNUAL_PAYMENT",
     ACV: "ANNUAL_PAYMENT",
@@ -59,7 +59,7 @@ const LD_BASE_ALIASES = {
 // How the form labels each LD base, so warnings can name the option the
 // reviewer actually sees rather than the code behind it.
 const LD_BASE_LABELS = {
-    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (NPQP)",
+    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (PQP)",
     ANNUAL_PAYMENT: "Annual Contract Value",
     FIXED_AMOUNT: "Deliverable Cost (set per mapping)",
 };

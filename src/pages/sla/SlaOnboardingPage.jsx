@@ -373,7 +373,7 @@ export default function SlaOnboardingPage() {
             {
                 key: "ld_computation_base", label: "Applied On", section: "Cadence", input_type: "select",
                 options: [
-                    { value: "QUARTERLY_PAYMENT", label: "Net Planned Quarterly Payment (NPQP)" },
+                    { value: "QUARTERLY_PAYMENT", label: "Net Planned Quarterly Payment (PQP)" },
                     { value: "ANNUAL_PAYMENT", label: "Annual Contract Value" },
                     { value: "FIXED_AMOUNT", label: "Deliverable Cost (set per mapping)" },
                 ], default: "QUARTERLY_PAYMENT",

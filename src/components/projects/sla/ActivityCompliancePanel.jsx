@@ -225,7 +225,7 @@ export default function ActivityCompliancePanel({ activityId, activityLabel }) {
                     )}
                     {results.some((r) => r.ldAmount === null) && (
                         <div style={{ fontSize: 11.5, ...muted, marginTop: 8, fontStyle: "italic" }}>
-                            LD amounts are null until the quarter&rsquo;s NPQP base is resolved — see the quarterly settlement below.
+                            LD amounts are null until the quarter&rsquo;s PQP base is resolved — see the quarterly settlement below.
                         </div>
                     )}
                 </>

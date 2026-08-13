@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// SLA Compliance / NPQP / Settlement API layer (contracts service).
+// SLA Compliance / PQP / Settlement API layer (contracts service).
 //
 // Kept deliberately free of React so the whole feature can be lifted onto a
 // dedicated page later: import these functions from anywhere, pass ids in,
@@ -43,6 +43,33 @@ function call(path, { method = "GET", body } = {}) {
 
 const enc = encodeURIComponent;
 
+/* ── NPQP → PQP, renamed at the boundary ──────────────────────────────
+   The contract dropped the NPQP term. The BACKEND has not caught up —
+   the route is still `/api/v3/npqp/...` and every payload still carries
+   an `npqp` field.
+
+   This is a RENAME ONLY. The value passed through is unchanged, and the
+   backend still computes it as F + QGR. Under the new rule QGR comes out
+   of the base, but that change waits on the backend so this app never
+   quotes a figure the invoice disagrees with — see `buildSettlementChain`
+   in utils/project/settlementChain.js for the agreed formula.
+
+   Rather than leave the old name loose in the app, it is translated here
+   and nowhere else. Everything downstream speaks only `pqp`, so when the
+   backend does rename, this one function changes and nothing else does.
+
+   Shallow by design: `npqp` only ever appears at the top level of a
+   payload or of a settlement row, and a deep walk would also rewrite the
+   `perMonth` entries, which have no such field. */
+function toPqp(v) {
+    if (Array.isArray(v)) return v.map(toPqp);
+    if (v && typeof v === "object" && !Array.isArray(v) && "npqp" in v) {
+        const { npqp, ...rest } = v;
+        return { ...rest, pqp: npqp };
+    }
+    return v;
+}
+
 /* The FIRST image attachment on an SLA master, or null.
 
    `attachments[]` carries { file_url, mime_type, original_filename,
@@ -68,7 +95,7 @@ function pickSlaImage(s) {
 
 /* ───────────────────────── Quarter helpers ─────────────────────────
    Contract quarters are PROJECT-ANCHORED: they run from the project's own
-   start date, not from a calendar year. Every settlement / NPQP /
+   start date, not from a calendar year. Every settlement / PQP /
    quarterly-aggregate response now reports one as
 
        fiscalYear = the 1-based CONTRACT year (1, 2, 3 …) — NOT a calendar year
@@ -97,7 +124,7 @@ export function isContractYear(fiscalYear) {
 }
 
 /* fiscalYear + quarter → the key the backend uses, in whichever regime
-   the row belongs to. Feed it a settlement / NPQP / aggregate row and it
+   the row belongs to. Feed it a settlement / PQP / aggregate row and it
    labels itself correctly without the caller having to know which. */
 export function formatQuarterKey(fiscalYear, quarter) {
     const y = Number(fiscalYear);
@@ -198,26 +225,28 @@ export function getActivityCompliance(activityId) {
 // `quarter` is a contract key ("Y1-Q2") or any ISO date inside the quarter.
 export function getQuarterlyAggregate(projectId, quarter) {
     const qs = quarter ? `?quarter=${enc(quarter)}` : "";
-    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/quarterly-aggregate${qs}`);
+    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/quarterly-aggregate${qs}`).then(toPqp);
 }
 
-// Phase C — NPQP = F (leave-mgmt per-month cost × 3) + QGR.
+// Phase C — PQP, the base the LD % is charged on.
+// NOTE: the route and the payload field are still called `npqp` server-side;
+// `toPqp` renames the field so nothing downstream carries the old term.
 // Returns status='leave_mgmt_unavailable' with HTTP 200 when leave-mgmt is
 // down, so callers must check `status`, not just the absence of an error.
-export function getNpqp(projectId, quarter) {
+export function getPqp(projectId, quarter) {
     const qs = quarter ? `?quarter=${enc(quarter)}` : "";
-    return call(`/api/v3/npqp/projects/${enc(projectId)}${qs}`);
+    return call(`/api/v3/npqp/projects/${enc(projectId)}${qs}`).then(toPqp);
 }
 
 // Phase D — settlement history, newest quarter first.
 export function listSettlements(projectId) {
-    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement`);
+    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement`).then(toPqp);
 }
 
-// Phase D — one quarter. Lazily auto-closes (rollup + NPQP + cap + AQP) and
+// Phase D — one quarter. Lazily auto-closes (rollup + PQP + cap + AQP) and
 // persists status='auto_closed' when no row exists yet.
 export function getSettlement(projectId, quarter) {
-    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}`);
+    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}`).then(toPqp);
 }
 
 // Phase D — finance override of sumLdPercent. Re-capped at the quarter cap
@@ -226,7 +255,7 @@ export function overrideSettlement(projectId, quarter, { sumLdPercent, overrideR
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/override`, {
         method: "POST",
         body: { sumLdPercent: Number(sumLdPercent), overrideReason },
-    });
+    }).then(toPqp);
 }
 
 // Phase E — lock the row after the invoice is raised. Idempotent.
@@ -234,7 +263,7 @@ export function markSettlementInvoiced(projectId, quarter, invoiceRef) {
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/mark-invoiced`, {
         method: "POST",
         body: { invoiceRef },
-    });
+    }).then(toPqp);
 }
 
 /* ───────────────────── Scoring configuration ─────────────────────

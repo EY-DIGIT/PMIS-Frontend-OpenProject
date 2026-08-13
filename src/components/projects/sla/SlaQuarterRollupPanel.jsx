@@ -25,7 +25,7 @@ import { Link } from "react-router-dom";
 import { loadProjectTree } from "../../../api/milestoneConfigApi";
 import {
     getActivityCompliance,
-    getNpqp,
+    getPqp,
     getSeverityMaster,
     getLdBands,
     listSlaMasters,
@@ -42,7 +42,7 @@ import {
     contractQuarters,
     contractQuarterFor,
     overlappingCalendarQuarters,
-    blendNpqp,
+    blendPqp,
     withinWindow,
     rollupBySla,
     quarterTotals,
@@ -1694,7 +1694,7 @@ function CheckRow({ check }) {
    survives on the settlement row of why the scored figure was not used,
    and a blank one turns a deliberate concession into an unexplained
    discrepancy for whoever reads the quarter next. */
-function RelaxationModal({ scoredPercent, npqp, quarterLabel, quarterDates, onCancel, onSubmit }) {
+function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCancel, onSubmit }) {
     const [value, setValue] = useState("");
     const [reason, setReason] = useState("");
     const [busy, setBusy] = useState(false);
@@ -1704,7 +1704,7 @@ function RelaxationModal({ scoredPercent, npqp, quarterLabel, quarterDates, onCa
     const relax = Number(value);
     const valid = Number.isFinite(relax) && relax > 0 && relax <= scored + 1e-9;
     const next = valid ? Math.max(0, scored - relax) : scored;
-    const amountOf = (p) => (Number.isFinite(Number(npqp)) ? (p / 100) * Number(npqp) : null);
+    const amountOf = (p) => (Number.isFinite(Number(pqp)) ? (p / 100) * Number(pqp) : null);
 
     async function submit() {
         if (!valid || !reason.trim()) return;
@@ -2399,11 +2399,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     /* PQP is published per CALENDAR quarter while everything else here is
        measured from T0, so a contract quarter usually straddles two of
        them. Both are fetched and blended by day overlap — see
-       `overlappingCalendarQuarters`. `npqpParts` keeps each quarter's raw
+       `overlappingCalendarQuarters`. `pqpParts` keeps each quarter's raw
        payload so a per-quarter failure can be named rather than folded
        into one useless "PQP unavailable". */
-    const [npqpParts, setNpqpParts] = useState([]);
-    const [npqpError, setNpqpError] = useState("");
+    const [pqpParts, setPqpParts] = useState([]);
+    const [pqpError, setPqpError] = useState("");
     const [mastersError, setMastersError] = useState("");
     /* The SLA library keyed by ref AND id, kept in state because the RFP
        re-check needs the target tables and cadence long after `load` has
@@ -2830,13 +2830,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        off. Both are fetched together and blended by day weight below. */
     useEffect(() => {
         let cancelled = false;
-        setNpqpError("");
-        if (!projectId || !overlaps.length) { setNpqpParts([]); return undefined; }
+        setPqpError("");
+        if (!projectId || !overlaps.length) { setPqpParts([]); return undefined; }
 
-        Promise.allSettled(overlaps.map((o) => getNpqp(projectId, o.key)))
+        Promise.allSettled(overlaps.map((o) => getPqp(projectId, o.key)))
             .then((settled) => {
                 if (cancelled) return;
-                setNpqpParts(settled.map((s, i) => ({
+                setPqpParts(settled.map((s, i) => ({
                     ...overlaps[i],
                     data: s.status === "fulfilled" ? s.value : null,
                     error: s.status === "rejected" ? (s.reason?.message || "request failed") : "",
@@ -2844,7 +2844,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 const failed = settled
                     .map((s, i) => (s.status === "rejected" ? overlaps[i].key : null))
                     .filter(Boolean);
-                setNpqpError(failed.length ? `could not read ${failed.join(" and ")}` : "");
+                setPqpError(failed.length ? `could not read ${failed.join(" and ")}` : "");
             });
         return () => { cancelled = true; };
         // overlapKeys, not overlaps: the array is rebuilt on every render of a
@@ -3015,24 +3015,24 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        reason it has none, then blended by day weight. A part that answered
        200 with a non-ok status is NOT usable — that is the whole point of
        checking `status` rather than trusting the absence of a throw. */
-    const npqpBlend = useMemo(() => {
+    const pqpBlend = useMemo(() => {
         const values = {};
-        for (const p of npqpParts) {
+        for (const p of pqpParts) {
             const ok = p.data && (!p.data.status || p.data.status === "ok");
-            if (ok) values[p.key] = p.data.npqp;
+            if (ok) values[p.key] = p.data.pqp;
         }
-        return blendNpqp(overlaps, values);
-    }, [npqpParts, overlaps]);
+        return blendPqp(overlaps, values);
+    }, [pqpParts, overlaps]);
 
-    const npqpValue = npqpBlend.npqp;
+    const pqpValue = pqpBlend.pqp;
 
     /* One line naming why there is no base, in the part's own words. A
        blend is all-or-nothing: half a base would understate every LD on
        screen while looking like a real number. */
-    const npqpIssue = useMemo(() => {
-        if (npqpBlend.complete) return null;
-        if (!npqpParts.length) return npqpError ? `PQP call failed — ${npqpError}` : null;
-        const reasons = npqpParts
+    const pqpIssue = useMemo(() => {
+        if (pqpBlend.complete) return null;
+        if (!pqpParts.length) return pqpError ? `PQP call failed — ${pqpError}` : null;
+        const reasons = pqpParts
             .filter((p) => !(p.data && (!p.data.status || p.data.status === "ok")))
             .map((p) => {
                 if (p.error) return `${p.key}: ${p.error}`;
@@ -3050,11 +3050,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 return `${p.key}: status ${p.data?.status ?? "no data"}`;
             });
         return reasons.length ? reasons.join(" · ") : null;
-    }, [npqpBlend.complete, npqpParts, npqpError]);
+    }, [pqpBlend.complete, pqpParts, pqpError]);
 
     const totals = useMemo(
-        () => quarterTotals(quarterlyItems, { npqp: npqpValue }),
-        [quarterlyItems, npqpValue]
+        () => quarterTotals(quarterlyItems, { pqp: pqpValue }),
+        [quarterlyItems, pqpValue]
     );
 
     /* ── F from the resource deployment plan (§5.28.1.d) ──────────────
@@ -3069,12 +3069,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
     const endpointF = useMemo(() => {
         const values = {};
-        for (const p of npqpParts) {
+        for (const p of pqpParts) {
             const ok = p.data && (!p.data.status || p.data.status === "ok");
             if (ok) values[p.key] = p.data.fAmount;
         }
-        return blendNpqp(overlaps, values).npqp;
-    }, [npqpParts, overlaps]);
+        return blendPqp(overlaps, values).pqp;
+    }, [pqpParts, overlaps]);
 
     const fCheck = useMemo(() => compareFToPlan(plan.fAmount, endpointF), [plan.fAmount, endpointF]);
 
@@ -3211,13 +3211,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        shows F, QGR, PQP and LD and simply names PA as pending. */
     const chain = useMemo(() => buildSettlementChain({
         fAmount: settlementRow?.fAmount ?? endpointF,
-        qgrAmount: settlementRow?.qgrAmount ?? npqpParts.find((p) => p.data?.qgrAmount != null)?.data?.qgrAmount,
-        npqp: settlementRow?.npqp ?? npqpValue,
+        qgrAmount: settlementRow?.qgrAmount ?? pqpParts.find((p) => p.data?.qgrAmount != null)?.data?.qgrAmount,
+        pqp: settlementRow?.pqp ?? pqpValue,
         sumLdPercent: settlementRow?.sumLdPercent ?? totals.sumLdPercent,
         cappedLdPercent: settlementRow?.cappedLdPercent,
         quarterCapPercent: totals.quarterCapPercent,
         paAmount: settlementRow?.paAmount,
-    }), [settlementRow, endpointF, npqpParts, npqpValue, totals.sumLdPercent, totals.quarterCapPercent]);
+    }), [settlementRow, endpointF, pqpParts, pqpValue, totals.sumLdPercent, totals.quarterCapPercent]);
 
     /* The "which AQP formula did the backend apply" check lived here and
        rendered inside the settlement-chain section. That section is gone —
@@ -3239,7 +3239,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        is never invented: "3 of 10" that is actually 4 of 12 is worse than
        no instalment line at all. */
     const qgr = useMemo(() => {
-        const sources = [...npqpParts.map((p) => p.data), contractSettlement].filter(Boolean);
+        const sources = [...pqpParts.map((p) => p.data), contractSettlement].filter(Boolean);
 
         const perQuarter = pick(sources, ["qgrAmount", "qgr_amount", "qgr"]);
         let total = pick(sources, ["qgrTotal", "qgr_total", "totalQgr", "total_qgr", "qgrGuaranteedTotal"]);
@@ -3284,7 +3284,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             paidToDate, paidCount,
             hasBasis: total !== null || count !== null || number !== null,
         };
-    }, [npqpParts, contractSettlement, settlements]);
+    }, [pqpParts, contractSettlement, settlements]);
 
     /* ── LD relaxation (§5.28.1.d) ────────────────────────────────────
        A relaxation lowers the quarter's Σ LD %. It is stored through the
@@ -3309,12 +3309,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         const granted = hasStored && Number.isFinite(scored) && scored - stored > 0.0001
             ? scored - stored
             : 0;
-        const npqp = Number(chain.npqp);
+        const pqp = Number(chain.pqp);
         return {
             scoredPercent: Number.isFinite(scored) ? scored : null,
             effectivePercent: hasStored ? stored : (Number.isFinite(scored) ? scored : null),
             grantedPercent: granted,
-            grantedAmount: granted > 0 && Number.isFinite(npqp) ? (granted / 100) * npqp : null,
+            grantedAmount: granted > 0 && Number.isFinite(pqp) ? (granted / 100) * pqp : null,
             reason: settlementRow?.overrideReason || "",
             applied: granted > 0,
             // Only a closed quarter has a row to override (404 before that).
@@ -3336,7 +3336,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                     ? "Cannot override an invoiced settlement — issue a credit note."
                     : "",
         };
-    }, [totals.sumLdPercent, settlementRow, chain.npqp, contractSettlementError]);
+    }, [totals.sumLdPercent, settlementRow, chain.pqp, contractSettlementError]);
 
     /* ── does that settlement row actually cover this quarter? ────────
        The rows carry `quarterStart` / `quarterEnd`. Those are now anchored
@@ -3595,11 +3595,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         /* Naming the CAUSE, not just the gap. "the quarterly resource
            payment pending" sends a reader hunting through resource data
            that is usually fine — the payment is missing because PQP had
-           no usable base, and `npqpIssue` already knows why (leave
+           no usable base, and `pqpIssue` already knows why (leave
            management unreachable, no resources deployed, and so on). */
         if (quarterlyItems.length > 0 && quarterlyNet === null) {
-            pending.push(npqpIssue
-                ? `the quarterly resource payment (${npqpIssue})`
+            pending.push(pqpIssue
+                ? `the quarterly resource payment (${pqpIssue})`
                 : "the quarterly resource payment");
         }
 
@@ -3624,7 +3624,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                section B is tax-exclusive by §5.27.6. */
             tax: taxBreakdown(grossDue),
         };
-    }, [quarterPayment, chain.aqp, chain.ldAmount, quarterlyItems.length, npqpIssue]);
+    }, [quarterPayment, chain.aqp, chain.ldAmount, quarterlyItems.length, pqpIssue]);
 
     /* ── does this page agree with Finance about tax? ─────────────────
        The rollup draws from two services that keep money on different
@@ -4086,20 +4086,20 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         />
                                         <Tile
                                             label="PQP"
-                                            value={money(totals.npqp)}
-                                            hint={npqpIssue
+                                            value={money(totals.pqp)}
+                                            hint={pqpIssue
                                                 || (fCheck.diverges
                                                     ? `⚠ F differs from the deployment plan by ${Math.round(fCheck.percent * 100) / 100}%`
-                                                    : npqpBlend.exact
+                                                    : pqpBlend.exact
                                                         ? `calendar ${overlaps[0]?.key} · exact`
                                                         : `blended across ${overlaps.map((o) => o.key).join(" + ")}`)}
-                                            accent={npqpIssue || fCheck.diverges ? AMBER : undefined}
+                                            accent={pqpIssue || fCheck.diverges ? AMBER : undefined}
                                         />
                                         <Tile
                                             label="Penalty amount"
                                             value={money(totals.ldAmount)}
                                             accent={RED}
-                                            hint={totals.npqp === null ? "needs a PQP base" : "capped LD % × PQP"}
+                                            hint={totals.pqp === null ? "needs a PQP base" : "capped LD % × PQP"}
                                         />
                                     </div>
                                     {/* Grouped under their own category rather than run
@@ -5367,7 +5367,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             sign="+"
                                             value={money(chain.qgr)}
                                         />
-                                        <ChainRow label="Payment base" clause="PQP" sign="=" value={money(chain.npqp)} />
+                                        <ChainRow label="Payment base" clause="PQP" sign="=" value={money(chain.pqp)} />
                                         <ChainRow
                                             label={relaxation.applied ? "Liquidated damages as scored" : "Liquidated damages"}
                                             clause={relaxation.applied
@@ -5736,7 +5736,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             {relaxOpen && (
                 <RelaxationModal
                     scoredPercent={relaxation.scoredPercent}
-                    npqp={chain.npqp}
+                    pqp={chain.pqp}
                     quarterLabel={period?.label || "this quarter"}
                     quarterDates={period ? `${longDate(period.start)} → ${longDate(period.end)}` : ""}
                     onCancel={() => setRelaxOpen(false)}

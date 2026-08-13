@@ -142,7 +142,7 @@ function resolveNavTitle(segments) {
     if (segments[2] === "sla-settlement") {
       return {
         label: "Settlement & LD",
-        tooltip: "Quarterly aggregate, NPQP, capped LD and the invoice lock."
+        tooltip: "Quarterly aggregate, PQP, capped LD and the invoice lock."
       };
     }
     // /projects/:id/penalty-report     → milestone delay → LD → net payable

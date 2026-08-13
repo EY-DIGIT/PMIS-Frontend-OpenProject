@@ -231,7 +231,7 @@ export function reconcileSlaDeductions({ paymentPage, period, totals, chain, qua
     compare("fin-sum-ld", "Σ LD % before the cap", totals?.sumLdPercent, row.sumLdPercent, pctStr,
         row.overrideReason ? `Finance's figure carries a reason: "${row.overrideReason}".` : "");
     compare("fin-capped-ld", "LD % after the quarter cap", totals?.cappedLdPercent, row.cappedLdPercent, pctStr);
-    compare("fin-npqp", "Payment base (PQP)", chain?.npqp, row.npqp, fmt,
+    compare("fin-pqp", "Payment base (PQP)", chain?.pqp, row.pqp, fmt,
         "Tax-exclusive on both sides.");
     compare("fin-ld-amount", "Liquidated damages", chain?.ldAmount, row.ldAmount, fmt);
     compare("fin-aqp", "Final payment (AQP)", quarterlyNet, row.aqpAmount, fmt);

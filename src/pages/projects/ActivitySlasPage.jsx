@@ -330,7 +330,7 @@ function DetailGrid({ fields }) {
 
 // Friendly label for the LD computation base ("Applied On" row).
 const APPLIED_ON_LABEL = {
-    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (NPQP)",
+    QUARTERLY_PAYMENT: "Net Planned Quarterly Payment (PQP)",
     ANNUAL_PAYMENT: "Annual Contract Value",
     FIXED_AMOUNT: "Deliverable Cost (set per mapping)",
 };

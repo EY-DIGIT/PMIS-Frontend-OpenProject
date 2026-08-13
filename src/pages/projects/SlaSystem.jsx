@@ -94,7 +94,7 @@ export const SECTIONS = [
     icon: FiPieChart,
     title: "Settlement & LD",
     blurb:
-      "The project's quarter: aggregate → NPQP → capped LD → settlement → invoice lock.",
+      "The project's quarter: aggregate → PQP → capped LD → settlement → invoice lock.",
   },
   {
     slug: "penalty-report",

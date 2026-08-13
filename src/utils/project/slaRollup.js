@@ -167,21 +167,21 @@ export function overlappingCalendarQuarters(window) {
    would quietly halve the base and understate every LD on the screen.
    The blend is instead reported as incomplete, with the missing keys
    named, and the caller decides whether to show a number at all.      */
-export function blendNpqp(overlaps, values) {
+export function blendPqp(overlaps, values) {
     const list = Array.isArray(overlaps) ? overlaps : [];
-    if (!list.length) return { npqp: null, complete: false, missing: [], parts: [] };
+    if (!list.length) return { pqp: null, complete: false, missing: [], parts: [] };
 
-    const parts = list.map((o) => ({ ...o, npqp: Number(values?.[o.key]) }));
-    const missing = parts.filter((p) => !Number.isFinite(p.npqp) || p.npqp <= 0);
-    const usable = parts.filter((p) => Number.isFinite(p.npqp) && p.npqp > 0);
+    const parts = list.map((o) => ({ ...o, pqp: Number(values?.[o.key]) }));
+    const missing = parts.filter((p) => !Number.isFinite(p.pqp) || p.pqp <= 0);
+    const usable = parts.filter((p) => Number.isFinite(p.pqp) && p.pqp > 0);
 
     return {
         parts,
         missing: missing.map((p) => p.key),
         complete: missing.length === 0,
         exact: list.length === 1,
-        npqp: missing.length === 0
-            ? usable.reduce((n, p) => n + p.npqp * p.weight, 0)
+        pqp: missing.length === 0
+            ? usable.reduce((n, p) => n + p.pqp * p.weight, 0)
             : null,
     };
 }
@@ -596,12 +596,12 @@ export function rollupBySla(results, { severityMaster, ldBands } = {}) {
 
    PQP may legitimately be absent — its F component comes from leave
    management — so the amount stays null rather than reporting zero.   */
-export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } = {}) {
+export function quarterTotals(quarterlyItems, { pqp, quarterCapPercent = 10 } = {}) {
     const items = Array.isArray(quarterlyItems) ? quarterlyItems : [];
     const contributing = items.filter((i) => Number.isFinite(i.ldPercent));
     const sumLdPercent = contributing.reduce((n, i) => n + i.ldPercent, 0);
     const cappedLdPercent = Math.min(sumLdPercent, quarterCapPercent);
-    const base = Number(npqp);
+    const base = Number(pqp);
     const hasBase = Number.isFinite(base) && base > 0;
 
     return {
@@ -616,7 +616,7 @@ export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } =
         cappedLdPercent,
         capApplied: sumLdPercent > quarterCapPercent,
         quarterCapPercent,
-        npqp: hasBase ? base : null,
+        pqp: hasBase ? base : null,
         ldAmount: hasBase ? (base * cappedLdPercent) / 100 : null,
         ldAmountUncapped: hasBase ? (base * sumLdPercent) / 100 : null,
     };
@@ -639,7 +639,7 @@ export function quarterTotals(quarterlyItems, { npqp, quarterCapPercent = 10 } =
        milestone") and UIDAI answered "No Change".
      · 10% OF PQP — §5.28.1.c defines PQP as the aggregate monthly
        payment of all resources in the deployment plan plus any CCN
-       resources. NPQP was deleted outright (s.no. 49), so QGR is no
+       resources. PQP was deleted outright (s.no. 49), so QGR is no
        longer part of the base.
      · EXCLUSIVE OF TAX — the ceiling and the charge are both pre-tax.
 
@@ -660,7 +660,7 @@ export function combinedCapCheck(totals, dTotals) {
     const d = Number.isFinite(deliverable) ? Math.max(0, deliverable) : 0;
     const combined = q + d;
 
-    const pqp = Number(totals?.npqp);
+    const pqp = Number(totals?.pqp);
     const capPercent = Number(totals?.quarterCapPercent ?? 10);
     const ceilingKnown = Number.isFinite(pqp) && pqp > 0;
     const ceiling = ceilingKnown ? (pqp * capPercent) / 100 : null;
