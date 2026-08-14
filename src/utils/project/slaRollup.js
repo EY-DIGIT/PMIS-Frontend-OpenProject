@@ -192,6 +192,34 @@ export function withinWindow(dateValue, window) {
     return d >= window.start && d <= window.end;
 }
 
+/* Which date decides the quarter a result is charged to.
+
+   NOT `evaluatedOn`. That is the day somebody pressed Evaluate, so it
+   files a breach into whichever quarter the RUN happened in — evaluate a
+   Q3 activity in August and its penalty lands in Q4, while Q3 closes at
+   zero. The results carry no field saying which period they measure
+   (checked: severityLevel, delayDays, ldPercent, evaluatedOn … and
+   nothing else), so the activity's own window is the best available
+   answer to "when was this work done".
+
+   The END date decides it, for two reasons:
+     · one quarter only — an activity that straddles a boundary is never
+       counted in both, which would charge the same breach twice;
+     · it matches how a deliverable becomes payable in the quarter its
+       work finishes, however late that is.
+
+   With contract quarters anchored so activities start on a boundary,
+   start and end fall in the same quarter and the choice is moot. The
+   rule only bites on a straddling activity, and there it errs towards
+   the quarter the work was completed in.
+
+   `evaluatedOn` remains the last resort: an activity with no dates at
+   all still has to appear somewhere rather than vanish from every
+   quarter. */
+export function attributionDate(result) {
+    return result?.activityEndDate || result?.activityStartDate || result?.evaluatedOn;
+}
+
 /* ─── severity & LD band lookups ─────────────────────────────────── */
 
 /* Severity master → { level → points } plus the ceiling used for the

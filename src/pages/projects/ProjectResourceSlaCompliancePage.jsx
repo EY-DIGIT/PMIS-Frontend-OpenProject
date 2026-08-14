@@ -21,6 +21,8 @@ import { setPageContext, clearPageContext } from "../../utils/pageContext";
 import {
   loadMilestonesForProject, loadActivitiesForMilestone,
 } from "../../api/milestoneConfigApi";
+import { getActivityCompliance } from "../../api/slaCompliance";
+import { normalizeStatus, STATUS } from "../../utils/project/slaRollup";
 import { readErrorMessage, readJsonBody, requestErrorMessage } from "../../utils/apiMessage";
 import { getToken } from "../../api/auth";
 import "../../styles/global.css";
@@ -160,6 +162,54 @@ export default function ProjectResourceSlaCompliancePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  /* ── SLA state for the selected activity ──────────────────────────
+     The availability numbers are what the SLAs are measured on; this is
+     the verdict they produced. Read from the compliance store rather
+     than derived here — the scoring is the backend's, and a second
+     opinion computed on this page could disagree with the rollup and
+     with what Settlement invoices.
+
+     Only the activity's OWN mapped SLAs are read (the endpoint is
+     activity-scoped), which is the cross-check asked for. Every
+     activity reachable on this page already sits under a resource-based
+     milestone — `pickableMilestones` filters on `isResourceBased` — so
+     no further gating is needed for "resource-based only".
+
+     A failed call leaves `slaBreached` false and shows no badge. That is
+     deliberate: the badge asserts a breach, and asserting one on a
+     failed lookup is worse than staying quiet. `slaCheckFailed` records
+     it so the absence can be explained rather than read as "clean". */
+  const [slaResults, setSlaResults] = useState([]);
+  const [slaCheckFailed, setSlaCheckFailed] = useState(false);
+
+  useEffect(() => {
+    if (!activityId) { setSlaResults([]); setSlaCheckFailed(false); return undefined; }
+    let active = true;
+    (async () => {
+      try {
+        const res = await getActivityCompliance(activityId);
+        if (!active) return;
+        setSlaResults(Array.isArray(res?.results) ? res.results : []);
+        setSlaCheckFailed(false);
+      } catch {
+        if (!active) return;
+        setSlaResults([]);
+        setSlaCheckFailed(true);
+      }
+    })();
+    return () => { active = false; };
+  }, [activityId, refreshKey]);
+
+  /* Breached if ANY mapped SLA is. Counted through `normalizeStatus`
+     because the wire values are enum names — "breached" here, but also
+     `pending_observation`, `excluded` — and matching the bare string
+     would quietly score a breach as nothing. */
+  const breachedSlas = useMemo(
+    () => slaResults.filter((r) => normalizeStatus(r?.status) === STATUS.BREACHED),
+    [slaResults]
+  );
+  const slaBreached = breachedSlas.length > 0;
+
   useEffect(() => {
     if (!projectId || !activityId) { setAvailability(null); setError(null); return undefined; }
     let active = true;
@@ -274,7 +324,30 @@ export default function ProjectResourceSlaCompliancePage() {
 
       <section className="sla-section">
         <div className="sla-section-head">
-          <h2 className="sla-section-title">Resource availability</h2>
+          <h2 className="sla-section-title">
+            Resource availability
+            {/* State only — deliberately not a link or a control. The
+                scoring behind it lives on the SLA Rollup; repeating any
+                of it here would be a second place to keep correct. */}
+            {selectionComplete && slaBreached && (
+              <span
+                className="sla-breach-badge"
+                title={
+                  `Breached: ${breachedSlas.map((r) => r.slaRef || r.slaId).join(", ")}`
+                  + " — scored by the SLA evaluation for this activity."
+                }
+              >
+                Breached
+              </span>
+            )}
+            {/* Without this, a failed lookup looks exactly like a clean
+                activity — the badge is simply absent either way. */}
+            {selectionComplete && slaCheckFailed && (
+              <span className="sla-breach-unknown" title="The SLA results for this activity could not be read, so no breach state is shown.">
+                SLA status unavailable
+              </span>
+            )}
+          </h2>
         </div>
 
         {!selectionComplete ? (
@@ -445,7 +518,24 @@ const STYLES = `
 .sla-section { margin-bottom: 24px; }
 .sla-section-head { margin-bottom: 14px; }
 .sla-section-title { font-size: 15px; font-weight: 700; color: ${C.ink}; margin: 0;
-  letter-spacing: -0.01em; }
+  letter-spacing: -0.01em; display: flex; align-items: center; gap: 9px;
+  flex-wrap: wrap; }
+
+/* Sized off the heading it sits beside rather than set in absolute px, so
+   it reads as part of the title and not as a control. */
+.sla-breach-badge {
+  font-size: 11.5px; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase; color: ${C.red};
+  background: #fdeeee; border: 1px solid #f3c9c9;
+  border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+}
+
+/* Muted, not amber: this is "we don't know", not "something is wrong". */
+.sla-breach-unknown {
+  font-size: 11.5px; font-weight: 600; color: ${C.muted};
+  background: ${C.surface}; border: 1px solid ${C.border};
+  border-radius: 999px; padding: 3px 10px; white-space: nowrap;
+}
 
 .sla-card { padding: 0; overflow: hidden; }
 .sla-card-head { display: flex; gap: 28px; flex-wrap: wrap; padding: 14px 16px;

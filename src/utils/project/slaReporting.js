@@ -73,7 +73,7 @@
    Pure functions, no React, no fetching.
    ══════════════════════════════════════════════════════════════════ */
 
-import { ldBandFor, parseISO, normalizeStatus, STATUS } from "./slaRollup";
+import { ldBandFor, parseISO, normalizeStatus, STATUS, attributionDate } from "./slaRollup";
 
 const num = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -404,7 +404,10 @@ export function recheckSla(item, master, { severityScale: scale, ldBands, period
         const buckets = new Map(expected.map((k) => [k, { key: k, scored: [], unscored: [] }]));
         const strays = [];
         for (const o of item.occurrences || []) {
-            const key = measurementIntervalKey(o.evaluatedOn, master.measurementInterval);
+            /* Bucketed by the same date the occurrence was filed under, or a
+               result evaluated after the quarter closed would fall in a
+               month outside the window and read as a stray. */
+            const key = measurementIntervalKey(attributionDate(o), master.measurementInterval);
             if (!key) { strays.push(o); continue; }
             if (!buckets.has(key)) buckets.set(key, { key, scored: [], unscored: [], outsideWindow: true });
             const b = buckets.get(key);
@@ -498,9 +501,14 @@ export function detectCarryForward({ allResults, period, mastersByRef } = {}) {
 
     // key = slaRef + activity, so two activities breaching the same SLA are
     // tracked as two independent obligations.
+    /* Ordered and split by the same date the rollup files results under —
+       the activity's own window, not the day the evaluation was run — so
+       "before this quarter" means the same thing in both places. */
+    const at = (r) => String(attributionDate(r) || "").slice(0, 10);
+
     const threads = new Map();
     for (const r of results) {
-        if (!r.evaluatedOn) continue;
+        if (!at(r)) continue;
         const ref = r.slaRef || r.slaId;
         if (!ref) continue;
         const key = `${ref}::${r.activityId ?? ""}`;
@@ -510,8 +518,8 @@ export function detectCarryForward({ allResults, period, mastersByRef } = {}) {
 
     const out = [];
     for (const [key, list] of threads) {
-        const sorted = list.slice().sort((a, b) => String(a.evaluatedOn).localeCompare(String(b.evaluatedOn)));
-        const before = sorted.filter((r) => String(r.evaluatedOn).slice(0, 10) < period.start);
+        const sorted = list.slice().sort((a, b) => at(a).localeCompare(at(b)));
+        const before = sorted.filter((r) => at(r) < period.start);
         if (!before.length) continue;
 
         // The most recent statement made before this quarter opened.
@@ -521,7 +529,7 @@ export function detectCarryForward({ allResults, period, mastersByRef } = {}) {
         // Already re-scored inside this quarter — the backend is emitting the
         // recurring row, so there is nothing missing to report.
         const inQuarter = sorted.some((r) => {
-            const d = String(r.evaluatedOn).slice(0, 10);
+            const d = at(r);
             return d >= period.start && d <= period.end;
         });
         if (inQuarter) continue;
@@ -540,8 +548,8 @@ export function detectCarryForward({ allResults, period, mastersByRef } = {}) {
             activityId: last.activityId ?? null,
             activityCode: last.activityCode || null,
             activityName: last.activityName || null,
-            openedOn: last.evaluatedOn,
-            quartersOpen: quartersBetween(last.evaluatedOn, period.start),
+            openedOn: at(last),
+            quartersOpen: quartersBetween(at(last), period.start),
             severity,
             hasTargetTable: !!(master?.targetRows || []).length,
         });

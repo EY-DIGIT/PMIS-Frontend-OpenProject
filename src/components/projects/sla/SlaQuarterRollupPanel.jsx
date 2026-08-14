@@ -44,6 +44,7 @@ import {
     overlappingCalendarQuarters,
     blendPqp,
     withinWindow,
+    attributionDate,
     rollupBySla,
     quarterTotals,
     deliverableTotals,
@@ -2674,6 +2675,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         name: a.name || "",
                         milestoneId: m?.apiId || null,
                         milestoneName: m?.name || `Milestone ${mi + 1}`,
+                        /* Carried so a result can be filed into the quarter its
+                           WORK falls in rather than the quarter someone
+                           happened to run the evaluation in — see
+                           `attributionDate`. */
+                        startDate: a.startDate || "",
+                        endDate: a.endDate || "",
                     };
                     activities.push(entry);
                     actIndex.set(String(a.apiId), entry);
@@ -2721,6 +2728,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 activityId: act.apiId,
                                 activityCode: act.code,
                                 activityName: act.name,
+                                activityStartDate: act.startDate,
+                                activityEndDate: act.endDate,
                                 milestoneId: act.milestoneId,
                                 milestoneName: act.milestoneName,
                             });
@@ -2852,11 +2861,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [projectId, overlapKeys]);
 
-    /* Results falling inside the selected contract quarter. `evaluatedOn` is
-       the reporting date, which is what §5.28 accumulates points by — not
-       the activity's own dates. */
+    /* Results falling inside the selected contract quarter, filed by the
+       activity's own window rather than by the date the evaluation was run
+       — see `attributionDate` for why. */
     const inQuarter = useMemo(
-        () => (period ? allResults.filter((r) => withinWindow(r.evaluatedOn, period)) : []),
+        () => (period ? allResults.filter((r) => withinWindow(attributionDate(r), period)) : []),
         [allResults, period]
     );
 
@@ -3699,7 +3708,10 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
     const needsScale = quarterlyItems.some((i) => i.scoring === SCORING.POINTS);
     const unconfigured = needsScale && (!scale.configured || !ldBands.length);
-    const undated = allResults.filter((r) => !r.evaluatedOn).length;
+    /* Unplaceable, not merely undated: a result with no evaluation date is
+       still filed correctly if its activity has a window, so only a result
+       with neither falls outside every quarter. */
+    const undated = allResults.filter((r) => !attributionDate(r)).length;
 
 
     /* ── diagnostics, as data ─────────────────────────────────────────
@@ -3779,7 +3791,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             add("info", "Backend aggregate could not be read", `${aggregateError}. This period's figures were not cross-checked against it.`);
         }
         if (undated > 0) {
-            add("info", `${undated} result(s) have no evaluation date`, "They appear in no period at all, so no quarter counts them.");
+            add("info", `${undated} result(s) cannot be placed in a quarter`,
+                "Their activity carries no start or end date and they have no evaluation date either, "
+                + "so there is nothing to file them by and no quarter counts them.");
         }
         if (awaitingObservation > 0) {
             out.push({
@@ -5060,8 +5074,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
                                 {undated > 0 && (
                                     <div style={{ color: AMBER, fontSize: 11.5, marginTop: 10 }}>
-                                        {undated} result{undated === 1 ? " has" : "s have"} no evaluation date and so
-                                        appear in no period.
+                                        {undated} result{undated === 1 ? " has" : "s have"} no activity dates and no
+                                        evaluation date, so {undated === 1 ? "it appears" : "they appear"} in no period.
                                     </div>
                                 )}
                             </div>
