@@ -7,11 +7,21 @@ import * as ratesApi from "../../api/designationRates";
 
    A resource-based milestone's activities carry their own allocation rows:
    designation (a role from the organisation's rate card) + headcount +
-   duration. The activity's resource cost is the sum of those rows, and the
-   finance page reads it back as the activity's share of the payment term.
+   duration + the date those resources are planned to deploy. The activity's
+   resource cost is the sum of those rows, and the finance page reads it back
+   as the activity's share of the payment term.
 
    `duration` is a flat number of MONTHS in [0, 3] — an activity is one
-   quarter, so there are no deployment dates to pick.
+   quarter.
+
+   ONE ROW IS ONE DATE. Three of a designation all starting on the same day
+   is a single row with quantity 3. A staggered start is separate rows — 2
+   Program Managers on 01-Sep and 1 more on 15-Sep are two rows, not one row
+   with a range. The "+ Add resource" button is how a split is expressed.
+
+   All of designation, quantity, duration and plannedDeploymentDate are
+   required; the backend answers 422 on a row missing any of them, so each is
+   flagged here before the save is attempted.
 
    The backend resolves each row's monthly rate itself when the activity is
    saved (from leave-management, for the activity's contract year) and echoes
@@ -118,8 +128,20 @@ export default function ActivityResourceAllocations({
     }));
   }
 
+  /* A new row defaults its date to the activity's own start — the common
+     case is "deploys when the activity begins", and it matches how the
+     backend backfilled the rows that predate this field. Still editable,
+     and still required: an activity with no start date leaves it blank
+     rather than guessing. */
   const addRow = () =>
-    onChange([...rows, { designation: "", quantity: 1, duration: "", monthlyRate: null, computedCost: null }]);
+    onChange([...rows, {
+      designation: "",
+      quantity: 1,
+      duration: "",
+      plannedDeploymentDate: String(activityStartDate || "").slice(0, 10),
+      monthlyRate: null,
+      computedCost: null,
+    }]);
 
   const removeRow = (idx) => onChange(rows.filter((_, i) => i !== idx));
 
@@ -132,8 +154,9 @@ export default function ActivityResourceAllocations({
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: "#5b6b82" }}>
-          One row per role. Duration is in <strong>months (0–{MAX_DURATION})</strong> —
-          an activity covers a single quarter.
+          One row per role <strong>per deployment date</strong>. Duration is in{" "}
+          <strong>months (0–{MAX_DURATION})</strong> — an activity covers a single quarter.
+          Staggering a role across dates? Add a row for each.
         </div>
         <div style={{ fontSize: 12, color: "#5b6b82" }}>
           Resource cost:{" "}
@@ -192,6 +215,12 @@ export default function ActivityResourceAllocations({
                 <th style={{ ...headStyle, minWidth: 190 }}>Designation</th>
                 <th style={{ ...headStyle, width: 90 }}>Qty</th>
                 <th style={{ ...headStyle, width: 110 }}>Duration (mo)</th>
+                <th
+                  style={{ ...headStyle, width: 150 }}
+                  title="The date these resources are planned to deploy. One row covers one date — split a staggered start across separate rows."
+                >
+                  Planned deployment
+                </th>
                 <th style={{ ...headStyle, width: 130 }} title="Rate-card rate for this designation, per resource per month.">Monthly Rate</th>
                 {/* The planned budget, not what gets billed — attendance has no
                     say in it. The formula is on the tooltip because the three
@@ -213,6 +242,7 @@ export default function ActivityResourceAllocations({
                 const durationBad =
                   row.duration !== "" &&
                   (!Number.isFinite(durationNum) || durationNum < 0 || durationNum > MAX_DURATION);
+                const dateMissing = !!row.designation && !row.plannedDeploymentDate;
                 return (
                   <tr key={idx}>
                     <td style={{ padding: "0 6px 6px 0" }}>
@@ -255,6 +285,23 @@ export default function ActivityResourceAllocations({
                         placeholder="0.00"
                         title={`Months, 0 to ${MAX_DURATION}`}
                         onChange={(e) => patchRow(idx, { duration: e.target.value })}
+                      />
+                    </td>
+                    <td style={{ padding: "0 6px 6px 0" }}>
+                      {/* Required: the backend 422s without it. Flagged red
+                          only once the row has a designation, so a freshly
+                          added blank row is not scolded before it is filled. */}
+                      <input
+                        type="date"
+                        style={{
+                          ...cellStyle,
+                          borderColor: dateMissing ? "#d32f2f" : "var(--uidai-pmis-border)",
+                        }}
+                        value={row.plannedDeploymentDate || ""}
+                        disabled={disabled}
+                        required
+                        title="Date these resources are planned to deploy"
+                        onChange={(e) => patchRow(idx, { plannedDeploymentDate: e.target.value })}
                       />
                     </td>
                     <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82" }}>

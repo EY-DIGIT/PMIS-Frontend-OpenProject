@@ -289,16 +289,23 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
       : (a.concernedDivision ? [a.concernedDivision] : []),
     concernedDivisionOther: a.concernedDivisionOther || a.concerned_division_other || "",
     /* Resource allocation on a resource-based activity: one row per
-       designation. designation/quantity/duration are what the FE sends;
+       designation PER DEPLOYMENT DATE. designation / quantity / duration /
+       plannedDeploymentDate are what the FE sends and all four are required;
        monthlyRate + computedCost are resolved by the backend at save time
        (from the leave-management rate card for the activity's contract year)
        and are read-only here. Responses are snake_case, and the money +
-       duration fields come back as strings. */
+       duration fields come back as strings.
+
+       A staggered deployment is SEPARATE ROWS, not one row with a range —
+       2 Program Managers on 01-Sep and 1 more on 15-Sep is two rows. */
     resources: Array.isArray(a.resources)
       ? a.resources.map((r) => ({
           designation: r?.designation || "",
           quantity: Number(r?.quantity) || 1,
           duration: r?.duration == null ? "" : String(r.duration),
+          plannedDeploymentDate: toDateInputValue(
+            r?.plannedDeploymentDate ?? r?.planned_deployment_date
+          ),
           monthlyRate: toNumberOrNull(r?.monthlyRate ?? r?.monthly_rate),
           computedCost: toNumberOrNull(r?.computedCost ?? r?.computed_cost)
         }))

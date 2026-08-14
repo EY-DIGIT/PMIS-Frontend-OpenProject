@@ -642,13 +642,22 @@ export async function loadActivityById(activityApiId) {
 }
 
 /* Resource allocation rows on a resource-based activity. The wire item is
-   exactly { designation, quantity, duration } — the endpoint rejects unknown
-   keys, so the read-only monthlyRate / computedCost the server echoes back
-   must be stripped before they're sent again on the next save.
+   exactly { designation, quantity, duration, plannedDeploymentDate } — the
+   endpoint rejects unknown keys, so the read-only monthlyRate / computedCost
+   the server echoes back must be stripped before they're sent again on the
+   next save.
 
    `duration` is a flat number of MONTHS in [0, 3] (an activity is one
-   quarter); there are no deployment dates. Rows without a designation are
-   dropped — they're half-filled UI rows, not allocations.
+   quarter). `plannedDeploymentDate` is a plain ISO calendar date
+   ("YYYY-MM-DD") and, like the other two, is REQUIRED — the backend answers
+   422 on a row missing any of them.
+
+   One row is one designation deploying on one date. A staggered deployment
+   is separate rows, so the date is not a range and never needs splitting
+   here — the form already adds a row per date.
+
+   Rows without a designation are dropped — they're half-filled UI rows, not
+   allocations.
 
    Returns undefined when the form carries no allocation array at all, which
    is how "leave the saved set untouched" is expressed on PATCH. An empty
@@ -660,7 +669,10 @@ function serializeActivityResources(formData) {
     .map((r) => ({
       designation: String(r.designation).trim(),
       quantity: Math.max(1, parseInt(r.quantity, 10) || 1),
-      duration: Number(Number(r.duration || 0).toFixed(2))
+      duration: Number(Number(r.duration || 0).toFixed(2)),
+      /* Sliced, not date-parsed: the input already yields YYYY-MM-DD, and
+         round-tripping through Date would shift the day by a timezone. */
+      plannedDeploymentDate: String(r.plannedDeploymentDate || "").slice(0, 10)
     }));
 }
 

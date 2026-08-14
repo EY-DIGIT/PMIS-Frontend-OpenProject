@@ -21,6 +21,7 @@ import {
   FiClipboard,
   FiGrid,
   FiArrowLeft,
+  FiActivity,
 } from "react-icons/fi";
 /* Feather has no rupee glyph, so money icons come from Lucide — its
    successor, drawn on the same grid at the same stroke width, so it sits
@@ -78,6 +79,14 @@ export const SECTIONS = [
     title: "Attendance",
     blurb:
       "Monthly and quarterly attendance per resource, with leave detail and the attendance-upload template.",
+  },
+  {
+    slug: "resource-sla-compliance",
+    label: "Resource SLA Compliance",
+    icon: FiActivity,
+    title: "Resource SLA Compliance",
+    blurb:
+      "The attendance figures SLA reporting is measured on — resource availability per cycle, business days against days actually covered.",
   },
   /* Penalty Report used to sit here (commented out). It now lives in the
      SLA System section — same URL, /projects/:projectId/penalty-report. */

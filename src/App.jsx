@@ -71,6 +71,7 @@ import SlaAiOnboardingPage from "./pages/sla/SlaAiOnboardingPage";
 import ProjectFinancePage from "./pages/projects/ProjectFinancePage";
 import ProjectResourcePage from "./pages/projects/ProjectResourcePage";
 import ProjectAttendancePage from "./pages/projects/ProjectAttendancePage";
+import ProjectResourceSlaCompliancePage from "./pages/projects/ProjectResourceSlaCompliancePage";
 import DesignationRatePage from "./pages/projects/DesignationRatePage";
 import AttendanceSystemHub, { AttendanceSystemLayout } from "./pages/projects/AttendanceSystem";
 import SlaSystemHub, { SlaSystemLayout } from "./pages/projects/SlaSystem";
@@ -348,7 +349,8 @@ function Breadcrumbs() {
         resource: "Resources",
         attendance: "Attendance",
         "designation-rate": "Designation Rates",
-        "leave-config": "Leave Policy"
+        "leave-config": "Leave Policy",
+        "resource-sla-compliance": "Resource SLA Compliance"
         /* penalty-report moved to the SLA System cluster below — it reports
            delay → LD → payment, which is SLA work, not workforce work. */
     };
@@ -872,6 +874,7 @@ export default function MainApp() {
                                                     <Route path="/projects/:projectId/attendance/leave/:attendanceId" element={<RequirePermission action="viewProjects"><LeaveDetailPage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/designation-rate" element={<RequirePermission action="viewProjects"><DesignationRatePage /></RequirePermission>} />
                                                     <Route path="/projects/:projectId/leave-config" element={<RequirePermission action="viewProjects"><ProjectLeaveConfigPage /></RequirePermission>} />
+                                                    <Route path="/projects/:projectId/resource-sla-compliance" element={<RequirePermission action="viewProjects"><ProjectResourceSlaCompliancePage /></RequirePermission>} />
                                                 </Route>
                                                 {/* SLA System — severity/LD configuration, activity mappings,
                                                     quarterly settlement and the penalty report are one chain

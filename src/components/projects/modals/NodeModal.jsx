@@ -858,6 +858,13 @@ export default function NodeModal({
             setSaveError(`Duration for "${r.designation}" must be between 0 and 3 months.`);
             return;
           }
+          /* Required alongside quantity and duration — the backend answers
+             422 on a row without it, and that error names no row, so the
+             check is worth doing here where the row can be pointed at. */
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(String(r.plannedDeploymentDate || ""))) {
+            setSaveError(`Pick a planned deployment date for "${r.designation}".`);
+            return;
+          }
         }
       }
     }
