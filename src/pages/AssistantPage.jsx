@@ -82,6 +82,279 @@ function nowTime() {
   });
 }
 
+/* ── Markdown rendering for assistant replies ─────────────────
+   The model answers in markdown ("There are **43 users**", "- item",
+   "1. item"). We render a safe subset — bold, italic, inline code,
+   links, headings, lists and fenced code — as React elements, so no
+   HTML from the webhook is ever injected into the page.
+────────────────────────────────────────────────────────────── */
+const CODE_FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+// **bold** / __bold__ / *italic* / _italic_ / `code` / [text](url)
+const INLINE_PATTERN =
+  "\\*\\*[^*]+\\*\\*|__[^_]+__|\\*[^*\\n]+\\*|_[^_\\n]+_|`[^`\\n]+`|\\[[^\\]]+\\]\\([^)\\s]+\\)";
+
+function renderInline(text, keyPrefix) {
+  // A fresh regex per call: renderInline recurses, so a shared one's
+  // lastIndex would be clobbered mid-scan.
+  const re = new RegExp(INLINE_PATTERN, "g");
+  const out = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const tok = m[0];
+    const key = `${keyPrefix}:${m.index}`;
+    if (tok.startsWith("**") || tok.startsWith("__")) {
+      out.push(<strong key={key}>{renderInline(tok.slice(2, -2), key)}</strong>);
+    } else if (tok.startsWith("`")) {
+      out.push(
+        <code
+          key={key}
+          style={{
+            background: "#eef1f5",
+            borderRadius: 4,
+            padding: "1px 5px",
+            fontSize: "0.92em",
+            fontFamily: CODE_FONT,
+          }}
+        >
+          {tok.slice(1, -1)}
+        </code>
+      );
+    } else if (tok.startsWith("[")) {
+      const cut = tok.indexOf("](");
+      out.push(
+        <a
+          key={key}
+          href={tok.slice(cut + 2, -1)}
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "inherit", textDecoration: "underline" }}
+        >
+          {renderInline(tok.slice(1, cut), key)}
+        </a>
+      );
+    } else {
+      out.push(<em key={key}>{renderInline(tok.slice(1, -1), key)}</em>);
+    }
+    last = m.index + tok.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+const FENCE_RE = /^\s*```/;
+const HEADING_RE = /^\s*(#{1,6})\s+(.*)$/;
+const BULLET_RE = /^\s*[-*•]\s+(.*)$/;
+const ORDERED_RE = /^\s*(\d+)[.)]\s+(.*)$/;
+
+// Pipe tables: a row of "| a | b |" whose NEXT line is a "|---|---|"
+// separator. Both lines are required — a lone sentence containing a pipe
+// isn't a table.
+const TABLE_SEP_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/;
+const isTableRow = (l) => typeof l === "string" && l.includes("|");
+const isTableStart = (ls, n) =>
+  isTableRow(ls[n]) && n + 1 < ls.length && TABLE_SEP_RE.test(ls[n + 1]);
+
+// "| a | b |" → ["a", "b"] (the outer pipes leave empty edge cells).
+const splitRow = (row) =>
+  row
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((c) => c.trim());
+
+const TABLE_CELL = {
+  padding: "7px 10px",
+  border: "1px solid #e6eaf0",
+  textAlign: "left",
+  verticalAlign: "top",
+  // Cap the wide free-text columns (descriptions) so they wrap instead of
+  // stretching the table across the screen.
+  maxWidth: 360,
+};
+
+function Markdown({ text }) {
+  const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const key = blocks.length;
+
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+
+    // ``` fenced code ```
+    if (FENCE_RE.test(line)) {
+      i += 1;
+      const body = [];
+      while (i < lines.length && !FENCE_RE.test(lines[i])) body.push(lines[i++]);
+      i += 1; // closing fence (or end of text)
+      blocks.push(
+        <pre
+          key={key}
+          style={{
+            margin: 0,
+            padding: "10px 12px",
+            background: "#f3f5f9",
+            border: "1px solid #e1e7ef",
+            borderRadius: 8,
+            fontSize: 13,
+            fontFamily: CODE_FONT,
+            overflowX: "auto",
+            whiteSpace: "pre",
+          }}
+        >
+          {body.join("\n")}
+        </pre>
+      );
+      continue;
+    }
+
+    // # Heading
+    const heading = line.match(HEADING_RE);
+    if (heading) {
+      i += 1;
+      blocks.push(
+        <div
+          key={key}
+          style={{
+            margin: 0,
+            fontWeight: 700,
+            fontSize: heading[1].length <= 2 ? 16 : 15,
+          }}
+        >
+          {renderInline(heading[2], `h${key}`)}
+        </div>
+      );
+      continue;
+    }
+
+    // - bullet list
+    if (BULLET_RE.test(line)) {
+      const items = [];
+      while (i < lines.length && BULLET_RE.test(lines[i]))
+        items.push(lines[i++].match(BULLET_RE)[1]);
+      blocks.push(
+        <ul key={key} style={{ margin: 0, paddingLeft: 22 }}>
+          {items.map((it, n) => (
+            <li key={n}>{renderInline(it, `u${key}-${n}`)}</li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // 1. numbered list
+    if (ORDERED_RE.test(line)) {
+      const start = Number(line.match(ORDERED_RE)[1]) || 1;
+      const items = [];
+      while (i < lines.length && ORDERED_RE.test(lines[i]))
+        items.push(lines[i++].match(ORDERED_RE)[2]);
+      blocks.push(
+        <ol key={key} start={start} style={{ margin: 0, paddingLeft: 22 }}>
+          {items.map((it, n) => (
+            <li key={n}>{renderInline(it, `o${key}-${n}`)}</li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    // | pipe | table |
+    if (isTableStart(lines, i)) {
+      const header = splitRow(lines[i]);
+      i += 2; // header row + separator row
+      const rows = [];
+      while (i < lines.length && lines[i].trim() && isTableRow(lines[i]))
+        rows.push(splitRow(lines[i++]));
+      blocks.push(
+        // Wide tables (UUID + description columns) scroll inside the bubble
+        // rather than stretching it.
+        <div key={key} style={{ overflowX: "auto", maxWidth: "100%" }}>
+          <table
+            style={{
+              borderCollapse: "collapse",
+              fontSize: 13,
+              // Size to the content and scroll, rather than squeezing every
+              // column to fit the bubble. wordBreak cancels the bubble's
+              // break-word, which otherwise splits headings mid-word.
+              width: "max-content",
+              wordBreak: "normal",
+              overflowWrap: "break-word",
+            }}
+          >
+            <thead>
+              <tr>
+                {header.map((h, n) => (
+                  <th
+                    key={n}
+                    style={{
+                      ...TABLE_CELL,
+                      background: "#f3f5f9",
+                      fontWeight: 700,
+                      // Keep "Planned Start" on one line.
+                      whiteSpace: "nowrap",
+                      maxWidth: "none",
+                    }}
+                  >
+                    {renderInline(h, `th${key}-${n}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, rn) => (
+                <tr key={rn}>
+                  {/* Walk the header so ragged rows stay aligned. */}
+                  {header.map((_, cn) => (
+                    <td key={cn} style={TABLE_CELL}>
+                      {renderInline(r[cn] ?? "", `td${key}-${rn}-${cn}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // Plain paragraph — consecutive lines until a blank line or a new block.
+    const para = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !FENCE_RE.test(lines[i]) &&
+      !HEADING_RE.test(lines[i]) &&
+      !BULLET_RE.test(lines[i]) &&
+      !ORDERED_RE.test(lines[i]) &&
+      !isTableStart(lines, i)
+    )
+      para.push(lines[i++]);
+    blocks.push(
+      <div key={key} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+        {renderInline(para.join("\n"), `p${key}`)}
+      </div>
+    );
+  }
+
+  return (
+    // minWidth:0 lets the scrollable table child shrink instead of forcing
+    // the whole bubble wider than the thread.
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
+      {blocks}
+    </div>
+  );
+}
+
 export default function AssistantPage() {
   const navigate = useNavigate();
 
@@ -334,6 +607,9 @@ export default function AssistantPage() {
 
           {messages.map((m, i) => {
             const isUser = m.role === "user";
+            // Replies that carry a table get a wider bubble — milestone dumps
+            // are unreadable squeezed into the usual 72%.
+            const wide = !isUser && !m.error && /\n\s*\|?[\s:|-]*-[\s:|-]*\|/.test(m.text || "");
             return (
               <div
                 key={i}
@@ -345,7 +621,15 @@ export default function AssistantPage() {
                 }}
               >
                 {isUser ? <UserAvatar /> : <BotAvatar />}
-                <div style={{ maxWidth: "72%", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div
+                  style={{
+                    maxWidth: wide ? "92%" : "72%",
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
                   <div
                     style={{
                       fontSize: 12,
@@ -392,7 +676,12 @@ export default function AssistantPage() {
                         <FiFile size={14} /> {m.file}
                       </div>
                     )}
-                    {m.text && <div>{m.text}</div>}
+                    {m.text &&
+                      (isUser || m.error ? (
+                        <div>{m.text}</div>
+                      ) : (
+                        <Markdown text={m.text} />
+                      ))}
                   </div>
                 </div>
               </div>
