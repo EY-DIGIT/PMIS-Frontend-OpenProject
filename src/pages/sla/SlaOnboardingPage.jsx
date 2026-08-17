@@ -144,7 +144,8 @@ const STYLE = `
 /* Validation highlights */
 .sla-onb-root .field-error,
 .sla-onb-root .field-error:focus{border:1px solid var(--red) !important;box-shadow:0 0 0 3px rgba(211,47,47,.14) !important;}
-.sla-onb-root #s_target_container.field-error{border-radius:8px;padding:6px;}
+.sla-onb-root #s_target_container.field-error,
+.sla-onb-root #s_attachments_container.field-error{border-radius:8px;padding:6px;}
 .sla-onb-root .table-error{outline:2px solid var(--red);outline-offset:2px;}
 `;
 
@@ -261,7 +262,7 @@ const BODY_HTML = `
         <button class="dyn-delete-btn" title="Remove the second metric" onclick="window.__slaOnb._removeSecondaryMetric()">✕</button>
       </div>
     </div>
-    <div class="dyn-row" style="border-bottom:none;">
+    <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
         <div style="font-weight:600;color:var(--navy);font-size:13px;">Target / Applied Severity level <span class="required">*</span></div>
         <div class="field-help" id="s_target_help">Pick a category above — the right input renders here automatically (severity table for banded SLAs, linear LD form for deliverable / query SLAs).</div>
@@ -269,6 +270,27 @@ const BODY_HTML = `
       <div class="dyn-cell-value">
         <div id="s_target_container">
           <div class="dyn-cell-empty">Waiting for category selection above…</div>
+        </div>
+      </div>
+      <div class="dyn-cell-delete"></div>
+    </div>
+    <!-- Image attachments used to be an optional RFP row, which meant the
+         onboarding-blocking image requirement was invisible until submit (and
+         "Pre-load standard RFP rows" never added it). It is a static field now:
+         always on screen, never in the "+ Add row" picker. The markup below is
+         exactly what _widgetFilePicker renders, so _collectRowValue's
+         [data-k="files"] lookup keeps working against it unchanged. -->
+    <div class="dyn-row" style="border-bottom:none;">
+      <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Image attachments <span class="required">*</span></div>
+        <div class="field-help">Attach the RFP image this SLA is taken from. Required to onboard.</div>
+      </div>
+      <div class="dyn-cell-value">
+        <div id="s_attachments_container">
+          <div class="sub-form" data-v="attachments">
+            <input type="file" data-k="files" accept="image/png,image/jpeg,image/webp,image/gif" multiple onchange="window.__slaOnb._onAttachmentsPicked(this)">
+            <div class="hint">Hold Shift/Ctrl to pick multiple. PNG/JPEG/WebP/GIF, 10 MB max each.</div>
+          </div>
         </div>
       </div>
       <div class="dyn-cell-delete"></div>
@@ -554,7 +576,7 @@ export default function SlaOnboardingPage() {
             "sla_ref", "title", "project_id", "category_code",
             "description", "calculation_method",
             "effective_from", "measurement", "secondary_measurement",
-            "target_rows", "linear_escalation",
+            "target_rows", "linear_escalation", "attachments",
         ];
         const _TEMPLATE_KEYS = [
             "scope_text", "data_source", "reports_submitted_to",
@@ -738,7 +760,7 @@ export default function SlaOnboardingPage() {
             // no .defaultValue at all), so Cancel always nagged.
             if (_formBaseline !== null) return _formSnapshot() !== _formBaseline;
             const staticEls = ["s_sla_ref", "s_title", "s_project_id", "s_category_code"].map((id) => host.querySelector("#" + id)).filter(Boolean);
-            const dynEls = Array.from(host.querySelectorAll("#dynBody input, #dynBody textarea, #dynBody select"));
+            const dynEls = Array.from(host.querySelectorAll("#s_attachments_container input, #dynBody input, #dynBody textarea, #dynBody select"));
             return [...staticEls, ...dynEls].some((el) => (el.value || "").trim() !== "" && el.value !== el.defaultValue);
         }
         function _formSnapshot() {
@@ -747,7 +769,8 @@ export default function SlaOnboardingPage() {
                 "#s_ld_formula_rule, #s_effective_from," +
                 "#s_measurement_container input, #s_measurement_container select," +
                 "#s_secondary_container input, #s_secondary_container select," +
-                "#s_target_container [data-k], #dynBody input, #dynBody textarea, #dynBody select"
+                "#s_target_container [data-k], #s_attachments_container input," +
+                "#dynBody input, #dynBody textarea, #dynBody select"
             )).map((el) => {
                 if (el.type === "file") return String(el.files ? el.files.length : 0);
                 if (el.type === "checkbox") return el.checked ? "1" : "0";
@@ -1198,6 +1221,25 @@ export default function SlaOnboardingPage() {
             body.appendChild(r);
         }
 
+        /* Validation marks are otherwise cleared only by _clearErrorState() on
+           the next submit, which left the image field outlined red even after
+           the user had picked a file and fixed the problem. */
+        function _onAttachmentsPicked(input) {
+            const box = input.closest("#s_attachments_container");
+            if (box && input.files && input.files.length) box.classList.remove("field-error");
+        }
+
+        /* Files can't ride inside the JSON payload, so they are stashed on
+           window.__currentPayload__.__files during _collectPayload(). Shared by
+           the static Image attachments field and any file_picker RFP row. */
+        function _stashFiles(scope) {
+            const el = scope && scope.querySelector('[data-k="files"]');
+            const files = el && el.files ? Array.from(el.files) : [];
+            if (!files.length) return;
+            const p = (window.__currentPayload__ = window.__currentPayload__ || {});
+            p.__files = (p.__files || []).concat(files);
+        }
+
         /* ── file-picker widget ── */
         function _widgetFilePicker(cell, f) {
             cell.innerHTML = `
@@ -1242,7 +1284,7 @@ export default function SlaOnboardingPage() {
             _validateBands(payload, errors, markIds);
             if (!editingId) {
                 const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
-                if (!stashed || !stashed.length) { errors.push({ label: "Image attachment", message: "Upload an RFP image (add the 'Image attachments' row)." }); tableErr = true; }
+                if (!stashed || !stashed.length) { errors.push({ label: "Image attachment", message: "Upload an RFP image." }); markIds.push("s_attachments_container"); }
             }
             if (errors.length) {
                 markIds.forEach(_markField);
@@ -1469,6 +1511,9 @@ export default function SlaOnboardingPage() {
                 if (isLinear && value) payload.linear_escalation = value;
                 else if (!isLinear && value) payload.target_rows = value;
             }
+            // Image attachments is a static field, so the #dynBody loop below
+            // never sees it — stash its files here or submit finds none.
+            _stashFiles(host.querySelector("#s_attachments_container"));
             host.querySelectorAll("#dynBody .dyn-row").forEach((row) => {
                 const key = row.dataset.fieldKey;
                 if (!key) return;
@@ -1553,15 +1598,7 @@ export default function SlaOnboardingPage() {
                 });
                 return rows.length ? rows : undefined;
             }
-            if (t === "file_picker") {
-                const el = cell.querySelector('[data-k="files"]');
-                const files = el && el.files ? Array.from(el.files) : [];
-                if (files.length) {
-                    const p = (window.__currentPayload__ = window.__currentPayload__ || {});
-                    p.__files = (p.__files || []).concat(files);
-                }
-                return undefined;
-            }
+            if (t === "file_picker") { _stashFiles(cell); return undefined; }
             return undefined;
         }
 
@@ -1597,7 +1634,8 @@ export default function SlaOnboardingPage() {
                    not as rows. */
                 { key: "effective_until", value: _asDate(d.effective_until), always: true },
                 { key: "placeholders", value: d.placeholders },
-                { key: "attachments", value: d.attachments, always: true },
+                /* attachments is a static field now — adding it as a row here
+                   would render a second, duplicate picker on every edit. */
             ];
         }
 
@@ -1662,6 +1700,13 @@ export default function SlaOnboardingPage() {
                     const sel = host.querySelector(`#dynBody .dyn-row[data-field-key="${key}"] select[data-v]`);
                     if (sel) { sel.insertAdjacentHTML("afterbegin", '<option value="" selected>— Not set —</option>'); sel.value = ""; }
                 });
+
+                /* Already-uploaded images used to be painted by _hydrateRow when
+                   the attachments ROW was built. The picker is static now, so
+                   hydrate it directly or edit mode loses the thumbnails. */
+                if (Array.isArray(d.attachments) && d.attachments.length) {
+                    _renderExistingAttachments(host.querySelector("#s_attachments_container"), d.attachments);
+                }
 
                 _lockUnpatchableFields();
                 _snapshotDefaults();
@@ -1915,6 +1960,7 @@ export default function SlaOnboardingPage() {
             compound_metric_rule: "s_measurement_container",
             target_rows: "s_target_container", linear_escalation: "s_target_container",
             condition_bands: "s_target_container", lookup_table: "s_target_container",
+            attachments: "s_attachments_container",
         };
         // Turn a server error body into a list of {label, message, fieldId?, table?}.
         function _parseServerErrors(text, status) {
@@ -1967,6 +2013,7 @@ export default function SlaOnboardingPage() {
             addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
             _onLdRuleChange, _addSecondaryMetric, _removeSecondaryMetric,
             _addSevRow, _updateSevPill, _deleteSevRow, _renderLinPreview, _addPhRow,
+            _onAttachmentsPicked,
         };
 
         /* ── render + boot ── */
