@@ -62,10 +62,12 @@
    the quarterly regime and cannot reach this one:
 
      · §5.27.6 caps cumulative quarterly LD at 10% of PQP, and
-       PQP = F + QGR (§5.28.1.d). SLA 001/002 apply only to D1–D8,
-       i.e. Phase 1, where F does not exist (staff cost starts at D9,
-       §5.25.2) and QGR does not exist (§5.23.2 runs it over Phase 2
-       and 3). There is no PQP for that cap to be 10% of.
+       PQP = F (§5.28.1.d — QGR is excluded from the base since
+       corrigendum items 47/49). SLA 001/002 apply only to D1–D8, i.e.
+       Phase 1, where F does not exist at all: staff cost starts at D9
+       (§5.25.2). There is no PQP for that cap to be 10% of, and
+       dropping QGR from the base does not change that — it makes it
+       plainer, since the base is now purely a staff-cost figure.
      · §5.28.1.b caps points at severity 4 and reads a band table.
        SLA 001/002 carry no severity level, so there is nothing to cap.
 

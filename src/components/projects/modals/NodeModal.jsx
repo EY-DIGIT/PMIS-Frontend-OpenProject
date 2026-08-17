@@ -58,6 +58,7 @@ import {
   postCommentForEntity,
   downloadAttachment
 } from "../../../api/milestoneConfigApi";
+import { quarterWindowOf } from "../../../utils/project/slaRollup";
 import { getToken } from "../../../api/auth";
 import { authorizedFetch } from "../../../api/client";
 import { listVendorAssignableUsers } from "../../../api/users";
@@ -299,6 +300,20 @@ export default function NodeModal({
     ) || null;
   }, [open, project, kind, mode, nodeUid, parentUid]);
   const milestoneIsResourceBased = enclosingMilestone?.isResourceBased === true;
+
+  /* Which of the milestone's quarters this activity falls in — checked
+     only for resource-based milestones, because only those are measured
+     quarter by quarter. Deliverable milestones are charged on each
+     deliverable's own cost and have no quarterly window to fit into. */
+  const quarterFit = useMemo(() => {
+    if (kind !== "activity" || !milestoneIsResourceBased) return null;
+    if (!form.startDate || !form.endDate) return null;
+    return quarterWindowOf(
+      form.startDate, form.endDate,
+      enclosingMilestone?.startDate, enclosingMilestone?.endDate
+    );
+  }, [kind, milestoneIsResourceBased, form.startDate, form.endDate,
+    enclosingMilestone?.startDate, enclosingMilestone?.endDate]);
 
   /* For Task / Subtask: walk the project tree from this node (or its
      parent in add mode) up to the enclosing Activity. Used to scope
@@ -865,6 +880,20 @@ export default function NodeModal({
             setSaveError(`Pick a planned deployment date for "${r.designation}".`);
             return;
           }
+          /* And inside the activity's own window — the backend rejects
+             anything else with `deployment_date_outside_activity_window`.
+             The picker is already bounded, so this catches the case that
+             bound cannot: a date saved earlier that the activity's dates
+             have since been narrowed past. */
+          const from = String(form.startDate || "").slice(0, 10);
+          const to = String(form.endDate || "").slice(0, 10);
+          if ((from && r.plannedDeploymentDate < from) || (to && r.plannedDeploymentDate > to)) {
+            setSaveError(
+              `Planned deployment for "${r.designation}" (${r.plannedDeploymentDate}) falls outside `
+              + `the activity's dates (${from} → ${to}). Move the date, or widen the activity.`
+            );
+            return;
+          }
         }
       }
     }
@@ -1291,6 +1320,23 @@ export default function NodeModal({
             )}
           </div>
 
+          {/* An activity that straddles two of its milestone's quarters is
+              scored in whichever one it ENDS in, so the earlier quarter's
+              work is charged to the later quarter and both read wrong. A
+              warning, not a block: a genuinely long activity is legitimate,
+              and the person entering it is the one who knows which. */}
+          {quarterFit && !quarterFit.fits && quarterFit.nearest && (
+            <div className="uidai-field uidai-field--full">
+              <div className="uidai-hint" style={{ color: "#8a6d1f", lineHeight: 1.6 }}>
+                ⚠ This activity does not sit inside a single quarter of its milestone. Its SLA
+                results will all be scored in the quarter it <b>ends</b> in. The nearest quarter is{" "}
+                <b>{quarterFit.nearest.label}</b> ({formatDateDisplay(quarterFit.nearest.start)} to{" "}
+                {formatDateDisplay(quarterFit.nearest.end)}) — use those dates if this was meant to
+                be one quarter's work.
+              </div>
+            </div>
+          )}
+
           {showActuals && (
             <>
               <div className="uidai-field">
@@ -1602,6 +1648,7 @@ export default function NodeModal({
                 projectStartDate={project.startDate}
                 organisationId={form.vendorId}
                 activityStartDate={form.startDate}
+                activityEndDate={form.endDate}
                 disabled={dis}
               />
             </div>

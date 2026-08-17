@@ -48,10 +48,66 @@ export function addMonths(date, months) {
 
 /* ─── contract quarters ──────────────────────────────────────────── */
 
-/* Contract quarters are measured from T0 (the date the contract is
-   signed / the project starts), NOT from a calendar or financial year.
-   Quarter n spans [T0 + 3n months, T0 + 3(n+1) months). Year 1 is
-   quarters 0–3, Year 2 is 4–7, and so on.
+/* T0 — the anchor every contract quarter is measured from.
+
+   It is the earliest RESOURCE-BASED milestone's start date, not the
+   project's own start. The two are usually different by months: a
+   project starts at award, but the quarterly SLAs measure deployed
+   people, and there are none until the resource phase opens. Anchoring
+   on project start therefore charged Y1-Q1 for a quarter in which
+   nothing measurable existed, and pushed every later window out of step
+   with the backend's.
+
+   Deliverable milestones are excluded even when they start earlier —
+   they are Track A, charged on each deliverable's own cost, and have no
+   quarterly window at all.
+
+   Returns null when no resource-based milestone carries a start date.
+   The caller falls back to the project start rather than showing no
+   quarters, and says so on screen: a wrong anchor is recoverable, a
+   blank page is not.
+
+   The backend anchors identically and returns `quarterStart` /
+   `quarterEnd` / `quarterKey` on settlement and aggregate rows. Where a
+   row is in hand, READ THE ROW — this is for the windows no row covers
+   yet (open and future quarters). */
+export function resourcePhaseStart(milestones) {
+    const list = Array.isArray(milestones) ? milestones : [];
+    let earliest = null;
+    for (const m of list) {
+        if (m?.isResourceBased !== true) continue;
+        const d = String(m?.startDate || "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+        if (earliest === null || d < earliest) earliest = d;
+    }
+    return earliest;
+}
+
+/* T0 read back off a backend row, for callers that hold settlement or
+   aggregate rows but not the milestone tree.
+
+   A row states its own window (`quarterStart`) and its own position in
+   the grid (`fiscalYear`, `quarter`), and the grid is regular — quarter
+   n starts at T0 + 3n months — so T0 is just the row's start wound back
+   by 3n months. That is exact, needs no extra request, and cannot drift
+   from the backend's anchor the way an independently-derived one can.
+
+   Calendar-keyed rows are ignored: a 4-digit fiscalYear is not a
+   contract year, so winding it back would produce a meaningless date. */
+export function anchorFromQuarterRow(row) {
+    const start = parseISO(row?.quarterStart);
+    const year = Number(row?.fiscalYear);
+    const quarter = Number(row?.quarter);
+    if (!start || !Number.isFinite(year) || !Number.isFinite(quarter)) return null;
+    if (!(year > 0 && year < 1000) || !(quarter >= 1 && quarter <= 4)) return null;
+    const n = (year - 1) * 4 + (quarter - 1);
+    return isoOf(addMonths(start, -3 * n));
+}
+
+/* Contract quarters are measured from T0 — see `resourcePhaseStart`
+   above — NOT from a calendar or financial year. Quarter n spans
+   [T0 + 3n months, T0 + 3(n+1) months). Year 1 is quarters 0–3, Year 2
+   is 4–7, and so on.
 
    `count` comes from the project's own end date when it has one; the
    fallback is 26 quarters — the RFP's 78-month (6.5 year) initial term.
@@ -90,6 +146,69 @@ export function contractQuarters(startDate, endDate, { max = 40 } = {}) {
         });
     }
     return out;
+}
+
+/* ─── quarter windows inside one milestone ────────────────────────────
+   A resource-based milestone is measured quarter by quarter, and an
+   activity is scored against ONE of those quarters. An activity that
+   straddles a boundary is not illegal, but it is almost always a typo:
+   its breaches get filed into the quarter its END lands in (see
+   `attributionDate`), so the work done in the earlier quarter is charged
+   to the later one and both quarters read wrong.
+
+   Windows run from the milestone's own start — [msStart + 3n months,
+   msStart + 3(n+1) months − 1 day] — and the last one is clipped to the
+   milestone's end so a window never claims days the milestone does not
+   own. This mirrors the backend's `quarter_window_of`.               */
+export function milestoneQuarterWindows(msStart, msEnd) {
+    const start = parseISO(msStart);
+    const end = parseISO(msEnd);
+    if (!start || !end || end < start) return [];
+
+    const out = [];
+    for (let n = 0; n < 40; n += 1) {
+        const from = addMonths(start, 3 * n);
+        if (from > end) break;
+        const nextFrom = addMonths(start, 3 * (n + 1));
+        const last = new Date(nextFrom);
+        last.setDate(last.getDate() - 1);
+        const to = last > end ? end : last;
+        out.push({ index: n, label: `Q${n + 1}`, start: isoOf(from), end: isoOf(to) });
+    }
+    return out;
+}
+
+/* Does [start, end] sit inside exactly one of the milestone's quarters?
+
+   Returns the containing window, or — when it does not fit — the
+   NEAREST one, so the caller can name a concrete alternative instead of
+   telling the user only that something is wrong. Nearest is measured by
+   how far the activity's start sits from each window; ties go to the
+   earlier window, which is the one the work actually began in.
+
+   `fits: true` with `window: null` when there is nothing to check
+   against (a milestone with no dates), so a caller cannot mistake
+   "unknown" for "outside".                                            */
+export function quarterWindowOf(activityStart, activityEnd, msStart, msEnd) {
+    const windows = milestoneQuarterWindows(msStart, msEnd);
+    const a = String(activityStart || "").slice(0, 10);
+    const b = String(activityEnd || a).slice(0, 10);
+    if (!windows.length || !a) return { fits: true, window: null, nearest: null, windows };
+
+    const inside = windows.find((w) => a >= w.start && b <= w.end);
+    if (inside) return { fits: true, window: inside, nearest: inside, windows };
+
+    const DAY = 24 * 60 * 60 * 1000;
+    const dist = (w) => {
+        const s = parseISO(w.start), e = parseISO(w.end), d = parseISO(a);
+        if (!s || !e || !d) return Number.POSITIVE_INFINITY;
+        if (d < s) return (s - d) / DAY;
+        if (d > e) return (d - e) / DAY;
+        return 0;
+    };
+    let nearest = windows[0];
+    for (const w of windows) if (dist(w) < dist(nearest)) nearest = w;
+    return { fits: false, window: null, nearest, windows };
 }
 
 /* The contract quarter containing `on` — used to default the selector to

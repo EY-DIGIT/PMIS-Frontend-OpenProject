@@ -10,13 +10,19 @@
        PA    = AMP(m1) + AMP(m2) + AMP(m3)     ← ACTUAL deployment
        F     = planned quarterly resource cost + CCN
        QGR   = 35% of Phase-1 fixed + one-time, ÷ Phase 2&3 quarters
-       PQP  = F + QGR                         ← the LD BASE
+       PQP   = F                              ← the LD BASE
        LD    = min(Σ LD%, 10%) × PQP          (§5.27.6 ceiling)
        AQP   = (PA − LD) + QGR
 
-   The RFP's own worked example, which the tests pin to:
-       F=100, QGR=10, PQP=110, ΣLD%=3% → LD=3.30
-       PA=90 → AQP = (90 − 3.30) + 10 = 96.70
+   The worked example, post-corrigendum:
+       F=100, QGR=10, PQP=100, ΣLD%=3% → LD=3.00
+       PA=90 → AQP = (90 − 3.00) + 10 = 97.00
+
+   The pre-corrigendum chain based LD on NPQP = F + QGR = 110, giving
+   LD=3.30 and AQP=96.70. Corrigendum item 49 DELETED the NPQP clause
+   and item 47 replaced it with PQP in §5.27.6, so that base is gone.
+   NPQP survives here only as a reference figure on the settlement
+   screen — it is never the base of anything.
 
    ── The asymmetry that matters ─────────────────────────────────────
    LD is computed on PQP — the PLANNED figure — and then deducted from
@@ -31,12 +37,16 @@
    it is the one that decides whether a quarter's SLA performance was
    actually affordable, and nothing else on the screen shows it.
 
-   ── QGR appears twice, and that is correct ─────────────────────────
-   It is inside PQP (so LD is charged on it) and added back after the
-   deduction (because it is guaranteed revenue — §5.23.2 pays it as an
-   equal instalment regardless of deployment). Dropping the add-back
+   ── QGR appears ONCE, in the add-back ──────────────────────────────
+   It is guaranteed revenue — §5.23.2 pays it as an equal instalment
+   regardless of deployment — so it is added back after the deduction
+   and is NOT part of the base LD is charged on. Dropping the add-back
    understates every Phase 2/3 quarter by exactly one instalment, which
    is why `verifyAqp` exists.
+
+   Under the old NPQP base it appeared twice, and that double role is
+   precisely what the corrigendum removed: charging LD on guaranteed
+   revenue penalised money that deployment performance cannot affect.
 
    Pure functions, no React, no fetching — the one import is the shared
    quarter-key formatter, so a row labels itself the same way here as it
@@ -69,6 +79,14 @@ export function buildSettlementChain({
     sumLdPercent, cappedLdPercent,
     quarterCapPercent = 10,
     paAmount,
+    /* A CLOSED quarter's own figures, straight off the settlement row.
+       When present these are rendered rather than recomputed: the row is
+       what Settlement invoiced, and a page that recomputes it will sooner
+       or later quote a different number from the invoice for reasons
+       (a rounding rule, a relaxation, a manual override) that are not
+       visible from here. The recomputed values are still returned
+       alongside, so a divergence is reported instead of hidden. */
+    statedLdAmount, statedAqpAmount, settled = false,
 } = {}) {
     const f = num(fAmount);
     const qgr = num(qgrAmount);
@@ -81,39 +99,61 @@ export function buildSettlementChain({
     // or the rollup's raw sum.
     const capped = num(cappedLdPercent) ?? (sumLd === null ? null : Math.min(sumLd, quarterCapPercent));
 
-    /* PQP = F + QGR — the BACKEND's base, which is what this still uses.
-       Both the stated and the derived value are kept: a disagreement
-       means one of the three fields is stale at source.
+    /* PQP = F. QGR is excluded from the base (corrigendum items 47/49)
+       and only added back in AQP below.
 
-       ── Agreed change, NOT yet applied (2026-08-14) ────────────────
-       The contract dropped NPQP and QGR is no longer part of the base:
-
-           PQP  = the quarter's RESOURCE payment (F), QGR excluded
-           LD ₹ = LD % × PQP
-           AQP  = (PQP − LD ₹) + QGR      ← QGR still added back after
-
-       Worked example agreed with the contract team: payment 100, QGR 10,
-       LD 10% → LD is 10 (10% of 100), not 11 (10% of 110), and the final
-       payment is 90 + 10. Deliverable SLAs are unaffected; they keep
-       charging on each deliverable's own cost.
-
-       It is deliberately NOT implemented yet. The backend still returns
-       the F + QGR base, and settlement rows are what Settlement actually
-       invoices — so changing it here alone would make this page quote a
-       different figure from the invoice. Change `derivedPqp` to `f` when
-       the backend's `/npqp` stops adding QGR, and check
-       `qgrAmount` is still returned separately for the add-back above. */
-    const derivedPqp = f !== null && qgr !== null ? f + qgr : null;
+       Applied 2026-08-17, once the backend confirmed the deployed
+       settlement service charges LD on F alone. Both the stated and the
+       derived value are kept: a disagreement now means the row was
+       written by the OLD service and still carries an F + QGR base, so
+       `pqpConsistent` is a staleness detector rather than a rounding
+       check. */
+    const derivedPqp = f;
     const base = statedPqp ?? derivedPqp;
     const pqpConsistent = statedPqp === null || derivedPqp === null
         ? null
         : Math.abs(statedPqp - derivedPqp) <= 1;
 
-    const ldAmount = base !== null && capped !== null ? (base * capped) / 100 : null;
+    /* The deleted NPQP figure, kept for display only. The settlement
+       screen shows it beside PQP so a reader comparing this quarter
+       against a pre-corrigendum statement can see where the old number
+       came from. Nothing computes against it. */
+    const npqpReference = f !== null && qgr !== null ? f + qgr : null;
+
+    /* A row whose stated base matches F + QGR rather than F was priced
+       by the old service. Its LD is overstated by (QGR ÷ PQP) × LD%, and
+       it needs re-closing at source — this page cannot fix it by
+       recomputing, because the invoice followed the row. */
+    const staleNpqpBase = statedPqp !== null && npqpReference !== null && f !== null
+        && Math.abs(statedPqp - npqpReference) <= 1
+        && Math.abs(statedPqp - f) > 1;
+
+    const ldComputed = base !== null && capped !== null ? (base * capped) / 100 : null;
     const ldAmountUncapped = base !== null && sumLd !== null ? (base * sumLd) / 100 : null;
 
+    /* Settled quarters render the row; open ones are computed from PQP.
+       An open quarter has no row to render — its figures move every time
+       an SLA is evaluated — so recomputing is the only honest answer
+       there. */
+    const ldStated = num(statedLdAmount);
+    const ldFromRow = settled && ldStated !== null;
+    const ldAmount = ldFromRow ? ldStated : ldComputed;
+    const ldSource = ldFromRow ? "row" : (ldComputed === null ? "none" : "computed");
+
+    /* Reported, never silently preferred. A gap here means the row was
+       priced on inputs this page does not have — most often a relaxation
+       or an override — and the row is still the figure that was paid. */
+    const ldDiverges = ldFromRow && ldComputed !== null
+        && Math.abs(ldStated - ldComputed) > 1;
+
     // (PA − LD) + QGR — §5.28.1.d(h).
-    const aqp = pa !== null && ldAmount !== null && qgr !== null ? pa - ldAmount + qgr : null;
+    const aqpComputed = pa !== null && ldAmount !== null && qgr !== null ? pa - ldAmount + qgr : null;
+    const aqpStated = num(statedAqpAmount);
+    const aqpFromRow = settled && aqpStated !== null;
+    const aqp = aqpFromRow ? aqpStated : aqpComputed;
+    const aqpSource = aqpFromRow ? "row" : (aqpComputed === null ? "none" : "computed");
+    const aqpDiverges = aqpFromRow && aqpComputed !== null
+        && Math.abs(aqpStated - aqpComputed) > 1;
     // The same figure with the QGR add-back omitted, kept so a backend
     // using this shorter formula can be identified rather than guessed at.
     const aqpWithoutQgr = pa !== null && ldAmount !== null ? pa - ldAmount : null;
@@ -137,14 +177,23 @@ export function buildSettlementChain({
         pqpStated: statedPqp,
         pqpDerived: derivedPqp,
         pqpConsistent,
+        npqpReference,
+        staleNpqpBase,
         sumLdPercent: sumLd,
         cappedLdPercent: capped,
         quarterCapPercent,
         capApplied: sumLd !== null && capped !== null && sumLd > capped,
         ldAmount,
         ldAmountUncapped,
+        ldComputed,
+        ldSource,
+        ldDiverges,
         pa,
         aqp,
+        aqpComputed,
+        aqpSource,
+        aqpDiverges,
+        settled,
         aqpWithoutQgr,
         effectiveLdPercentOnPa,
         /* PA below F is the ordinary shape — resources onboarded late, or

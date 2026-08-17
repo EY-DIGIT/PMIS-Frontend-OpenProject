@@ -57,8 +57,12 @@ export default function ActivityResourceAllocations({
   projectStartDate = "",
   /* The activity's organisation — the rate card is keyed on it. */
   organisationId = "",
-  /* Anchors the contract year for the cost estimate. */
+  /* Anchors the contract year for the cost estimate, and — with
+     `activityEndDate` — bounds each row's planned deployment date. The
+     backend rejects a date outside that window with 422, so the picker
+     is bounded to it rather than letting the save fail. */
   activityStartDate = "",
+  activityEndDate = "",
   disabled = false,
 }) {
   const [roles, setRoles] = useState([]);
@@ -243,6 +247,17 @@ export default function ActivityResourceAllocations({
                   row.duration !== "" &&
                   (!Number.isFinite(durationNum) || durationNum < 0 || durationNum > MAX_DURATION);
                 const dateMissing = !!row.designation && !row.plannedDeploymentDate;
+                /* The backend rejects a deployment date outside the
+                   activity's own window with 422
+                   `deployment_date_outside_activity_window`. `min`/`max`
+                   below stop the picker offering one, but a date typed in
+                   directly — or one that was valid until the activity's
+                   dates were narrowed — still has to be caught here. */
+                const dateOutside =
+                  !!row.plannedDeploymentDate
+                  && ((activityStartDate && row.plannedDeploymentDate < String(activityStartDate).slice(0, 10))
+                    || (activityEndDate && row.plannedDeploymentDate > String(activityEndDate).slice(0, 10)));
+                const dateBad = dateMissing || dateOutside;
                 return (
                   <tr key={idx}>
                     <td style={{ padding: "0 6px 6px 0" }}>
@@ -295,14 +310,23 @@ export default function ActivityResourceAllocations({
                         type="date"
                         style={{
                           ...cellStyle,
-                          borderColor: dateMissing ? "#d32f2f" : "var(--uidai-pmis-border)",
+                          borderColor: dateBad ? "#d32f2f" : "var(--uidai-pmis-border)",
                         }}
                         value={row.plannedDeploymentDate || ""}
                         disabled={disabled}
                         required
-                        title="Date these resources are planned to deploy"
+                        min={activityStartDate ? String(activityStartDate).slice(0, 10) : undefined}
+                        max={activityEndDate ? String(activityEndDate).slice(0, 10) : undefined}
+                        title={dateOutside
+                          ? `Must fall between ${String(activityStartDate).slice(0, 10)} and ${String(activityEndDate).slice(0, 10)} — the activity's own dates`
+                          : "Date these resources are planned to deploy"}
                         onChange={(e) => patchRow(idx, { plannedDeploymentDate: e.target.value })}
                       />
+                      {dateOutside && (
+                        <div style={{ fontSize: 10.5, color: "#d32f2f", marginTop: 2, lineHeight: 1.4 }}>
+                          Outside the activity ({String(activityStartDate).slice(0, 10)} → {String(activityEndDate).slice(0, 10)})
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82" }}>
                       {rate == null ? "—" : inr(rate)}

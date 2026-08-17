@@ -40,6 +40,7 @@ import {
 import { getPaymentPage, isFinanceForbidden } from "../../../api/paymentPage";
 import {
     contractQuarters,
+    resourcePhaseStart,
     contractQuarterFor,
     overlappingCalendarQuarters,
     blendPqp,
@@ -1301,7 +1302,7 @@ function HeadlineFigure({ caption, value, tone, note, noteTone }) {
     );
 }
 
-function Headline({ period, breaches, measured, awaiting, ldPercent, ldAmount, deliverableLd, finalPayment, pending }) {
+function Headline({ period, breaches, measured, awaiting, ldPercent, ldAmount, deliverableLd, finalPayment, pending, settled }) {
     /* "No breaches" is only true if everything was actually read. With SLAs
        still unscored the quarter is unmeasured, not clean. Since 005–009
        now score automatically on activity completion this should be rare,
@@ -1341,11 +1342,16 @@ function Headline({ period, breaches, measured, awaiting, ldPercent, ldAmount, d
                         : measured > 0 ? `${measured} SLA${measured === 1 ? "" : "s"} measured` : "nothing measured yet"}
                     noteTone={awaiting > 0 ? AMBER : null}
                 />
+                {/* Fed from the settlement row on a closed quarter, so this
+                    cannot say "None" while the payment statement below shows
+                    a deduction — they now read the same source. */}
                 <HeadlineFigure
                     caption="Penalty"
                     value={totalPenalty > 0 ? money(totalPenalty) : "None"}
                     tone={totalPenalty > 0 ? RED : GREEN}
-                    note={Number(ldPercent) > 0 ? `${pct(ldPercent)} of the payment base` : "nothing deducted"}
+                    note={Number(ldPercent) > 0
+                        ? `${pct(ldPercent)} of the payment base${settled ? " · as settled" : ""}`
+                        : settled ? "settled at nil" : "nothing deducted"}
                 />
                 <HeadlineFigure
                     caption="Net payment"
@@ -1371,8 +1377,8 @@ const GLOSSARY = [
     ["Measurement interval", "How often the SLA runs — e.g. monthly. All resources score together."],
     ["Reporting interval", "What the penalty is charged for — the quarter. Points add up, then reset."],
     ["F", "Planned resource cost for the quarter."],
-    ["QGR", "Guaranteed quarterly amount, paid whatever the deployment."],
-    ["PQP", "F + QGR — the planned base the penalty % applies to."],
+    ["QGR", "Guaranteed quarterly amount, paid whatever the deployment. No penalty is charged on it."],
+    ["PQP", "The planned base the penalty % applies to — F alone. QGR is not part of it."],
     ["PA", "What was actually earned, from real attendance."],
     ["AQP", "Final payment: (PA − penalty) + QGR."],
 ];
@@ -2502,9 +2508,23 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         return next;
     });
 
+    /* T0 for the quarter grid: the resource phase's own start, falling
+       back to the project start only when no resource-based milestone
+       carries a date. See `resourcePhaseStart` — the two anchors usually
+       differ by months, and using the project's start put every window
+       out of step with the backend's rows. `anchorIsFallback` drives the
+       note on screen, so a reader is never left to wonder which of the
+       two dates the grid was built from. */
+    const resourceAnchor = useMemo(
+        () => resourcePhaseStart(treeMilestones),
+        [treeMilestones]
+    );
+    const anchorDate = resourceAnchor || startDate;
+    const anchorIsFallback = !resourceAnchor && !!startDate;
+
     const quarters = useMemo(
-        () => contractQuarters(startDate, endDate),
-        [startDate, endDate]
+        () => contractQuarters(anchorDate, endDate),
+        [anchorDate, endDate]
     );
     const years = useMemo(
         () => [...new Set(quarters.map((q) => q.year))],
@@ -3218,6 +3238,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
        deployment payable, computed from attendance. Everything else the
        chain needs, this page already has, so an unsettled quarter still
        shows F, QGR, PQP and LD and simply names PA as pending. */
+    /* A quarter the backend has priced. `blocked_*` rows are deliberately
+       excluded: the backend created them but could not compute them, so
+       their nulls are missing data rather than a settled figure, and
+       rendering them would replace a computable estimate with a blank. */
+    const settlementSettled = !!settlementRow
+        && !String(settlementRow.status || "").toLowerCase().startsWith("blocked");
+
     const chain = useMemo(() => buildSettlementChain({
         fAmount: settlementRow?.fAmount ?? endpointF,
         qgrAmount: settlementRow?.qgrAmount ?? pqpParts.find((p) => p.data?.qgrAmount != null)?.data?.qgrAmount,
@@ -3226,7 +3253,12 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         cappedLdPercent: settlementRow?.cappedLdPercent,
         quarterCapPercent: totals.quarterCapPercent,
         paAmount: settlementRow?.paAmount,
-    }), [settlementRow, endpointF, pqpParts, pqpValue, totals.sumLdPercent, totals.quarterCapPercent]);
+        // Closed quarter → render what was invoiced, don't re-derive it.
+        statedLdAmount: settlementRow?.ldAmount,
+        statedAqpAmount: settlementRow?.aqpAmount,
+        settled: settlementSettled,
+    }), [settlementRow, settlementSettled, endpointF, pqpParts, pqpValue,
+        totals.sumLdPercent, totals.quarterCapPercent]);
 
     /* The "which AQP formula did the backend apply" check lived here and
        rendered inside the settlement-chain section. That section is gone —
@@ -3469,6 +3501,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             .filter((it) => !quarterlyItems.some((i) => String(i.slaRef) === String(it.slaRef ?? it.sla_ref)))
             .map((it) => String(it.slaRef ?? it.sla_ref));
         const mineTotal = totals.sumLdPercent;
+        /* Σ ONE LD % per SLA, pre-cap — the same basis as `sumLdPercent`
+           here. It used to sum per MAPPING, counting an SLA once for every
+           activity it was mapped to, which made the totals differ by the
+           mapping count and turned this comparison into noise. Now they
+           are like for like, so a divergence means something real. */
         const theirTotal = Number(aggregate.totalLdPercentUncapped);
         return {
             rows,
@@ -3790,6 +3827,26 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         if (aggregateError) {
             add("info", "Backend aggregate could not be read", `${aggregateError}. This period's figures were not cross-checked against it.`);
         }
+        /* The grid was built from the wrong anchor. Not blocking — the
+           windows are still three months long and the arithmetic inside
+           each is sound — but every one of them is shifted, so a quarter
+           here may not be the quarter the backend priced. */
+        if (anchorIsFallback) {
+            add("warn", "Quarters are anchored on the project start, not the resource phase",
+                `No resource-based milestone carries a start date, so the grid falls back to the project's own start `
+                + `(${startDate}). The backend anchors on the earliest resource-based milestone, so its settlement rows `
+                + `may describe different windows than the ones shown here. Set a start date on the resource-based `
+                + `milestone to align them.`);
+        }
+        /* A row priced on the deleted NPQP base. Its LD is overstated and
+           this page cannot correct it — the invoice followed the row. */
+        if (chain.staleNpqpBase) {
+            add("blocking", "This quarter was priced on the old NPQP base",
+                `The settlement row's base matches F + QGR (${money(chain.npqpReference)}) rather than F `
+                + `(${money(chain.f)}). LD was charged on guaranteed revenue, which the corrigendum removed, so the `
+                + `deduction is overstated. The row has to be re-closed by the backend — recomputing it here would only `
+                + `make this page disagree with the invoice.`);
+        }
         if (undated > 0) {
             add("info", `${undated} result(s) cannot be placed in a quarter`,
                 "Their activity carries no start or end date and they have no evaluation date either, "
@@ -3822,7 +3879,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         return out;
     }, [loadedOnce, classification, mastersError, slaLibraryEmpty, unconfigured, scale.configured,
         ldBands.length, aggregateCheck, alignedQuarterKey, recheckIssues, quarterlyItems.length,
-        overlaps.length, aggregateError, undated, mastersIncomplete, awaitingObservation, awaiting.activities, projectId]);
+        overlaps.length, aggregateError, undated, mastersIncomplete, awaitingObservation, awaiting.activities, projectId,
+        anchorIsFallback, startDate, chain.staleNpqpBase, chain.npqpReference, chain.f]);
 
     const blockingCount = issues.filter((i) => i.level === "blocking").length;
 
@@ -3933,9 +3991,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 <Banner
                     kind="error"
                     text={
-                        "Contract quarters are measured from the project's start date (T0), and this project has none set" +
-                        (startDate ? ` — "${startDate}" could not be read as a date.` : ".") +
-                        " Set the start date on the project to use this view."
+                        "Contract quarters are measured from the resource phase's start date, and this project has none" +
+                        (anchorDate ? ` — "${anchorDate}" could not be read as a date.` : ".") +
+                        " Set a start date on a resource-based milestone (or on the project) to use this view."
                     }
                 />
             )}
@@ -3951,11 +4009,15 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                         breaches={totals.totalBreaches + dTotals.totalBreaches}
                         measured={quarterlyItems.length + deliverableItems.length}
                         awaiting={awaitingObservation}
-                        ldPercent={totals.cappedLdPercent}
-                        ldAmount={totals.ldAmount}
+                        ldPercent={chain.cappedLdPercent ?? totals.cappedLdPercent}
+                        /* The chain, not `totals` — on a settled quarter it
+                           carries the invoiced figure, and on an open one it
+                           falls back to exactly what `totals` computed. */
+                        ldAmount={chain.ldAmount ?? totals.ldAmount}
                         deliverableLd={dTotals.totalLdAmount}
                         finalPayment={statement.tax.net}
                         pending={statement.pending}
+                        settled={settlementSettled}
                     />
                     <Glossary open={showGlossary} onToggle={() => setShowGlossary((v) => !v)} />
                     {draftCount > 0 && (
@@ -4111,9 +4173,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         />
                                         <Tile
                                             label="Penalty amount"
-                                            value={money(totals.ldAmount)}
+                                            value={money(chain.ldAmount ?? totals.ldAmount)}
                                             accent={RED}
-                                            hint={totals.pqp === null ? "needs a PQP base" : "capped LD % × PQP"}
+                                            hint={chain.ldSource === "row"
+                                                ? (chain.ldDiverges
+                                                    ? `⚠ as settled — this page computes ${money(chain.ldComputed)}`
+                                                    : "as settled by the backend")
+                                                : totals.pqp === null ? "needs a PQP base" : "capped LD % × PQP"}
                                         />
                                     </div>
                                     {/* Grouped under their own category rather than run
@@ -4155,7 +4221,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
                             {/* ══ PQP base — the resource deployment plan ═════════
                                 Every LD % above is a percentage of PQP, and
-                                PQP = F + QGR. §5.28.1.d(c) defines F as the aggregate
+                                PQP = F. §5.28.1.d(c) defines F as the aggregate
                                 monthly payment of all resources to be deployed as per
                                 the resource deployment plan — which is exactly what the
                                 activities' allocation rows hold. Summing them gives F
@@ -4215,7 +4281,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             text={
                                                 `The deployment plan and the PQP endpoint disagree about F for this quarter by `
                                                 + `${formatINR(Math.abs(fCheck.difference))} (${Math.round(fCheck.percent * 100) / 100}%). `
-                                                + `Every LD amount above is a percentage of PQP = F + QGR, so this moves all of them.\n`
+                                                + `Every LD amount above is a percentage of PQP, which IS F, so this moves all of them `
+                                                + `one-for-one.\n`
                                                 + (fCheck.planHigher
                                                     ? `The plan is HIGHER. Usually an approved resource that was never onboarded, or unpaid `
                                                       + `leave: MP = R(1 − L/N), so leave beyond the 6 permissible days per `
@@ -5021,8 +5088,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             <FormulaRow step="F" formula="Σ monthly cost of resources in the deployment plan + CCN" when="quarter" />
                                             <FormulaRow step="QGR" formula="35% of (Phase-1 fixed + one-time) ÷ Phase 2&3 quarters" when="quarter"
                                                 note="Guaranteed regardless of deployment." />
-                                            <FormulaRow step="PQP" formula="F + QGR" when="quarter"
-                                                note="The LD base. QGR is inside it, so LD is charged on QGR too." />
+                                            <FormulaRow step="PQP" formula="F" when="quarter"
+                                                note="The LD base — the quarter's resource payment. QGR is NOT inside it, so no penalty is charged on guaranteed revenue." />
                                             <FormulaRow step="Σ LD %" formula="sum of every quarterly SLA's LD %" when="quarter" />
                                             <FormulaRow
                                                 step="③ Quarter cap"

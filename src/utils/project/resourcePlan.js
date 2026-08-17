@@ -3,9 +3,13 @@
 
    Every LD figure on the rollup is a percentage of PQP, and
 
-       PQP = F + QGR              (§5.28.1.d, steps c–e)
+       PQP = F                    (§5.28.1.d, steps c–e)
 
-   where F is "the Planned Quarterly Payment applicable (aggregate of
+   QGR is NOT part of it. It was, under the deleted NPQP clause, which is
+   what this comment used to describe — the figure this file computes was
+   always F alone and never changed; only the description was stale.
+
+   F is "the Planned Quarterly Payment applicable (aggregate of
    monthly payment of all resources to be deployed as per resource
    deployment plan Plus CCN resources, if any)".
 

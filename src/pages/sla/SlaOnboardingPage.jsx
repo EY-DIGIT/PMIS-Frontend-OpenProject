@@ -25,8 +25,14 @@ import { useNavigate } from "react-router-dom";
 import { authorizedFetch } from "../../api/client";
 import { listAll as listAllProjects } from "../../api/projects";
 
-// Contracts service host (SLA masters / categories / RFP fields / input variables).
-const CONTRACTS_BASE = "http://10.1.131.199/contracts";
+/* Contracts service base (SLA masters / categories / RFP fields / input
+   variables). Overridable so the service can move without a code change;
+   the default is the relative gateway path, NOT a hardcoded dev host —
+   this page was pinned to http://10.1.131.199/contracts, which meant
+   every environment other than that one talked to the wrong service (or,
+   over HTTPS, was blocked as mixed content). */
+const CONTRACTS_BASE =
+    (import.meta.env?.VITE_CONTRACTS_BASE_URL || "/contracts").replace(/\/+$/, "");
 
 /* ─── Scoped stylesheet (ported from the reference, prefixed with
    `.sla-onb-root` so it can't leak into the rest of the app) ─── */
@@ -185,10 +191,18 @@ const BODY_HTML = `
     </div>
     <div class="dyn-row">
       <div class="dyn-cell-label" style="display:flex;flex-direction:column;justify-content:center;">
-        <div style="font-weight:600;color:var(--navy);font-size:13px;">Contract Type</div>
-        <div class="field-help">Derived from the SLA Number prefix — BSP-SLA001 → BSP. Set server-side; shown here for confirmation.</div>
+        <div style="font-weight:600;color:var(--navy);font-size:13px;">Contract Type <span class="required">*</span></div>
+        <div class="field-help">Prefilled from the SLA Number prefix — BSP-SLA001 → BSP, PMC → PMU. Change it if the prefix doesn't name the contract.</div>
       </div>
-      <div class="dyn-cell-value"><input id="s_contract_type" type="text" readonly placeholder="—" style="background:#f8fafc;font-weight:600;color:var(--navy);"></div>
+      <div class="dyn-cell-value">
+        <select id="s_contract_type" style="font-weight:600;color:var(--navy);">
+          <option value="">— Select a contract type —</option>
+          <option value="PMU">PMU</option>
+          <option value="BSP">BSP</option>
+          <option value="MSAP">MSAP</option>
+          <option value="MSIP">MSIP</option>
+        </select>
+      </div>
       <div class="dyn-cell-delete"></div>
     </div>
     <div class="dyn-row">
@@ -625,18 +639,38 @@ export default function SlaOnboardingPage() {
             ordered.forEach((f) => addRow(f.key));
         }
 
-        /* #362 — Contract Type auto-derives server-side from the SLA ref
-           prefix (BSP-SLA001 → BSP) when it's omitted, which is why Mapping
-           no longer shows it blank. Mirroring that derivation here is purely
-           informational: the field is read-only and is NOT submitted, so the
-           backend stays the single source of truth. */
+        /* Contract Type derives from the SLA ref prefix (BSP-SLA001 → BSP)
+           and the backend derives the same way — but it REJECTS a save when
+           the prefix names nothing it recognises (`missing_contract_type`).
+           While this field was a read-only echo that was a dead end: the
+           form showed the value it could not accept and gave the user no
+           way to correct it short of renaming the SLA.
+
+           So it is now a real editable select, and this only PREFILLS it —
+           it never overwrites a choice the user has already made, or the
+           value loaded from a saved record. `PMC` is an alias for `PMU`,
+           matching the backend's own aliasing. */
+        const CONTRACT_TYPES = ["PMU", "BSP", "MSAP", "MSIP"];
+        const CONTRACT_TYPE_ALIASES = { PMC: "PMU" };
+
+        function _deriveContractType(ref) {
+            const m = String(ref || "").trim().match(/^([A-Za-z0-9]+)[-_]/);
+            if (!m) return "";
+            const raw = m[1].toUpperCase();
+            const mapped = CONTRACT_TYPE_ALIASES[raw] || raw;
+            return CONTRACT_TYPES.includes(mapped) ? mapped : "";
+        }
+
         function _syncContractType() {
             const src = host.querySelector("#s_sla_ref");
             const out = host.querySelector("#s_contract_type");
             if (!src || !out) return;
-            const ref = (src.value || "").trim();
-            const m = ref.match(/^([A-Za-z0-9]+)[-_]/);
-            out.value = m ? m[1].toUpperCase() : "";
+            /* Only fill a blank. Once the user has picked one — or a saved
+               record supplied one — retyping the ref must not silently
+               undo it. */
+            if (out.value) return;
+            const derived = _deriveContractType(src.value);
+            if (derived) out.value = derived;
         }
 
         /* A saved SLA stores `category` as the catalog's DISPLAY NAME
@@ -1039,7 +1073,27 @@ export default function SlaOnboardingPage() {
             if (!s) return "";
             return _JUNK_EXAMPLES.has(s.toLowerCase()) ? "" : s;
         }
-        function _confirmNewMeasurement(btn) {
+        /* Register a new measurement variable in the SHARED catalog.
+
+           Returns true when the catalog accepted it. A failure is not
+           fatal — the variable still works for this SLA, because the key
+           is what the engine scores on and the key is stored on the SLA
+           itself — but it changes what we are allowed to tell the user,
+           so the result is reported rather than swallowed. */
+        async function _postInputVariable(v) {
+            try {
+                const res = await authorizedFetch(CONTRACTS_BASE + "/api/v3/sla-input-variables", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Accept: "application/json" },
+                    body: JSON.stringify({ key: v.key, label: v.label, unit: v.unit || null }),
+                });
+                return res.ok;
+            } catch {
+                return false;
+            }
+        }
+
+        async function _confirmNewMeasurement(btn) {
             const hostEl = btn.closest("[data-mv-host]");
             const rawKey = (hostEl.querySelector(".mv-new-key").value || "").trim();
             const rawLabel = (hostEl.querySelector(".mv-new-label").value || "").trim();
@@ -1055,21 +1109,37 @@ export default function SlaOnboardingPage() {
                 toast("Already exists", `"${sameLabel.label}" is already in the catalog as "${sameLabel.key}" — pick it from the list instead.`, "error");
                 return;
             }
-            /* This variable is created for THIS SLA only; nothing POSTs it to the
-               shared catalog. Say so before it can be banded on, so a typo'd key
-               isn't discovered later in a live LD calculation. */
+            /* The key becomes part of how the SLA is scored, so a typo is
+               only discovered later, inside a live LD calculation. Confirm
+               before it can be banded on. */
             const ok = window.confirm(
                 `Create the measurement variable "${rawLabel}" with key "${safeKey}"?\n\n` +
-                `This variable is not in the shared catalog — it is saved with this SLA only, ` +
-                `and the key becomes part of how the SLA is scored. Check the spelling before continuing.`
+                `The key becomes part of how this SLA is scored — check the spelling before continuing.`
             );
             if (!ok) return;
-            INPUT_VARIABLES.push({ key: safeKey, label: rawLabel, unit: rawUnit || null, source: "custom" });
+
+            const variable = { key: safeKey, label: rawLabel, unit: rawUnit || null };
+            const registered = await _postInputVariable(variable);
+
+            INPUT_VARIABLES.push({ ...variable, source: registered ? "catalog" : "custom" });
             const sel = hostEl.querySelector(".mv-picker");
             sel.innerHTML = _measurementOptions(safeKey);
             sel.value = safeKey;
             _onMeasurementPick(sel);
-            toast("Added", `"${rawLabel}" is now in the catalog and selected.`, "success");
+
+            /* Two different outcomes, said differently. Claiming "added to
+               the catalog" when the POST failed is how a key that exists
+               nowhere but this form ends up banded on. */
+            if (registered) {
+                toast("Added", `"${rawLabel}" is now in the shared catalog and selected.`, "success");
+            } else {
+                toast(
+                    "Selected — not in the shared catalog",
+                    `"${rawLabel}" could not be added to the catalog, so it is saved with this SLA only. `
+                    + `Scoring still works — the key is stored on the SLA — but nobody else will find it in the list.`,
+                    "error"
+                );
+            }
         }
         function _cancelNewMeasurement(btn) {
             const hostEl = btn.closest("[data-mv-host]");
@@ -1354,6 +1424,17 @@ export default function SlaOnboardingPage() {
                 errors.push({ label: "SLA Number", message: "Use capital letters, digits, - and _ only — e.g. PMU-SLA001." });
                 markIds.push("s_sla_ref");
             }
+            /* Mirrors the backend's `missing_contract_type`. Blocking it here
+               is what turns an unfixable rejection into a field the user can
+               just fill in. */
+            if (!payload.contract_type) {
+                errors.push({
+                    label: "Contract Type",
+                    message: "Pick the contract this SLA belongs to. It is normally taken from the "
+                        + "SLA Number prefix (PMU-SLA001 → PMU), but this ref's prefix doesn't name one.",
+                });
+                markIds.push("s_contract_type");
+            }
             _validateBands(payload, errors, markIds);
             _validateLinear(errors, markIds);
             if (!editingId) {
@@ -1592,6 +1673,13 @@ export default function SlaOnboardingPage() {
             const calc = (host.querySelector("#s_calculation_method").value || "").trim();
             if (slaRef) payload.sla_ref = slaRef;
             if (title) payload.title = title;
+            /* Sent, not just displayed. The backend derives this from the ref
+               prefix when it is absent, but that derivation fails on a ref
+               whose prefix names no known contract — and then rejects the
+               save. Sending the user's explicit choice is what makes such an
+               SLA onboardable at all. */
+            const contractType = (host.querySelector("#s_contract_type")?.value || "").trim();
+            if (contractType) payload.contract_type = contractType;
             if (projId) payload.project_id = projId;
             if (catCode) payload.category_code = catCode;
             if (desc) payload.description = desc;
@@ -1902,6 +1990,11 @@ export default function SlaOnboardingPage() {
             });
             _lockCell(host.querySelector("#s_target_container").parentElement,
                 "Target / severity bands are fixed at onboarding — re-onboard the SLA to change them.");
+            /* Editable at ONBOARDING (it is what unblocks a ref whose prefix
+               names no contract), but SlaUpdateRequest does not carry it, so
+               a change here would be silently dropped. */
+            _lockCell(host.querySelector("#s_contract_type")?.parentElement,
+                "Contract type is fixed at onboarding — re-onboard the SLA to change it.");
             /* SlaUpdateRequest carries none of these, so leaving them editable
                would show a change that the PATCH silently drops. */
             _lockCell(host.querySelector("#s_ld_formula_rule").parentElement,
@@ -2062,6 +2155,7 @@ export default function SlaOnboardingPage() {
         // Map a payload/loc key → the static field element id to mark red.
         const STATIC_FIELD_IDS = {
             sla_ref: "s_sla_ref", title: "s_title", project_id: "s_project_id",
+            contract_type: "s_contract_type",
             category_code: "s_category_code", description: "s_description",
             calculation_method: "s_calculation_method",
             ld_formula_rule: "s_ld_formula_rule", effective_from: "s_effective_from",

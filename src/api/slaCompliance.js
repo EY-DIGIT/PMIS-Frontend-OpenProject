@@ -48,11 +48,12 @@ const enc = encodeURIComponent;
    the route is still `/api/v3/npqp/...` and every payload still carries
    an `npqp` field.
 
-   This is a RENAME ONLY. The value passed through is unchanged, and the
-   backend still computes it as F + QGR. Under the new rule QGR comes out
-   of the base, but that change waits on the backend so this app never
-   quotes a figure the invoice disagrees with — see `buildSettlementChain`
-   in utils/project/settlementChain.js for the agreed formula.
+   This is a RENAME ONLY — the value passed through is unchanged. What
+   changed is what the backend puts in it: the deployed service now
+   returns F alone, QGR excluded (corrigendum items 47/49). A row still
+   carrying F + QGR was written by the old service; `buildSettlementChain`
+   flags that as `staleNpqpBase` rather than silently recomputing it,
+   because the invoice followed the row.
 
    Rather than leave the old name loose in the app, it is translated here
    and nowhere else. Everything downstream speaks only `pqp`, so when the
@@ -94,13 +95,20 @@ function pickSlaImage(s) {
 }
 
 /* ───────────────────────── Quarter helpers ─────────────────────────
-   Contract quarters are PROJECT-ANCHORED: they run from the project's own
-   start date, not from a calendar year. Every settlement / PQP /
-   quarterly-aggregate response now reports one as
+   Contract quarters are RESOURCE-PHASE-ANCHORED: they run from the
+   earliest resource-based milestone's start date — the point the vendor
+   actually starts being measured — not from the project's own start and
+   not from a calendar year. (They were anchored on project start until
+   2026-08-17; see `contractQuarters` in utils/project/slaRollup.js.)
+
+   The responses carry their own `quarterStart` / `quarterEnd` /
+   `quarterKey`, so a caller holding a row should read the window off the
+   row rather than re-deriving it. Every settlement / PQP /
+   quarterly-aggregate response reports one as
 
        fiscalYear = the 1-based CONTRACT year (1, 2, 3 …) — NOT a calendar year
        quarter    = 1..4 within that contract year
-       label      = "Y1-Q2"   (a project starting 2025-11-10 has
+       label      = "Y1-Q2"   (a resource phase starting 2025-11-10 has
                                Y1-Q2 = 2026-02-10 .. 2026-05-09)
 
    and the ?quarter= param on those endpoints takes the same "Y1-Q2" — or
@@ -143,6 +151,11 @@ export function quarterKeyOfRow(row) {
     return formatQuarterKey(row?.fiscalYear, row?.quarter);
 }
 
+/* CALENDAR key for a date — the fallback for a project with nothing to
+   anchor to, and only that. A project whose resource phase has a start
+   date has contract quarters, and a caller that reaches for this instead
+   will build a selector whose keys can never match an anchored row. Use
+   `contractQuarters()` first and fall back here only when it is empty. */
 export function quarterKeyOf(date = new Date()) {
     const d = typeof date === "string" ? new Date(`${date}T00:00:00`) : date;
     if (Number.isNaN(d.getTime())) return "";
@@ -152,10 +165,11 @@ export function quarterKeyOf(date = new Date()) {
 /* Parse either shape.
 
    A CONTRACT key carries no dates of its own — its window depends on the
-   project's T0, which lives on the project and not in the key — so
-   `start` / `end` come back null and the caller pairs it with
-   contractQuarters() from utils/project/slaRollup when it needs bounds.
-   `kind` says which was parsed, so nobody has to sniff the year. */
+   resource-phase anchor, which lives on the project's milestones and not
+   in the key — so `start` / `end` come back null and the caller pairs it
+   with contractQuarters() from utils/project/slaRollup, or reads
+   `quarterStart` / `quarterEnd` straight off the backend row when it has
+   one. `kind` says which was parsed, so nobody has to sniff the year. */
 export function parseQuarterKey(key) {
     const raw = String(key || "").trim();
 
@@ -188,8 +202,9 @@ export function rowMatchesQuarter(row, key) {
     return Number(row.fiscalYear) === p.year && Number(row.quarter) === p.quarter;
 }
 
-// The last N quarters ending at the current one, newest first — drives the
-// quarter <select> without needing a backend list endpoint.
+// The last N CALENDAR quarters ending at the current one, newest first.
+// Same caveat as quarterKeyOf: last resort for an un-anchorable project,
+// never a substitute for contractQuarters() on one that has an anchor.
 export function recentQuarterKeys(count = 8, from = new Date()) {
     const d = typeof from === "string" ? new Date(`${from}T00:00:00`) : from;
     let year = d.getFullYear();

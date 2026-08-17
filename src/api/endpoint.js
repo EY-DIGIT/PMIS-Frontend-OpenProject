@@ -273,11 +273,17 @@ export const ENDPOINTS = {
        reason (`startDateRemarks` / `endDateRemarks` / `actualEndRemarks` on the
        project PATCH) plus its own document list, so a schedule slip can be
        justified per-date instead of in one shared note. All four lists are
-       excluded from the general `attachments` GET. */
+       excluded from the general `attachments` GET.
+
+       The two SCHEDULE dates are "planned-*" on the wire, not
+       "start-date-*" / "end-date-*" — those were guessed before the
+       endpoints existed and answered 404 on every upload and every list.
+       The field names on the PATCH stay `startDateRemarks` /
+       `endDateRemarks`; only the attachment paths use "planned". */
     startDateAttachments: (uuid) =>
-      `/projects/api/v3/projects/${enc(uuid)}/start-date-attachments`,
+      `/projects/api/v3/projects/${enc(uuid)}/planned-start-attachments`,
     endDateAttachments: (uuid) =>
-      `/projects/api/v3/projects/${enc(uuid)}/end-date-attachments`,
+      `/projects/api/v3/projects/${enc(uuid)}/planned-end-attachments`,
     actualEndAttachments: (uuid) =>
       `/projects/api/v3/projects/${enc(uuid)}/actual-end-attachments`,
     discussionFeed: (uuid) => `/projects/api/v3/projects/${enc(uuid)}/discussion-feed`,

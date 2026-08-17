@@ -19,7 +19,7 @@ import {
     parseQuarterKey,
     rowMatchesQuarter,
 } from "../../../api/slaCompliance";
-import { contractQuarters, contractQuarterFor } from "../../../utils/project/slaRollup";
+import { contractQuarters, contractQuarterFor, anchorFromQuarterRow } from "../../../utils/project/slaRollup";
 import { formatINR } from "../../../utils/project/helpers";
 
 const muted = { color: "var(--uidai-pmis-muted)" };
@@ -108,9 +108,28 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
        has populated yet. The settlement history covers the second case —
        its rows already name the quarters this project has closed — and
        the calendar list is the last resort for the first. */
+    /* T0 for the selector's grid. Contract quarters anchor on the
+       RESOURCE PHASE, not on the project's start, and this panel has no
+       milestone tree to read that from — but any settled row states both
+       its window and its position in the grid, which pins T0 exactly.
+       The project start is the fallback for a project with no rows yet,
+       and it is the same fallback the backend uses. */
+    const anchorDate = useMemo(() => {
+        for (const r of history) {
+            const t0 = anchorFromQuarterRow(r);
+            if (t0) return t0;
+        }
+        return projectStartDate;
+    }, [history, projectStartDate]);
+    // Whether that anchor came from a backend row (exact) or is the fallback.
+    const anchorFromRow = useMemo(
+        () => history.some((r) => !!anchorFromQuarterRow(r)),
+        [history]
+    );
+
     const contractQs = useMemo(
-        () => contractQuarters(projectStartDate, projectEndDate),
-        [projectStartDate, projectEndDate]
+        () => contractQuarters(anchorDate, projectEndDate),
+        [anchorDate, projectEndDate]
     );
     const quarterOptions = useMemo(() => {
         const seen = new Set();
@@ -295,13 +314,14 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
 
             {range && (
                 <div style={{ fontSize: 12, ...muted, marginTop: 8 }}>
-                    {/* Quarters run from the project's start date, so the year in
-                        the key is the contract year — spelled out here so "Y2" is
-                        never read as a calendar year. Undated projects fall back
-                        to calendar quarters and are labelled as such. */}
+                    {/* Quarters run from the resource phase's start date, so the
+                        year in the key is the contract year — spelled out here so
+                        "Y2" is never read as a calendar year. A project with no
+                        resource-based milestone to anchor to falls back to
+                        calendar quarters and is labelled as such. */}
                     {isContractKey
                         ? <>Contract year <b style={{ color: "#173e77" }}>{range.year}</b>, quarter <b style={{ color: "#173e77" }}>{range.quarter}</b> · </>
-                        : <>Calendar quarter (project has no start date to anchor to) · </>}
+                        : <>Calendar quarter (nothing to anchor contract quarters to) · </>}
                     {range.start
                         ? <>Period <b style={{ color: "#173e77" }}>{range.start}</b> → <b style={{ color: "#173e77" }}>{range.end}</b></>
                         : <>period resolved by the backend</>}
@@ -323,6 +343,24 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                         Closing computes the per-SLA rollup, pulls PQP, applies the quarter cap and persists an
                         <b style={{ color: "#173e77" }}> auto_closed</b> settlement row.
                     </div>
+                    {/* Closing WRITES a row, and the row records whatever window
+                        the key resolves to. With no settled row to pin T0 the
+                        grid is built from the project's start rather than the
+                        resource phase, so the key offered here may name a
+                        different three months than the backend's — and once
+                        written, that row is what Settlement invoices. */}
+                    {!anchorFromRow && (
+                        <div style={{
+                            fontSize: 11.5, color: "#8a6d1f", background: "#fffaf0",
+                            border: "1px solid #e8d9b0", borderRadius: 8,
+                            padding: "9px 12px", margin: "0 auto 14px", maxWidth: 520,
+                            lineHeight: 1.6, textAlign: "left",
+                        }}>
+                            ⚠ No quarter has been settled yet, so this grid is anchored on the project&rsquo;s start
+                            date rather than on the resource phase. Check that <b>{quarter}</b> is the quarter you
+                            mean before closing — the row persists the window it resolves to.
+                        </div>
+                    )}
                     <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={closeQuarter} disabled={closing}>
                         {closing ? "Closing…" : "Compute & close quarter"}
                     </button>
@@ -338,11 +376,29 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                     <div className="uidai-pmis-grid-4" style={{ gap: 12 }}>
                         <Tile label="Sum LD %" value={pct(settlement.sumLdPercent)} hint="before quarter cap" />
                         <Tile label="Capped LD %" value={pct(settlement.cappedLdPercent)} accent="#c0392b" hint="RFP §5.27.6 cap" />
-                        <Tile label="PQP" value={money(settlement.pqp)} hint={`F ${money(settlement.fAmount)} + QGR ${money(settlement.qgrAmount)}`} />
-                        <Tile label="LD Amount" value={money(settlement.ldAmount)} accent="#c0392b" hint="deducted this quarter" />
+                        {/* PQP is F alone. QGR was part of the base under the
+                            deleted NPQP clause and is not any more — it appears
+                            once, in the AQP add-back below. */}
+                        <Tile label="PQP" value={money(settlement.pqp)} hint={`F ${money(settlement.fAmount)} — QGR excluded`} />
+                        <Tile label="LD Amount" value={money(settlement.ldAmount)} accent="#c0392b" hint="LD % × PQP, deducted this quarter" />
                         <Tile label="Payable Amount (PA)" value={money(settlement.paAmount)} />
-                        <Tile label="Adjusted Quarterly Payment (AQP)" value={money(settlement.aqpAmount)} accent="#1f8a4c" hint="PA − LD" />
+                        <Tile label="Adjusted Quarterly Payment (AQP)" value={money(settlement.aqpAmount)} accent="#1f8a4c" hint="(PA − LD) + QGR" />
                     </div>
+                    {/* The deleted NPQP figure, for reference only. Kept
+                        visible because statements issued before the
+                        corrigendum were based on it, and a reader comparing
+                        this quarter against one of those needs to see where
+                        the older, larger base came from. Nothing is computed
+                        from it. */}
+                    {Number.isFinite(Number(settlement.fAmount)) && Number.isFinite(Number(settlement.qgrAmount)) && (
+                        <div style={{ fontSize: 11.5, ...muted, marginTop: 10, lineHeight: 1.6 }}>
+                            For reference: the superseded <b>NPQP</b> base (F + QGR) would have been{" "}
+                            <b style={{ color: "#173e77" }}>
+                                {money(Number(settlement.fAmount) + Number(settlement.qgrAmount))}
+                            </b>. Corrigendum item 49 deleted that clause — LD is charged on PQP (F) alone.
+                        </div>
+                    )}
+
                     {settlement.overrideReason && (
                         <div style={{ fontSize: 12, ...muted, marginTop: 10 }}>
                             <b style={{ color: "#173e77" }}>Reason:</b> {settlement.overrideReason}
@@ -418,7 +474,13 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
             <Section title="Per-SLA quarterly rollup" badge={aggItems.length} defaultOpen={aggItems.length > 0}>
                 {aggregate && (
                     <div style={{ fontSize: 12.5, ...muted, marginBottom: 10 }}>
+                        {/* Σ ONE %LD per SLA — the same basis as the
+                            settlement row's `sumLdPercent`, so the two now
+                            agree. It used to sum per MAPPING, which counted an
+                            SLA once for every activity it was mapped to and
+                            read far higher than the figure actually charged. */}
                         Uncapped total: <b style={{ color: "#c0392b" }}>{pct(aggregate.totalLdPercentUncapped)}</b>
+                        <span style={{ fontSize: 11.5 }}> (Σ one LD % per SLA, before the quarter cap)</span>
                         {aggregate.quarterStart ? ` · ${aggregate.quarterStart} → ${aggregate.quarterEnd}` : ""}
                     </div>
                 )}
@@ -468,7 +530,7 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                         <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 10 }}>
                             <Tile label="F (resource cost)" value={money(pqp.fAmount)} hint="3 months of per-resource cost" />
                             <Tile label="QGR" value={money(pqp.qgrAmount)} />
-                            <Tile label="PQP" value={money(pqp.pqp)} accent="#1f8a4c" hint="F + QGR" />
+                            <Tile label="PQP" value={money(pqp.pqp)} accent="#1f8a4c" hint="= F — the LD base" />
                         </div>
                         {perMonth.length > 0 && (
                             <div className="uidai-pmis-table-wrap" style={{ marginTop: 12 }}>
