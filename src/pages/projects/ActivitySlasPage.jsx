@@ -4,6 +4,7 @@ import { authorizedFetch } from "../../api/client";
 import { loadProjectTree } from "../../api/milestoneConfigApi";
 import { uiStore } from "../../store/project/uiStore";
 import ActivityCompliancePanel from "../../components/projects/sla/ActivityCompliancePanel";
+import ResourceObservationPanel from "../../components/projects/sla/ResourceObservationPanel";
 import "../../styles/global.css";
 
 const STATUS_OPTIONS = ["ACTIVE", "RETIRED"];
@@ -2104,6 +2105,18 @@ export default function ActivitySlasPage() {
                             )}
                         </div>
                         {actEvalError && <Banner text={actEvalError} />}
+
+                        {/* The measured figures behind the resource SLAs, sat
+                            directly above the form they get typed into. The
+                            attendance system already knows them; before this
+                            they lived on a different page, so filling this form
+                            meant reading a number off one screen and retyping it
+                            into another. Reference only — see the panel's own
+                            note for why nothing is submitted from it. */}
+                        <ResourceObservationPanel
+                            projectId={projectId}
+                            activityId={activityIdInput.trim()}
+                        />
 
                         {actEval && (
                             <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>

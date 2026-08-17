@@ -22,6 +22,7 @@ import {
   loadMilestonesForProject, loadActivitiesForMilestone,
 } from "../../api/milestoneConfigApi";
 import { getActivityCompliance } from "../../api/slaCompliance";
+import { getActivityReplacementsReport } from "../../api/attendanceReports";
 import { normalizeStatus, STATUS } from "../../utils/project/slaRollup";
 import { readErrorMessage, readJsonBody, requestErrorMessage } from "../../utils/apiMessage";
 import { getToken } from "../../api/auth";
@@ -292,6 +293,35 @@ export default function ProjectResourceSlaCompliancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, activityId, refreshKey]);
 
+  /* ── SLA 005 · replacement count ──────────────────────────────────────
+     GET /api/attendance/report/activity/replacements
+       ?projectId&activityId — the staffing history behind the two
+     sections below. They score how well each handover went; this one is
+     the count of handovers, which is its own SLA and its own request. */
+  const [replacements, setReplacements] = useState(null);
+  const [replacementsLoading, setReplacementsLoading] = useState(false);
+  const [replacementsError, setReplacementsError] = useState(null);
+
+  useEffect(() => {
+    if (!projectId || !activityId) { setReplacements(null); setReplacementsError(null); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      setReplacementsLoading(true);
+      setReplacementsError(null);
+      const { data, error: err } = await getActivityReplacementsReport(
+        projectId, activityId, controller.signal
+      );
+      if (!active) return;
+      setReplacements(data);
+      // A 404 comes back as null data with no error — "nobody has been
+      // staffed here yet" is a real answer, not a fault.
+      if (err) setReplacementsError(err);
+      setReplacementsLoading(false);
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, activityId, refreshKey]);
+
   /* ── SLA 006 · replacement overlap ────────────────────────────────────
      GET /api/attendance/report/activity/replacement-overlap
        ?projectId&activityId — both required (verified: omitting either is 400).
@@ -507,6 +537,33 @@ export default function ProjectResourceSlaCompliancePage() {
           />
         ) : (
           <AvailabilityTable data={availability} months={months} totals={totals} />
+        )}
+      </section>
+
+      {/* SLA 005 — the count itself. The two sections below measure how
+          WELL each replacement was handled; this one measures how many
+          there were, which is a separate SLA and was the one figure this
+          page could not answer. */}
+      <section className="sla-section">
+        <div className="sla-section-head">
+          <h2 className="sla-section-title">Resource replacement</h2>
+        </div>
+
+        {!selectionComplete ? (
+          <EmptyState
+            title={!milestoneId ? "Select a milestone to begin" : "Now select an activity"}
+            hint={
+              !milestoneId
+                ? "Pick a milestone above, then the activity within it."
+                : "Replacements are reported per activity — choose one of this milestone's activities."
+            }
+          />
+        ) : replacementsLoading ? (
+          <div className="sla-muted">Loading replacement history…</div>
+        ) : replacementsError ? (
+          <div className="sla-error">{replacementsError}</div>
+        ) : (
+          <ReplacementCountTable data={replacements} />
         )}
       </section>
 
@@ -733,6 +790,131 @@ const SLA006 = {
   ],
 };
 
+/* SLA 005 — the replacement COUNT, per designation.
+
+   The other two replacement sections judge how well each handover went.
+   This one judges how many there were, which is a different SLA and a
+   different question: a project can hand over perfectly every time and
+   still breach 005 by handing over too often.
+
+   Split by designation rather than shown as one number, because the
+   target table reads "every increase of 1 replacement" — a repeating
+   severity — and because a count only means something against the number
+   of seats. Two replacements across one seat is churn; across ten seats
+   it is ordinary.
+
+   `resources[]` carries who held the seat and whether they are still on
+   it, so a vacant seat is called out: it is the state that generates the
+   NEXT replacement, and it is invisible in a bare count. */
+function ReplacementCountTable({ data }) {
+  const raw = data?.designations;
+  const rows = useMemo(() => (Array.isArray(raw) ? raw : []), [raw]);
+
+  const summed = useMemo(
+    () => rows.reduce((t, d) => t + num(d.replacementCount), 0),
+    [rows]
+  );
+  const vacant = useMemo(
+    () => rows.filter((d) => {
+      const people = Array.isArray(d.resources) ? d.resources : [];
+      return people.length > 0 && !people.some((p) => p?.active);
+    }).length,
+    [rows]
+  );
+
+  if (!rows.length) {
+    return (
+      <EmptyState
+        title="No staffing reported"
+        hint="Nobody has been recorded against this activity yet, so there are no replacements to count."
+      />
+    );
+  }
+
+  /* The envelope's own total against the sum of the rows — a disagreement
+     matters here because either number could be the one someone types
+     into an evaluation form. */
+  const stated = data?.totalReplacements;
+  const countMismatch = stated != null && num(stated) !== summed;
+
+  return (
+    <div className="uidai-pmis-card sla-card">
+      <div className="sla-card-head">
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Activity</span>
+          <span className="sla-meta-val">{data?.activityName || "—"}</span>
+        </div>
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Replacements</span>
+          <span className="sla-meta-val" style={{ color: summed > 0 ? C.red : C.green }}>{summed}</span>
+        </div>
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Designations</span>
+          <span className="sla-meta-val">{rows.length}</span>
+        </div>
+        {vacant > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Seats vacant</span>
+            <span className="sla-meta-val" style={{ color: C.amber }}>{vacant}</span>
+          </div>
+        )}
+      </div>
+
+      {countMismatch && (
+        <div className="sla-warn">
+          The report states {days(stated)} replacements in total but the rows sum to {summed}.
+          The per-designation rows below are what was returned.
+        </div>
+      )}
+
+      <div className="sla-table-wrap">
+        <table className="sla-table">
+          <thead>
+            <tr>
+              <th className="sla-th">Designation</th>
+              <th className="sla-th sla-num" title="Seats this activity is configured for.">Seats</th>
+              <th className="sla-th sla-num" title="How many different people have held one of those seats.">People seen</th>
+              <th className="sla-th sla-num" title="Times a seat changed hands. This is the figure SLA 005 is judged on.">Replacements</th>
+              <th className="sla-th" title="Who is on the seat now.">Currently deployed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((d, i) => {
+              const people = Array.isArray(d.resources) ? d.resources : [];
+              const active = people.filter((p) => p?.active);
+              const count = num(d.replacementCount);
+              const seatVacant = people.length > 0 && active.length === 0;
+              return (
+                <tr key={d.designation || i} className="sla-row">
+                  <td className="sla-td sla-strong">{d.designation || "—"}</td>
+                  <td className="sla-td sla-num">{num(d.configuredQuantity) || "—"}</td>
+                  <td className="sla-td sla-num">{num(d.distinctResourceCount) || "—"}</td>
+                  <td className="sla-td sla-num" style={{ color: count > 0 ? C.red : C.green, fontWeight: 700 }}>
+                    {count}
+                  </td>
+                  <td className="sla-td">
+                    {seatVacant ? (
+                      <span className="sla-flag" title="Nobody is currently on this seat.">seat vacant</span>
+                    ) : (
+                      active.map((p) => p.employeeName).filter(Boolean).join(", ") || "—"
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sla-note">
+        SLA 005 scores on the count, and its target table reads &ldquo;every increase of 1
+        replacement&rdquo; — a repeating severity, so {summed === 1 ? "one replacement is one hit" : `${summed} replacements are ${summed} hits`},
+        not a single one.
+      </div>
+    </div>
+  );
+}
+
 /* SLA 009 — how long the seat stood empty: from being notified that the
    outgoing resource is leaving, to the replacement actually mobilising. */
 const SLA009 = {
@@ -949,6 +1131,10 @@ const STYLES = `
   padding: 1px 7px; border-radius: 999px; background: #fdf4e3; color: ${C.amber}; }
 .sla-warn { margin: 0; padding: 10px 16px; font-size: 12.5px; color: ${C.amber};
   background: #fdf4e3; border-bottom: 1px solid ${C.divider}; line-height: 1.5; }
+/* Explains how a figure in the table above is read. Sits BELOW the table
+   and stays quiet — it is a footnote, not a warning. */
+.sla-note { margin: 0; padding: 10px 16px; font-size: 12px; color: ${C.muted};
+  border-top: 1px solid ${C.divider}; line-height: 1.6; }
 
 .sla-muted { color: ${C.muted}; font-size: 14px; padding: 16px 0; }
 .sla-error { color: ${C.red}; font-size: 14px; padding: 12px 14px; background: #fdecec;
