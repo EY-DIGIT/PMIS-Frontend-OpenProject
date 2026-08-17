@@ -280,7 +280,7 @@ export default function ProjectsListPage() {
                         onClick={() =>
                           navigate(`/projects/${encodeURIComponent(p.projectId)}`)
                         }
-                        title={p.projectId}
+                        title={p.projectCode || p.projectId}
                       >
                         {p.projectCode || p.projectId}
                       </button>
