@@ -147,6 +147,9 @@ const STYLE = `
 .sla-onb-root #s_target_container.field-error,
 .sla-onb-root #s_attachments_container.field-error{border-radius:8px;padding:6px;}
 .sla-onb-root .table-error{outline:2px solid var(--red);outline-offset:2px;}
+.sla-onb-root .lin-err{display:none;margin-top:5px;font-size:11.5px;line-height:1.4;
+  color:var(--red);font-weight:600;}
+.sla-onb-root .lin-err.on{display:block;}
 `;
 
 /* ─── Page markup (ported; inline handlers call window.__slaOnb.*) ─── */
@@ -1163,12 +1166,33 @@ export default function SlaOnboardingPage() {
         }
 
         /* ── linear LD escalation widget ── */
+        /* The API bounds the rate at 0 < rate <= 10. min/max below only constrain
+           the spinner arrows — a typed or pasted value still reaches _rateError,
+           which is the single source of truth for both the as-you-type message
+           and the submit-time gate in _validateLinear. step="any" so the rate
+           takes as many decimal places as the RFP quotes (0.1, 0.01, 0.001 …). */
+        const _RATE_MSG = "Enter a rate greater than 0 and up to 10 — e.g. 0.5.";
+        function _rateError(raw) {
+            const s = String(raw == null ? "" : raw).trim();
+            if (!s) return "";   // empty is the required-field check's business, not ours
+            const n = Number(s);
+            if (!Number.isFinite(n)) return _RATE_MSG;
+            return n > 0 && n <= 10 ? "" : _RATE_MSG;
+        }
+        // Paint (or clear) the inline message + red outline for one linear sub-form.
+        function _paintRateError(hostEl, message) {
+            const input = hostEl.querySelector('[data-k="rate_per_unit_percent"]');
+            const box = hostEl.querySelector('[data-k="rate_err"]');
+            if (input) input.classList.toggle("field-error", !!message);
+            if (box) { box.textContent = message; box.classList.toggle("on", !!message); }
+        }
         function _widgetLinearForm(cell, f) {
             cell.innerHTML = `
                 <div class="sub-form" data-v="${esc(f.key)}">
                   <div class="sub-grid" style="grid-template-columns:1fr 1fr 1fr;">
                     <div><label>Rate per unit (%) <span class="required">*</span></label>
-                      <input type="number" step="0.01" data-k="rate_per_unit_percent" placeholder="0.5" oninput="window.__slaOnb._renderLinPreview(this)"></div>
+                      <input type="number" step="any" min="0" max="10" data-k="rate_per_unit_percent" placeholder="0.5" oninput="window.__slaOnb._renderLinPreview(this)">
+                      <div class="lin-err" data-k="rate_err"></div></div>
                     <div><label>Unit</label>
                       <select data-k="unit" onchange="window.__slaOnb._renderLinPreview(this)">
                         <option value="week">week</option><option value="day">day</option><option value="month">month</option>
@@ -1187,7 +1211,12 @@ export default function SlaOnboardingPage() {
             const unit = hostEl.querySelector('[data-k="unit"]').value;
             const grace = parseInt(hostEl.querySelector('[data-k="grace_units"]').value || "0", 10);
             const prev = hostEl.querySelector('[data-k="preview"]');
+            const rateErr = _rateError(rate);
+            _paintRateError(hostEl, rateErr);
             if (!rate) { prev.innerHTML = '<span style="color:var(--text-muted);font-style:italic;">Type a rate above to see the LD rule.</span>'; return; }
+            /* Don't render a formula off an out-of-range rate — it used to print
+               things like "LD = N × -22.38% × base" as if they were valid. */
+            if (rateErr) { prev.innerHTML = '<span style="color:var(--text-muted);font-style:italic;">Fix the rate above to see the LD rule.</span>'; return; }
             const graceLine = grace > 0 ? `<div style="color:var(--text-muted);font-size:11px;margin-top:4px;">First ${grace} ${unit}${grace === 1 ? "" : "s"} excluded as grace period.</div>` : "";
             prev.innerHTML = `
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1282,6 +1311,7 @@ export default function SlaOnboardingPage() {
                 markIds.push("s_sla_ref");
             }
             _validateBands(payload, errors, markIds);
+            _validateLinear(errors, markIds);
             if (!editingId) {
                 const stashed = window.__currentPayload__ && window.__currentPayload__.__files;
                 if (!stashed || !stashed.length) { errors.push({ label: "Image attachment", message: "Upload an RFP image." }); markIds.push("s_attachments_container"); }
@@ -1347,6 +1377,21 @@ export default function SlaOnboardingPage() {
            catching it in the form tells the user WHICH band is wrong while the
            band is still in front of them. Linear-LD categories have no bands,
            so they're skipped entirely. */
+        /* Counterpart to _validateBands for the linear-LD categories. The
+           as-you-type check in _renderLinPreview covers typing, but not a paste
+           that never fires input, nor a bad rate arriving from a loaded record —
+           and _clearErrorState() has just wiped the marks, so re-paint them. */
+        function _validateLinear(errors, markIds) {
+            const targetHost = host.querySelector("#s_target_container");
+            const sub = targetHost && targetHost.querySelector('.sub-form [data-k="rate_per_unit_percent"]');
+            if (!sub) return;
+            const hostEl = sub.closest(".sub-form");
+            const message = _rateError(sub.value);
+            if (!message) return;
+            _paintRateError(hostEl, message);
+            errors.push({ label: "Rate per unit (%)", message });
+            markIds.push("s_target_container");
+        }
         function _validateBands(payload, errors, markIds) {
             const catCode = (host.querySelector("#s_category_code").value || "").trim();
             const cat = CATEGORIES.find((c) => c.code === catCode);
@@ -1933,6 +1978,7 @@ export default function SlaOnboardingPage() {
         // Clear inline validation marks + any lingering error toasts before re-validating.
         function _clearErrorState() {
             host.querySelectorAll(".field-error").forEach((el) => el.classList.remove("field-error"));
+            host.querySelectorAll(".lin-err.on").forEach((el) => { el.classList.remove("on"); el.textContent = ""; });
             const tbl = host.querySelector("#dynTable");
             if (tbl) tbl.classList.remove("table-error");
             host.querySelectorAll("#toastStack [data-err]").forEach((el) => el.remove());
