@@ -57,7 +57,13 @@ const hours = (v) => num(v).toLocaleString("en-IN", { minimumFractionDigits: 2, 
 const isoDate = (raw) => {
   const s = String(raw ?? "").trim();
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  return m ? s : "";
+  if (m) return s;
+  /* The overlap report sends ISO, but the rest of this service speaks
+     dd-MM-yyyy — accepted here so one shape change doesn't blank a column.
+     Never via `new Date`: it reads "04-03-2026" as 3 April, not 4 March. */
+  const dmy = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(s);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, "0")}-${String(dmy[1]).padStart(2, "0")}`;
+  return "";
 };
 const prettyDate = (raw) => {
   const iso = isoDate(raw);
@@ -81,6 +87,51 @@ const pctTone = (p) => {
   if (p >= 99.5) return C.green;
   if (p >= 95) return C.amber;
   return C.red;
+};
+
+/* `slaResult` is a free-text string in the contract, so its exact vocabulary
+   is the server's to choose. Rather than hard-code one, the wording is matched
+   loosely and anything unrecognised is shown verbatim in a neutral tone — a
+   result we can't classify must still be readable, and must never be coloured
+   green by accident. */
+/* Negation is handled explicitly rather than by keyword weighting, because
+   the failure words are contained inside the pass words: "not met" contains
+   "met", "non-compliant" contains "compliant". Matching on keywords alone
+   classified "not-met" and "not compliant" as PASSES — a breach shown in
+   green, which is the one mistake this must never make.
+
+   Punctuation is flattened to spaces first, so "not-met", "not_met" and
+   "NOT MET" are one case rather than three. */
+const NEGATED_FAILURE = /\bno(t)?\s+(breach(ed)?|fail(ed|ure)?|shortfall|violat(ed|ion))\b/;
+const NEGATED_PASS = /\bno(t|n)?\s+(met|meets|compl(y|ied|iant)|satisf(y|ied)|ok)\b/;
+const FAILURE = /\b(fail(ed|ure)?|breach(ed|es)?|shortfall|violat(ed|ion)|lapse[ds]?)\b/;
+const PASSING = /\b(pass(ed|es)?|met|meets|compl(y|ied|iant)|ok|yes|satisf(y|ied|actory))\b/;
+
+const resultTone = (raw) => {
+  const s = String(raw ?? "").trim();
+  if (!s) return { label: "—", tone: C.faint, kind: "unknown" };
+  const norm = s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+  const kind =
+    /* "No breach" is a pass — a negated failure, checked before the plain
+       failure words it contains. */
+    NEGATED_FAILURE.test(norm) ? "pass"
+      /* "Not met" / "non-compliant" — a negated pass, checked before the
+         plain pass words it contains. */
+      : NEGATED_PASS.test(norm) ? "fail"
+        : FAILURE.test(norm) ? "fail"
+          : PASSING.test(norm) ? "pass"
+            : norm === "no" ? "fail"
+              /* Anything else is shown as the server wrote it, in a neutral
+                 tone. An unrecognised result must stay readable, and must
+                 never be coloured green by guesswork. */
+              : "unknown";
+
+  return {
+    label: s,
+    tone: kind === "fail" ? C.red : kind === "pass" ? C.green : C.ink2,
+    kind,
+  };
 };
 
 export default function ProjectResourceSlaCompliancePage() {
@@ -241,6 +292,92 @@ export default function ProjectResourceSlaCompliancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, activityId, refreshKey]);
 
+  /* ── SLA 006 · replacement overlap ────────────────────────────────────
+     GET /api/attendance/report/activity/replacement-overlap
+       ?projectId&activityId — both required (verified: omitting either is 400).
+     Its own request and its own error state: one section failing shouldn't
+     take the other off the page, since they answer different SLAs. */
+  const [overlap, setOverlap] = useState(null);
+  const [overlapLoading, setOverlapLoading] = useState(false);
+  const [overlapError, setOverlapError] = useState(null);
+
+  useEffect(() => {
+    if (!projectId || !activityId) { setOverlap(null); setOverlapError(null); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    const FALLBACK = "Couldn't load the replacement overlap report.";
+    (async () => {
+      setOverlapLoading(true);
+      setOverlapError(null);
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({ projectId, activityId });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/report/activity/replacement-overlap?${qs}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          }
+        );
+        // No replacements recorded is a real answer, not a failure.
+        if (res.status === 404) { if (active) setOverlap(null); return; }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setOverlap(data && typeof data === "object" ? data : null);
+      } catch (err) {
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active) { setOverlap(null); if (msg) setOverlapError(msg); }
+      } finally {
+        if (active) setOverlapLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, activityId, refreshKey]);
+
+  /* ── SLA 009 · replacement onboarding ─────────────────────────────────
+     GET /api/attendance/report/activity/replacement-onboarding
+       ?projectId&activityId — both required, same as the overlap report.
+     Its own request and error state for the same reason: the two answer
+     different SLAs, and one failing shouldn't blank the other. */
+  const [onboarding, setOnboarding] = useState(null);
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [onboardingError, setOnboardingError] = useState(null);
+
+  useEffect(() => {
+    if (!projectId || !activityId) { setOnboarding(null); setOnboardingError(null); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    const FALLBACK = "Couldn't load the replacement onboarding report.";
+    (async () => {
+      setOnboardingLoading(true);
+      setOnboardingError(null);
+      try {
+        const token = getToken();
+        const qs = new URLSearchParams({ projectId, activityId });
+        const res = await fetch(
+          `${API_BASE}/api/attendance/report/activity/replacement-onboarding?${qs}`,
+          {
+            signal: controller.signal,
+            cache: "no-store",
+            headers: { accept: "*/*", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          }
+        );
+        // No replacements recorded is a real answer, not a failure.
+        if (res.status === 404) { if (active) setOnboarding(null); return; }
+        if (!res.ok) throw new Error(await readErrorMessage(res, FALLBACK));
+        const data = await readJsonBody(res, FALLBACK);
+        if (active) setOnboarding(data && typeof data === "object" ? data : null);
+      } catch (err) {
+        const msg = requestErrorMessage(err, FALLBACK);
+        if (active) { setOnboarding(null); if (msg) setOnboardingError(msg); }
+      } finally {
+        if (active) setOnboardingLoading(false);
+      }
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, activityId, refreshKey]);
+
   const months = useMemo(
     () => (Array.isArray(availability?.months) ? availability.months : []),
     [availability?.months]
@@ -372,9 +509,252 @@ export default function ProjectResourceSlaCompliancePage() {
           <AvailabilityTable data={availability} months={months} totals={totals} />
         )}
       </section>
+
+      <section className="sla-section">
+        <div className="sla-section-head">
+          <h2 className="sla-section-title">Replacement overlap</h2>
+        </div>
+
+        {!selectionComplete ? (
+          <EmptyState
+            title={!milestoneId ? "Select a milestone to begin" : "Now select an activity"}
+            hint={
+              !milestoneId
+                ? "Pick a milestone above, then the activity within it."
+                : "Overlap is reported per activity — choose one of this milestone's activities."
+            }
+          />
+        ) : overlapLoading ? (
+          <div className="sla-muted">Loading replacement overlap…</div>
+        ) : overlapError ? (
+          <div className="sla-error">{overlapError}</div>
+        ) : (
+          <ReplacementSlaTable data={overlap} {...SLA006} />
+        )}
+      </section>
+
+      <section className="sla-section">
+        <div className="sla-section-head">
+          <h2 className="sla-section-title">Replacement onboarding</h2>
+        </div>
+
+        {!selectionComplete ? (
+          <EmptyState
+            title={!milestoneId ? "Select a milestone to begin" : "Now select an activity"}
+            hint={
+              !milestoneId
+                ? "Pick a milestone above, then the activity within it."
+                : "Onboarding time is reported per activity — choose one of this milestone's activities."
+            }
+          />
+        ) : onboardingLoading ? (
+          <div className="sla-muted">Loading replacement onboarding…</div>
+        ) : onboardingError ? (
+          <div className="sla-error">{onboardingError}</div>
+        ) : (
+          <ReplacementSlaTable data={onboarding} {...SLA009} />
+        )}
+      </section>
     </div>
   );
 }
+
+/* The replacement SLAs share one shape: an envelope of replacements, each
+   naming who left and who arrived, two dates that bracket the handover, and
+   the server's verdict. SLA 006 measures the overlap between the two people;
+   SLA 009 measures how long the seat took to refill. Only those two dates and
+   the measured figure differ, so they are passed in rather than the whole
+   table being written twice — one copy to drift is enough.
+
+   The server decides pass or fail. This shows the dates it decided from, so a
+   disputed result can be checked rather than taken on trust. */
+function ReplacementSlaTable({ data, outgoingDate, incomingDate, metrics = [] }) {
+  /* Memoised because the tally below depends on it: the `: []` branch hands
+     back a fresh array every render, which would re-tally on every render. */
+  const raw = data?.replacements;
+  const rows = useMemo(() => (Array.isArray(raw) ? raw : []), [raw]);
+
+  /* Counted from the rows rather than trusting a headline, and only rows we
+     could actually classify — an unrecognised result is neither a pass nor a
+     failure, and folding it into either would misstate the position. */
+  const tally = useMemo(() => {
+    let pass = 0, fail = 0, unknown = 0;
+    rows.forEach((r) => {
+      const k = resultTone(r?.slaResult).kind;
+      if (k === "pass") pass += 1;
+      else if (k === "fail") fail += 1;
+      else unknown += 1;
+    });
+    return { pass, fail, unknown };
+  }, [rows]);
+
+  if (!rows.length) {
+    return (
+      <EmptyState
+        title="No replacements"
+        hint="Nobody was replaced on this activity, so there is nothing for this SLA to measure."
+      />
+    );
+  }
+
+  /* The envelope's own count, kept only to flag a disagreement with the rows
+     actually returned — a truncated list would otherwise pass unnoticed. */
+  const stated = data?.replacementCount;
+  const countMismatch = stated != null && num(stated) !== rows.length;
+
+  return (
+    <div className="uidai-pmis-card sla-card">
+      <div className="sla-card-head">
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Activity</span>
+          <span className="sla-meta-val">{data?.activityName || "—"}</span>
+        </div>
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Replacements</span>
+          <span className="sla-meta-val">{rows.length}</span>
+        </div>
+        {tally.fail > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Not met</span>
+            <span className="sla-meta-val" style={{ color: C.red }}>{tally.fail}</span>
+          </div>
+        )}
+        {tally.pass > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Met</span>
+            <span className="sla-meta-val" style={{ color: C.green }}>{tally.pass}</span>
+          </div>
+        )}
+        {tally.unknown > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Unclassified</span>
+            <span className="sla-meta-val" style={{ color: C.ink2 }}>{tally.unknown}</span>
+          </div>
+        )}
+      </div>
+
+      {countMismatch && (
+        <div className="sla-warn">
+          The report states {days(stated)} replacements but returned {rows.length}.
+          The rows below are what was returned.
+        </div>
+      )}
+
+      <div className="sla-table-wrap">
+        <table className="sla-table">
+          <thead>
+            <tr>
+              <th className="sla-th">SLA</th>
+              <th className="sla-th">Designation</th>
+              <th className="sla-th">Outgoing</th>
+              {outgoingDate && <th className="sla-th" title={outgoingDate.title}>{outgoingDate.h}</th>}
+              <th className="sla-th">Incoming</th>
+              {incomingDate && <th className="sla-th" title={incomingDate.title}>{incomingDate.h}</th>}
+              {metrics.map((c) => (
+                <th key={c.h} className={`sla-th${c.num ? " sla-num" : ""}`} title={c.title}>{c.h}</th>
+              ))}
+              <th className="sla-th">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const res = resultTone(r?.slaResult);
+              /* A replacement into a different role is not a like-for-like
+                 handover. The server may not treat it as a breach, but it is
+                 the kind of thing a reviewer needs to see. */
+              const outDes = String(r?.outgoingDesignation || "").trim();
+              const inDes = String(r?.incomingDesignation || "").trim();
+              const roleChanged = outDes && inDes && outDes !== inDes;
+              return (
+                <tr key={`${r?.outgoingResId}-${r?.incomingResId}-${i}`} className="sla-row">
+                  <td className="sla-td sla-strong">{r?.slaNumber || "—"}</td>
+                  <td className="sla-td">
+                    {outDes || inDes || "—"}
+                    {roleChanged && (
+                      <span className="sla-flag" title={`Replaced by a different designation — ${inDes}`}>
+                        → {inDes}
+                      </span>
+                    )}
+                  </td>
+                  <td className="sla-td">
+                    <span className="sla-strong">{r?.outgoingName || "—"}</span>
+                    {r?.outgoingResId && <code className="sla-code">{r.outgoingResId}</code>}
+                  </td>
+                  {outgoingDate && <td className="sla-td">{outgoingDate.get(r)}</td>}
+                  <td className="sla-td">
+                    <span className="sla-strong">{r?.incomingName || "—"}</span>
+                    {r?.incomingResId && <code className="sla-code">{r.incomingResId}</code>}
+                  </td>
+                  {incomingDate && <td className="sla-td">{incomingDate.get(r)}</td>}
+                  {metrics.map((c) => (
+                    <td key={c.h} className={`sla-td${c.num ? " sla-num sla-strong" : ""}`}>{c.get(r)}</td>
+                  ))}
+                  <td className="sla-td sla-strong" style={{ color: res.tone }}>{res.label}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* SLA 006 — the handover overlap: how many working days the outgoing resource
+   and their replacement were both on the activity. */
+const SLA006 = {
+  outgoingDate: {
+    h: "Last Working Day",
+    title: "The outgoing resource's last day on the activity.",
+    get: (r) => prettyDate(r?.outgoingLastWorkingDate) || "—",
+  },
+  incomingDate: {
+    h: "Joining Date",
+    title: "The day the replacement joined the activity.",
+    get: (r) => prettyDate(r?.incomingJoiningDate) || "—",
+  },
+  metrics: [
+    {
+      h: "Overlap",
+      title: "The days both were on the activity — the handover window.",
+      get: (r) => {
+        const from = prettyDate(r?.overlapStartDate);
+        const to = prettyDate(r?.overlapEndDate);
+        if (!from && !to) return <span className="sla-dim">No overlap</span>;
+        return <>{from || "—"}<span className="sla-arrow" aria-hidden="true"> → </span>{to || "—"}</>;
+      },
+    },
+    {
+      h: "Working Days",
+      num: true,
+      title: "Working days in the overlap window, excluding weekends and holidays. This is the figure the SLA is judged on.",
+      get: (r) => days(r?.overlapWorkingDays),
+    },
+  ],
+};
+
+/* SLA 009 — how long the seat stood empty: from being notified that the
+   outgoing resource is leaving, to the replacement actually mobilising. */
+const SLA009 = {
+  outgoingDate: {
+    h: "Notification Date",
+    title: "When the replacement was notified — the clock for this SLA starts here.",
+    get: (r) => prettyDate(r?.notificationDate) || "—",
+  },
+  incomingDate: {
+    h: "Mobilization Date",
+    title: "When the incoming resource actually mobilised — the clock stops here.",
+    get: (r) => prettyDate(r?.mobilizationDate) || "—",
+  },
+  metrics: [
+    {
+      h: "Onboarding Days",
+      num: true,
+      title: "Days from notification to mobilisation. This is the figure the SLA is judged on.",
+      get: (r) => days(r?.onboardingDays),
+    },
+  ],
+};
 
 function AvailabilityTable({ data, months, totals }) {
   return (
@@ -559,6 +939,16 @@ const STYLES = `
 .sla-row:hover .sla-td { background: ${C.surface}; }
 .sla-foot .sla-td { background: ${C.surface}; border-top: 2px solid ${C.borderStrong};
   border-bottom: none; }
+
+.sla-dim { color: ${C.faint}; }
+.sla-code { display: inline-block; margin-left: 7px; font-size: 11.5px; padding: 1px 6px;
+  border-radius: 6px; background: ${C.surfaceAlt}; color: ${C.muted};
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* A role change on a handover — quiet, but it shouldn't need a hover to spot. */
+.sla-flag { display: inline-block; margin-left: 7px; font-size: 11.5px; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px; background: #fdf4e3; color: ${C.amber}; }
+.sla-warn { margin: 0; padding: 10px 16px; font-size: 12.5px; color: ${C.amber};
+  background: #fdf4e3; border-bottom: 1px solid ${C.divider}; line-height: 1.5; }
 
 .sla-muted { color: ${C.muted}; font-size: 14px; padding: 16px 0; }
 .sla-error { color: ${C.red}; font-size: 14px; padding: 12px 14px; background: #fdecec;
