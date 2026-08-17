@@ -1143,14 +1143,17 @@ export default function SlaOnboardingPage() {
         }
         /* The threshold column holds the RFP's own wording, so words stay free
            text ("days <= 7", "≤ 21 days"). What it must not accept is a broken
-           quantity: testers typed 8.2, -2 and 3.5.6.13.-245 and the form saved
-           them. So every number appearing anywhere in the text has to be a whole
-           0–100 — the wording around it is nobody's business. A threshold with
-           no digits at all is wording, and passes untouched.
+           quantity: testers typed 8.2, -789.25 and 3.5.6.13.-245 and the form
+           saved them. So every number appearing anywhere in the text has to be a
+           whole -100…100 — the wording around it is nobody's business. A
+           threshold with no digits at all is wording, and passes untouched.
+           The range mirrors the Points column on Severity & LD Configuration,
+           which is the other screen these numbers are read against; negatives
+           are legal there, so they are legal here.
            The error div is picked by class, not data-k: _collectSeverityFromHost
            turns every [data-k] in the row into a payload field, and a marker
            element would ride along as a stray null. */
-        const _THRESHOLD_MSG = "Please enter a range from 0 up to 100 — no decimals or negative numbers allowed.";
+        const _THRESHOLD_MSG = "Please enter a whole number from -100 up to 100 — no decimals allowed.";
         function _thresholdError(raw) {
             const s = String(raw == null ? "" : raw).trim();
             if (!s) return "";   // empty is the required-field check's business, not ours
@@ -1159,7 +1162,7 @@ export default function SlaOnboardingPage() {
             if (!numbers) return "";   // pure wording — allowed
             for (const tok of numbers) {
                 const n = Number(tok);
-                if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 100) return _THRESHOLD_MSG;
+                if (!Number.isFinite(n) || !Number.isInteger(n) || n < -100 || n > 100) return _THRESHOLD_MSG;
             }
             return "";
         }
@@ -1203,18 +1206,22 @@ export default function SlaOnboardingPage() {
         }
 
         /* ── linear LD escalation widget ── */
-        /* The API bounds the rate at 0 < rate <= 10. min/max below only constrain
-           the spinner arrows — a typed or pasted value still reaches _rateError,
-           which is the single source of truth for both the as-you-type message
-           and the submit-time gate in _validateLinear. step="any" so the rate
-           takes as many decimal places as the RFP quotes (0.1, 0.01, 0.001 …). */
-        const _RATE_MSG = "Enter a rate greater than 0 and up to 10 — e.g. 0.5.";
+        /* The form bounds the rate at 0 < rate <= 100. NOTE: the API is stricter
+           and rejects anything over 10 ("Input should be less than or equal to
+           10"), so 10 < rate <= 100 passes here and fails on save — a deliberate
+           product decision, not an oversight. min/max below only constrain the
+           spinner arrows; a typed or pasted value still reaches _rateError, the
+           single source of truth for both the as-you-type message and the
+           submit-time gate in _validateLinear. step="any" so the rate takes as
+           many decimal places as the RFP quotes (0.1, 0.01, 0.001 …). */
+        /* No full stop after the example — "e.g. 0.5." reads as a malformed number. */
+        const _RATE_MSG = "Enter a rate greater than 0 and up to 100 — e.g. 0.5";
         function _rateError(raw) {
             const s = String(raw == null ? "" : raw).trim();
             if (!s) return "";   // empty is the required-field check's business, not ours
             const n = Number(s);
             if (!Number.isFinite(n)) return _RATE_MSG;
-            return n > 0 && n <= 10 ? "" : _RATE_MSG;
+            return n > 0 && n <= 100 ? "" : _RATE_MSG;
         }
         // Paint (or clear) the inline message + red outline for one linear sub-form.
         function _paintRateError(hostEl, message) {
@@ -1228,7 +1235,7 @@ export default function SlaOnboardingPage() {
                 <div class="sub-form" data-v="${esc(f.key)}">
                   <div class="sub-grid" style="grid-template-columns:1fr 1fr 1fr;">
                     <div><label>Rate per unit (%) <span class="required">*</span></label>
-                      <input type="number" step="any" min="0" max="10" data-k="rate_per_unit_percent" placeholder="0.5" oninput="window.__slaOnb._renderLinPreview(this)">
+                      <input type="number" step="any" min="0" max="100" data-k="rate_per_unit_percent" placeholder="0.5" oninput="window.__slaOnb._renderLinPreview(this)">
                       <div class="lin-err" data-k="rate_err"></div></div>
                     <div><label>Unit</label>
                       <select data-k="unit" onchange="window.__slaOnb._renderLinPreview(this)">
