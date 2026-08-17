@@ -546,6 +546,11 @@ export default function VendorDetails() {
                                   name={`assign-${pIdx}-${rIdx}`}
                                   placeholder="Select User"
                                   searchPlaceholder="Search user..."
+                                  emptyText={
+                                    ROLE_LABELS[rIdx] || r.role
+                                      ? `No ${ROLE_LABELS[rIdx] || r.role} assigned`
+                                      : 'No users assigned'
+                                  }
                                   value={r.userIds || []}
                                   options={availableOptions}
                                   onChange={(next) =>

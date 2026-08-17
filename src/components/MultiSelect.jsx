@@ -15,6 +15,7 @@ export default function MultiSelect({
   onChange,
   placeholder = 'Select projects',
   searchPlaceholder = 'Search project...',
+  emptyText = 'No matching projects',
   disabled = false
 }) {
   const [open, setOpen] = useState(false);
@@ -103,7 +104,7 @@ export default function MultiSelect({
                 </label>
               ))
             ) : (
-              <div className="uidai-pmis-ms-empty">No matching projects</div>
+              <div className="uidai-pmis-ms-empty">{emptyText}</div>
             )}
           </div>
         </div>
