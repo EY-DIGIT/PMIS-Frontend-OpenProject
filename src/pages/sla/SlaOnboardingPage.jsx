@@ -150,6 +150,9 @@ const STYLE = `
 .sla-onb-root .lin-err{display:none;margin-top:5px;font-size:11.5px;line-height:1.4;
   color:var(--red);font-weight:600;}
 .sla-onb-root .lin-err.on{display:block;}
+/* The threshold message drops onto its own full-width line under its severity
+   row, so it can't squeeze the six columns above it. */
+.sla-onb-root .sev-row .sev-err{grid-column:1 / -1;margin-top:0;}
 `;
 
 /* ─── Page markup (ported; inline handlers call window.__slaOnb.*) ─── */
@@ -1138,6 +1141,39 @@ export default function SlaOnboardingPage() {
                 if (cur) sel.value = cur;
             });
         }
+        /* The threshold column holds the RFP's own wording, so words stay free
+           text ("days <= 7", "≤ 21 days"). What it must not accept is a broken
+           quantity: testers typed 8.2, -2 and 3.5.6.13.-245 and the form saved
+           them. So every number appearing anywhere in the text has to be a whole
+           0–100 — the wording around it is nobody's business. A threshold with
+           no digits at all is wording, and passes untouched.
+           The error div is picked by class, not data-k: _collectSeverityFromHost
+           turns every [data-k] in the row into a payload field, and a marker
+           element would ride along as a stray null. */
+        const _THRESHOLD_MSG = "Please enter a range from 0 up to 100 — no decimals or negative numbers allowed.";
+        function _thresholdError(raw) {
+            const s = String(raw == null ? "" : raw).trim();
+            if (!s) return "";   // empty is the required-field check's business, not ours
+            // Decimals first, so "8.2" is read as one number and not as 8 and 2.
+            const numbers = s.match(/-?\d*\.\d+|-?\d+/g);
+            if (!numbers) return "";   // pure wording — allowed
+            for (const tok of numbers) {
+                const n = Number(tok);
+                if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 100) return _THRESHOLD_MSG;
+            }
+            return "";
+        }
+        // Paint (or clear) the inline message + red outline for one severity row.
+        function _paintThresholdError(row, message) {
+            const input = row.querySelector('[data-k="threshold_label"]');
+            const box = row.querySelector(".sev-err");
+            if (input) input.classList.toggle("field-error", !!message);
+            if (box) { box.textContent = message; box.classList.toggle("on", !!message); }
+        }
+        function _onThresholdInput(input) {
+            const row = input.closest(".sev-row");
+            if (row) _paintThresholdError(row, _thresholdError(input.value));
+        }
         function _addSevRow(btn) {
             const hostEl = btn.closest(".sub-form");
             const body = hostEl.querySelector(".sev-body");
@@ -1148,10 +1184,11 @@ export default function SlaOnboardingPage() {
                 <span class="sev-pill" style="background:${_SEV_COLOUR[sev]};">L${sev}</span>
                 <select data-k="severity" onchange="window.__slaOnb._updateSevPill(this)">${_severityOptions(sev)}</select>
                 <select data-k="input_variable">${_sevInputVarOptions("")}</select>
-                <input data-k="threshold_label" type="text" placeholder="e.g. ≤ 21 days">
+                <input data-k="threshold_label" type="text" placeholder="e.g. ≤ 21 days" oninput="window.__slaOnb._onThresholdInput(this)">
                 <input data-k="from_value" type="number" step="any" placeholder="≥ this">
                 <input data-k="to_value" type="number" step="any" placeholder="≤ this">
-                <button type="button" class="dyn-delete-btn" onclick="window.__slaOnb._deleteSevRow(this)">✕</button>`;
+                <button type="button" class="dyn-delete-btn" onclick="window.__slaOnb._deleteSevRow(this)">✕</button>
+                <div class="lin-err sev-err"></div>`;
             body.appendChild(r);
         }
         function _updateSevPill(sel) {
@@ -1415,6 +1452,22 @@ export default function SlaOnboardingPage() {
                 variable: (r.querySelector('[data-k="input_variable"]')?.value || "").trim(),
             }));
             const filled = raw.filter((b) => b.threshold || b.from || b.to);
+
+            /* The as-you-type check in _onThresholdInput covers typing, but not
+               a paste that never fires input, nor a bad threshold arriving from
+               a loaded record — and _clearErrorState() has just wiped the marks,
+               so re-paint them. */
+            const badThresholds = [];
+            targetHost.querySelectorAll(".sev-row").forEach((r) => {
+                const input = r.querySelector('[data-k="threshold_label"]');
+                const message = _thresholdError(input && input.value);
+                if (!message) return;
+                _paintThresholdError(r, message);
+                badThresholds.push(`"${input.value.trim()}"`);
+            });
+            if (badThresholds.length) {
+                push(`${badThresholds.join(", ")} — ${_THRESHOLD_MSG}`);
+            }
 
             // A band with neither bound matches every value, so it wins for all
             // inputs and every band after it is unreachable. One-sided bounds
@@ -1791,7 +1844,11 @@ export default function SlaOnboardingPage() {
                         ivSel.innerHTML = _sevInputVarOptions(tr.input_variable);
                         ivSel.value = tr.input_variable;
                     }
-                    sevRow.querySelector('[data-k="threshold_label"]').value = tr.threshold_label ?? "";
+                    const thrInput = sevRow.querySelector('[data-k="threshold_label"]');
+                    thrInput.value = tr.threshold_label ?? "";
+                    // A record saved before this rule existed shows its message
+                    // on open, rather than only once the user re-submits.
+                    _onThresholdInput(thrInput);
                     // Stored From is exclusive; the column shows it inclusively.
                     if (tr.from_value != null) {
                         sevRow.querySelector('[data-k="from_value"]').value = _storedToFromInclusive(Number(tr.from_value));
@@ -2058,7 +2115,7 @@ export default function SlaOnboardingPage() {
             boot, _onStaticCategoryChange, _syncContractType, useTemplate, cancelOnboarding, submitSla,
             addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
             _onLdRuleChange, _addSecondaryMetric, _removeSecondaryMetric,
-            _addSevRow, _updateSevPill, _deleteSevRow, _renderLinPreview, _addPhRow,
+            _addSevRow, _updateSevPill, _deleteSevRow, _onThresholdInput, _renderLinPreview, _addPhRow,
             _onAttachmentsPicked,
         };
 
