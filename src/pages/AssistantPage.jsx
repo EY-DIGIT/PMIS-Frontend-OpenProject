@@ -16,6 +16,7 @@ import { useNavigate } from "react-router-dom";
 import { FiSend, FiX, FiUser, FiPaperclip, FiFile } from "react-icons/fi";
 import Aadhaar from "../assets/Aadhaar.png";
 import { getToken } from "../api/auth";
+import { setPageContext } from "../utils/pageContext";
 
 // Two n8n chat webhooks power Aadhaar Genius:
 //   • project    → project-related information
@@ -387,6 +388,14 @@ export default function AssistantPage() {
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus();
   }, []);
+
+  /* Publish the open tab so the global breadcrumb can render
+     "Home › Aadhaar Genius › Project Info / Documents". Cleared on
+     unmount so other routes don't inherit it. */
+  useEffect(() => {
+    setPageContext({ assistantTab: MODES[mode].label });
+    return () => setPageContext({ assistantTab: "" });
+  }, [mode]);
 
   // Append a message to a specific mode's thread (captured at send time so a
   // reply lands in the right conversation even if the user switches modes).

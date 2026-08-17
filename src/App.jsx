@@ -249,7 +249,33 @@ function Breadcrumbs() {
     if (segments.length === 0) return null; // hide on Dashboard
     if (segments[0] === "dashboard") return null; // hide on all dashboard views
     if (segments[0] === "profile") return null; // heading now lives in the navbar
-    if (segments[0] === "assistant") return null; // Aadhaar Genius has its own branded bar
+
+    /* Aadhaar Genius — the leaf follows the open tab, which the page
+       publishes into pageContext ("Project Info" / "Documents"). Both
+       tabs live on /assistant, so the "Aadhaar Genius" crumb is plain
+       text rather than a link back to the page you're already on. */
+    if (segments[0] === "assistant") {
+        const sep = <span style={{ color: "#999" }}>›</span>;
+        const tab = (pageCtx && pageCtx.assistantTab) || "";
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={{ color: "#173e77", textDecoration: "none", fontWeight: 500 }}>Home</Link>
+                {sep}
+                {tab
+                    ? <span style={{ color: "#5a6680", fontWeight: 500 }}>Aadhaar Genius</span>
+                    : <span style={{ color: "#333", fontWeight: 600 }}>Aadhaar Genius</span>}
+                {tab && (<>{sep}<span style={{ color: "#333", fontWeight: 600 }}>{tab}</span></>)}
+            </nav>
+        );
+    }
 
     /* SLA Masters — clean trail:
          /sla-masters              → Home › SLA Masters
