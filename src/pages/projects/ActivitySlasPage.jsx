@@ -1592,8 +1592,10 @@ export default function ActivitySlasPage() {
             {/* Header */}
             <div className="uidai-pmis-title">SLA → Activity Mapping &amp; Evaluation</div>
 
-            {/* Which activity we're on, and the way back to the chooser. */}
-            {view === "mapping" && !chooserVisible && (
+            {/* Which activity we're on, and the way back to the chooser. Shown on
+                the picker too — that's where the mapping is actually created, so
+                the activity has to stay in sight while browsing SLAs. */}
+            {!chooserVisible && (
                 <div className="uidai-pmis-filter-shell" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--uidai-pmis-muted)", textTransform: "uppercase", letterSpacing: ".3px", marginBottom: 2 }}>Activity</div>
@@ -1606,14 +1608,18 @@ export default function ActivitySlasPage() {
                             )}
                         </div>
                     </div>
-                    <button
-                        type="button"
-                        className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
-                        style={{ marginTop: 0, marginLeft: "auto" }}
-                        onClick={() => setChooserOpen(true)}
-                    >
-                        Change activity
-                    </button>
+                    {/* Switching activity mid-selection would strand the picked
+                        SLA, so the way out is only offered on the mapping view. */}
+                    {view === "mapping" && (
+                        <button
+                            type="button"
+                            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                            style={{ marginTop: 0, marginLeft: "auto" }}
+                            onClick={() => setChooserOpen(true)}
+                        >
+                            Change activity
+                        </button>
+                    )}
                 </div>
             )}
 
