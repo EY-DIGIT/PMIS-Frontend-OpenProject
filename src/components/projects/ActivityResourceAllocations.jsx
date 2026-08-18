@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import * as ratesApi from "../../api/designationRates";
 
@@ -48,7 +48,24 @@ const cellStyle = {
 const headStyle = {
   textAlign: "left", fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
   textTransform: "uppercase", color: "#5b6b82", padding: "0 6px 6px 0",
+  /* A squeezed column must clip its heading, never break "Monthly Rate"
+     into a stack of two-letter fragments. */
+  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
 };
+
+/* The same label above a field once the row is a card rather than a table
+   row — the column headings have to go somewhere. */
+const fieldLabelStyle = {
+  display: "block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
+  textTransform: "uppercase", color: "#5b6b82", marginBottom: 3,
+};
+
+/* Below this the columns can no longer hold a role name, a date picker and
+   two rupee figures at a readable size, so the table gives way to one card
+   per allocation. Above it, the table scrolls sideways rather than
+   compressing — TABLE_MIN_WIDTH is what the seven columns actually need. */
+const TABLE_MIN_WIDTH = 860;
+const STACK_BELOW = 720;
 
 export default function ActivityResourceAllocations({
   rows = [],
@@ -68,6 +85,26 @@ export default function ActivityResourceAllocations({
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  /* Which layout to use is decided by the space this panel actually has,
+     not by the viewport — the same window is far narrower here with the
+     sidebar open, or with the modal's right-hand column showing. */
+  const panelRef = useRef(null);
+  const [panelWidth, setPanelWidth] = useState(0);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setPanelWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  /* Width 0 means it has not been measured yet (or ResizeObserver is
+     missing) — fall back to the table, which scrolls on its own. */
+  const stacked = panelWidth > 0 && panelWidth < STACK_BELOW;
 
   async function loadRoles() {
     setError("");
@@ -149,20 +186,154 @@ export default function ActivityResourceAllocations({
 
   const removeRow = (idx) => onChange(rows.filter((_, i) => i !== idx));
 
+  /* Everything that decides how one row renders. Shared by both layouts, so
+     a narrow screen flags exactly what a wide one flags. */
+  function rowState(row) {
+    const { rate, cost, estimated } = priceOf(row);
+    const durationNum = Number(row.duration);
+    const durationBad =
+      row.duration !== "" &&
+      (!Number.isFinite(durationNum) || durationNum < 0 || durationNum > MAX_DURATION);
+    const dateMissing = !!row.designation && !row.plannedDeploymentDate;
+    /* The backend rejects a deployment date outside the activity's own
+       window with 422 `deployment_date_outside_activity_window`. The
+       picker's `min`/`max` stop it offering one, but a date typed in
+       directly — or one that was valid until the activity's dates were
+       narrowed — still has to be caught here. */
+    const dateOutside =
+      !!row.plannedDeploymentDate
+      && ((activityStartDate && row.plannedDeploymentDate < String(activityStartDate).slice(0, 10))
+        || (activityEndDate && row.plannedDeploymentDate > String(activityEndDate).slice(0, 10)));
+    return {
+      rate, cost, estimated,
+      missingRole: !!row.designation && !roleByName[row.designation],
+      durationBad,
+      dateOutside,
+      dateBad: dateMissing || dateOutside,
+    };
+  }
+
+  /* One definition per input, used by the table and the cards alike — the
+     two layouts must not drift apart as either is edited. */
+  const designationField = (row, idx, st) => (
+    <select
+      style={cellStyle}
+      value={row.designation}
+      disabled={disabled || roles.length === 0}
+      onChange={(e) => patchRow(idx, { designation: e.target.value })}
+    >
+      <option value="">
+        {loading ? "Loading roles…" : roles.length === 0 ? "— No rate card —" : "— Select role —"}
+      </option>
+      {/* A role dropped from the card since this was saved still has to
+          render, or the row looks empty. */}
+      {st.missingRole && (
+        <option value={row.designation}>{row.designation} (not on the current card)</option>
+      )}
+      {roles.map((r) => (
+        <option key={r.id || r.role} value={r.role}>{r.role}</option>
+      ))}
+    </select>
+  );
+
+  const qtyField = (row, idx) => (
+    <input
+      type="number" min="1" step="1" style={{ ...cellStyle, textAlign: "right" }}
+      value={row.quantity}
+      disabled={disabled}
+      onChange={(e) => patchRow(idx, { quantity: e.target.value })}
+    />
+  );
+
+  const durationField = (row, idx, st) => (
+    <input
+      type="number" min="0" max={MAX_DURATION} step="0.01"
+      style={{
+        ...cellStyle, textAlign: "right",
+        borderColor: st.durationBad ? "#d32f2f" : "var(--uidai-pmis-border)",
+      }}
+      value={row.duration}
+      disabled={disabled}
+      placeholder="0.00"
+      title={`Months, 0 to ${MAX_DURATION}`}
+      onChange={(e) => patchRow(idx, { duration: e.target.value })}
+    />
+  );
+
+  /* Required: the backend 422s without it. Flagged red only once the row has
+     a designation, so a freshly added blank row is not scolded before it is
+     filled. */
+  const dateField = (row, idx, st) => (
+    <>
+      <input
+        type="date"
+        style={{
+          ...cellStyle,
+          borderColor: st.dateBad ? "#d32f2f" : "var(--uidai-pmis-border)",
+        }}
+        value={row.plannedDeploymentDate || ""}
+        disabled={disabled}
+        required
+        min={activityStartDate ? String(activityStartDate).slice(0, 10) : undefined}
+        max={activityEndDate ? String(activityEndDate).slice(0, 10) : undefined}
+        title={st.dateOutside
+          ? `Must fall between ${String(activityStartDate).slice(0, 10)} and ${String(activityEndDate).slice(0, 10)} — the activity's own dates`
+          : "Date these resources are planned to deploy"}
+        onChange={(e) => patchRow(idx, { plannedDeploymentDate: e.target.value })}
+      />
+      {st.dateOutside && (
+        <div style={{ fontSize: 10.5, color: "#d32f2f", marginTop: 2, lineHeight: 1.4 }}>
+          Outside the activity ({String(activityStartDate).slice(0, 10)} → {String(activityEndDate).slice(0, 10)})
+        </div>
+      )}
+    </>
+  );
+
+  const removeButton = (idx) => (
+    <button
+      type="button"
+      title="Remove this allocation"
+      aria-label={`Remove allocation ${idx + 1}`}
+      disabled={disabled}
+      onClick={() => removeRow(idx)}
+      style={{
+        border: "1px solid #e6b4b4", background: "#fff", color: "#b3261e",
+        borderRadius: 6, width: 28, height: 30, flex: "0 0 auto",
+        cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, lineHeight: 1,
+      }}
+    >
+      ✕
+    </button>
+  );
+
+  const costText = (st) => (
+    <>
+      {st.cost == null ? "—" : inr(st.cost)}
+      {st.cost != null && st.estimated && (
+        <span style={{ fontWeight: 500, fontSize: 11, color: "#5b6b82" }}> est.</span>
+      )}
+    </>
+  );
+
   return (
     <div
+      ref={panelRef}
       style={{
         border: "1px solid var(--uidai-pmis-border)", borderRadius: 10,
         padding: "12px 14px", background: "#fbfdff",
+        /* The panel sits in a form grid: without these it would grow to fit
+           its widest child and drag the whole form sideways, instead of
+           letting the table below take the scrolling on itself. */
+        minWidth: 0, maxWidth: "100%", boxSizing: "border-box",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: "#5b6b82" }}>
+        <div style={{ fontSize: 12, color: "#5b6b82", flex: "1 1 260px", minWidth: 0 }}>
           One row per role <strong>per deployment date</strong>. Duration is in{" "}
           <strong>months (0–{MAX_DURATION})</strong> — an activity covers a single quarter.
           Staggering a role across dates? Add a row for each.
         </div>
-        <div style={{ fontSize: 12, color: "#5b6b82" }}>
+        <div style={{ fontSize: 12, color: "#5b6b82", whiteSpace: "nowrap" }}>
           Resource cost:{" "}
           <strong style={{ color: "#173e77", fontSize: 14 }}>{inr(total)}</strong>
           {anyEstimated && <span style={{ fontSize: 11 }}> (est.)</span>}
@@ -180,7 +351,7 @@ export default function ActivityResourceAllocations({
             fontSize: 12.5, color: error ? "#b3261e" : "#3d5372",
           }}
         >
-          <span>
+          <span style={{ flex: "1 1 240px", minWidth: 0 }}>
             {error
               ? `The rate card could not be loaded — ${error}`
               : !organisationId
@@ -211,147 +382,129 @@ export default function ActivityResourceAllocations({
         </div>
       )}
 
-      {rows.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+      {/* Too narrow for a legible table: one card per allocation, so nothing
+          ends up clipped or hidden behind a scrollbar. */}
+      {rows.length > 0 && stacked && (
+        <div style={{ display: "grid", gap: 10 }}>
+          {rows.map((row, idx) => {
+            const st = rowState(row);
+            return (
+              <div
+                key={idx}
+                style={{
+                  border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
+                  background: "#fff", padding: 10, boxSizing: "border-box", minWidth: 0,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={fieldLabelStyle}>Designation</span>
+                    {designationField(row, idx, st)}
+                  </div>
+                  {removeButton(idx)}
+                </div>
+
+                <div
+                  style={{
+                    display: "grid", gap: 8, marginTop: 8,
+                    gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <span style={fieldLabelStyle}>Qty</span>
+                    {qtyField(row, idx)}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <span style={fieldLabelStyle}>Duration (mo)</span>
+                    {durationField(row, idx, st)}
+                  </div>
+                  <div style={{ minWidth: 0, gridColumn: "1 / -1" }}>
+                    <span style={fieldLabelStyle}>Planned deployment</span>
+                    {dateField(row, idx, st)}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex", justifyContent: "space-between", flexWrap: "wrap",
+                    gap: 8, marginTop: 10, paddingTop: 8, fontSize: 12.5,
+                    borderTop: "1px dashed var(--uidai-pmis-border)",
+                  }}
+                >
+                  <span style={{ color: "#5b6b82", whiteSpace: "nowrap" }}>
+                    Monthly rate: {st.rate == null ? "—" : inr(st.rate)}
+                  </span>
+                  <span style={{ fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
+                    Cost: {costText(st)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Wide enough for the table. The columns hold their proportions and
+          share out any extra room; the min-width is what they genuinely
+          need, so a tight fit scrolls instead of mangling the cells. */}
+      {rows.length > 0 && !stacked && (
+        <div style={{ overflowX: "auto", maxWidth: "100%", paddingBottom: 4 }}>
+          <table
+            style={{
+              width: "100%", minWidth: TABLE_MIN_WIDTH,
+              borderCollapse: "collapse", tableLayout: "fixed",
+            }}
+          >
+            <colgroup>
+              <col style={{ width: "24%" }} />
+              <col style={{ width: "9%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: "16%" }} />
+              <col style={{ width: 44 }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ ...headStyle, minWidth: 190 }}>Designation</th>
-                <th style={{ ...headStyle, width: 90 }}>Qty</th>
-                <th style={{ ...headStyle, width: 110 }}>Duration (mo)</th>
+                <th style={headStyle}>Designation</th>
+                <th style={headStyle}>Qty</th>
+                <th style={headStyle}>Duration (mo)</th>
                 <th
-                  style={{ ...headStyle, width: 150 }}
+                  style={headStyle}
                   title="The date these resources are planned to deploy. One row covers one date — split a staggered start across separate rows."
                 >
                   Planned deployment
                 </th>
-                <th style={{ ...headStyle, width: 130 }} title="Rate-card rate for this designation, per resource per month.">Monthly Rate</th>
+                <th style={headStyle} title="Rate-card rate for this designation, per resource per month.">Monthly Rate</th>
                 {/* The planned budget, not what gets billed — attendance has no
                     say in it. The formula is on the tooltip because the three
                     inputs are all in this row, so a reader can check it. */}
                 <th
-                  style={{ ...headStyle, width: 130 }}
+                  style={headStyle}
                   title="Planned cost for this designation = monthly rate × planned months × number of resources. Example: 2,11,982 × 3 × 2 = ₹12,71,892."
                 >
                   Cost
                 </th>
-                <th style={{ ...headStyle, width: 40 }} />
+                <th style={headStyle} />
               </tr>
             </thead>
             <tbody>
               {rows.map((row, idx) => {
-                const { rate, cost, estimated } = priceOf(row);
-                const missingRole = row.designation && !roleByName[row.designation];
-                const durationNum = Number(row.duration);
-                const durationBad =
-                  row.duration !== "" &&
-                  (!Number.isFinite(durationNum) || durationNum < 0 || durationNum > MAX_DURATION);
-                const dateMissing = !!row.designation && !row.plannedDeploymentDate;
-                /* The backend rejects a deployment date outside the
-                   activity's own window with 422
-                   `deployment_date_outside_activity_window`. `min`/`max`
-                   below stop the picker offering one, but a date typed in
-                   directly — or one that was valid until the activity's
-                   dates were narrowed — still has to be caught here. */
-                const dateOutside =
-                  !!row.plannedDeploymentDate
-                  && ((activityStartDate && row.plannedDeploymentDate < String(activityStartDate).slice(0, 10))
-                    || (activityEndDate && row.plannedDeploymentDate > String(activityEndDate).slice(0, 10)));
-                const dateBad = dateMissing || dateOutside;
+                const st = rowState(row);
                 return (
                   <tr key={idx}>
-                    <td style={{ padding: "0 6px 6px 0" }}>
-                      <select
-                        style={cellStyle}
-                        value={row.designation}
-                        disabled={disabled || roles.length === 0}
-                        onChange={(e) => patchRow(idx, { designation: e.target.value })}
-                      >
-                        <option value="">
-                          {loading ? "Loading roles…" : roles.length === 0 ? "— No rate card —" : "— Select role —"}
-                        </option>
-                        {/* A role dropped from the card since this was saved
-                            still has to render, or the row looks empty. */}
-                        {missingRole && (
-                          <option value={row.designation}>{row.designation} (not on the current card)</option>
-                        )}
-                        {roles.map((r) => (
-                          <option key={r.id || r.role} value={r.role}>{r.role}</option>
-                        ))}
-                      </select>
+                    <td style={{ padding: "0 6px 6px 0" }}>{designationField(row, idx, st)}</td>
+                    <td style={{ padding: "0 6px 6px 0" }}>{qtyField(row, idx)}</td>
+                    <td style={{ padding: "0 6px 6px 0" }}>{durationField(row, idx, st)}</td>
+                    <td style={{ padding: "0 6px 6px 0" }}>{dateField(row, idx, st)}</td>
+                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82", whiteSpace: "nowrap" }}>
+                      {st.rate == null ? "—" : inr(st.rate)}
                     </td>
-                    <td style={{ padding: "0 6px 6px 0" }}>
-                      <input
-                        type="number" min="1" step="1" style={{ ...cellStyle, textAlign: "right" }}
-                        value={row.quantity}
-                        disabled={disabled}
-                        onChange={(e) => patchRow(idx, { quantity: e.target.value })}
-                      />
-                    </td>
-                    <td style={{ padding: "0 6px 6px 0" }}>
-                      <input
-                        type="number" min="0" max={MAX_DURATION} step="0.01"
-                        style={{
-                          ...cellStyle, textAlign: "right",
-                          borderColor: durationBad ? "#d32f2f" : "var(--uidai-pmis-border)",
-                        }}
-                        value={row.duration}
-                        disabled={disabled}
-                        placeholder="0.00"
-                        title={`Months, 0 to ${MAX_DURATION}`}
-                        onChange={(e) => patchRow(idx, { duration: e.target.value })}
-                      />
-                    </td>
-                    <td style={{ padding: "0 6px 6px 0" }}>
-                      {/* Required: the backend 422s without it. Flagged red
-                          only once the row has a designation, so a freshly
-                          added blank row is not scolded before it is filled. */}
-                      <input
-                        type="date"
-                        style={{
-                          ...cellStyle,
-                          borderColor: dateBad ? "#d32f2f" : "var(--uidai-pmis-border)",
-                        }}
-                        value={row.plannedDeploymentDate || ""}
-                        disabled={disabled}
-                        required
-                        min={activityStartDate ? String(activityStartDate).slice(0, 10) : undefined}
-                        max={activityEndDate ? String(activityEndDate).slice(0, 10) : undefined}
-                        title={dateOutside
-                          ? `Must fall between ${String(activityStartDate).slice(0, 10)} and ${String(activityEndDate).slice(0, 10)} — the activity's own dates`
-                          : "Date these resources are planned to deploy"}
-                        onChange={(e) => patchRow(idx, { plannedDeploymentDate: e.target.value })}
-                      />
-                      {dateOutside && (
-                        <div style={{ fontSize: 10.5, color: "#d32f2f", marginTop: 2, lineHeight: 1.4 }}>
-                          Outside the activity ({String(activityStartDate).slice(0, 10)} → {String(activityEndDate).slice(0, 10)})
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82" }}>
-                      {rate == null ? "—" : inr(rate)}
-                    </td>
-                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, fontWeight: 700, color: "#173e77" }}>
-                      {cost == null ? "—" : inr(cost)}
-                      {cost != null && estimated && (
-                        <span style={{ fontWeight: 500, fontSize: 11, color: "#5b6b82" }}> est.</span>
-                      )}
+                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
+                      {costText(st)}
                     </td>
                     <td style={{ padding: "0 0 6px 0", textAlign: "center" }}>
-                      <button
-                        type="button"
-                        title="Remove this allocation"
-                        aria-label={`Remove allocation ${idx + 1}`}
-                        disabled={disabled}
-                        onClick={() => removeRow(idx)}
-                        style={{
-                          border: "1px solid #e6b4b4", background: "#fff", color: "#b3261e",
-                          borderRadius: 6, width: 28, height: 30, cursor: disabled ? "not-allowed" : "pointer",
-                          fontSize: 13, lineHeight: 1,
-                        }}
-                      >
-                        ✕
-                      </button>
+                      {removeButton(idx)}
                     </td>
                   </tr>
                 );
@@ -370,7 +523,7 @@ export default function ActivityResourceAllocations({
       <button
         type="button"
         className="uidai-pmis-btn uidai-pmis-btn-small"
-        style={{ marginTop: 4, padding: "5px 12px" }}
+        style={{ marginTop: 8, padding: "5px 12px" }}
         disabled={disabled}
         onClick={addRow}
       >
