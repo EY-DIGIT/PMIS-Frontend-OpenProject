@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as ratesApi from "../../api/designationRates";
 
@@ -47,25 +47,18 @@ const cellStyle = {
 
 const headStyle = {
   textAlign: "left", fontSize: 11, fontWeight: 800, letterSpacing: 0.4,
-  textTransform: "uppercase", color: "#5b6b82", padding: "0 6px 6px 0",
-  /* A squeezed column must clip its heading, never break "Monthly Rate"
-     into a stack of two-letter fragments. */
+  textTransform: "uppercase", color: "#5b6b82", padding: "0 10px 8px 0",
+  /* A heading is clipped rather than broken — never "Monthly Rate" stacked
+     as two-letter fragments. */
   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
 };
 
-/* The same label above a field once the row is a card rather than a table
-   row — the column headings have to go somewhere. */
-const fieldLabelStyle = {
-  display: "block", fontSize: 10, fontWeight: 800, letterSpacing: 0.4,
-  textTransform: "uppercase", color: "#5b6b82", marginBottom: 3,
-};
+const cellPad = "0 10px 8px 0";
 
-/* Below this the columns can no longer hold a role name, a date picker and
-   two rupee figures at a readable size, so the table gives way to one card
-   per allocation. Above it, the table scrolls sideways rather than
-   compressing — TABLE_MIN_WIDTH is what the seven columns actually need. */
-const TABLE_MIN_WIDTH = 860;
-const STACK_BELOW = 720;
+/* What the seven columns genuinely need to stay comfortable. The table never
+   shrinks below this — a narrower panel scrolls sideways instead, which is
+   what the scrollbar under the table is for. */
+const TABLE_MIN_WIDTH = 900;
 
 export default function ActivityResourceAllocations({
   rows = [],
@@ -85,26 +78,6 @@ export default function ActivityResourceAllocations({
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  /* Which layout to use is decided by the space this panel actually has,
-     not by the viewport — the same window is far narrower here with the
-     sidebar open, or with the modal's right-hand column showing. */
-  const panelRef = useRef(null);
-  const [panelWidth, setPanelWidth] = useState(0);
-
-  useEffect(() => {
-    const el = panelRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => setPanelWidth(el.clientWidth);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  /* Width 0 means it has not been measured yet (or ResizeObserver is
-     missing) — fall back to the table, which scrolls on its own. */
-  const stacked = panelWidth > 0 && panelWidth < STACK_BELOW;
 
   async function loadRoles() {
     setError("");
@@ -317,7 +290,6 @@ export default function ActivityResourceAllocations({
 
   return (
     <div
-      ref={panelRef}
       style={{
         border: "1px solid var(--uidai-pmis-border)", borderRadius: 10,
         padding: "12px 14px", background: "#fbfdff",
@@ -382,73 +354,11 @@ export default function ActivityResourceAllocations({
         </div>
       )}
 
-      {/* Too narrow for a legible table: one card per allocation, so nothing
-          ends up clipped or hidden behind a scrollbar. */}
-      {rows.length > 0 && stacked && (
-        <div style={{ display: "grid", gap: 10 }}>
-          {rows.map((row, idx) => {
-            const st = rowState(row);
-            return (
-              <div
-                key={idx}
-                style={{
-                  border: "1px solid var(--uidai-pmis-border)", borderRadius: 8,
-                  background: "#fff", padding: 10, boxSizing: "border-box", minWidth: 0,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={fieldLabelStyle}>Designation</span>
-                    {designationField(row, idx, st)}
-                  </div>
-                  {removeButton(idx)}
-                </div>
-
-                <div
-                  style={{
-                    display: "grid", gap: 8, marginTop: 8,
-                    gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <span style={fieldLabelStyle}>Qty</span>
-                    {qtyField(row, idx)}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <span style={fieldLabelStyle}>Duration (mo)</span>
-                    {durationField(row, idx, st)}
-                  </div>
-                  <div style={{ minWidth: 0, gridColumn: "1 / -1" }}>
-                    <span style={fieldLabelStyle}>Planned deployment</span>
-                    {dateField(row, idx, st)}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex", justifyContent: "space-between", flexWrap: "wrap",
-                    gap: 8, marginTop: 10, paddingTop: 8, fontSize: 12.5,
-                    borderTop: "1px dashed var(--uidai-pmis-border)",
-                  }}
-                >
-                  <span style={{ color: "#5b6b82", whiteSpace: "nowrap" }}>
-                    Monthly rate: {st.rate == null ? "—" : inr(st.rate)}
-                  </span>
-                  <span style={{ fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
-                    Cost: {costText(st)}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Wide enough for the table. The columns hold their proportions and
-          share out any extra room; the min-width is what they genuinely
-          need, so a tight fit scrolls instead of mangling the cells. */}
-      {rows.length > 0 && !stacked && (
-        <div style={{ overflowX: "auto", maxWidth: "100%", paddingBottom: 4 }}>
+      {/* The columns hold their proportions and share out any extra room on a
+          wide panel; below TABLE_MIN_WIDTH this scrolls sideways rather than
+          squeezing headings and amounts into unreadable stacks. */}
+      {rows.length > 0 && (
+        <div style={{ overflowX: "auto", maxWidth: "100%", paddingBottom: 6 }}>
           <table
             style={{
               width: "100%", minWidth: TABLE_MIN_WIDTH,
@@ -456,12 +366,12 @@ export default function ActivityResourceAllocations({
             }}
           >
             <colgroup>
-              <col style={{ width: "24%" }} />
+              <col style={{ width: "25%" }} />
               <col style={{ width: "9%" }} />
               <col style={{ width: "13%" }} />
               <col style={{ width: "18%" }} />
-              <col style={{ width: "16%" }} />
-              <col style={{ width: "16%" }} />
+              <col style={{ width: "17%" }} />
+              <col style={{ width: "18%" }} />
               <col style={{ width: 44 }} />
             </colgroup>
             <thead>
@@ -493,17 +403,17 @@ export default function ActivityResourceAllocations({
                 const st = rowState(row);
                 return (
                   <tr key={idx}>
-                    <td style={{ padding: "0 6px 6px 0" }}>{designationField(row, idx, st)}</td>
-                    <td style={{ padding: "0 6px 6px 0" }}>{qtyField(row, idx)}</td>
-                    <td style={{ padding: "0 6px 6px 0" }}>{durationField(row, idx, st)}</td>
-                    <td style={{ padding: "0 6px 6px 0" }}>{dateField(row, idx, st)}</td>
-                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, color: "#5b6b82", whiteSpace: "nowrap" }}>
+                    <td style={{ padding: cellPad }}>{designationField(row, idx, st)}</td>
+                    <td style={{ padding: cellPad }}>{qtyField(row, idx)}</td>
+                    <td style={{ padding: cellPad }}>{durationField(row, idx, st)}</td>
+                    <td style={{ padding: cellPad }}>{dateField(row, idx, st)}</td>
+                    <td style={{ padding: cellPad, fontSize: 12.5, color: "#5b6b82", whiteSpace: "nowrap" }}>
                       {st.rate == null ? "—" : inr(st.rate)}
                     </td>
-                    <td style={{ padding: "0 6px 6px 0", fontSize: 12.5, fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
+                    <td style={{ padding: cellPad, fontSize: 12.5, fontWeight: 700, color: "#173e77", whiteSpace: "nowrap" }}>
                       {costText(st)}
                     </td>
-                    <td style={{ padding: "0 0 6px 0", textAlign: "center" }}>
+                    <td style={{ padding: "0 0 8px 0", textAlign: "center" }}>
                       {removeButton(idx)}
                     </td>
                   </tr>
