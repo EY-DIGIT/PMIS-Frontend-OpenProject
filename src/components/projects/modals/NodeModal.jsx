@@ -1355,7 +1355,7 @@ export default function NodeModal({
                   disabled={actualDisabled}
                 />
                 {hasKids && (
-                  <div className="uidai-auto-hint">Auto-derived from children's dates</div>
+                  <div className="uidai-auto-hint">Auto-derived</div>
                 )}
               </div>
 
@@ -1369,7 +1369,7 @@ export default function NodeModal({
                   disabled={actualDisabled}
                 />
                 {hasKids && (
-                  <div className="uidai-auto-hint">Auto-derived from children's dates</div>
+                  <div className="uidai-auto-hint">Auto-derived</div>
                 )}
               </div>
             </>
