@@ -301,20 +301,6 @@ export default function NodeModal({
   }, [open, project, kind, mode, nodeUid, parentUid]);
   const milestoneIsResourceBased = enclosingMilestone?.isResourceBased === true;
 
-  /* Which of the milestone's quarters this activity falls in — checked
-     only for resource-based milestones, because only those are measured
-     quarter by quarter. Deliverable milestones are charged on each
-     deliverable's own cost and have no quarterly window to fit into. */
-  const quarterFit = useMemo(() => {
-    if (kind !== "activity" || !milestoneIsResourceBased) return null;
-    if (!form.startDate || !form.endDate) return null;
-    return quarterWindowOf(
-      form.startDate, form.endDate,
-      enclosingMilestone?.startDate, enclosingMilestone?.endDate
-    );
-  }, [kind, milestoneIsResourceBased, form.startDate, form.endDate,
-    enclosingMilestone?.startDate, enclosingMilestone?.endDate]);
-
   /* For Task / Subtask: walk the project tree from this node (or its
      parent in add mode) up to the enclosing Activity. Used to scope
      the "Assigned To" user picker to that activity's vendor's users. */
@@ -365,6 +351,26 @@ export default function NodeModal({
   }, [open, kind, assignableVendorId]);
 
   const [form, setForm] = useState(() => makeDefaultForm(kind, node, mode, parentNode));
+
+  /* Which of the milestone's quarters this activity falls in — checked
+     only for resource-based milestones, because only those are measured
+     quarter by quarter. Deliverable milestones are charged on each
+     deliverable's own cost and have no quarterly window to fit into.
+
+     Declared HERE, after `form`, and not up beside `milestoneIsResourceBased`
+     where it logically belongs: it reads `form.startDate`, and a const is in
+     the temporal dead zone until its own declaration runs, so referencing it
+     earlier throws on every render and blanks the whole modal. */
+  const quarterFit = useMemo(() => {
+    if (kind !== "activity" || !milestoneIsResourceBased) return null;
+    if (!form.startDate || !form.endDate) return null;
+    return quarterWindowOf(
+      form.startDate, form.endDate,
+      enclosingMilestone?.startDate, enclosingMilestone?.endDate
+    );
+  }, [kind, milestoneIsResourceBased, form.startDate, form.endDate,
+    enclosingMilestone?.startDate, enclosingMilestone?.endDate]);
+
   // Snapshot of the form taken whenever it is (re)initialized from the
   // node — open, async record fetch, divisions normalization. Compared
   // against `form` to decide whether the Save button should be enabled
