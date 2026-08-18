@@ -107,6 +107,59 @@ export async function listAll({ status, pageSize = 50 } = {}) {
   return all.map(fromApi);
 }
 
+/* One row of GET /projects/{id}/role-assignments — the backend answers in
+   snake_case here (unlike the camelCase /users collection), so normalise
+   before it reaches the UI. A user holding two roles on the same project
+   comes back as two rows. */
+export function roleAssignmentFromApi(r) {
+  return {
+    assignmentId: r.id ?? null,
+    userId: r.user_id || r.userId || '',
+    login: r.user_login || r.userLogin || '',
+    email: r.user_email || r.userEmail || '',
+    roleId: r.role_id ?? r.roleId ?? null,
+    roleName: r.role_name || r.roleName || '',
+    projectId: r.project_id || r.projectId || '',
+    projectCode: r.project_code || r.projectCode || '',
+    scope: r.scope || '',
+  };
+}
+
+/* Everyone with a role on a project.
+   GET /users/api/v3/projects/{projectId}/role-assignments
+   Paged like the other v3 collections (1-based `offset` page index), so we
+   walk until the server-reported `total` is reached. */
+export async function listProjectRoleAssignments(projectId, { pageSize = 100, scope } = {}) {
+  if (!projectId) return [];
+  const all = [];
+  const seen = new Set();
+  let offset = 1;
+  let total = Infinity;
+  // Hard cap on iterations as a runaway guard.
+  for (let i = 0; i < 100 && all.length < total; i++) {
+    const res = await api.get(ENDPOINTS.users.projectRoleAssignments(projectId), {
+      query: { offset, pageSize, scope },
+    });
+    const elements = unwrap(res);
+    const reported = Number(res?.data?.total ?? res?.total);
+    if (Number.isFinite(reported)) total = reported;
+    if (!elements.length) break;
+    // Dedup by assignment id so a backend that ignores `offset` can't loop
+    // forever or surface duplicate rows.
+    const fresh = elements.filter((r) => {
+      const key = r?.id ?? `${r?.user_id}:${r?.role_id}`;
+      if (key == null || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (!fresh.length) break;
+    all.push(...fresh);
+    if (elements.length < pageSize) break;
+    offset += 1;
+  }
+  return all.map(roleAssignmentFromApi);
+}
+
 export async function get(id) {
   const res = await api.get(ENDPOINTS.users.get(id));
   return fromApi(unwrapOne(res));

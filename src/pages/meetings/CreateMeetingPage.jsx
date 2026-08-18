@@ -1,10 +1,11 @@
 /* ══════════════════════════════════════════════════════════════════
    CreateMeetingPage.jsx — single-page Create Meeting form.
 
-   POSTs to /api/meetings (see src/api/meetings.js). Projects and the
-   user roster are fetched live from the existing project / user APIs;
-   attachments are read as base64 and shipped inside the same JSON
-   body.
+   POSTs to /api/meetings (see src/api/meetings.js). Projects come from the
+   project API; candidate attendees come from that project's role
+   assignments (GET /users/api/v3/projects/{id}/role-assignments), so the
+   picker only ever offers users who hold a role on the selected project.
+   Attachments are read as base64 and shipped inside the same JSON body.
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -12,10 +13,15 @@ import { useNavigate } from "react-router-dom";
 import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
 import * as usersApi from "../../api/users";
-// TEMP: vendor-based attendee filter disabled while the vendor API is erroring.
-import * as vendorsApi from "../../api/vendors";
 import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
+
+/* Backend role slugs → human labels: "project_admin" → "Project Admin". */
+function roleLabel(name) {
+  const words = String(name || "").split(/[_\s-]+/).filter(Boolean);
+  if (!words.length) return "Member";
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
 
 /* Grouped checkbox multi-select used for Attendees. */
 function GroupedMultiSelect({ groups, selected, onChange, placeholder, mountId, disabled }) {
@@ -362,104 +368,81 @@ export default function CreateMeetingPage() {
 
   /* Master data fetched from existing APIs. */
   const [projects, setProjects] = useState([]);
-  const [users, setUsers] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  const [loadingUsers, setLoadingUsers] = useState(false);
 
-  /* projectId / projectCode → vendor name. TEMPORARILY DISABLED while the
-     vendor API is erroring — attendee filtering is off and we show every
-     user (see `projectUsers` below). Re-enable these two lines, the
-     vendorsApi import, the fetch effect, and the filtered `projectUsers`
-     to restore per-project (vendor) attendee filtering. */
-  const [vendorByProject, setVendorByProject] = useState({});
-  const [loadingVendors, setLoadingVendors] = useState(false);
+  /* Candidate attendees = everyone holding a role on the selected project
+     (GET /projects/{id}/role-assignments). This replaces the old approach of
+     pulling the whole user directory and filtering it by the project's
+     vendor — the roster is already project-scoped server-side. */
+  const [projectMembers, setProjectMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
-  /* Initial load: projects + users in parallel. */
+  /* Initial load: projects. */
   useEffect(() => {
     let alive = true;
     setLoadingProjects(true);
-    setLoadingUsers(true);
     projectsApi
       .list({ pageSize: 200 })
       .then((rows) => { if (alive) setProjects(rows); })
       .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
       .finally(() => { if (alive) setLoadingProjects(false); });
-    usersApi
-      .listAll()
-      .then((rows) => { if (alive) setUsers(rows); })
-      .catch((e) => { if (alive) show(`Couldn't load users: ${e.message}`, "warn"); })
-      .finally(() => { if (alive) setLoadingUsers(false); });
-    /* Vendor master → which vendor owns which project. TEMPORARILY DISABLED
-       (vendor API erroring). Re-enable to restore the attendee filter. */
-    setLoadingVendors(true);
-    vendorsApi
-      .list()
-      .then((vendors) => {
-        if (!alive) return;
-        const map = {};
-        vendors.forEach((v) => {
-          const name = v.vendorName || "";
-          if (!name) return;
-          (v.projectIds || []).forEach((pid) => { if (pid) map[pid] = name; });
-          (v.projects || []).forEach((p) => {
-            const code = p?.projectCode;
-            if (code) map[code] = name;
-          });
-        });
-        setVendorByProject(map);
-      })
-      .catch((e) => { if (alive) show(`Couldn't load vendors: ${e.message}`, "warn"); })
-      .finally(() => { if (alive) setLoadingVendors(false); });
     return () => { alive = false; };
   }, [show]);
 
-  /* ── Vendor-based attendee filter (TEMPORARILY DISABLED) ─────────────
-     Re-enable this block (plus the import, state and fetch effect above)
-     once the vendor API is fixed, then swap `projectUsers` back to the
-     filtered version.
-     */
-
-  const selectedVendorName = useMemo(() => {
-    if (!draft.projectId) return "";
-    const sel = projects.find((p) => p.projectId === draft.projectId);
-    return (
-      vendorByProject[draft.projectId] ||
-      (sel?.projectCode ? vendorByProject[sel.projectCode] : "") ||
-      ""
-    );
-  }, [draft.projectId, projects, vendorByProject]);
-
-  const projectUsers = useMemo(() => {
-    if (!draft.projectId || loadingVendors) return [];
-    if (!selectedVendorName) return [];
-    const want = selectedVendorName.toLowerCase();
-    return users.filter(
-      (u) => u.vendorName && String(u.vendorName).toLowerCase() === want
-    );
-  }, [users, draft.projectId, selectedVendorName, loadingVendors]);
-  // ──────────────────────────────────────────────────────────────────── 
-
-  /* TEMP: show the full user roster as candidate attendees (no vendor
-     filter) until the vendor API is reliable. */
-  // const projectUsers = users;
+  /* Project members → attendee candidates. Refetched on every project switch. */
+  useEffect(() => {
+    let alive = true;
+    const projectId = draft.projectId;
+    if (!projectId) {
+      setProjectMembers([]);
+      return () => { alive = false; };
+    }
+    setLoadingMembers(true);
+    usersApi
+      .listProjectRoleAssignments(projectId)
+      .then((rows) => {
+        if (!alive) return;
+        /* One row per (user, role) — a user holding two roles on the project
+           would otherwise show up twice behind the same checkbox value. */
+        const byUser = new Map();
+        rows.forEach((r) => {
+          if (r.userId && !byUser.has(r.userId)) byUser.set(r.userId, r);
+        });
+        setProjectMembers(Array.from(byUser.values()));
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setProjectMembers([]);
+        show(`Couldn't load project members: ${e.message}`, "warn");
+      })
+      .finally(() => { if (alive) setLoadingMembers(false); });
+    return () => { alive = false; };
+  }, [draft.projectId, show]);
 
   const attendeeGroups = useMemo(() => {
-    const byVendor = {};
-    projectUsers.forEach((u) => {
-      const group = u.vendorName || u.division || u.orgRole || "Users";
-      (byVendor[group] = byVendor[group] || []).push(u);
+    const byRole = {};
+    projectMembers.forEach((m) => {
+      const group = roleLabel(m.roleName);
+      (byRole[group] = byRole[group] || []).push(m);
     });
-    return Object.entries(byVendor).map(([group, items]) => ({
+    return Object.entries(byRole).map(([group, items]) => ({
       group,
-      items: items.map((u) => ({
-        value: u.userId,
-        label: u.fullName || u.email || u.userId,
-        meta: u.orgRole || u.role || ""
+      items: items.map((m) => ({
+        value: m.userId,
+        label: m.login || m.email || m.userId,
+        meta: m.roleName || ""
       }))
     }));
-  }, [projectUsers]);
+  }, [projectMembers]);
+
+  /* userId → member row, so the create payload can carry email + role name. */
+  const memberById = useMemo(() => {
+    const map = {};
+    projectMembers.forEach((m) => { map[m.userId] = m; });
+    return map;
+  }, [projectMembers]);
 
   const validateTimes = () => {
     const bad = !!(draft.start && draft.end && draft.end <= draft.start);
@@ -537,6 +520,8 @@ export default function CreateMeetingPage() {
         projectId: draft.projectId,
         attendees: draft.attendees.map((userId) => ({
           userId,
+          email: memberById[userId]?.email || "",
+          roleName: memberById[userId]?.roleName || "",
           participantRole: "attendee",
           mandatory: false
         })),
@@ -823,7 +808,14 @@ export default function CreateMeetingPage() {
               updateDraft({ attendees: sel });
               setErrors((er) => ({ ...er, attendees: false }));
             }}
-            placeholder={loadingUsers ? "Loading users…" : "Select attendees…"}
+            disabled={!draft.projectId || loadingMembers}
+            placeholder={
+              !draft.projectId
+                ? "Select a project first…"
+                : loadingMembers
+                  ? "Loading project members…"
+                  : "Select attendees…"
+            }
           />
           <div className={`field-err${errors.attendees ? " show" : ""}`}>
             Select at least one attendee.

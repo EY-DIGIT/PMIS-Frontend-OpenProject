@@ -177,6 +177,12 @@ export const ENDPOINTS = {
        Backs the "Assigned To" dropdown in the task / subtask modals. */
     vendorAssignableUsers: (vendorId) =>
       `/users/api/v3/vendors/${enc(vendorId)}/assignable-users`,
+    /* Every user holding a role on a project (project_admin, project_member,
+       ...). Rows come back snake_case: { user_id, user_login, user_email,
+       role_id, role_name, project_id, project_code, scope }. Backs the
+       Create Meeting attendee picker. */
+    projectRoleAssignments: (projectId) =>
+      `/users/api/v3/projects/${enc(projectId)}/role-assignments`,
     /* SuperAdmin session management (#365). super_admin ONLY — every other
        role gets a 403. Responses on this branch are snake_case:
          GET    sessions        → { user_id, sessions: [{ session_id,
