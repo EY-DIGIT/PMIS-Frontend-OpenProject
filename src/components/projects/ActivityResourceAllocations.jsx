@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import * as ratesApi from "../../api/designationRates";
 import { getAdditionalResourceOnboardingReport } from "../../api/attendanceReports";
 import {
-  readAdditionalResources, groupByDesignation, tallyOnboarding,
+  readAdditionalResources, groupByDesignation,
 } from "../../utils/project/additionalOnboarding";
 
 /* ────────────────────────────────────────────────────────────────────
@@ -59,21 +59,6 @@ const MAX_DURATION = 3;
    blocks a save, and never colours a field red: the report is a
    measurement of what the backend already approved, not a validation of
    what is being typed. */
-/* Three levels of loudness, because one badge could not carry it.
-
-   `row` tints the whole row, so which rows are additional is answered by
-   glancing down the table rather than by reading each one. `solid` fills
-   the badge itself — a tinted-outline pill sat in a tinted panel and read
-   as decoration, so this one is filled and reversed out in white, which is
-   the only treatment in this table that does that. `edge` draws the left
-   margin stripe that ties the two together. */
-const FLAG_TONE = {
-  pass: { solid: "#1a7a48", row: "#f1faf5", edge: "#1a7a48", word: "onboarded" },
-  fail: { solid: "#c0392b", row: "#fdf4f2", edge: "#c0392b", word: "breached" },
-  pending: { solid: "#b06f00", row: "#fffaef", edge: "#b06f00", word: "pending" },
-  unknown: { solid: "#456186", row: "#f6faff", edge: "#456186", word: "unclassified" },
-};
-
 /* Designations come from one rate card on both sides, so they should match
    exactly — but "Program Director" and "program  director" arriving from
    two services is a difference in typing, not in meaning, and letting it
@@ -120,61 +105,6 @@ function onboardedSummary(group) {
   return { text, pending: false, detail };
 }
 
-
-/* One designation's worst outstanding state. A breach outranks a pending
-   seat, which outranks a clean one — the badge has room for a single
-   answer and the reason to look at it is the worst thing it can say. */
-function worstKind(rows) {
-  const t = tallyOnboarding(rows);
-  if (t.fail > 0) return "fail";
-  if (t.pending > 0) return "pending";
-  if (t.pass > 0) return "pass";
-  return "unknown";
-}
-
-function AdditionalFlag({ group, kind }) {
-  const tone = FLAG_TONE[kind] || FLAG_TONE.unknown;
-  const t = tallyOnboarding(group.rows);
-
-  const qty = `Approved head count ${group.originalQuantity ?? "—"} → ${group.currentApprovedQuantity ?? "—"}`;
-  const heads = group.additionalQuantity === null
-    ? "an additional head"
-    : `${group.additionalQuantity} additional head${group.additionalQuantity === 1 ? "" : "s"}`;
-  const state = [
-    t.pass > 0 ? `${t.pass} onboarded in time` : "",
-    t.fail > 0 ? `${t.fail} breached` : "",
-    t.pending > 0 ? `${t.pending} still pending` : "",
-    t.unknown > 0 ? `${t.unknown} unclassified` : "",
-  ].filter(Boolean).join(", ");
-
-  // The planned dates, so the tooltip says WHEN without opening another page.
-  const planned = group.rows
-    .map((r) => r.plannedDeploymentDate)
-    .filter(Boolean);
-
-  return (
-    <div
-      title={`${qty} — ${heads} on this activity. ${state}.`
-        + (planned.length ? ` Planned ${planned.join(", ")}.` : "")
-        + (group.quantitiesVary ? " ⚠ the report's rows disagree about this designation's quantities." : "")
-        + " Measured by SLA 008; shown here for reference and not editable."}
-      style={{
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-        width: "100%", boxSizing: "border-box", marginTop: 5,
-        padding: "3px 8px", borderRadius: 6, cursor: "help",
-        background: tone.solid, color: "#fff",
-        fontSize: 9.5, fontWeight: 800, letterSpacing: ".7px", textTransform: "uppercase",
-        whiteSpace: "nowrap", overflow: "hidden",
-      }}
-    >
-      <span>
-        {group.additionalQuantity === null ? "Additional" : `+${group.additionalQuantity} additional`}
-      </span>
-      <span style={{ opacity: .55 }} aria-hidden="true">•</span>
-      <span style={{ opacity: .92, overflow: "hidden", textOverflow: "ellipsis" }}>{tone.word}</span>
-    </div>
-  );
-}
 
 const cellStyle = {
   width: "100%", padding: "6px 8px", border: "1px solid var(--uidai-pmis-border)",
@@ -351,6 +281,8 @@ export default function ActivityResourceAllocations({
       designation: "",
       quantity: 1,
       duration: "",
+      // The server's own default; ticking the box is what changes it.
+      resourceClassification: "planned",
       plannedDeploymentDate: String(activityStartDate || "").slice(0, 10),
       monthlyRate: null,
       computedCost: null,
@@ -388,9 +320,6 @@ export default function ActivityResourceAllocations({
       /* Annotation only — never folded into any of the `*Bad` flags above.
          Being an additional resource is not an error in the row. */
       additional: addl,
-      // Resolved once here, because the tint, the stripe and the badge all
-      // key off it and computing it three times could disagree three ways.
-      additionalKind: addl ? worstKind(addl.rows) : null,
     };
   }
 
@@ -416,11 +345,6 @@ export default function ActivityResourceAllocations({
           <option key={r.id || r.role} value={r.role}>{r.role}</option>
         ))}
       </select>
-      {/* Full width under the picker rather than floating beside it. The
-          column is 25% wide, so a badge on the same line would squeeze the
-          select narrower than the role names it has to show — and a small
-          pill tucked under one corner was what read as an afterthought. */}
-      {st.additional && <AdditionalFlag group={st.additional} kind={st.additionalKind} />}
     </>
   );
 
@@ -432,6 +356,52 @@ export default function ActivityResourceAllocations({
       onChange={(e) => patchRow(idx, { quantity: e.target.value })}
     />
   );
+
+  /* Whether this row is original plan or a head the team was approved to grow
+     by. Stored on the row and sent with the save, so it survives a reload —
+     it used to be inferred by matching the SLA report's designation names,
+     which cannot tell two rows of the same role apart.
+
+     Ticking it is the act that puts the row into SLA 008, so the label says
+     so rather than leaving it to be discovered from the report later. */
+  const additionalField = (row, idx) => {
+    const on = row.resourceClassification === "additional";
+    return (
+      <label
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          fontSize: 11.5, fontWeight: 700,
+          /* Filled, not tinted. This is the only mark left saying the row is
+             additional, so it has to carry that on its own — a pale wash in a
+             pale panel is what read as decoration before. */
+          color: on ? "#fff" : "#5b6b82",
+          background: on ? "#e0a300" : "#fff",
+          border: `1px solid ${on ? "#e0a300" : "var(--uidai-pmis-border)"}`,
+          cursor: disabled ? "not-allowed" : "pointer", userSelect: "none",
+          padding: "6px 4px", borderRadius: 6,
+          boxSizing: "border-box", width: "100%",
+        }}
+        title={on
+          ? "An additional resource — a head approved on top of the original plan. Measured by SLA 008 on how quickly it onboards."
+          : "Part of the original plan. Tick this if the head was approved on top of it — that is what puts the row into SLA 008."}
+      >
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={disabled}
+          onChange={(e) => patchRow(idx, {
+            resourceClassification: e.target.checked ? "additional" : "planned",
+          })}
+          style={{
+            margin: 0, cursor: disabled ? "not-allowed" : "pointer",
+            // Renders the tick white-on-yellow instead of a blue box on yellow.
+            accentColor: on ? "#8a6400" : undefined,
+          }}
+        />
+        {on ? "Additional" : "Planned"}
+      </label>
+    );
+  };
 
   const durationField = (row, idx, st) => (
     <input
@@ -597,19 +567,29 @@ export default function ActivityResourceAllocations({
             }}
           >
             <colgroup>
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "8%" }} />
+              <col style={{ width: "19%" }} />
+              <col style={{ width: "7%" }} />
               <col style={{ width: "11%" }} />
-              <col style={{ width: "15%" }} />
+              <col style={{ width: "10%" }} />
               <col style={{ width: "14%" }} />
-              <col style={{ width: "15%" }} />
-              <col style={{ width: "15%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "13%" }} />
               <col style={{ width: 44 }} />
             </colgroup>
             <thead>
               <tr>
                 <th style={{ ...headStyle, padding: firstCellPad }}>Designation</th>
                 <th style={headStyle}>Qty</th>
+                {/* Beside Qty on purpose: raising a designation's head count is
+                    the act that creates an additional resource, so the mark
+                    belongs next to the number being raised. */}
+                <th
+                  style={headStyle}
+                  title="Is this row part of the original plan, or a head approved on top of it? Additional rows are measured by SLA 008."
+                >
+                  Type
+                </th>
                 <th style={headStyle}>Duration (mo)</th>
                 <th
                   style={headStyle}
@@ -644,22 +624,17 @@ export default function ActivityResourceAllocations({
             <tbody>
               {rows.map((row, idx) => {
                 const st = rowState(row);
-                const flag = st.additionalKind ? FLAG_TONE[st.additionalKind] : null;
                 return (
-                  /* The whole row is tinted, so "which of these are
-                     additional" is answered by glancing down the table
-                     instead of reading every row. The stripe is an inset
-                     shadow rather than a border because a border would
-                     resize the cell and knock the flagged rows' inputs out
-                     of alignment with every other row's. */
-                  <tr key={idx} style={flag ? { background: flag.row } : undefined}>
-                    <td style={{
-                      padding: firstCellPad,
-                      boxShadow: flag ? `inset 3px 0 0 ${flag.edge}` : undefined,
-                    }}>
+                  /* No row tint and no stripe: the Type cell is a solid block
+                     of colour on exactly the rows that are additional, which
+                     answers "which of these" on its own. Tinting the row as
+                     well made three things say one thing. */
+                  <tr key={idx}>
+                    <td style={{ padding: firstCellPad }}>
                       {designationField(row, idx, st)}
                     </td>
                     <td style={{ padding: cellPad }}>{qtyField(row, idx)}</td>
+                    <td style={{ padding: cellPad }}>{additionalField(row, idx)}</td>
                     <td style={{ padding: cellPad }}>{durationField(row, idx, st)}</td>
                     <td style={{ padding: cellPad }}>{dateField(row, idx, st)}</td>
                     <td style={{ padding: cellPad, fontSize: 12.5, whiteSpace: "nowrap" }}>
@@ -689,16 +664,15 @@ export default function ActivityResourceAllocations({
           display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap",
           fontSize: 11.5, color: "#5b6b82", marginTop: 2, lineHeight: 1.5,
         }}>
+          {/* The same fill the Type cell uses, so the legend points at
+              something actually on screen. */}
           <span style={{
-            width: 22, height: 10, borderRadius: 3, flex: "0 0 auto",
-            background: FLAG_TONE.pending.row,
-            boxShadow: `inset 3px 0 0 ${FLAG_TONE.pending.edge}`,
-            border: "1px solid #eddcb4",
+            width: 22, height: 12, borderRadius: 3, flex: "0 0 auto",
+            background: "#e0a300", border: "1px solid #e0a300",
           }} aria-hidden="true" />
           <span>
-            Highlighted rows are <b>additional resources</b> — heads approved after this
-            activity was first staffed, and the ones SLA 008 scores on how quickly they
-            onboarded. Reference only; editing a row does not change them.
+            Rows marked <b>Additional</b> are heads approved after this activity was
+            first staffed — the ones SLA 008 scores on how quickly they onboarded.
           </span>
         </div>
       )}

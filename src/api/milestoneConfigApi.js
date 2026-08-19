@@ -662,6 +662,14 @@ export async function loadActivityById(activityApiId) {
    Returns undefined when the form carries no allocation array at all, which
    is how "leave the saved set untouched" is expressed on PATCH. An empty
    array is meaningful (it clears the set) and is preserved. */
+/* The two values the server stores for a resource row. Confirmed live: a
+   round-trip PATCH echoes them back unchanged, and the column is capped at 12
+   characters. Kept as constants because they travel between the editor, the
+   wire and the SLA report, and a typo in any one of them would silently
+   reclassify a row rather than fail. */
+export const PLANNED = "planned";
+export const ADDITIONAL = "additional";
+
 function serializeActivityResources(formData) {
   if (!Array.isArray(formData?.resources)) return undefined;
   return formData.resources
@@ -672,7 +680,17 @@ function serializeActivityResources(formData) {
       duration: Number(Number(r.duration || 0).toFixed(2)),
       /* Sliced, not date-parsed: the input already yields YYYY-MM-DD, and
          round-tripping through Date would shift the day by a timezone. */
-      plannedDeploymentDate: String(r.plannedDeploymentDate || "").slice(0, 10)
+      plannedDeploymentDate: String(r.plannedDeploymentDate || "").slice(0, 10),
+      /* Whether this row is original plan or a head the team was approved to
+         grow by. Verified against the live endpoint: the field is accepted on
+         PATCH, echoed back on read, and capped at 12 characters — a longer
+         value answers 422 naming this field.
+
+         Defaulted rather than omitted, because `resources` is a replace-set:
+         a row saved without it would come back as whatever the server
+         defaults to, quietly resetting a mark someone had set. */
+      resourceClassification:
+        r.resourceClassification === ADDITIONAL ? ADDITIONAL : PLANNED
     }));
 }
 

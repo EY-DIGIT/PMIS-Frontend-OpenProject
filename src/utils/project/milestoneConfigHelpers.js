@@ -307,7 +307,18 @@ function buildActivityLikeNode(a, kindLetter, childrenKey) {
             r?.plannedDeploymentDate ?? r?.planned_deployment_date
           ),
           monthlyRate: toNumberOrNull(r?.monthlyRate ?? r?.monthly_rate),
-          computedCost: toNumberOrNull(r?.computedCost ?? r?.computed_cost)
+          computedCost: toNumberOrNull(r?.computedCost ?? r?.computed_cost),
+          /* Original plan, or a head the team was approved to grow by. Read
+             back so the editor's checkbox reflects what is actually stored
+             rather than being inferred from the SLA report by matching
+             designation names, which cannot tell two rows of the same role
+             apart. Anything unrecognised falls back to "planned": that is the
+             server's own default, and guessing "additional" would put a row
+             into an SLA that is not measuring it. */
+          resourceClassification:
+            (r?.resourceClassification ?? r?.resource_classification) === "additional"
+              ? "additional"
+              : "planned"
         }))
       : [],
     resourceCostTotal:
