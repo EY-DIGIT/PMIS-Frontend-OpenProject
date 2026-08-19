@@ -34,6 +34,8 @@ import {
     listSettlements,
     getSettlement,
     overrideSettlement,
+    finalizeSettlement,
+    isSettlementFinal,
     formatQuarterKey,
     isContractYear,
 } from "../../../api/slaCompliance";
@@ -1689,38 +1691,143 @@ function CheckRow({ check }) {
     );
 }
 
-/* ─── granting an LD relaxation ───────────────────────────────────
+/* ─── a two-way segmented switch ──────────────────────────────────
+   Both switches in the relaxation dialog are the same shape — two
+   mutually exclusive words, the live one filled — so they are one
+   component rather than two near-identical blocks of inline style.
+
+   A disabled option keeps its slot instead of disappearing. The ₹ side
+   greys out when PQP is unknown, and a toggle that silently loses half
+   of itself reads as a bug; one that greys out and says why does not. */
+function Seg({ options, value, onChange, disabled }) {
+    return (
+        <div style={{
+            display: "inline-flex", border: "1px solid var(--uidai-pmis-border)",
+            borderRadius: 8, overflow: "hidden", background: "#fff",
+        }}>
+            {options.map((o, i) => {
+                const on = o.key === value;
+                const off = disabled || o.disabled;
+                return (
+                    <button
+                        key={o.key}
+                        type="button"
+                        onClick={() => { if (!off) onChange(o.key); }}
+                        disabled={off}
+                        title={o.title || ""}
+                        style={{
+                            font: "inherit", fontSize: 11.5, fontWeight: 700,
+                            padding: "6px 11px", border: 0,
+                            borderLeft: i === 0 ? 0 : "1px solid var(--uidai-pmis-border)",
+                            background: on ? INK : "transparent",
+                            color: on ? "#fff" : off ? "#9bb0c9" : INK,
+                            cursor: off ? "not-allowed" : "pointer",
+                            whiteSpace: "nowrap",
+                        }}
+                    >
+                        {o.label}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+/* ─── adjusting the quarterly LD ──────────────────────────────────
    Writes through the settlement override, which is what the backend
-   offers: it replaces Σ LD % and stores the reason, re-capping the value
-   server-side. So the form takes the relaxation as PERCENTAGE POINTS TO
-   WAIVE rather than as the resulting figure — "waive 1.8 of the 3.3
-   charged" is the decision a reviewer actually makes, and computing the
-   remainder for them removes the subtraction where the mistakes live.
+   offers: it REPLACES Σ LD % and stores the reason, re-capping the
+   value server-side.
+
+   Because the write is a replacement and not a delta, the figure this
+   dialog computes is the whole answer — which is why it moves in both
+   directions and is not bounded by what is currently charged. A
+   correction that raises the penalty (a check scored too generously, an
+   SLA breach that only came to light later) is the same kind of act as
+   one that lowers it: both end as one number on the row plus a reason.
+   Refusing the upward half did not prevent the adjustment, it only
+   meant it happened somewhere this page could not record.
+
+   Two switches, because two people think about this differently. A
+   reviewer working from a waiver note has a SIZE in mind — "1.8 points
+   off", "₹10,000 off". A reviewer working from a signed settlement has
+   a TOTAL in mind — "this quarter is 1.5%". Making either convert by
+   hand is the subtraction where the mistakes live, so the dialog does
+   it and shows the other reading of whatever was typed.
+
+   The rupee side is arithmetic on PQP, not a second unit the API
+   understands: `overrideSettlement` takes a percentage, so ₹ is
+   converted before it is sent and the rupee figure is never persisted.
+   It follows that ₹ is only offered when PQP is known.
 
    The reason is mandatory and not defaulted. It is the only record that
    survives on the settlement row of why the scored figure was not used,
-   and a blank one turns a deliberate concession into an unexplained
+   and a blank one turns a deliberate adjustment into an unexplained
    discrepancy for whoever reads the quarter next. */
-function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCancel, onSubmit }) {
+/* `chargedPercent` is what the quarter is CURRENTLY charged — the
+   settlement row's own figure, not this page's recomputation of it. An
+   adjustment is made against the penalty being levied, so the levied
+   figure is the only correct thing to measure from. Feeding it a
+   recomputed number means that whenever the two disagree, the change is
+   measured against a figure nobody is being charged. */
+function RelaxationModal({ chargedPercent, pqp, quarterCapPercent, quarterLabel, quarterDates, onCancel, onSubmit }) {
+    const [mode, setMode] = useState("delta");   // "delta" = adjust by · "total" = set to
+    const [unit, setUnit] = useState("pct");     // "pct"   = points   · "inr"   = rupees
     const [value, setValue] = useState("");
     const [reason, setReason] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
-    const scored = Number(scoredPercent) || 0;
-    const relax = Number(value);
-    const valid = Number.isFinite(relax) && relax > 0 && relax <= scored + 1e-9;
-    const next = valid ? Math.max(0, scored - relax) : scored;
-    const amountOf = (p) => (Number.isFinite(Number(pqp)) ? (p / 100) * Number(pqp) : null);
+    const charged = Number(chargedPercent) || 0;
+
+    const pqpNum = Number(pqp);
+    const hasPqp = Number.isFinite(pqpNum) && pqpNum > 0;
+    const cap = Number(quarterCapPercent);
+    const hasCap = Number.isFinite(cap) && cap > 0;
+
+    /* PQP can resolve late, or not at all. Rather than leave the dialog
+       sitting in a rupee mode it cannot do arithmetic in, the active unit
+       falls back to percent — which is what the endpoint takes anyway, so
+       the dialog is never unusable merely because the base is unknown. */
+    const activeUnit = hasPqp ? unit : "pct";
+
+    const amountOf = (v) => (hasPqp && Number.isFinite(v) ? (v / 100) * pqpNum : null);
+    const percentOf = (v) => (hasPqp && Number.isFinite(v) ? (v / pqpNum) * 100 : null);
+
+    /* Percent carries more decimals than the 2 the field steps in: one
+       rupee of a large PQP is a very small percentage, and rounding the
+       entry before sending it would quietly move the rupee figure the
+       user typed. So the value stays whole and only DISPLAY is trimmed. */
+    const p = (n) => (Number.isFinite(n) ? pct(Number(n.toFixed(4))) : "—");
+
+    const raw = Number(value);
+    const entered = value !== "" && Number.isFinite(raw)
+        ? (activeUnit === "pct" ? raw : percentOf(raw))
+        : null;
+
+    // The figure the row will carry, and the movement it represents.
+    const next = entered === null ? null : (mode === "delta" ? charged - entered : entered);
+    const delta = next === null ? null : charged - next;     // + waived · − added
+
+    const negative = next !== null && next < -1e-9;
+    const unchanged = next !== null && Math.abs(next - charged) <= 1e-9;
+    const valid = next !== null && !negative && !unchanged;
+
+    /* The server re-caps before it persists, so a figure above the
+       ceiling is not rejected — it is silently changed. Saying so is the
+       whole point of this line. The save stays allowed, because pushing
+       deliberately to the ceiling is a real thing to want; what must not
+       happen is discovering afterwards that the number on the row is not
+       the number that was typed. */
+    const overCap = valid && hasCap && next > cap + 1e-9;
 
     async function submit() {
         if (!valid || !reason.trim()) return;
         setBusy(true);
         setError("");
         try {
-            await onSubmit({ relaxPercent: relax, reason: reason.trim() });
+            await onSubmit({ nextPercent: next, reason: reason.trim() });
         } catch (err) {
-            setError(err?.message || "The relaxation could not be saved.");
+            setError(err?.message || "The adjustment could not be saved.");
             setBusy(false);
         }
     }
@@ -1742,36 +1849,106 @@ function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCan
             <div style={{
                 background: "#fff", borderRadius: 14, width: "100%", maxWidth: 460,
                 boxShadow: "0 12px 40px rgba(12,26,48,.28)", overflow: "hidden",
+                maxHeight: "92vh", display: "flex", flexDirection: "column",
             }}>
-                <div style={{ background: INK, color: "#fff", padding: "14px 18px" }}>
+                <div style={{ background: INK, color: "#fff", padding: "14px 18px", flex: "0 0 auto" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", opacity: .65 }}>
                         quarterly LD only
                     </div>
-                    <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>Grant LD relaxation</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>Adjust quarterly LD</div>
                     <div style={{ fontSize: 11.5, opacity: .8, marginTop: 2 }}>
                         {quarterLabel}{quarterDates ? ` · ${quarterDates}` : ""}
                     </div>
                 </div>
 
-                <div style={{ padding: "16px 18px" }}>
+                <div style={{ padding: "16px 18px", overflowY: "auto" }}>
                     <div style={{ fontSize: 12, ...muted, marginBottom: 12, lineHeight: 1.6 }}>
-                        Charged this quarter: <b style={{ color: RED }}>{pct(Math.round(scored * 100) / 100)}</b>
-                        {amountOf(scored) !== null && <> · {money(amountOf(scored))}</>}
+                        Charged this quarter: <b style={{ color: RED }}>{p(charged)}</b>
+                        {amountOf(charged) !== null && <> · {money(amountOf(charged))}</>}
+                    </div>
+
+                    {/* Switch one: the size of the change, or the figure it lands on. */}
+                    <div style={{ marginBottom: 10 }}>
+                        <Seg
+                            value={mode}
+                            onChange={setMode}
+                            disabled={busy}
+                            options={[
+                                { key: "delta", label: "Adjust by", title: "Enter how far to move the charge." },
+                                { key: "total", label: "Set new figure", title: "Enter the figure the quarter should carry." },
+                            ]}
+                        />
                     </div>
 
                     <label style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: INK, marginBottom: 5 }}>
-                        Relaxation to grant (percentage points)
+                        {mode === "delta" ? "Adjustment" : "New quarterly LD"}
                     </label>
-                    <input
-                        type="number" step="0.01" min="0" max={scored} value={value} autoFocus
-                        onChange={(e) => setValue(e.target.value)}
-                        placeholder={`0 – ${Math.round(scored * 100) / 100}`}
-                        style={field}
-                        disabled={busy}
-                    />
-                    {value !== "" && !valid && (
+
+                    {/* Switch two: the unit the figure above is written in. */}
+                    <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                        <input
+                            type="number"
+                            step={activeUnit === "pct" ? "0.01" : "1"}
+                            min={mode === "total" ? "0" : undefined}
+                            value={value}
+                            autoFocus
+                            onChange={(e) => setValue(e.target.value)}
+                            placeholder={activeUnit === "pct" ? "percentage points" : "rupees"}
+                            style={{ ...field, flex: "1 1 auto", minWidth: 0 }}
+                            disabled={busy}
+                        />
+                        <Seg
+                            value={activeUnit}
+                            onChange={setUnit}
+                            disabled={busy}
+                            options={[
+                                { key: "pct", label: "%", title: "Enter the figure in percentage points of PQP." },
+                                {
+                                    key: "inr",
+                                    label: "₹",
+                                    disabled: !hasPqp,
+                                    title: hasPqp
+                                        ? "Enter the figure in rupees; it is converted through PQP before saving."
+                                        : "PQP has not resolved for this quarter, so a rupee figure cannot be converted. Use %.",
+                                },
+                            ]}
+                        />
+                    </div>
+
+                    <div style={{ fontSize: 11, ...muted, marginTop: 5, lineHeight: 1.55 }}>
+                        {mode === "delta"
+                            ? "Positive lowers the charge, negative raises it. No limit in either direction."
+                            : "Replaces what is charged now — it can be higher or lower."}
+                        {!hasPqp && <> Rupees are unavailable: PQP has not resolved for this quarter.</>}
+                    </div>
+
+                    {/* The same entry read back in the other unit, so a rupee
+                        figure is never committed without its percentage being
+                        seen, nor the reverse. */}
+                    {entered !== null && hasPqp && (
+                        <div style={{ fontSize: 11.5, ...muted, marginTop: 5 }}>
+                            {activeUnit === "pct"
+                                ? <>= <b style={{ color: INK }}>{money(amountOf(entered))}</b> of PQP</>
+                                : <>= <b style={{ color: INK }}>{p(entered)}</b> of PQP</>}
+                        </div>
+                    )}
+
+                    {value !== "" && entered === null && (
                         <div style={{ fontSize: 11, color: RED, marginTop: 5 }}>
-                            Enter a figure above 0 and no more than the {Math.round(scored * 100) / 100}% charged.
+                            Enter a number.
+                        </div>
+                    )}
+                    {negative && (
+                        <div style={{ fontSize: 11, color: RED, marginTop: 5, lineHeight: 1.55 }}>
+                            That puts the quarter at {p(next)}. The charge cannot go below zero —
+                            {mode === "delta"
+                                ? ` the most that can be waived is ${p(charged)}.`
+                                : " enter 0 to waive it entirely."}
+                        </div>
+                    )}
+                    {unchanged && (
+                        <div style={{ fontSize: 11, color: RED, marginTop: 5 }}>
+                            That leaves the quarter exactly where it is. Nothing to save.
                         </div>
                     )}
 
@@ -1780,7 +1957,7 @@ function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCan
                     </label>
                     <textarea
                         rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
-                        placeholder="Who approved this relaxation, and on what grounds."
+                        placeholder="Who approved this adjustment, and on what grounds."
                         style={{ ...field, resize: "vertical" }}
                         disabled={busy}
                     />
@@ -1795,19 +1972,37 @@ function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCan
                         }}>
                             <table style={{ borderCollapse: "collapse", width: "100%" }}>
                                 <tbody>
-                                    <ChainRow label="Charged" value={pct(Math.round(scored * 100) / 100)} tone={RED} />
-                                    <ChainRow label="Relaxation" sign="−" value={pct(Math.round(relax * 100) / 100)} tone={GREEN} />
+                                    <ChainRow label="Charged" value={p(charged)} tone={RED} />
                                     <ChainRow
-                                        label="LD after relaxation"
+                                        label={delta > 0 ? "Relaxation" : "Increase"}
+                                        sign={delta > 0 ? "−" : "+"}
+                                        value={p(Math.abs(delta))}
+                                        tone={delta > 0 ? GREEN : RED}
+                                    />
+                                    <ChainRow
+                                        label="Quarterly LD after this"
                                         sign="="
-                                        value={pct(Math.round(next * 100) / 100)}
+                                        value={p(next)}
                                         strong rule
                                         hint={amountOf(next) !== null
-                                            ? `${money(amountOf(next))} of PQP — down from ${money(amountOf(scored))}.`
+                                            ? `${money(amountOf(next))} of PQP — ${delta > 0 ? "down" : "up"} from ${money(amountOf(charged))}.`
                                             : null}
                                     />
                                 </tbody>
                             </table>
+                        </div>
+                    )}
+
+                    {overCap && (
+                        <div style={{
+                            marginTop: 10, padding: "9px 11px", borderRadius: 8,
+                            background: "#fdf4f2", border: "1px solid #f0c9c2",
+                            fontSize: 11.5, color: RED, lineHeight: 1.6,
+                        }}>
+                            <b>Above the {cap}% quarter ceiling.</b> The server re-caps before it
+                            saves, so the row will end up holding {pct(cap)}, not {p(next)}. Save
+                            anyway if that is what you intend — the reason above is what will
+                            explain it.
                         </div>
                     )}
 
@@ -1834,7 +2029,131 @@ function RelaxationModal({ scoredPercent, pqp, quarterLabel, quarterDates, onCan
                             onClick={submit}
                             disabled={busy || !valid || !reason.trim()}
                         >
-                            {busy ? "Saving…" : "Grant relaxation"}
+                            {busy ? "Saving…" : delta !== null && delta < 0 ? "Raise LD" : "Grant relaxation"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/* ─── marking a quarter final ─────────────────────────────────────
+   Ends the relaxation window. Until this is pressed a quarter can be
+   relaxed and re-relaxed for as long as the project runs; afterwards
+   the figure is the one being stood behind.
+
+   Deliberately heavier than the relaxation dialog: a relaxation can be
+   revised, this cannot be undone from here. It states the figure being
+   frozen, requires a reason, and names the consequence in the button
+   rather than saying "OK".                                            */
+function FinalizeModal({ effectivePercent, ldAmount, quarterLabel, quarterDates, onCancel, onSubmit }) {
+    const [reason, setReason] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+
+    async function submit() {
+        setBusy(true);
+        setError("");
+        try {
+            await onSubmit({ reason: reason.trim() });
+        } catch (err) {
+            setError(err?.message || "The quarter could not be marked final.");
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div
+            style={{
+                position: "fixed", inset: 0, background: "rgba(12,26,48,.45)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 20, zIndex: 60,
+            }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}
+        >
+            <div style={{
+                background: "#fff", borderRadius: 14, width: "100%", maxWidth: 460,
+                boxShadow: "0 12px 40px rgba(12,26,48,.28)", overflow: "hidden",
+            }}>
+                <div style={{ background: INK, color: "#fff", padding: "14px 18px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", opacity: .65 }}>
+                        ends the relaxation window
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>Mark quarter final</div>
+                    <div style={{ fontSize: 11.5, opacity: .8, marginTop: 2 }}>
+                        {quarterLabel}{quarterDates ? ` · ${quarterDates}` : ""}
+                    </div>
+                </div>
+
+                <div style={{ padding: "16px 18px" }}>
+                    <div style={{
+                        background: "#fbfdff", border: "1px solid var(--uidai-pmis-border)",
+                        borderRadius: 10, padding: "11px 13px", marginBottom: 14,
+                    }}>
+                        <div style={{ fontSize: 11, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".3px" }}>
+                            Figure being frozen
+                        </div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: RED, marginTop: 4 }}>
+                            {ldAmount === null || ldAmount === undefined ? "—" : money(ldAmount)}
+                        </div>
+                        <div style={{ fontSize: 11.5, ...muted, marginTop: 2 }}>
+                            {effectivePercent === null || effectivePercent === undefined
+                                ? "No penalty percentage resolved for this quarter."
+                                : `${pct(Math.round(effectivePercent * 100) / 100)} of PQP, after any relaxation already granted.`}
+                        </div>
+                    </div>
+
+                    <div style={{ fontSize: 12, ...muted, marginBottom: 12, lineHeight: 1.6 }}>
+                        After this, the quarter can no longer be relaxed from this page. It stays
+                        readable and it is <b>not</b> invoiced — that is a separate step on the
+                        Settlement page.
+                    </div>
+
+                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: INK, marginBottom: 5 }}>
+                        Reason
+                    </label>
+                    <textarea
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        rows={3}
+                        placeholder="Who signed this off, and on what basis."
+                        style={{
+                            width: "100%", padding: "7px 10px", borderRadius: 8,
+                            border: "1px solid var(--uidai-pmis-border)", font: "inherit",
+                            fontSize: 13, resize: "vertical",
+                        }}
+                    />
+                    <div style={{ fontSize: 11, ...muted, marginTop: 5, lineHeight: 1.5 }}>
+                        Recorded against the settlement row. This is the audit trail for why the
+                        quarter stopped being revisable.
+                    </div>
+
+                    {error && (
+                        <div style={{ marginTop: 12, fontSize: 11.5, color: RED, fontWeight: 600, lineHeight: 1.6 }}>
+                            {error}
+                        </div>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}>
+                        <button
+                            type="button"
+                            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                            style={{ marginTop: 0 }}
+                            onClick={onCancel}
+                            disabled={busy}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="uidai-pmis-btn uidai-pmis-btn-small"
+                            style={{ marginTop: 0 }}
+                            onClick={submit}
+                            disabled={busy || !reason.trim()}
+                        >
+                            {busy ? "Saving…" : "Mark final"}
                         </button>
                     </div>
                 </div>
@@ -2496,6 +2815,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     // Bumped after a successful relaxation so the row is re-read.
     const [settlementTick, setSettlementTick] = useState(0);
     const [relaxOpen, setRelaxOpen] = useState(false);
+    const [finalizeOpen, setFinalizeOpen] = useState(false);
     const [showFormulas, setShowFormulas] = useState(false);
     const [showGlossary, setShowGlossary] = useState(false);
     /* Opened automatically when something actually affects the figures —
@@ -3347,19 +3667,53 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         const stored = Number(rawStored);
         const hasStored = rawStored !== null && rawStored !== undefined && rawStored !== ""
             && Number.isFinite(stored);
-        const granted = hasStored && Number.isFinite(scored) && scored - stored > 0.0001
+        /* SIGNED, because the adjustment goes both ways: positive is a
+           relaxation, negative is a correction upward. Reading only the
+           positive half meant a quarter whose LD had been deliberately
+           raised reported "no relaxation on this quarter" and showed no
+           reason — the override was on the row, invisible, which is the
+           one state this strip exists to prevent. */
+        const movement = hasStored && Number.isFinite(scored) && Math.abs(scored - stored) > 0.0001
             ? scored - stored
             : 0;
+        const granted = Math.abs(movement);
         const pqp = Number(chain.pqp);
+
+        /* What a relaxation is actually granted AGAINST: the penalty being
+           levied, which is the settlement row's figure. This page's own
+           recomputation is only the fallback for a quarter with no row.
+
+           They are usually the same. When they are not — the row is what
+           Finance invoices, so it is the one a waiver has to reduce.
+           Gating on the recomputation instead meant a quarter could show
+           a ₹33 lakh deduction on the statement while the button said
+           there was nothing to relax, and it meant granting 2% would post
+           `recomputed − 2`, silently wiping the whole charge rather than
+           trimming it. */
+        const charged = hasStored ? stored : (Number.isFinite(scored) ? scored : null);
+
         return {
             scoredPercent: Number.isFinite(scored) ? scored : null,
-            effectivePercent: hasStored ? stored : (Number.isFinite(scored) ? scored : null),
+            chargedPercent: charged,
+            effectivePercent: charged,
             grantedPercent: granted,
             grantedAmount: granted > 0 && Number.isFinite(pqp) ? (granted / 100) * pqp : null,
             reason: settlementRow?.overrideReason || "",
             applied: granted > 0,
-            // Only a closed quarter has a row to override (404 before that).
-            canGrant: !!settlementRow && String(settlementRow.status || "") !== "invoiced",
+            // Which way it moved, for a strip that has to name it either way.
+            raised: movement < 0,
+            /* A relaxation has NO deadline. The quarter ending does not
+               close it, and neither does any amount of time passing — a
+               waiver is routinely agreed months after the quarter it
+               applies to, and the RFP sets no limit. The only thing that
+               ends it is somebody deciding the figure is final.
+
+               The one structural requirement is a settlement row to
+               override, which exists from the moment the quarter is first
+               opened on this page (the read auto-closes it). */
+            canGrant: !!settlementRow && !isSettlementFinal(settlementRow),
+            finalized: isSettlementFinal(settlementRow),
+            invoiced: String(settlementRow?.status || "").toLowerCase() === "invoiced",
             blockedReason: !settlementRow
                 /* The endpoint's own words when it refused, rather than a
                    guess at why. A 404 here means "not closed yet", which is
@@ -3367,7 +3721,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 ? (contractSettlementError
                     ? `This quarter's settlement could not be read — ${contractSettlementError}`
                     : "This quarter has no settlement row yet, so there is nothing to relax. It is created when the quarter is closed.")
-                : String(settlementRow.status || "") === "invoiced"
+                : String(settlementRow.status || "").toLowerCase() === "invoiced"
                     /* The backend's own words, confirmed against the live
                        endpoint: it answers 422 `settlement_immutable` with
                        "Cannot override an invoiced settlement — issue a credit
@@ -3375,7 +3729,9 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                        not. The guard stays only to spare a doomed request and
                        a filled-in form; the rule is the server's. */
                     ? "Cannot override an invoiced settlement — issue a credit note."
-                    : "",
+                    : isSettlementFinal(settlementRow)
+                        ? "This quarter has been marked final. Reopening it is a deliberate act — ask whoever finalised it."
+                        : "",
         };
     }, [totals.sumLdPercent, settlementRow, chain.pqp, contractSettlementError]);
 
@@ -3417,15 +3773,49 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         };
     }, [settlementRow, period]);
 
-    const grantRelaxation = useCallback(async ({ relaxPercent, reason }) => {
-        const scored = Number(totals.sumLdPercent) || 0;
-        const next = Math.max(0, scored - Number(relaxPercent));
+    /* Takes the RESULTING figure, not the size of the change.
+
+       The override is a replacement — it writes Σ LD % outright rather
+       than recording a delta — so the subtraction belongs where the
+       charged figure is on screen and can be checked against it, which
+       is the dialog. Redoing it here from a delta meant the same
+       arithmetic existed twice against two different ideas of what was
+       charged, and the copy without the figure in front of it is the
+       one that got it wrong.
+
+       The floor at 0 is the only rule left. There is deliberately no
+       ceiling: the quarter cap belongs to the server, which re-caps on
+       persist, and the dialog warns before it comes to that. */
+    const grantRelaxation = useCallback(async ({ nextPercent, reason }) => {
         await overrideSettlement(projectId, quarterProbeDate, {
-            sumLdPercent: next,
+            sumLdPercent: Math.max(0, Number(nextPercent) || 0),
             overrideReason: reason,
         });
         setSettlementTick((t) => t + 1);
-    }, [projectId, quarterProbeDate, totals.sumLdPercent]);
+    }, [projectId, quarterProbeDate]);
+
+    /* Mark the quarter final — the act that ends the relaxation window.
+
+       The endpoint is not deployed yet, so a 404/405 is the EXPECTED
+       failure today and has to read as "not available", not as "the
+       server rejected your reason". Anything else is the server's own
+       message, passed through untouched. */
+    const finalizeQuarter = useCallback(async ({ reason }) => {
+        try {
+            await finalizeSettlement(projectId, quarterProbeDate, { reason });
+        } catch (err) {
+            const msg = String(err?.message || "");
+            if (/\b(404|405|not found|method not allowed)\b/i.test(msg)) {
+                throw new Error(
+                    "The finalise endpoint is not deployed yet, so this quarter could not be marked final. "
+                    + "The backend needs POST …/settlement/{quarter}/finalize accepting a reason. "
+                    + "Nothing was changed."
+                );
+            }
+            throw err;
+        }
+        setSettlementTick((t) => t + 1);
+    }, [projectId, quarterProbeDate]);
 
     const cumulative = useMemo(() => cumulativePayout(settlements), [settlements]);
 
@@ -5461,16 +5851,19 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 ? `Capped from ${pct(chain.sumLdPercent)} at the ${chain.quarterCapPercent}% ceiling.`
                                                 : null}
                                         />
-                                        {/* A relaxation lowers the penalty, so it reads as
-                                            money coming BACK — the only "+" in an otherwise
-                                            downward column, which is exactly what it is. */}
+                                        {/* A relaxation lowers the penalty, so it reads as money
+                                            coming BACK — the only "+" in an otherwise downward
+                                            column, which is exactly what it is. An adjustment the
+                                            other way is a further deduction and has to read as
+                                            one; carrying a green "+" on it would show a raised
+                                            LD as money returned. */}
                                         {relaxation.applied && (
                                             <ChainRow
-                                                label="Relaxation granted"
-                                                clause={`${pct(Math.round(relaxation.grantedPercent * 100) / 100)} waived`}
-                                                sign="+"
+                                                label={relaxation.raised ? "LD raised on review" : "Relaxation granted"}
+                                                clause={`${pct(Math.round(relaxation.grantedPercent * 100) / 100)} ${relaxation.raised ? "added" : "waived"}`}
+                                                sign={relaxation.raised ? "−" : "+"}
                                                 value={relaxation.grantedAmount === null ? "—" : money(relaxation.grantedAmount)}
-                                                tone={GREEN}
+                                                tone={relaxation.raised ? RED : GREEN}
                                                 hint={relaxation.reason ? `Reason: ${relaxation.reason}` : "No reason recorded."}
                                             />
                                         )}
@@ -5585,33 +5978,67 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
                                         }}>
                                             <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-                                                <div style={{ fontSize: 11.5, fontWeight: 700, color: relaxation.applied ? GREEN : INK }}>
-                                                    {relaxation.applied
-                                                        ? `Relaxation of ${pct(Math.round(relaxation.grantedPercent * 100) / 100)} granted`
-                                                        : "No relaxation on this quarter"}
+                                                <div style={{
+                                                    fontSize: 11.5, fontWeight: 700,
+                                                    color: relaxation.finalized ? INK
+                                                        : relaxation.applied ? (relaxation.raised ? RED : GREEN)
+                                                            : INK,
+                                                }}>
+                                                    {relaxation.finalized
+                                                        ? (relaxation.invoiced ? "Quarter invoiced — locked" : "Quarter marked final")
+                                                        : relaxation.applied
+                                                            ? `${relaxation.raised ? "LD raised by" : "Relaxation of"} ${pct(Math.round(relaxation.grantedPercent * 100) / 100)}${relaxation.raised ? "" : " granted"}`
+                                                            : "No adjustment on this quarter"}
                                                 </div>
                                                 <div style={{ fontSize: 11, ...muted, marginTop: 2, lineHeight: 1.55 }}>
-                                                    {relaxation.applied
-                                                        ? (relaxation.reason || "No reason was recorded against the settlement row.")
-                                                        : relaxation.canGrant
-                                                            ? "Lowers the quarterly LD only — deliverable penalties are settled separately."
-                                                            : relaxation.blockedReason}
+                                                    {relaxation.finalized
+                                                        ? relaxation.blockedReason
+                                                        : relaxation.applied
+                                                            ? (relaxation.reason || "No reason was recorded against the settlement row.")
+                                                            : relaxation.canGrant
+                                                                /* Says the quiet part: nothing expires. The
+                                                                   commonest question about this control is
+                                                                   "have I missed the window", and the answer
+                                                                   is no — only marking it final ends it. */
+                                                                ? "Moves the quarterly LD up or down, in % or rupees — deliverable penalties are settled separately. Stays available until the quarter is marked final."
+                                                                : relaxation.blockedReason}
                                                 </div>
                                             </div>
                                             <button
                                                 type="button"
                                                 className="uidai-pmis-btn uidai-pmis-btn-small"
                                                 style={{ marginTop: 0 }}
-                                                disabled={!relaxation.canGrant || !(relaxation.scoredPercent > 0)}
+                                                /* No longer gated on something being charged. The
+                                                   dialog moves the figure both ways, so a quarter
+                                                   sitting at 0% is still adjustable — that is
+                                                   exactly the case where a missed breach has to be
+                                                   put back on. The only gate is the row itself. */
+                                                disabled={!relaxation.canGrant}
                                                 title={!relaxation.canGrant
                                                     ? relaxation.blockedReason
-                                                    : !(relaxation.scoredPercent > 0)
-                                                        ? "Nothing was charged this quarter, so there is nothing to relax."
-                                                        : "Waive part of this quarter's quarterly LD."}
+                                                    : "Move this quarter's quarterly LD up or down, in % or rupees."}
                                                 onClick={() => setRelaxOpen(true)}
                                             >
-                                                {relaxation.applied ? "Revise relaxation" : "Grant relaxation"}
+                                                {relaxation.applied ? "Revise adjustment" : "Adjust LD"}
                                             </button>
+                                            {/* The other half of the pair: one revises, one stops
+                                                revision. Hidden once the quarter is closed rather
+                                                than shown disabled — a permanently dead button
+                                                beside a live one reads as something broken. */}
+                                            {!relaxation.finalized && (
+                                                <button
+                                                    type="button"
+                                                    className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                                                    style={{ marginTop: 0 }}
+                                                    disabled={!settlementRow}
+                                                    title={!settlementRow
+                                                        ? "This quarter has no settlement row yet."
+                                                        : "Stop this quarter being relaxed further. Does not invoice it."}
+                                                    onClick={() => setFinalizeOpen(true)}
+                                                >
+                                                    Mark final
+                                                </button>
+                                            )}
                                         </div>
 
                                         {/* ── C · the invoice ─────────────────────── */}
@@ -5816,14 +6243,33 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
 
             {relaxOpen && (
                 <RelaxationModal
-                    scoredPercent={relaxation.scoredPercent}
+                    chargedPercent={relaxation.chargedPercent}
                     pqp={chain.pqp}
+                    /* From the chain first — that is the cap the figures on
+                       this quarter were actually computed under. `totals` is
+                       the fallback for a quarter whose chain has not
+                       resolved; a missing cap just drops the warning. */
+                    quarterCapPercent={chain.quarterCapPercent ?? totals.quarterCapPercent}
                     quarterLabel={period?.label || "this quarter"}
                     quarterDates={period ? `${longDate(period.start)} → ${longDate(period.end)}` : ""}
                     onCancel={() => setRelaxOpen(false)}
                     onSubmit={async (payload) => {
                         await grantRelaxation(payload);
                         setRelaxOpen(false);
+                    }}
+                />
+            )}
+
+            {finalizeOpen && (
+                <FinalizeModal
+                    effectivePercent={relaxation.effectivePercent}
+                    ldAmount={chain.ldAmount}
+                    quarterLabel={period?.label || "this quarter"}
+                    quarterDates={period ? `${longDate(period.start)} → ${longDate(period.end)}` : ""}
+                    onCancel={() => setFinalizeOpen(false)}
+                    onSubmit={async (payload) => {
+                        await finalizeQuarter(payload);
+                        setFinalizeOpen(false);
                     }}
                 />
             )}

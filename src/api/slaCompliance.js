@@ -273,6 +273,58 @@ export function overrideSettlement(projectId, quarter, { sumLdPercent, overrideR
     }).then(toPqp);
 }
 
+/* Close the quarter to further relaxation, WITHOUT invoicing it.
+
+   A relaxation stays available for as long as the project runs — the
+   RFP puts no deadline on it, and in practice a waiver is agreed months
+   after the quarter it applies to. So nothing expires; the quarter stays
+   open to revision until somebody deliberately says "this figure is the
+   one we are standing behind".
+
+   That is what this is. It is NOT `mark-invoiced`: invoicing is a
+   finance event that happens later and locks the row permanently against
+   everything. Finalising is the SLA owner signing off the penalty, and
+   it takes a reason because the point of it is accountability — the
+   thing being recorded is a decision, not a state change.
+
+   ── NOT YET DEPLOYED ───────────────────────────────────────────────
+   The endpoint below is the agreed shape, not a live route. Until the
+   backend ships it this call answers 404/405, and the caller reports
+   that plainly rather than pretending the quarter was finalised. The
+   contract expected:
+
+       POST .../settlement/{quarter}/finalize   { reason }
+       → the settlement row, with a status of "final" (or a
+         `finalizedAt` timestamp, or both — the reader below accepts
+         any of them) and the reason echoed back.
+
+   Idempotent: finalising a final quarter should return the row, not
+   error, so a double-click cannot produce a second audit entry.       */
+export function finalizeSettlement(projectId, quarter, { reason }) {
+    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/finalize`, {
+        method: "POST",
+        body: { reason },
+    }).then(toPqp);
+}
+
+/* Is this row closed to further relaxation?
+
+   Deliberately tolerant: the finalise contract is not deployed yet, so
+   rather than pin to one field this accepts whichever the backend ends
+   up sending — a status, a timestamp, or a flag. An INVOICED row counts
+   too: invoicing is the stronger lock and implies finality.
+
+   Erring toward "locked" is the safe direction. Reading a final row as
+   open offers a relaxation the server will reject; reading an open row
+   as final only hides a button that can be un-hidden.                 */
+export function isSettlementFinal(row) {
+    if (!row) return false;
+    const status = String(row.status || "").toLowerCase();
+    if (status === "final" || status === "finalized" || status === "finalised") return true;
+    if (status === "invoiced") return true;
+    return !!(row.finalizedAt || row.finalisedAt || row.isFinal);
+}
+
 // Phase E — lock the row after the invoice is raised. Idempotent.
 export function markSettlementInvoiced(projectId, quarter, invoiceRef) {
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/mark-invoiced`, {
