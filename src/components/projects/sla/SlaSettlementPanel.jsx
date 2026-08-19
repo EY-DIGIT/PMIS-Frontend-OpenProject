@@ -25,6 +25,7 @@ import {
 } from "../../../api/slaCompliance";
 import { contractQuarters, contractQuarterFor, anchorFromQuarterRow } from "../../../utils/project/slaRollup";
 import { formatINR } from "../../../utils/project/helpers";
+import { buildSettlementChain } from "../../../utils/project/settlementChain";
 
 const muted = { color: "var(--uidai-pmis-muted)" };
 
@@ -439,10 +440,46 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                     <div className="uidai-pmis-grid-4" style={{ gap: 12 }}>
                         <Tile label="Sum LD %" value={pct(settlement.sumLdPercent)} hint="before quarter cap" />
                         <Tile label="Capped LD %" value={pct(settlement.cappedLdPercent)} accent="#c0392b" hint="RFP §5.27.6 cap" />
-                        {/* PQP is F alone. QGR was part of the base under the
-                            deleted NPQP clause and is not any more — it appears
-                            once, in the AQP add-back below. */}
-                        <Tile label="PQP" value={money(settlement.pqp)} hint={`F ${money(settlement.fAmount)} — QGR excluded`} />
+                        {/* F beside PQP rather than tucked into its hint. Since
+                            corrigendum 47/49 the two ARE the same figure, so
+                            showing both means a row still priced on the old
+                            F + QGR base declares itself instead of hiding
+                            inside one number. The staleness test comes from the
+                            shared chain builder — the rollup page asks the same
+                            question, and two copies of that rule could answer it
+                            two ways. */}
+                        {(() => {
+                            const c = buildSettlementChain({
+                                fAmount: settlement.fAmount,
+                                qgrAmount: settlement.qgrAmount,
+                                pqp: settlement.pqp,
+                                sumLdPercent: settlement.sumLdPercent,
+                                cappedLdPercent: settlement.cappedLdPercent,
+                            });
+                            const bad = c.staleNpqpBase || c.pqpConsistent === false;
+                            return (
+                                <>
+                                    <Tile
+                                        label="F"
+                                        value={money(settlement.fAmount)}
+                                        accent={bad ? "#c0392b" : undefined}
+                                        hint={c.f === null
+                                            ? "not available"
+                                            : c.staleNpqpBase
+                                                ? "⚠ base is F + QGR — priced by the old service"
+                                                : c.pqpConsistent === false
+                                                    ? "⚠ differs from the settled PQP"
+                                                    : "planned resource cost — the LD base"}
+                                    />
+                                    <Tile
+                                        label="PQP"
+                                        value={money(settlement.pqp)}
+                                        accent={bad ? "#c0392b" : undefined}
+                                        hint={bad ? "does not equal F — see the note below" : "= F — QGR excluded"}
+                                    />
+                                </>
+                            );
+                        })()}
                         <Tile label="LD Amount" value={money(settlement.ldAmount)} accent="#c0392b" hint="LD % × PQP, deducted this quarter" />
                         <Tile label="Payable Amount (PA)" value={money(settlement.paAmount)} />
                         <Tile label="Adjusted Quarterly Payment (AQP)" value={money(settlement.aqpAmount)} accent="#1f8a4c" hint="(PA − LD) + QGR" />

@@ -4586,6 +4586,34 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 ? `the ${totals.quarterCapPercent}% quarter ceiling bit`
                                                 : `ceiling ${totals.quarterCapPercent}% of PQP`}
                                         />
+                                        {/* F sits immediately before PQP because PQP IS F
+                                            (corrigendum 47/49 — QGR is out of the base). Side
+                                            by side the two should read identically, so a row
+                                            still priced on the old F + QGR base shows itself
+                                            as a mismatch instead of hiding inside one figure.
+
+                                            `chain.f` rather than the deployment plan's own
+                                            total: this is the F the settlement actually used —
+                                            the row's when the quarter is closed, the endpoint's
+                                            while it is open. The plan-derived figure and the
+                                            gap between them stay in "The payment base" below,
+                                            which is where that comparison belongs. */}
+                                        <Tile
+                                            label="F"
+                                            value={money(chain.f)}
+                                            hint={chain.f === null
+                                                ? "not available"
+                                                : chain.staleNpqpBase
+                                                    ? "⚠ base is F + QGR — priced by the old service"
+                                                    : chain.pqpConsistent === false
+                                                        ? "⚠ differs from the settled PQP"
+                                                        : "planned resource cost · the penalty base"}
+                                            accent={chain.f === null
+                                                ? AMBER
+                                                : (chain.staleNpqpBase || chain.pqpConsistent === false)
+                                                    ? RED
+                                                    : undefined}
+                                        />
                                         <Tile
                                             label="PQP"
                                             value={money(totals.pqp)}

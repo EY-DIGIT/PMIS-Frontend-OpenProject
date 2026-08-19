@@ -664,16 +664,7 @@ export default function ActivityResourceAllocations({
           display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap",
           fontSize: 11.5, color: "#5b6b82", marginTop: 2, lineHeight: 1.5,
         }}>
-          {/* The same fill the Type cell uses, so the legend points at
-              something actually on screen. */}
-          <span style={{
-            width: 22, height: 12, borderRadius: 3, flex: "0 0 auto",
-            background: "#e0a300", border: "1px solid #e0a300",
-          }} aria-hidden="true" />
-          <span>
-            Rows marked <b>Additional</b> are heads approved after this activity was
-            first staffed — the ones SLA 008 scores on how quickly they onboarded.
-          </span>
+          
         </div>
       )}
 
