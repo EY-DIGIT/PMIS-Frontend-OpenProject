@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import * as ratesApi from "../../api/designationRates";
+import { getAdditionalResourceOnboardingReport } from "../../api/attendanceReports";
+import {
+  readAdditionalResources, groupByDesignation, tallyOnboarding,
+} from "../../utils/project/additionalOnboarding";
 
 /* ────────────────────────────────────────────────────────────────────
    Resource allocation on a resource-based activity.
@@ -39,6 +43,98 @@ const inr = (n) => {
 
 const MAX_DURATION = 3;
 
+/* ─── additional-resource flags (SLA 008) ──────────────────────────────
+   Some of these rows are not original deployment — they are heads the team
+   was approved to GROW by, after it was already staffed. That distinction
+   is invisible in this table: a row for 1 Program Director looks the same
+   whether it was in the original plan or added eighteen months later, and
+   only the second one is scored by SLA 008.
+
+   Worth flagging here, of all places, because this is where somebody
+   changes a quantity. Raising a designation from 1 to 2 IS the act that
+   creates an additional resource and starts that SLA's clock — and doing
+   it without knowing that is how a breach gets created by accident.
+
+   The flag is an annotation and nothing more. It never edits a row, never
+   blocks a save, and never colours a field red: the report is a
+   measurement of what the backend already approved, not a validation of
+   what is being typed. */
+/* Three levels of loudness, because one badge could not carry it.
+
+   `row` tints the whole row, so which rows are additional is answered by
+   glancing down the table rather than by reading each one. `solid` fills
+   the badge itself — a tinted-outline pill sat in a tinted panel and read
+   as decoration, so this one is filled and reversed out in white, which is
+   the only treatment in this table that does that. `edge` draws the left
+   margin stripe that ties the two together. */
+const FLAG_TONE = {
+  pass: { solid: "#1a7a48", row: "#f1faf5", edge: "#1a7a48", word: "onboarded" },
+  fail: { solid: "#c0392b", row: "#fdf4f2", edge: "#c0392b", word: "breached" },
+  pending: { solid: "#b06f00", row: "#fffaef", edge: "#b06f00", word: "pending" },
+  unknown: { solid: "#456186", row: "#f6faff", edge: "#456186", word: "unclassified" },
+};
+
+/* Designations come from one rate card on both sides, so they should match
+   exactly — but "Program Director" and "program  director" arriving from
+   two services is a difference in typing, not in meaning, and letting it
+   drop the flag would be a silent failure. */
+const desigKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/* One designation's worst outstanding state. A breach outranks a pending
+   seat, which outranks a clean one — the badge has room for a single
+   answer and the reason to look at it is the worst thing it can say. */
+function worstKind(rows) {
+  const t = tallyOnboarding(rows);
+  if (t.fail > 0) return "fail";
+  if (t.pending > 0) return "pending";
+  if (t.pass > 0) return "pass";
+  return "unknown";
+}
+
+function AdditionalFlag({ group, kind }) {
+  const tone = FLAG_TONE[kind] || FLAG_TONE.unknown;
+  const t = tallyOnboarding(group.rows);
+
+  const qty = `Approved head count ${group.originalQuantity ?? "—"} → ${group.currentApprovedQuantity ?? "—"}`;
+  const heads = group.additionalQuantity === null
+    ? "an additional head"
+    : `${group.additionalQuantity} additional head${group.additionalQuantity === 1 ? "" : "s"}`;
+  const state = [
+    t.pass > 0 ? `${t.pass} onboarded in time` : "",
+    t.fail > 0 ? `${t.fail} breached` : "",
+    t.pending > 0 ? `${t.pending} still pending` : "",
+    t.unknown > 0 ? `${t.unknown} unclassified` : "",
+  ].filter(Boolean).join(", ");
+
+  // The planned dates, so the tooltip says WHEN without opening another page.
+  const planned = group.rows
+    .map((r) => r.plannedDeploymentDate)
+    .filter(Boolean);
+
+  return (
+    <div
+      title={`${qty} — ${heads} on this activity. ${state}.`
+        + (planned.length ? ` Planned ${planned.join(", ")}.` : "")
+        + (group.quantitiesVary ? " ⚠ the report's rows disagree about this designation's quantities." : "")
+        + " Measured by SLA 008; shown here for reference and not editable."}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        width: "100%", boxSizing: "border-box", marginTop: 5,
+        padding: "3px 8px", borderRadius: 6, cursor: "help",
+        background: tone.solid, color: "#fff",
+        fontSize: 9.5, fontWeight: 800, letterSpacing: ".7px", textTransform: "uppercase",
+        whiteSpace: "nowrap", overflow: "hidden",
+      }}
+    >
+      <span>
+        {group.additionalQuantity === null ? "Additional" : `+${group.additionalQuantity} additional`}
+      </span>
+      <span style={{ opacity: .55 }} aria-hidden="true">•</span>
+      <span style={{ opacity: .92, overflow: "hidden", textOverflow: "ellipsis" }}>{tone.word}</span>
+    </div>
+  );
+}
+
 const cellStyle = {
   width: "100%", padding: "6px 8px", border: "1px solid var(--uidai-pmis-border)",
   borderRadius: 6, background: "#fff", font: "inherit", fontSize: 13,
@@ -55,6 +151,13 @@ const headStyle = {
 
 const cellPad = "0 10px 8px 0";
 
+/* The first column carries a 9px gutter on EVERY row, flagged or not, so the
+   additional-resource stripe has somewhere to live without resizing the cell.
+   Applying it only to flagged rows would indent their pickers 9px further
+   than everyone else's, and a column that doesn't line up is a worse problem
+   than the one the stripe solves. */
+const firstCellPad = "0 10px 8px 9px";
+
 /* What the seven columns genuinely need to stay comfortable. The table never
    shrinks below this — a narrower panel scrolls sideways instead, which is
    what the scrollbar under the table is for. */
@@ -65,6 +168,10 @@ export default function ActivityResourceAllocations({
   onChange,
   projectId,
   projectStartDate = "",
+  /* The saved activity's backend id. Empty while an activity is being
+     CREATED, which is correct and not a gap: nothing has been approved to
+     grow yet, so there is no additional-resource report to flag against. */
+  activityId = "",
   /* The activity's organisation — the rate card is keyed on it. */
   organisationId = "",
   /* Anchors the contract year for the cost estimate, and — with
@@ -106,6 +213,57 @@ export default function ActivityResourceAllocations({
     roles.forEach((r) => { m[r.role] = r; });
     return m;
   }, [roles]);
+
+  /* ── which of these rows are ADDITIONAL (SLA 008) ──────────────────
+     Read-only, and deliberately not part of `loadRoles`: the rate card
+     decides what this table can contain and its failure is worth a banner,
+     whereas this only annotates what is already there. If the attendance
+     service is down the editor must still work exactly as it did before
+     the flags existed. */
+  const [additional, setAdditional] = useState(null);
+  const [additionalError, setAdditionalError] = useState("");
+
+  useEffect(() => {
+    if (!projectId || !activityId) { setAdditional(null); setAdditionalError(""); return undefined; }
+    let alive = true;
+    const controller = new AbortController();
+    (async () => {
+      const { data, error: err } = await getAdditionalResourceOnboardingReport(
+        projectId, activityId, controller.signal
+      );
+      if (!alive) return;
+      setAdditional(data);
+      // 404 is "the team was never grown here" — a real answer, not a fault.
+      setAdditionalError(err || "");
+    })();
+    return () => { alive = false; controller.abort(); };
+  }, [projectId, activityId]);
+
+  /* Keyed by designation, because that is the only field the report and an
+     allocation row have in common — the report is about approved head
+     counts per role, and these rows have no id it could refer to. */
+  const additionalByDesignation = useMemo(() => {
+    const groups = groupByDesignation(readAdditionalResources(additional));
+    const m = new Map();
+    groups.forEach((g) => { if (g.designation) m.set(desigKey(g.designation), g); });
+    return m;
+  }, [additional]);
+
+  /* Approved to grow, but no row here to grow into. Worth saying out loud:
+     it means either the allocation was never updated to match the approval,
+     or the designation was renamed on one side. Both are things somebody
+     editing this table needs to know, and neither is visible from the rows
+     themselves — an absent row cannot carry a badge. */
+  const anyAdditional = rows.some(
+    (r) => r.designation && additionalByDesignation.has(desigKey(r.designation))
+  );
+
+  const unallocatedAdditions = useMemo(() => {
+    const present = new Set(rows.map((r) => desigKey(r.designation)).filter(Boolean));
+    const out = [];
+    additionalByDesignation.forEach((g, k) => { if (!present.has(k)) out.push(g); });
+    return out;
+  }, [rows, additionalByDesignation]);
 
   /* What a row costs. Prefer the server's own numbers; fall back to an
      estimate at the rate for the activity's contract year. */
@@ -177,36 +335,52 @@ export default function ActivityResourceAllocations({
       !!row.plannedDeploymentDate
       && ((activityStartDate && row.plannedDeploymentDate < String(activityStartDate).slice(0, 10))
         || (activityEndDate && row.plannedDeploymentDate > String(activityEndDate).slice(0, 10)));
+    const addl = row.designation
+      ? additionalByDesignation.get(desigKey(row.designation)) || null
+      : null;
     return {
       rate, cost, estimated,
       missingRole: !!row.designation && !roleByName[row.designation],
       durationBad,
       dateOutside,
       dateBad: dateMissing || dateOutside,
+      /* Annotation only — never folded into any of the `*Bad` flags above.
+         Being an additional resource is not an error in the row. */
+      additional: addl,
+      // Resolved once here, because the tint, the stripe and the badge all
+      // key off it and computing it three times could disagree three ways.
+      additionalKind: addl ? worstKind(addl.rows) : null,
     };
   }
 
   /* One definition per input, used by the table and the cards alike — the
      two layouts must not drift apart as either is edited. */
   const designationField = (row, idx, st) => (
-    <select
-      style={cellStyle}
-      value={row.designation}
-      disabled={disabled || roles.length === 0}
-      onChange={(e) => patchRow(idx, { designation: e.target.value })}
-    >
-      <option value="">
-        {loading ? "Loading roles…" : roles.length === 0 ? "— No rate card —" : "— Select role —"}
-      </option>
-      {/* A role dropped from the card since this was saved still has to
-          render, or the row looks empty. */}
-      {st.missingRole && (
-        <option value={row.designation}>{row.designation} (not on the current card)</option>
-      )}
-      {roles.map((r) => (
-        <option key={r.id || r.role} value={r.role}>{r.role}</option>
-      ))}
-    </select>
+    <>
+      <select
+        style={cellStyle}
+        value={row.designation}
+        disabled={disabled || roles.length === 0}
+        onChange={(e) => patchRow(idx, { designation: e.target.value })}
+      >
+        <option value="">
+          {loading ? "Loading roles…" : roles.length === 0 ? "— No rate card —" : "— Select role —"}
+        </option>
+        {/* A role dropped from the card since this was saved still has to
+            render, or the row looks empty. */}
+        {st.missingRole && (
+          <option value={row.designation}>{row.designation} (not on the current card)</option>
+        )}
+        {roles.map((r) => (
+          <option key={r.id || r.role} value={r.role}>{r.role}</option>
+        ))}
+      </select>
+      {/* Full width under the picker rather than floating beside it. The
+          column is 25% wide, so a badge on the same line would squeeze the
+          select narrower than the role names it has to show — and a small
+          pill tucked under one corner was what read as an afterthought. */}
+      {st.additional && <AdditionalFlag group={st.additional} kind={st.additionalKind} />}
+    </>
   );
 
   const qtyField = (row, idx) => (
@@ -371,7 +545,7 @@ export default function ActivityResourceAllocations({
             </colgroup>
             <thead>
               <tr>
-                <th style={headStyle}>Designation</th>
+                <th style={{ ...headStyle, padding: firstCellPad }}>Designation</th>
                 <th style={headStyle}>Qty</th>
                 <th style={headStyle}>Duration (mo)</th>
                 <th
@@ -396,9 +570,21 @@ export default function ActivityResourceAllocations({
             <tbody>
               {rows.map((row, idx) => {
                 const st = rowState(row);
+                const flag = st.additionalKind ? FLAG_TONE[st.additionalKind] : null;
                 return (
-                  <tr key={idx}>
-                    <td style={{ padding: cellPad }}>{designationField(row, idx, st)}</td>
+                  /* The whole row is tinted, so "which of these are
+                     additional" is answered by glancing down the table
+                     instead of reading every row. The stripe is an inset
+                     shadow rather than a border because a border would
+                     resize the cell and knock the flagged rows' inputs out
+                     of alignment with every other row's. */
+                  <tr key={idx} style={flag ? { background: flag.row } : undefined}>
+                    <td style={{
+                      padding: firstCellPad,
+                      boxShadow: flag ? `inset 3px 0 0 ${flag.edge}` : undefined,
+                    }}>
+                      {designationField(row, idx, st)}
+                    </td>
                     <td style={{ padding: cellPad }}>{qtyField(row, idx)}</td>
                     <td style={{ padding: cellPad }}>{durationField(row, idx, st)}</td>
                     <td style={{ padding: cellPad }}>{dateField(row, idx, st)}</td>
@@ -416,6 +602,27 @@ export default function ActivityResourceAllocations({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Says what the tint means. A colour nobody has been told the meaning
+          of is decoration, and this one is carrying a fact about the SLA. */}
+      {anyAdditional && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap",
+          fontSize: 11.5, color: "#5b6b82", marginTop: 2, lineHeight: 1.5,
+        }}>
+          <span style={{
+            width: 22, height: 10, borderRadius: 3, flex: "0 0 auto",
+            background: FLAG_TONE.pending.row,
+            boxShadow: `inset 3px 0 0 ${FLAG_TONE.pending.edge}`,
+            border: "1px solid #eddcb4",
+          }} aria-hidden="true" />
+          <span>
+            Highlighted rows are <b>additional resources</b> — heads approved after this
+            activity was first staffed, and the ones SLA 008 scores on how quickly they
+            onboarded. Reference only; editing a row does not change them.
+          </span>
         </div>
       )}
 
@@ -439,6 +646,37 @@ export default function ActivityResourceAllocations({
         <div style={{ fontSize: 11.5, color: "#5b6b82", marginTop: 8 }}>
           Costs marked “est.” are calculated here from the rate card. The saved figure is
           resolved by the server when you save the activity.
+        </div>
+      )}
+
+      {/* Approved to grow with nothing here to grow into. Stated rather than
+          silently absent: a designation the backend has already approved an
+          extra head for, but which has no row on this activity, is either an
+          allocation nobody updated or a designation renamed on one side. */}
+      {unallocatedAdditions.length > 0 && (
+        <div style={{
+          marginTop: 8, padding: "7px 10px", borderRadius: 8,
+          border: "1px solid #eddcb4", background: "#fdf6e8",
+          fontSize: 11.5, color: "#8a5a00", lineHeight: 1.55,
+        }}>
+          <b>Approved for additional resources, but not allocated here:</b>{" "}
+          {unallocatedAdditions.map((g, i) => (
+            <span key={g.designation}>
+              {i > 0 ? ", " : ""}{g.designation}
+              {g.additionalQuantity === null ? "" : ` (+${g.additionalQuantity})`}
+            </span>
+          ))}
+          . Either the allocation has not been updated to match the approval, or the
+          designation is spelled differently on the two sides.
+        </div>
+      )}
+
+      {/* Quiet, because it is not this editor's job. But the flags being
+          absent has to be distinguishable from there being nothing to flag —
+          otherwise an unreachable report reads as "no additional resources". */}
+      {additionalError && (
+        <div style={{ fontSize: 11, color: "#8a5a00", marginTop: 8, lineHeight: 1.5 }}>
+          Additional-resource flags unavailable — {additionalError} Rows are shown without them.
         </div>
       )}
     </div>

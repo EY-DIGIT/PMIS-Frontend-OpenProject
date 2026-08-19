@@ -14,7 +14,7 @@
    More are expected here as the SLA inputs are built out, so the page is laid
    out as a stack of independent sections rather than one report.
    ───────────────────────────────────────────────────────────────────────── */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useProject } from "../../store/project/projectsStore";
 import { setPageContext, clearPageContext } from "../../utils/pageContext";
@@ -22,7 +22,14 @@ import {
   loadMilestonesForProject, loadActivitiesForMilestone,
 } from "../../api/milestoneConfigApi";
 import { getActivityCompliance } from "../../api/slaCompliance";
-import { getActivityReplacementsReport } from "../../api/attendanceReports";
+import {
+  getActivityReplacementsReport,
+  getAdditionalResourceOnboardingReport,
+} from "../../api/attendanceReports";
+import {
+  readAdditionalResources, groupByDesignation, tallyOnboarding,
+  readSlaNumbers, countCheck,
+} from "../../utils/project/additionalOnboarding";
 import { normalizeStatus, STATUS } from "../../utils/project/slaRollup";
 import { readErrorMessage, readJsonBody, requestErrorMessage } from "../../utils/apiMessage";
 import { getToken } from "../../api/auth";
@@ -365,6 +372,42 @@ export default function ProjectResourceSlaCompliancePage() {
     return () => { active = false; controller.abort(); };
   }, [projectId, activityId, refreshKey]);
 
+  /* ── SLA 008 · additional resource onboarding ─────────────────────────
+     GET /api/attendance/report/activity/additional-resource-onboarding
+       ?projectId&activityId — both required, same as the two below.
+
+     A different event from SLA 009: that one refills a seat somebody
+     vacated, this one fills a seat that did not exist until the team was
+     approved to grow. So it only ever covers the second onboarding
+     onwards against a designation — the first is the original deployment.
+
+     Fetched through the api module rather than inline, like the
+     replacement history above; the four hand-rolled fetches on this page
+     predate it and are left alone rather than rewritten here. */
+  const [additional, setAdditional] = useState(null);
+  const [additionalLoading, setAdditionalLoading] = useState(false);
+  const [additionalError, setAdditionalError] = useState(null);
+
+  useEffect(() => {
+    if (!projectId || !activityId) { setAdditional(null); setAdditionalError(null); return undefined; }
+    let active = true;
+    const controller = new AbortController();
+    (async () => {
+      setAdditionalLoading(true);
+      setAdditionalError(null);
+      const { data, error: err } = await getAdditionalResourceOnboardingReport(
+        projectId, activityId, controller.signal
+      );
+      if (!active) return;
+      setAdditional(data);
+      // A 404 comes back as null data with no error — "the team was never
+      // grown here" is a real answer, not a fault.
+      if (err) setAdditionalError(err);
+      setAdditionalLoading(false);
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, activityId, refreshKey]);
+
   /* ── SLA 009 · replacement onboarding ─────────────────────────────────
      GET /api/attendance/report/activity/replacement-onboarding
        ?projectId&activityId — both required, same as the overlap report.
@@ -587,6 +630,34 @@ export default function ProjectResourceSlaCompliancePage() {
           <div className="sla-error">{overlapError}</div>
         ) : (
           <ReplacementSlaTable data={overlap} {...SLA006} />
+        )}
+      </section>
+
+      {/* Placed immediately before replacement onboarding because the two
+          are the easiest pair on this page to confuse — both measure days
+          to onboard — and reading them adjacently is what makes the
+          difference obvious: this one moves an approved head count, that
+          one refills a seat that was already funded. */}
+      <section className="sla-section">
+        <div className="sla-section-head">
+          <h2 className="sla-section-title">Additional resource onboarding</h2>
+        </div>
+
+        {!selectionComplete ? (
+          <EmptyState
+            title={!milestoneId ? "Select a milestone to begin" : "Now select an activity"}
+            hint={
+              !milestoneId
+                ? "Pick a milestone above, then the activity within it."
+                : "Additional resources are reported per activity — choose one of this milestone's activities."
+            }
+          />
+        ) : additionalLoading ? (
+          <div className="sla-muted">Loading additional resource onboarding…</div>
+        ) : additionalError ? (
+          <div className="sla-error">{additionalError}</div>
+        ) : (
+          <AdditionalOnboardingTable data={additional} />
         )}
       </section>
 
@@ -937,6 +1008,203 @@ const SLA009 = {
     },
   ],
 };
+
+/* SLA 008 — onboarding of a resource ADDED to the team.
+
+   The quantity columns are what distinguish this from SLA 009 above, and they
+   earn their width: an addition is only an addition because an approved head
+   count moved. "0 → 1" is the whole justification for the row existing, and
+   without it a reader has two near-identical onboarding tables and no way to
+   tell which event each one measured.
+
+   The reading — grouping, tally, SLA number — is in
+   utils/project/additionalOnboarding, shared with the reference panel on the
+   Activity SLAs page so the two screens cannot quote different figures for one
+   activity. */
+function AdditionalOnboardingTable({ data }) {
+  const rows = useMemo(() => readAdditionalResources(data), [data]);
+  const groups = useMemo(() => groupByDesignation(rows), [rows]);
+  const tally = useMemo(() => tallyOnboarding(rows), [rows]);
+  const sla = useMemo(() => readSlaNumbers(rows), [rows]);
+  const check = useMemo(() => countCheck(data, rows, groups), [data, rows, groups]);
+
+  if (!rows.length) {
+    return (
+      <EmptyState
+        title="No additional resources"
+        hint="This activity's team was never approved to grow, so nothing has been onboarded as an addition. The first person against a designation is the original deployment, not an addition."
+      />
+    );
+  }
+
+  /* Pending is deliberately not a verdict. An approved head that nobody has
+     arrived for yet has neither met the SLA nor missed it — the planned date
+     may be months out — so it is counted and coloured on its own rather than
+     folded into either column. */
+  const kindTone = (k) => (k === "fail" ? C.red : k === "pass" ? C.green : k === "pending" ? C.amber : C.ink2);
+
+  // Stated once per designation: the quantities describe the seat count, not
+  // the person, so repeating them per head would read as repeated approvals.
+  const approved = (g) => (
+    <>
+      <td className="sla-td sla-num">
+        {g.originalQuantity === null ? "—" : g.originalQuantity}
+        <span className="sla-arrow" aria-hidden="true"> → </span>
+        {g.currentApprovedQuantity === null ? "—" : g.currentApprovedQuantity}
+      </td>
+      <td className="sla-td sla-num sla-strong">
+        {g.additionalQuantity === null ? "—" : `+${g.additionalQuantity}`}
+        {g.quantitiesVary && (
+          <span className="sla-flag" title="Rows of this designation disagree about its quantities — the figures shown are the first row's.">
+            ⚠ varies
+          </span>
+        )}
+      </td>
+    </>
+  );
+
+  const measured = (r) => (
+    <>
+      <td className="sla-td">
+        {r.employeeName
+          ? <span className="sla-strong">{r.employeeName}</span>
+          : <span style={{ color: C.faint, fontStyle: "italic" }}>unassigned</span>}
+        {r.resId && <code className="sla-code">{r.resId}</code>}
+      </td>
+      <td className="sla-td">{prettyDate(r.plannedDeploymentDate) || "—"}</td>
+      <td className="sla-td">{prettyDate(r.actualOnboardingDate) || "—"}</td>
+      <td className="sla-td sla-num sla-strong">
+        {r.onboardingDays === null ? "—" : days(r.onboardingDays)}
+      </td>
+      <td className="sla-td sla-strong" style={{ color: kindTone(r.kind) }}>
+        {r.slaResult || "—"}
+      </td>
+    </>
+  );
+
+  return (
+    <div className="uidai-pmis-card sla-card">
+      <div className="sla-card-head">
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Activity</span>
+          <span className="sla-meta-val">{data?.activityName || "—"}</span>
+        </div>
+        <div className="sla-meta">
+          <span className="sla-meta-lbl">Additional resources</span>
+          <span className="sla-meta-val">{rows.length}</span>
+        </div>
+        {check.headcount !== null && check.headcount !== rows.length && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Heads approved</span>
+            <span className="sla-meta-val">{check.headcount}</span>
+          </div>
+        )}
+        {tally.fail > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Not met</span>
+            <span className="sla-meta-val" style={{ color: C.red }}>{tally.fail}</span>
+          </div>
+        )}
+        {tally.pass > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Met</span>
+            <span className="sla-meta-val" style={{ color: C.green }}>{tally.pass}</span>
+          </div>
+        )}
+        {tally.pending > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Pending</span>
+            <span className="sla-meta-val" style={{ color: C.amber }}>{tally.pending}</span>
+          </div>
+        )}
+        {tally.unknown > 0 && (
+          <div className="sla-meta">
+            <span className="sla-meta-lbl">Unclassified</span>
+            <span className="sla-meta-val" style={{ color: C.ink2 }}>{tally.unknown}</span>
+          </div>
+        )}
+      </div>
+
+      {check.mismatch && (
+        <div className="sla-warn">
+          The report states {days(check.stated)} additional resources but returned {rows.length} row
+          {rows.length === 1 ? "" : "s"} covering {days(check.headcount)} head
+          {check.headcount === 1 ? "" : "s"}. The rows below are what was returned.
+        </div>
+      )}
+
+      <div className="sla-table-wrap">
+        <table className="sla-table">
+          <thead>
+            <tr>
+              <th className="sla-th">SLA</th>
+              <th className="sla-th">Designation</th>
+              <th className="sla-th sla-num" title="Approved head count before → after the addition.">Approved</th>
+              <th className="sla-th sla-num" title="Heads added to this designation.">Added</th>
+              <th className="sla-th">Resource</th>
+              <th className="sla-th" title="When the added head was planned to deploy — the clock for this SLA starts here.">
+                Planned Deployment
+              </th>
+              <th className="sla-th" title="When they actually onboarded — the clock stops here. Empty while the seat is unfilled.">
+                Actual Onboarding
+              </th>
+              <th className="sla-th sla-num" title="Days from planned deployment to actual onboarding. This is the figure the SLA is judged on.">
+                Onboarding Days
+              </th>
+              <th className="sla-th">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              g.rows.length === 1 ? (
+                <tr key={g.designation} className="sla-row">
+                  <td className="sla-td sla-strong">{g.rows[0].slaNumber || sla.label || "—"}</td>
+                  <td className="sla-td">{g.designation || "—"}</td>
+                  {approved(g)}
+                  {measured(g.rows[0])}
+                </tr>
+              ) : (
+                /* Several heads against one approval. The designation and its
+                   quantities are stated once on a header row, then a row per
+                   person beneath — repeating "0 → 3" on each would read as
+                   three separate approvals for nine heads. */
+                <Fragment key={g.designation}>
+                  <tr className="sla-row">
+                    <td className="sla-td sla-strong">{g.slaNumber || sla.label || "—"}</td>
+                    <td className="sla-td sla-strong">{g.designation || "—"}</td>
+                    {approved(g)}
+                    <td className="sla-td" colSpan={5} style={{ color: C.muted, fontStyle: "italic" }}>
+                      {g.rows.length} heads against this approval
+                    </td>
+                  </tr>
+                  {g.rows.map((r) => (
+                    <tr key={r.i} className="sla-row">
+                      <td className="sla-td" />
+                      <td className="sla-td" />
+                      <td className="sla-td" />
+                      <td className="sla-td" />
+                      {measured(r)}
+                    </tr>
+                  ))}
+                </Fragment>
+              )
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sla-note">
+        Measured from the planned deployment date to the actual onboarding date, so it
+        only covers heads ADDED to an already-staffed designation — the first person
+        against a designation is the original deployment and is not scored here.
+        {tally.pending > 0 && (
+          <> {tally.pending === 1 ? "One seat is" : `${tally.pending} seats are`} still
+            pending: approved, not yet onboarded, and so neither met nor missed.</>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AvailabilityTable({ data, months, totals }) {
   return (

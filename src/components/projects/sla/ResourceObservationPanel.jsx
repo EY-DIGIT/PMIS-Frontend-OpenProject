@@ -1,7 +1,8 @@
 /* ══════════════════════════════════════════════════════════════════
    Measured resource data — the numbers behind SLA 005 (replacement
-   count), 006 (handover overlap), 007 (availability) and 009 (onboarding
-   time), shown next to the evaluation form so they can be read off
+   count), 006 (handover overlap), 007 (availability), 008 (onboarding
+   of resources ADDED to the team) and 009 (refilling a seat somebody
+   left), shown next to the evaluation form so they can be read off
    rather than hunted for on another page.
 
    This is a REFERENCE panel and nothing more. It scores nothing, writes
@@ -20,6 +21,10 @@
    ══════════════════════════════════════════════════════════════════ */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getResourceObservations } from "../../../api/attendanceReports";
+import {
+    readAdditionalResources, groupByDesignation, tallyOnboarding,
+    readSlaNumbers, countCheck,
+} from "../../../utils/project/additionalOnboarding";
 
 const muted = { color: "var(--uidai-pmis-muted)" };
 const INK = "#173e77";
@@ -374,6 +379,159 @@ function ReplacementSection({ result, title, sla, fromLabel, fromKey, toLabel, t
     );
 }
 
+/* ─── additional resource onboarding (SLA 008) ──────────────────────
+   A seat that did not exist until the team was approved to grow, and
+   how long it then took to fill. Not SLA 009 below, which refills a
+   seat somebody vacated — the two are next to each other precisely
+   because they are easy to confuse, and the quantity columns are what
+   tell them apart: an addition always moves an approved head count.
+
+   The reading is in utils/project/additionalOnboarding so that this
+   panel and the compliance page cannot drift into quoting two
+   different figures for one activity. */
+const KIND_TONE = { pass: GREEN, fail: RED, pending: AMBER, unknown: undefined };
+
+function AdditionalOnboardingSection({ result }) {
+    const data = result?.data;
+    const rows = useMemo(() => readAdditionalResources(data), [data]);
+    const groups = useMemo(() => groupByDesignation(rows), [rows]);
+    const tally = useMemo(() => tallyOnboarding(rows), [rows]);
+    const sla = useMemo(() => readSlaNumbers(rows), [rows]);
+    const check = useMemo(() => countCheck(data, rows, groups), [data, rows, groups]);
+
+    /* The quantities describe the designation, so they are rendered once
+       per group rather than once per person. `span` is what a group
+       header borrows when several people share one approval. */
+    const qty = (g) => (
+        <>
+            <td style={{ ...td, ...muted }}>
+                {g.originalQuantity === null ? "—" : g.originalQuantity}
+                <span aria-hidden="true"> → </span>
+                {g.currentApprovedQuantity === null ? "—" : g.currentApprovedQuantity}
+            </td>
+            <td style={td}>
+                <Figure
+                    value={g.additionalQuantity === null ? "" : `+${g.additionalQuantity}`}
+                    title="Additional heads approved"
+                    tone={INK}
+                />
+                {g.quantitiesVary && (
+                    <span style={{ color: AMBER, fontWeight: 700 }} title="Rows of this designation disagree about its quantities."> ⚠</span>
+                )}
+            </td>
+        </>
+    );
+
+    // Person, dates, measured days and the server's verdict.
+    const measure = (r) => (
+        <>
+            <td style={{ ...td, color: r.employeeName ? INK : undefined, fontWeight: r.employeeName ? 600 : 400 }}>
+                {r.employeeName || <span style={{ ...muted, fontStyle: "italic" }}>unassigned</span>}
+            </td>
+            <td style={{ ...td, ...muted }}>{prettyDate(r.plannedDeploymentDate)}</td>
+            <td style={{ ...td, ...muted }}>{prettyDate(r.actualOnboardingDate)}</td>
+            <td style={td}>
+                <Figure value={r.onboardingDays} title="Onboarding days" />
+            </td>
+            <td style={{
+                ...td,
+                color: KIND_TONE[r.kind],
+                fontWeight: KIND_TONE[r.kind] ? 700 : 400,
+            }}>
+                {r.slaResult || "—"}
+            </td>
+        </>
+    );
+
+    return (
+        <div>
+            <SectionHead
+                title="Additional resource onboarding"
+                /* Read off the rows, not hardcoded — that is where the
+                   backend puts it. Falls back to the expected number only
+                   when there are no rows to read it from, and drops to a
+                   per-row column when the rows disagree. */
+                sla={sla.mixed ? "per row" : (sla.label || "SLA 008")}
+            />
+            {result?.error ? <Err text={result.error} />
+                : !rows.length ? (
+                    <Empty text="No additional resources on this activity — the team has not been approved to grow, so there is nothing for this SLA to measure." />
+                ) : (
+                    <div style={{ overflowX: "auto" }}>
+                        <table style={{ borderCollapse: "collapse" }}>
+                            <thead>
+                                <tr>
+                                    <th style={th}>Designation</th>
+                                    {sla.mixed && <th style={th}>SLA</th>}
+                                    <th style={th} title="Approved head count before → after">Approved</th>
+                                    <th style={th}>Added</th>
+                                    <th style={th}>Resource</th>
+                                    <th style={th} title="When the added head was planned to deploy — the clock starts here.">Planned</th>
+                                    <th style={th} title="When they actually onboarded — the clock stops here.">Onboarded</th>
+                                    <th style={th}>Days</th>
+                                    <th style={th}>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {groups.map((g) => (
+                                    g.rows.length === 1 ? (
+                                        <tr key={g.designation}>
+                                            <td style={{ ...td, color: INK, fontWeight: 600 }}>{g.designation}</td>
+                                            {sla.mixed && <td style={{ ...td, ...muted }}>{g.slaNumber || "—"}</td>}
+                                            {qty(g)}
+                                            {measure(g.rows[0])}
+                                        </tr>
+                                    ) : (
+                                        /* Several people against one approval: the
+                                           designation and its quantities are stated
+                                           once, then a row each. Repeating "0 → 3"
+                                           on all three would read as three separate
+                                           approvals for nine heads. */
+                                        <React.Fragment key={g.designation}>
+                                            <tr>
+                                                <td style={{ ...td, color: INK, fontWeight: 700 }}>{g.designation}</td>
+                                                {sla.mixed && <td style={{ ...td, ...muted }}>{g.slaNumber || "—"}</td>}
+                                                {qty(g)}
+                                                <td style={{ ...td, ...muted, fontStyle: "italic" }} colSpan={5}>
+                                                    {g.rows.length} heads against this approval
+                                                </td>
+                                            </tr>
+                                            {g.rows.map((r) => (
+                                                <tr key={r.i}>
+                                                    <td style={td} />
+                                                    {sla.mixed && <td style={td} />}
+                                                    <td style={td} />
+                                                    <td style={td} />
+                                                    {measure(r)}
+                                                </tr>
+                                            ))}
+                                        </React.Fragment>
+                                    )
+                                ))}
+                            </tbody>
+                        </table>
+
+                        <div style={{ fontSize: 11, ...muted, marginTop: 5 }}>
+                            {rows.length} additional resource{rows.length === 1 ? "" : "s"}
+                            {tally.pass > 0 && <> · <span style={{ color: GREEN, fontWeight: 600 }}>{tally.pass} onboarded in time</span></>}
+                            {tally.fail > 0 && <> · <span style={{ color: RED, fontWeight: 600 }}>{tally.fail} breached</span></>}
+                            {/* Pending is stated, never folded into either
+                                column — an approved seat nobody has arrived
+                                for yet has neither met nor missed anything. */}
+                            {tally.pending > 0 && <> · <span style={{ color: AMBER, fontWeight: 600 }}>{tally.pending} still pending</span></>}
+                            {tally.unknown > 0 && <> · {tally.unknown} unclassified</>}
+                            {check.mismatch && (
+                                <span style={{ color: AMBER, fontWeight: 600 }}>
+                                    {" "}⚠ the report states {check.stated} — the list may be truncated.
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                )}
+        </div>
+    );
+}
+
 export default function ResourceObservationPanel({ projectId, activityId }) {
     // Collapsed by default: this is reference material consulted while
     // filling the form below, not something every visit needs to scroll past.
@@ -459,9 +617,12 @@ export default function ResourceObservationPanel({ projectId, activityId }) {
                         <div style={{ fontSize: 12.5, ...muted, padding: "6px 0" }}>Loading measured data…</div>
                     ) : (
                         <>
-                            {/* Ordered by SLA number — 005, 006, 007, 009 — so
-                                the panel reads in the same order as the SLA
-                                library and the rollup do. */}
+                            {/* Ordered by SLA number — 005, 006, 007, 008, 009
+                                — so the panel reads in the same order as the
+                                SLA library and the rollup do. 008 sits
+                                immediately before 009 on purpose: they are the
+                                two onboarding clocks and the pairing is what
+                                makes the difference between them legible. */}
                             <ReplacementCountSection result={obs?.replacements} />
                             <ReplacementSection
                                 result={obs?.overlap}
@@ -472,6 +633,7 @@ export default function ResourceObservationPanel({ projectId, activityId }) {
                                 metricLabel="Overlap working days" metricKey="overlapWorkingDays"
                             />
                             <AvailabilitySection result={obs?.availability} />
+                            <AdditionalOnboardingSection result={obs?.additionalOnboarding} />
                             <ReplacementSection
                                 result={obs?.onboarding}
                                 title="Replacement onboarding"

@@ -1,13 +1,18 @@
 /* ══════════════════════════════════════════════════════════════════
    Attendance reports — the measured figures behind the resource SLAs.
 
-   Four per-activity reports, one per SLA the attendance system can
+   Five per-activity reports, one per SLA the attendance system can
    actually answer for:
 
      · replacements          → how many times a seat changed hands  (005)
      · replacement-overlap   → the handover window between two people (006)
      · availability          → business days vs days actually covered (007)
+     · additional-resource-… → how long an ADDED seat took to fill   (008)
      · replacement-onboarding→ how long a vacated seat stood empty    (009)
+
+   008 and 009 sound alike and are not: 009 refills a seat somebody
+   left, 008 fills a seat that did not exist until the team was approved
+   to grow.
 
    These are READ-ONLY observations. Nothing here scores an SLA or
    writes a result — they are the numbers a person reads off the screen
@@ -109,16 +114,41 @@ export function getReplacementOnboardingReport(projectId, activityId, signal) {
     });
 }
 
-/* All four at once. `Promise.all` is safe here precisely because
+/* SLA 008 — onboarding of ADDITIONAL resources.
+
+   Distinct from 009 above, which measures a seat that already existed
+   standing empty. This measures a seat that did not exist before: the
+   team was approved to grow, and the clock runs from the date the new
+   head was planned to deploy to the date they actually arrived. So it
+   only ever covers the second onboarding onwards against a designation
+   — the first is the original deployment and is not an addition.
+
+   Returns { activityName, additionalResourceCount, additionalResources:
+   [{ slaNumber, designation, originalQuantity, currentApprovedQuantity,
+   additionalQuantity, resId, employeeName, plannedDeploymentDate,
+   actualOnboardingDate, onboardingDays, slaResult }] }.
+
+   The last four are null while a seat is still unfilled — an approved
+   head nobody has arrived for yet is the report's normal state, not a
+   gap in it. `utils/project/additionalOnboarding` does the reading. */
+export function getAdditionalResourceOnboardingReport(projectId, activityId, signal) {
+    return report("/api/attendance/report/activity/additional-resource-onboarding", {
+        projectId, activityId, signal,
+        fallback: "Couldn't load the additional resource onboarding report.",
+    });
+}
+
+/* All five at once. `Promise.all` is safe here precisely because
    `report` never rejects — one unreachable service cannot take the
-   other three down with it. */
+   other four down with it. */
 export function getResourceObservations(projectId, activityId, signal) {
     return Promise.all([
         getActivityReplacementsReport(projectId, activityId, signal),
         getReplacementOverlapReport(projectId, activityId, signal),
         getAvailabilityReport(projectId, activityId, signal),
+        getAdditionalResourceOnboardingReport(projectId, activityId, signal),
         getReplacementOnboardingReport(projectId, activityId, signal),
-    ]).then(([replacements, overlap, availability, onboarding]) => ({
-        replacements, overlap, availability, onboarding,
+    ]).then(([replacements, overlap, availability, additionalOnboarding, onboarding]) => ({
+        replacements, overlap, availability, additionalOnboarding, onboarding,
     }));
 }

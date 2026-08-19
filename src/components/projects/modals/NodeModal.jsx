@@ -1652,6 +1652,11 @@ export default function NodeModal({
                 onChange={(next) => updateField({ resources: next })}
                 projectId={project.projectId}
                 projectStartDate={project.startDate}
+                /* Flags which of these rows are additional resources (SLA
+                   008). Empty until the activity has been saved once — the
+                   backend id is what the attendance report is keyed on, and
+                   an unsaved activity has nothing approved against it. */
+                activityId={node?.apiId || ""}
                 organisationId={form.vendorId}
                 activityStartDate={form.startDate}
                 activityEndDate={form.endDate}
