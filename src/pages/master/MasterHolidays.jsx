@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getToken } from "../../api/auth";
 import * as projectsApi from "../../api/projects";
-import { FiUploadCloud, FiCalendar } from "react-icons/fi";
+import { FiUploadCloud, FiDownload, FiCalendar } from "react-icons/fi";
 
 const API_BASE = "http://10.1.131.199:8019";
 
@@ -53,6 +53,17 @@ const CAL_STYLES = `
 }
 .mh-btn-upload:hover:not(:disabled) { background: #062a63; }
 .mh-btn-upload:disabled { opacity: .55; cursor: not-allowed; }
+/* Same box as Upload so the panel keeps one rhythm, but outlined rather than
+   filled — getting the blank sheet is the preparatory step, and two solid
+   primary buttons stacked would make the panel ask twice for attention. */
+.mh-btn-template {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+  border-radius: 10px; font-size: 13.5px; font-weight: 700; padding: 11px;
+  cursor: pointer; border: 1px solid #c8d6ee; background: #fff; color: #0b3c88;
+  font-family: inherit; transition: background .15s, border-color .15s;
+}
+.mh-btn-template:hover:not(:disabled) { background: #f2f7ff; border-color: #0b3c88; }
+.mh-btn-template:disabled { opacity: .55; cursor: not-allowed; }
 .mh-msg { display: flex; align-items: center; gap: 10px; border-radius: 10px; padding: 12px 16px; font-size: 14px; margin-bottom: 14px; font-weight: 500; }
 .mh-msg.ok { background: #e6f6ee; border: 1px solid #c7ead6; color: #0f7a45; }
 .mh-msg.err { background: #fde8e8; border: 1px solid #f5c9c9; color: #d32f2f; }
@@ -178,6 +189,7 @@ export default function MasterHolidays() {
   const [year, setYear] = useState("");
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [msg, setMsg] = useState(null);
 
   // calendar state
@@ -227,6 +239,56 @@ export default function MasterHolidays() {
   }, []);
 
   useEffect(() => { fetchHolidays(calYear); }, [calYear, fetchHolidays]);
+
+  /* The blank workbook for the selected year. A binary .xlsx, so it's read as
+     a blob and handed to a temporary <a download> rather than parsed like the
+     JSON endpoints — the same shape the designation-rate template uses.
+
+     Tied to the year selector deliberately: the template the server builds is
+     year-specific (its filename is holidays_template_<year>.xlsx), and letting
+     someone download 2026's sheet while uploading against 2027 is how a whole
+     year of holidays lands on the wrong one. */
+  async function handleDownloadTemplate() {
+    if (downloading) return;
+    setMsg(null);
+    if (!year) { setMsg({ type: "error", text: "Please select a year first." }); return; }
+    setDownloading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/export/template/holidays?year=${encodeURIComponent(year)}`, {
+        headers: { accept: "*/*" },
+      });
+      if (!res.ok) throw new Error(`The server refused the download (HTTP ${res.status}).`);
+      const blob = await res.blob();
+      /* A 200 with an empty body saves a 0-byte file Excel refuses to open —
+         better to say so than to hand over something broken. */
+      if (!blob.size) throw new Error("The server returned an empty template file.");
+
+      /* The API does send a Content-Disposition filename, but unless it is
+         listed in Access-Control-Expose-Headers cross-origin JS can't read it
+         and this returns null. Kept anyway: it starts working the moment the
+         backend exposes the header, and the fallback names the year either
+         way so two downloads never collide in the browser's folder. */
+      const disposition = res.headers.get("content-disposition") || "";
+      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+      const filename = match
+        ? decodeURIComponent(match[1].trim())
+        : `holidays_template_${year}.xlsx`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMsg({ type: "ok", text: `Template downloaded — ${filename}` });
+    } catch (err) {
+      setMsg({ type: "error", text: err?.message || "Failed to download the template." });
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   async function handleUpload() {
     setMsg(null);
@@ -296,6 +358,23 @@ export default function MasterHolidays() {
                   {years.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
+              {/* Between the year and the file picker, because that is the
+                  order the work happens in: pick the year, get the blank sheet
+                  for it, fill it, upload it. Put beside Upload it would read as
+                  an alternative to uploading rather than the step before it. */}
+              <button
+                type="button"
+                className="mh-btn-template"
+                onClick={handleDownloadTemplate}
+                disabled={downloading || !year}
+                title={year
+                  ? `Download the blank holiday sheet for ${year}`
+                  : "Select a year first — the template is built for one year"}
+              >
+                <FiDownload size={15} />
+                {downloading ? "Preparing…" : `Download template${year ? ` for ${year}` : ""}`}
+              </button>
+
               <div className="mh-field">
                 <span className="mh-field-label">Holiday Excel (.xlsx)</span>
                 <label className="mh-dropzone" style={{ cursor: "pointer" }}>
