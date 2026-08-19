@@ -1022,17 +1022,25 @@ export default function MeetingDetailPage() {
           />
         </div>
 
+        {/* Linked Activity — hidden pending bug #281. The backend copies the
+            meeting's own title into activityName (and description into
+            activityDescription), so this chip only ever echoes the title.
+            Re-enable once the backend accepts a real activityId on meeting
+            create. The inner "sub" span was already dead code; its braces
+            were stripped so this outer comment doesn't terminate early.
+
         {(meeting.activityName || meeting.activityId) && (
           <>
             <div className="mt-section-label">Linked Activity</div>
             <div className="attendee-chips">
               <span className="chip">
                 {meeting.activityName || meeting.activityId}
-                {/* <span className="sub">{meeting.activityId}</span> */}
+                <span className="sub">{meeting.activityId}</span>
               </span>
             </div>
           </>
         )}
+        */}
 
         {meeting.description && (
           <>
