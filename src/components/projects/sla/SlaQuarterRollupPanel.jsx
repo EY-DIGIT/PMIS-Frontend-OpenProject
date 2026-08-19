@@ -35,7 +35,9 @@ import {
     getSettlement,
     overrideSettlement,
     finalizeSettlement,
+    clearSettlementOverride,
     isSettlementFinal,
+    isSettlementOverridden,
     formatQuarterKey,
     isContractYear,
 } from "../../../api/slaCompliance";
@@ -2045,10 +2047,14 @@ function RelaxationModal({ chargedPercent, pqp, quarterCapPercent, quarterLabel,
 
    Deliberately heavier than the relaxation dialog: a relaxation can be
    revised, this cannot be undone from here. It states the figure being
-   frozen, requires a reason, and names the consequence in the button
-   rather than saying "OK".                                            */
-function FinalizeModal({ effectivePercent, ldAmount, quarterLabel, quarterDates, onCancel, onSubmit }) {
-    const [reason, setReason] = useState("");
+   frozen and names the consequence in the button rather than saying "OK".
+
+   It does NOT collect a reason. The shipped endpoint takes no body, so a
+   reason box here would be asking the user to write something that is
+   discarded on send — worse than not asking, because they would believe
+   it had been recorded. Where a figure needs explaining, the override
+   reason is what carries it; this only records that the row is closed. */
+function FinalizeModal({ effectivePercent, ldAmount, overridden, overrideReason, quarterLabel, quarterDates, onCancel, onSubmit }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
 
@@ -2056,7 +2062,7 @@ function FinalizeModal({ effectivePercent, ldAmount, quarterLabel, quarterDates,
         setBusy(true);
         setError("");
         try {
-            await onSubmit({ reason: reason.trim() });
+            await onSubmit();
         } catch (err) {
             setError(err?.message || "The quarter could not be marked final.");
         } finally {
@@ -2106,28 +2112,33 @@ function FinalizeModal({ effectivePercent, ldAmount, quarterLabel, quarterDates,
                     </div>
 
                     <div style={{ fontSize: 12, ...muted, marginBottom: 12, lineHeight: 1.6 }}>
-                        After this, the quarter can no longer be relaxed from this page. It stays
-                        readable and it is <b>not</b> invoiced — that is a separate step on the
-                        Settlement page.
+                        After this, the quarter can no longer be adjusted from this page, and the
+                        adjustment cannot be reverted to the computed figure. It stays readable
+                        and it is <b>not</b> invoiced — that is a separate step on the Settlement
+                        page, and a finalised quarter can still go on to be invoiced.
                     </div>
 
-                    <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: INK, marginBottom: 5 }}>
-                        Reason
-                    </label>
-                    <textarea
-                        value={reason}
-                        onChange={(e) => setReason(e.target.value)}
-                        rows={3}
-                        placeholder="Who signed this off, and on what basis."
-                        style={{
-                            width: "100%", padding: "7px 10px", borderRadius: 8,
-                            border: "1px solid var(--uidai-pmis-border)", font: "inherit",
-                            fontSize: 13, resize: "vertical",
-                        }}
-                    />
-                    <div style={{ fontSize: 11, ...muted, marginTop: 5, lineHeight: 1.5 }}>
-                        Recorded against the settlement row. This is the audit trail for why the
-                        quarter stopped being revisable.
+                    {/* What the lock is freezing, when it is freezing a hand-set
+                        figure rather than a computed one. This is the last point
+                        at which the override can be thrown away, so the reason
+                        behind it belongs in front of the person locking it. */}
+                    {overridden && (
+                        <div style={{
+                            marginBottom: 12, padding: "9px 11px", borderRadius: 8,
+                            background: "#fdf6e8", border: "1px solid #eddcb4",
+                            fontSize: 11.5, color: "#8a5a00", lineHeight: 1.55,
+                        }}>
+                            <b>This figure was set manually.</b> Finalising locks the override in —
+                            “Revert to computed” is refused afterwards.
+                            {overrideReason
+                                ? <> Recorded reason: “{overrideReason}”.</>
+                                : <> No reason is recorded against it.</>}
+                        </div>
+                    )}
+
+                    <div style={{ fontSize: 11, ...muted, marginBottom: 4, lineHeight: 1.5 }}>
+                        No reason is collected here — the lock records that the quarter is closed,
+                        not why. An explanation belongs on the adjustment itself.
                     </div>
 
                     {error && (
@@ -2151,9 +2162,9 @@ function FinalizeModal({ effectivePercent, ldAmount, quarterLabel, quarterDates,
                             className="uidai-pmis-btn uidai-pmis-btn-small"
                             style={{ marginTop: 0 }}
                             onClick={submit}
-                            disabled={busy || !reason.trim()}
+                            disabled={busy}
                         >
-                            {busy ? "Saving…" : "Mark final"}
+                            {busy ? "Locking…" : "Mark final"}
                         </button>
                     </div>
                 </div>
@@ -2816,6 +2827,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
     const [settlementTick, setSettlementTick] = useState(0);
     const [relaxOpen, setRelaxOpen] = useState(false);
     const [finalizeOpen, setFinalizeOpen] = useState(false);
+    // Revert acts straight from the strip — no dialog, because it restores
+    // the computed figure rather than inventing one, and is itself undoable
+    // by adjusting again while the row is still open.
+    const [reverting, setReverting] = useState(false);
+    const [revertError, setRevertError] = useState("");
     const [showFormulas, setShowFormulas] = useState(false);
     const [showGlossary, setShowGlossary] = useState(false);
     /* Opened automatically when something actually affects the figures —
@@ -3714,6 +3730,21 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
             canGrant: !!settlementRow && !isSettlementFinal(settlementRow),
             finalized: isSettlementFinal(settlementRow),
             invoiced: String(settlementRow?.status || "").toLowerCase() === "invoiced",
+            /* The backend's own flag, not inferred from the figures. The
+               `applied` above is a COMPARISON — this page's recomputation
+               against the row — and the two disagree in both directions: a
+               row can be overridden to a value that happens to equal the
+               computation, and the two can differ for reasons that are not
+               an override at all. Only `manuallyOverridden` says a human
+               set it, which is the question the badge and the revert
+               button both actually turn on. */
+            overridden: isSettlementOverridden(settlementRow),
+            /* Revert is refused with 422 `settlement_locked` once the row
+               is finalized or invoiced, so the control disappears at the
+               same moment the lock lands rather than staying and failing. */
+            canRevert: !!settlementRow
+                && isSettlementOverridden(settlementRow)
+                && !isSettlementFinal(settlementRow),
             blockedReason: !settlementRow
                 /* The endpoint's own words when it refused, rather than a
                    guess at why. A 404 here means "not closed yet", which is
@@ -3794,26 +3825,32 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         setSettlementTick((t) => t + 1);
     }, [projectId, quarterProbeDate]);
 
-    /* Mark the quarter final — the act that ends the relaxation window.
+    /* Mark the quarter final — the pre-billing lock.
 
-       The endpoint is not deployed yet, so a 404/405 is the EXPECTED
-       failure today and has to read as "not available", not as "the
-       server rejected your reason". Anything else is the server's own
-       message, passed through untouched. */
-    const finalizeQuarter = useCallback(async ({ reason }) => {
-        try {
-            await finalizeSettlement(projectId, quarterProbeDate, { reason });
-        } catch (err) {
-            const msg = String(err?.message || "");
-            if (/\b(404|405|not found|method not allowed)\b/i.test(msg)) {
-                throw new Error(
-                    "The finalise endpoint is not deployed yet, so this quarter could not be marked final. "
-                    + "The backend needs POST …/settlement/{quarter}/finalize accepting a reason. "
-                    + "Nothing was changed."
-                );
-            }
-            throw err;
-        }
+       No body. The shipped endpoint accepts none, so nothing is collected
+       to send it; the earlier draft here took a reason on the assumption
+       that a lock needs an audit note, and posting one the server drops
+       would have the user believing it was recorded.
+
+       The server's own message is passed through untouched — it names the
+       actual refusal (`settlement_immutable` once invoiced,
+       `settlement_not_computed` on a blocked row) far better than a guess
+       from the status code would. */
+    const finalizeQuarter = useCallback(async () => {
+        await finalizeSettlement(projectId, quarterProbeDate);
+        setSettlementTick((t) => t + 1);
+    }, [projectId, quarterProbeDate]);
+
+    /* Throw the manual override away and go back to the computed figure.
+
+       The only route back: an overridden row is deliberately not
+       recomputed by a refresh, so without this the way to undo a wrong
+       adjustment was to adjust it again with a guess at what the
+       computation would have said. Refused with 422 `settlement_locked`
+       once the row is finalized or invoiced, which is why the control
+       offering it disappears at the same moment the lock lands. */
+    const clearOverride = useCallback(async () => {
+        await clearSettlementOverride(projectId, quarterProbeDate);
         setSettlementTick((t) => t + 1);
     }, [projectId, quarterProbeDate]);
 
@@ -4496,7 +4533,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             <PageSection
                                 index="2"
                                 title="Service levels this quarter"
-                                sub="What each SLA scored, and what it cost. Grouped by how the penalty is charged."
                                 right={
                                     <button
                                         type="button"
@@ -4514,7 +4550,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 track="quarterly"
                                 title="Quarterly SLAs"
                                 count={visibleQuarterly.reduce((n, c) => n + c.items.length, 0)}
-                                sub="Charged as a % of the quarter's payment base. Resources, query resolution, recommendations."
+                                sub="These SLAs are charged on the quarterly resource payment (PQP)."
                             />
 
                             {quarterlyItems.length === 0 ? (
@@ -4539,7 +4575,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             hint={`${num(totals.contributingCount, 0)} SLA${totals.contributingCount === 1 ? "" : "s"} contributing`}
                                         />
                                         <Tile
-                                            label="Penalty % before → after"
+                                            label="Penalty Percentage after Cap of 10%"
                                             value={<CapPair
                                                 before={totals.sumLdPercent}
                                                 after={totals.cappedLdPercent}
@@ -4568,7 +4604,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             hint={chain.ldSource === "row"
                                                 ? (chain.ldDiverges
                                                     ? `⚠ as settled — this page computes ${money(chain.ldComputed)}`
-                                                    : "as settled by the backend")
+                                                    : "")
                                                 : totals.pqp === null ? "needs a PQP base" : "capped LD % × PQP"}
                                         />
                                     </div>
@@ -5093,7 +5129,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <div style={{ fontStyle: "italic" }}>
                                         No deliverable-linked SLA evaluations in this period.
                                     </div>
-                                    <div style={{ marginTop: 6 }}>
+                                    {/* <div style={{ marginTop: 6 }}>
                                         This section only fills when an evaluated SLA is charged on a
                                         deliverable&rsquo;s own cost — i.e. its <b>Applied On</b> is{" "}
                                         <code style={{ background: "#eef3fb", padding: "1px 5px", borderRadius: 4 }}>FIXED_AMOUNT</code>{" "}
@@ -5102,7 +5138,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         (the RFP&rsquo;s SLA 001 / 002). {classification.total > 0
                                             ? `All ${classification.total} SLA(s) evaluated in this period resolved to the quarterly track.`
                                             : ""}
-                                    </div>
+                                    </div> */}
                                 </div>
                             ) : (
                                 <>
@@ -5167,7 +5203,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Deliverable payment"
                                         count={payables.rows.length}
-                                        sub="What each deliverable was due, less penalties."
                                         style={{ marginTop: 26 }}
                                     />
 
@@ -5552,7 +5587,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             <PageSection
                                 index="3"
                                 title="Payment statement"
-                                sub="The quarter's audit record — what was earned, what was penalised, what is paid."
                                 right={
                                     <button
                                         type="button"
@@ -5708,7 +5742,6 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             <ChainRow
                                                 label="No deliverable completed in this quarter"
                                                 value="—"
-                                                hint="A deliverable becomes payable in the quarter its activities finish, however late that is."
                                             />
                                         ) : (
                                             <>
@@ -5864,7 +5897,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 sign={relaxation.raised ? "−" : "+"}
                                                 value={relaxation.grantedAmount === null ? "—" : money(relaxation.grantedAmount)}
                                                 tone={relaxation.raised ? RED : GREEN}
-                                                hint={relaxation.reason ? `Reason: ${relaxation.reason}` : "No reason recorded."}
+                                                hint={relaxation.reason ? `LD Override Reason: ${relaxation.reason}` : "No reason recorded."}
                                             />
                                         )}
                                         <ChainRow
@@ -5958,10 +5991,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                         )}
                                                     </tbody>
                                                 </table>
-                                                <div style={{ fontSize: 11, ...muted, marginTop: 7, lineHeight: 1.55 }}>
-                                                    Paid whatever the deployment. It sits inside PQP so LD is charged on it,
-                                                    then is added back after the deduction.
-                                                </div>
+                                               
                                             </div>
                                         )}
 
@@ -5985,10 +6015,32 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                             : INK,
                                                 }}>
                                                     {relaxation.finalized
-                                                        ? (relaxation.invoiced ? "Quarter invoiced — locked" : "Quarter marked final")
+                                                        ? (relaxation.invoiced ? "Quarter invoiced — locked" : "Finalized — locked")
                                                         : relaxation.applied
                                                             ? `${relaxation.raised ? "LD raised by" : "Relaxation of"} ${pct(Math.round(relaxation.grantedPercent * 100) / 100)}${relaxation.raised ? "" : " granted"}`
                                                             : "No adjustment on this quarter"}
+                                                    {/* The backend's flag, shown alongside the lock
+                                                        rather than instead of it: the two are
+                                                        independent, `manuallyOverridden` survives a
+                                                        finalize, and a locked row that was hand-set
+                                                        is a different fact from a locked row that
+                                                        was computed. */}
+                                                    {relaxation.overridden && (
+                                                        <span
+                                                            title={relaxation.reason
+                                                                ? `Reason: ${relaxation.reason}`
+                                                                : "No reason is recorded against this override."}
+                                                            style={{
+                                                                marginLeft: 8, padding: "1px 7px", borderRadius: 999,
+                                                                background: "#fdf6e8", border: "1px solid #eddcb4",
+                                                                color: "#8a5a00", fontSize: 10, fontWeight: 800,
+                                                                textTransform: "uppercase", letterSpacing: ".4px",
+                                                                cursor: "help", whiteSpace: "nowrap",
+                                                            }}
+                                                        >
+                                                            Manually overridden
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div style={{ fontSize: 11, ...muted, marginTop: 2, lineHeight: 1.55 }}>
                                                     {relaxation.finalized
@@ -6021,6 +6073,35 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             >
                                                 {relaxation.applied ? "Revise adjustment" : "Adjust LD"}
                                             </button>
+
+                                            {/* Shown only while it would actually work: an override
+                                                exists AND the row is not yet locked. Once finalized
+                                                or invoiced the endpoint answers 422
+                                                `settlement_locked`, and a button whose only outcome
+                                                is a refusal is worse than no button. */}
+                                            {relaxation.canRevert && (
+                                                <button
+                                                    type="button"
+                                                    className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                                                    style={{ marginTop: 0 }}
+                                                    disabled={reverting}
+                                                    title="Throw the manual figure away and go back to the computed one. This is the only route back — a finalised row cannot be reverted."
+                                                    onClick={async () => {
+                                                        setRevertError("");
+                                                        setReverting(true);
+                                                        try {
+                                                            await clearOverride();
+                                                        } catch (err) {
+                                                            setRevertError(err?.message || "The override could not be cleared.");
+                                                        } finally {
+                                                            setReverting(false);
+                                                        }
+                                                    }}
+                                                >
+                                                    {reverting ? "Reverting…" : "Revert to computed"}
+                                                </button>
+                                            )}
+
                                             {/* The other half of the pair: one revises, one stops
                                                 revision. Hidden once the quarter is closed rather
                                                 than shown disabled — a permanently dead button
@@ -6038,6 +6119,19 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                                 >
                                                     Mark final
                                                 </button>
+                                            )}
+
+                                            {/* Revert failing is the server refusing, and the
+                                                message names which refusal. Shown in the strip
+                                                rather than a toast because the row it is about is
+                                                right here. */}
+                                            {revertError && (
+                                                <div style={{
+                                                    flex: "1 1 100%", fontSize: 11.5, color: RED,
+                                                    fontWeight: 600, lineHeight: 1.55,
+                                                }}>
+                                                    {revertError}
+                                                </div>
                                             )}
                                         </div>
 
@@ -6264,11 +6358,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 <FinalizeModal
                     effectivePercent={relaxation.effectivePercent}
                     ldAmount={chain.ldAmount}
+                    overridden={relaxation.overridden}
+                    overrideReason={relaxation.reason}
                     quarterLabel={period?.label || "this quarter"}
                     quarterDates={period ? `${longDate(period.start)} → ${longDate(period.end)}` : ""}
                     onCancel={() => setFinalizeOpen(false)}
-                    onSubmit={async (payload) => {
-                        await finalizeQuarter(payload);
+                    onSubmit={async () => {
+                        await finalizeQuarter();
                         setFinalizeOpen(false);
                     }}
                 />

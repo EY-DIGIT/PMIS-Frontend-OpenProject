@@ -12,6 +12,10 @@ import {
     listSettlements,
     getSettlement,
     overrideSettlement,
+    finalizeSettlement,
+    clearSettlementOverride,
+    isSettlementFinal,
+    isSettlementOverridden,
     markSettlementInvoiced,
     quarterKeyOf,
     quarterKeyOfRow,
@@ -182,6 +186,8 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
     const [showOverride, setShowOverride] = useState(false);
     const [overrideForm, setOverrideForm] = useState({ sumLdPercent: "", overrideReason: "" });
     const [overrideLoading, setOverrideLoading] = useState(false);
+    const [finalizeLoading, setFinalizeLoading] = useState(false);
+    const [clearLoading, setClearLoading] = useState(false);
     const [invoiceRef, setInvoiceRef] = useState("");
     const [invoiceLoading, setInvoiceLoading] = useState(false);
 
@@ -266,6 +272,55 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
         }
     }
 
+    /* The PRE-BILLING lock. Not the same act as marking it invoiced: this
+       says the SLA owner is standing behind the figure, invoicing says
+       finance has billed it. A finalized quarter can still be invoiced
+       afterwards, which is why both controls survive side by side.
+
+       No body — the endpoint accepts none, so nothing is collected. */
+    async function submitFinalize() {
+        setFinalizeLoading(true);
+        setError("");
+        setNotice("");
+        try {
+            const row = await finalizeSettlement(projectId, quarter);
+            setSettlement(row);
+            setShowOverride(false);
+            setNotice("Quarter finalized — the LD is locked. It can still be marked invoiced.");
+            listSettlements(projectId).then((r) => setHistory(r?.items || [])).catch(() => { });
+        } catch (err) {
+            /* The server's own words. It distinguishes "already invoiced"
+               (settlement_immutable) from "nothing computed to finalize"
+               (settlement_not_computed), and those need different actions
+               from the reader — a status code alone would flatten them. */
+            setError(err?.message || "Failed to finalize the settlement.");
+        } finally {
+            setFinalizeLoading(false);
+        }
+    }
+
+    /* Throw the manual figure away and go back to the computed one. The
+       only route back: an overridden row is deliberately never recomputed
+       by a refresh, so without this the way to undo a wrong override was
+       to override it again with a guess at the computed value. */
+    async function submitClearOverride() {
+        setClearLoading(true);
+        setError("");
+        setNotice("");
+        try {
+            const row = await clearSettlementOverride(projectId, quarter);
+            setSettlement(row);
+            setShowOverride(false);
+            setNotice(`Override cleared — recomputed from current data, LD is now ${pct(row?.cappedLdPercent)}.`);
+            listSettlements(projectId).then((r) => setHistory(r?.items || [])).catch(() => { });
+        } catch (err) {
+            // 422 `settlement_locked` once invoiced or finalized.
+            setError(err?.message || "Failed to clear the override.");
+        } finally {
+            setClearLoading(false);
+        }
+    }
+
     async function submitInvoiced() {
         if (!invoiceRef.trim()) { setError("Enter the invoice reference."); return; }
         setInvoiceLoading(true);
@@ -286,6 +341,14 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
 
     const isContractKey = range?.kind === "contract" || /^Y\d+-Q[1-4]$/i.test(quarter);
     const invoiced = settlement?.status === "invoiced";
+    /* Two independent facts, and the UI needs both. `finalized` is a lock;
+       `overridden` is how the figure got there and survives the lock. A
+       locked row that was hand-set is not the same thing as a locked row
+       that was computed, and only one of them has a reason worth reading. */
+    const finalized = isSettlementFinal(settlement);
+    const overridden = isSettlementOverridden(settlement);
+    // Both refuse an override, so both close the form.
+    const locked = invoiced || finalized;
     const pqpUnavailable = pqp && pqp.status && pqp.status !== "ok";
     const aggItems = Array.isArray(aggregate?.items) ? aggregate.items : [];
     const perMonth = Array.isArray(pqp?.perMonth) ? pqp.perMonth : [];
@@ -399,7 +462,11 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                         </div>
                     )}
 
-                    {settlement.overrideReason && (
+                    {/* Shown only when the row is actually flagged as
+                        overridden. A cleared override can leave the old reason
+                        behind on the row, and printing that under a recomputed
+                        figure would describe a decision that has been undone. */}
+                    {overridden && settlement.overrideReason && (
                         <div style={{ fontSize: 12, ...muted, marginTop: 10 }}>
                             <b style={{ color: "#173e77" }}>Reason:</b> {settlement.overrideReason}
                         </div>
@@ -409,11 +476,35 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                     <div className="uidai-pmis-filter-shell" style={{ marginTop: 14 }}>
                         <div className="uidai-pmis-filter-head">
                             <div className="uidai-pmis-filter-title">Finance actions</div>
+                            {/* Both badges can be true at once — an overridden
+                                row that was then finalized is both, and hiding
+                                either would lose a fact somebody needs. */}
+                            {overridden && (
+                                <span
+                                    className="uidai-pmis-badge"
+                                    title={settlement.overrideReason
+                                        ? `Reason: ${settlement.overrideReason}`
+                                        : "No reason is recorded against this override."}
+                                    style={{
+                                        background: "#fdf6e8", border: "1px solid #eddcb4",
+                                        color: "#8a5a00", cursor: "help",
+                                    }}
+                                >
+                                    Manually overridden
+                                </span>
+                            )}
+                            {finalized && !invoiced && (
+                                <span className="uidai-pmis-badge" style={{ background: "#eef3fb", border: "1px solid #cfdcf0", color: "#173e77" }}>
+                                    Finalized — locked
+                                </span>
+                            )}
                             {invoiced && <span className="uidai-pmis-badge uidai-pmis-badge-green">Locked — invoiced</span>}
                         </div>
-                        {invoiced ? (
+                        {locked ? (
                             <div style={{ fontSize: 12.5, ...muted, marginTop: 10, lineHeight: 1.5 }}>
-                                This settlement is immutable. Corrections must be issued as a credit note, not by editing the row.
+                                {invoiced
+                                    ? "This settlement is immutable. Corrections must be issued as a credit note, not by editing the row."
+                                    : "This settlement is finalized. The LD can no longer be overridden or reverted to the computed figure; it can still be marked invoiced below."}
                             </div>
                         ) : (
                             <div style={{ marginTop: 12 }}>
@@ -423,6 +514,36 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                                         setOverrideForm({ sumLdPercent: String(settlement.sumLdPercent ?? ""), overrideReason: "" });
                                     }}>
                                         {showOverride ? "Cancel override" : "✎ Override LD %"}
+                                    </button>
+
+                                    {/* Offered only while it would work: an
+                                        override exists and nothing has locked
+                                        yet. Past that the endpoint answers 422
+                                        `settlement_locked`, and a control whose
+                                        only outcome is a refusal is worse than
+                                        no control. */}
+                                    {overridden && (
+                                        <button
+                                            type="button"
+                                            className="uidai-pmis-btn uidai-pmis-btn-cancel uidai-pmis-btn-small"
+                                            style={{ marginTop: 0 }}
+                                            onClick={submitClearOverride}
+                                            disabled={clearLoading}
+                                            title="Discard the manual figure and recompute from current data. This is the only route back to the computed value."
+                                        >
+                                            {clearLoading ? "Reverting…" : "↺ Revert to computed"}
+                                        </button>
+                                    )}
+
+                                    <button
+                                        type="button"
+                                        className="uidai-pmis-btn uidai-pmis-btn-small"
+                                        style={{ marginTop: 0 }}
+                                        onClick={submitFinalize}
+                                        disabled={finalizeLoading}
+                                        title="Lock the LD before billing. Blocks further overrides and reverts; marking invoiced can still follow."
+                                    >
+                                        {finalizeLoading ? "Locking…" : "✓ Mark as final"}
                                     </button>
                                 </div>
 
@@ -447,22 +568,29 @@ export default function SlaSettlementPanel({ projectId, projectStartDate = "", p
                                     </div>
                                 )}
 
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--uidai-pmis-border)" }}>
-                                    <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
-                                        <label>Invoice reference</label>
-                                        <input
-                                            type="text"
-                                            value={invoiceRef}
-                                            placeholder={`INV-${quarter || "Y1-Q3"}-001`}
-                                            onChange={(e) => setInvoiceRef(e.target.value)}
-                                        />
-                                        <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Locks the row permanently once the LD has been billed.</div>
-                                    </div>
-                                    <div style={{ display: "flex", alignItems: "flex-end" }}>
-                                        <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={submitInvoiced} disabled={invoiceLoading}>
-                                            {invoiceLoading ? "Locking…" : "🔒 Mark invoiced"}
-                                        </button>
-                                    </div>
+                            </div>
+                        )}
+
+                        {/* OUTSIDE the lock branch, because finalize is the
+                            PRE-billing lock and invoicing is what follows it.
+                            A finalized quarter must still be billable — only
+                            an already-invoiced one has nothing left to do. */}
+                        {!invoiced && (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14, marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--uidai-pmis-border)" }}>
+                                <div className="uidai-pmis-field" style={{ marginBottom: 0 }}>
+                                    <label>Invoice reference</label>
+                                    <input
+                                        type="text"
+                                        value={invoiceRef}
+                                        placeholder={`INV-${quarter || "Y1-Q3"}-001`}
+                                        onChange={(e) => setInvoiceRef(e.target.value)}
+                                    />
+                                    <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>Locks the row permanently once the LD has been billed.</div>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "flex-end" }}>
+                                    <button type="button" className="uidai-pmis-btn uidai-pmis-btn-small" style={{ marginTop: 0 }} onClick={submitInvoiced} disabled={invoiceLoading}>
+                                        {invoiceLoading ? "Locking…" : "🔒 Mark invoiced"}
+                                    </button>
                                 </div>
                             </div>
                         )}

@@ -264,8 +264,16 @@ export function getSettlement(projectId, quarter) {
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}`).then(toPqp);
 }
 
-// Phase D — finance override of sumLdPercent. Re-capped at the quarter cap
-// before persistence. 404 when not auto-closed yet, 422 once invoiced.
+/* Phase D — finance override of sumLdPercent. Re-capped at the quarter cap
+   before persistence. 404 when not auto-closed yet, 422 once invoiced or
+   finalized.
+
+   `overrideReason` is REQUIRED SERVER-SIDE as of contract/eyremote — a
+   blank or whitespace-only reason is refused with 422
+   (`override_reason_required`, or a plain schema 422). The caller keeps
+   its own required-field check so the user gets an inline error instead
+   of a round trip, but the rule is the server's and this does not try to
+   soften it. */
 export function overrideSettlement(projectId, quarter, { sumLdPercent, overrideReason }) {
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/override`, {
         method: "POST",
@@ -273,56 +281,89 @@ export function overrideSettlement(projectId, quarter, { sumLdPercent, overrideR
     }).then(toPqp);
 }
 
-/* Close the quarter to further relaxation, WITHOUT invoicing it.
+/* Lock the quarter WITHOUT invoicing it — the pre-billing lock.
 
-   A relaxation stays available for as long as the project runs — the
-   RFP puts no deadline on it, and in practice a waiver is agreed months
-   after the quarter it applies to. So nothing expires; the quarter stays
-   open to revision until somebody deliberately says "this figure is the
-   one we are standing behind".
+   Two distinct locks, and they are not interchangeable. Finalize is the
+   SLA owner signing off the penalty: the figure stops moving, but no
+   money has been raised. Mark-invoiced is the billing lock and comes
+   later. A finalized quarter can still go on to be invoiced.
 
-   That is what this is. It is NOT `mark-invoiced`: invoicing is a
-   finance event that happens later and locks the row permanently against
-   everything. Finalising is the SLA owner signing off the penalty, and
-   it takes a reason because the point of it is accountability — the
-   thing being recorded is a decision, not a state change.
+   ── NO BODY ────────────────────────────────────────────────────────
+   POST .../settlement/{quarter}/finalize   → the locked row
+       (`status: "finalized"`, `finalized: true`)
 
-   ── NOT YET DEPLOYED ───────────────────────────────────────────────
-   The endpoint below is the agreed shape, not a live route. Until the
-   backend ships it this call answers 404/405, and the caller reports
-   that plainly rather than pretending the quarter was finalised. The
-   contract expected:
+   No reason is sent. An earlier draft of this took `{ reason }` on the
+   assumption that a lock needs an audit note; the shipped endpoint does
+   not accept one, and posting a body it ignores would leave the UI
+   collecting a reason that goes nowhere — worse than not asking, because
+   the user believes it was recorded. The override reason remains the
+   place a decision is explained; this only records that it is closed.
 
-       POST .../settlement/{quarter}/finalize   { reason }
-       → the settlement row, with a status of "final" (or a
-         `finalizedAt` timestamp, or both — the reader below accepts
-         any of them) and the reason echoed back.
-
-   Idempotent: finalising a final quarter should return the row, not
-   error, so a double-click cannot produce a second audit entry.       */
-export function finalizeSettlement(projectId, quarter, { reason }) {
+   Errors: 422 `settlement_immutable` (already invoiced), 422
+   `settlement_not_computed` (a blocked_* row — nothing to finalize),
+   404 (no row for this quarter).                                      */
+export function finalizeSettlement(projectId, quarter) {
     return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/finalize`, {
         method: "POST",
-        body: { reason },
     }).then(toPqp);
 }
 
-/* Is this row closed to further relaxation?
+/* Throw a manual override away and go back to the computed figure.
 
-   Deliberately tolerant: the finalise contract is not deployed yet, so
-   rather than pin to one field this accepts whichever the backend ends
-   up sending — a status, a timestamp, or a flag. An INVOICED row counts
-   too: invoicing is the stronger lock and implies finality.
+   The ONLY route back to the live computation. A row carrying an
+   override is not recomputed by a refresh — that is the point of an
+   override — so without this the only way to undo a wrong figure was to
+   override it again with a guess at what the computation would have said.
 
-   Erring toward "locked" is the safe direction. Reading a final row as
-   open offers a relaxation the server will reject; reading an open row
-   as final only hides a button that can be un-hidden.                 */
+   POST .../settlement/{quarter}/clear-override   → the recomputed row
+       (`status: "auto_closed"`, `manuallyOverridden: false`)
+
+   Errors: 422 `settlement_locked` once invoiced or finalized. Which is
+   why the button offering this has to disappear at the same moment the
+   lock lands, rather than staying and failing.                        */
+export function clearSettlementOverride(projectId, quarter) {
+    return call(`/api/v3/sla-compliance/projects/${enc(projectId)}/settlement/${enc(quarter)}/clear-override`, {
+        method: "POST",
+    }).then(toPqp);
+}
+
+/* Is this row locked against further change?
+
+   Reads the shipped `finalized` flag first, then falls back to the
+   status string and the older timestamp shapes — a row fetched from a
+   cache, or an endpoint not yet redeployed, can still arrive without the
+   boolean, and treating that as unlocked would offer an override the
+   server refuses.
+
+   An INVOICED row counts too: invoicing is the stronger lock and implies
+   finality. Erring toward "locked" is the safe direction — reading a
+   locked row as open offers an action the server will reject, while
+   reading an open row as locked only hides a button. */
 export function isSettlementFinal(row) {
     if (!row) return false;
+    if (row.finalized === true) return true;
     const status = String(row.status || "").toLowerCase();
     if (status === "final" || status === "finalized" || status === "finalised") return true;
     if (status === "invoiced") return true;
     return !!(row.finalizedAt || row.finalisedAt || row.isFinal);
+}
+
+/* Has the LD on this row been set by hand rather than computed?
+
+   Survives a finalize — a locked row that was overridden is still an
+   overridden row, and the badge has to keep saying so after the lock
+   lands. False for invoiced and auto-closed rows.
+
+   `overrideReason` alone is NOT taken as proof: a cleared override may
+   leave the old reason on the row, and reading that as "still
+   overridden" would offer a Clear-override button for an override that
+   is already gone. The flag is the answer; the reason is only what the
+   badge says when it is true. */
+export function isSettlementOverridden(row) {
+    if (!row) return false;
+    if (row.manuallyOverridden === true) return true;
+    // Pre-flag rows: the old status was the only signal there was.
+    return String(row.status || "").toLowerCase() === "manual_override";
 }
 
 // Phase E — lock the row after the invoice is raised. Idempotent.

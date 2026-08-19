@@ -636,6 +636,25 @@ export default function ManageTeam() {
 
   /* ─── Submit (PUT) / Back ─── */
   const submitTeam = async () => {
+    /* Never submit a state the GET has not finished filling.
+
+       `PUT /team-page` is a FULL REPLACE per scope: for every activity in
+       the payload it deletes and rewrites all four buckets, and
+       projectOwner is replaced outright. That is safe only because this
+       page pre-hydrates the complete team and sends it all back, so
+       untouched assignments ride along unchanged.
+
+       Submit while the hydration is still in flight and that guarantee
+       inverts — the payload is the empty initial state, and a full
+       replace against it wipes every assignment the project had. The
+       partial-save relaxation below is what makes this reachable: before
+       it, an unhydrated page failed the completeness check and never got
+       this far. */
+    if (loading) {
+      showToast('Still loading the current team — wait for it to finish before saving.', 'warning');
+      return;
+    }
+
     const missing = [];
     state.orgUser.forEach((r) => {
       if (!r.users || r.users.length === 0) missing.push(`Organization User → ${r.displayLabel}`);
@@ -1408,9 +1427,11 @@ export default function ManageTeam() {
               type="button"
               className="mt-btn"
               onClick={submitTeam}
-              disabled={saving}
+              /* `loading` as well as `saving`: a full-replace PUT built
+                 from a half-hydrated state would clear real assignments. */
+              disabled={saving || loading}
             >
-              {saving ? 'Saving…' : 'Submit'}
+              {saving ? 'Saving…' : loading ? 'Loading…' : 'Submit'}
             </button>
           </>
         )}
