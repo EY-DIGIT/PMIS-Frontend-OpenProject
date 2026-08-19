@@ -299,11 +299,30 @@ function Breadcrumbs() {
         );
     }
 
-    // Project Details (/projects/:projectId) has no sub-pages reachable
-    // from the breadcrumb yet — the heading already lives in the navbar,
-    // so the lone "Projects › <code>" trail is noise. Hide it for now.
+    /* Project Details (/projects/:projectId) — Home › Projects › <code>.
+       "Projects" links back to the list; the leaf shows the project code
+       once the store has it (the page seeds it on load) and falls back to
+       "Project Details" so the raw uuid never shows on a hard refresh. */
     if (segments[0] === "projects" && segments.length === 2 && segments[1] !== "add") {
-        return null;
+        const sep = <span style={{ color: "#999" }}>›</span>;
+        const linkStyle = { color: "#173e77", textDecoration: "none", fontWeight: 500 };
+        return (
+            <nav aria-label="breadcrumb" className="uidai-breadcrumbs" style={{
+                paddingBottom: "10px",
+                background: "#f5f7fa",
+                fontSize: 14,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap"
+            }}>
+                <Link to="/" style={linkStyle}>Home</Link>
+                {sep}
+                <Link to="/projects" style={linkStyle}>Projects</Link>
+                {sep}
+                <span style={{ color: "#333", fontWeight: 600 }}>{projectCode || "Project Details"}</span>
+            </nav>
+        );
     }
 
     // Leave Policy Configure — heading + project name already live in the
