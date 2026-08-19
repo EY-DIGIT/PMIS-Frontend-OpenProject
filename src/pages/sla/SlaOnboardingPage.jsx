@@ -1209,7 +1209,17 @@ export default function SlaOnboardingPage() {
                 const cur = sel.value;
                 sel.innerHTML = _sevInputVarOptions(cur);
                 if (cur) sel.value = cur;
+                _syncSevVarTitle(sel);
             });
+        }
+        /* The column is too narrow for the catalog's longer labels ("Bona-fide
+           Presentation…", "Knowledge-transfer…"), and a closed <select> has no
+           way to scroll its own text — so the full label rides along as the
+           native hover tooltip. Called wherever the selection can change:
+           onchange, after a dropdown rebuild, and after edit-mode prefill. */
+        function _syncSevVarTitle(sel) {
+            if (!sel) return;
+            sel.title = sel.options[sel.selectedIndex]?.text || "";
         }
         /* The threshold column holds the RFP's own wording, so words stay free
            text ("days <= 7", "≤ 21 days"). What it must not accept is a broken
@@ -1256,13 +1266,15 @@ export default function SlaOnboardingPage() {
             r.innerHTML = `
                 <span class="sev-pill" style="background:${_SEV_COLOUR[sev]};">L${sev}</span>
                 <select data-k="severity" onchange="window.__slaOnb._updateSevPill(this)">${_severityOptions(sev)}</select>
-                <select data-k="input_variable">${_sevInputVarOptions("")}</select>
+                <select data-k="input_variable" onchange="window.__slaOnb._syncSevVarTitle(this)">${_sevInputVarOptions("")}</select>
                 <input data-k="threshold_label" type="text" placeholder="e.g. ≤ 21 days" oninput="window.__slaOnb._onThresholdInput(this)">
                 <input data-k="from_value" type="number" step="any" placeholder="≥ this">
                 <input data-k="to_value" type="number" step="any" placeholder="≤ this">
                 <button type="button" class="dyn-delete-btn" onclick="window.__slaOnb._deleteSevRow(this)">✕</button>
                 <div class="lin-err sev-err"></div>`;
             body.appendChild(r);
+            // The default "— Primary measurement —" option is a long label too.
+            _syncSevVarTitle(r.querySelector('[data-k="input_variable"]'));
         }
         function _updateSevPill(sel) {
             const row = sel.closest(".sev-row");
@@ -1938,6 +1950,7 @@ export default function SlaOnboardingPage() {
                     if (tr.input_variable && ivSel) {
                         ivSel.innerHTML = _sevInputVarOptions(tr.input_variable);
                         ivSel.value = tr.input_variable;
+                        _syncSevVarTitle(ivSel);
                     }
                     const thrInput = sevRow.querySelector('[data-k="threshold_label"]');
                     thrInput.value = tr.threshold_label ?? "";
@@ -2217,6 +2230,7 @@ export default function SlaOnboardingPage() {
             addRow, _onFieldTypeChange, _deleteRow, _onMeasurementPick, _confirmNewMeasurement, _cancelNewMeasurement,
             _onLdRuleChange, _addSecondaryMetric, _removeSecondaryMetric,
             _addSevRow, _updateSevPill, _deleteSevRow, _onThresholdInput, _renderLinPreview, _addPhRow,
+            _syncSevVarTitle,
             _onAttachmentsPicked,
         };
 
