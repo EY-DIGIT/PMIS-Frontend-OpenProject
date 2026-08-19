@@ -300,11 +300,6 @@ export default function ActivityResourceAllocations({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: "#5b6b82", flex: "1 1 260px", minWidth: 0 }}>
-          One row per role <strong>per deployment date</strong>. Duration is in{" "}
-          <strong>months (0–{MAX_DURATION})</strong> — an activity covers a single quarter.
-          Staggering a role across dates? Add a row for each.
-        </div>
         <div style={{ fontSize: 12, color: "#5b6b82", whiteSpace: "nowrap" }}>
           Resource cost:{" "}
           <strong style={{ color: "#173e77", fontSize: 14 }}>{inr(total)}</strong>
