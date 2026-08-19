@@ -56,6 +56,18 @@ export function formatINR(n, { compact = true } = {}) {
   return "₹ " + v.toLocaleString("en-IN");
 }
 
+/* ─── Value-axis ticks ──────────────────────────────────────────────
+   Recharts word-wraps a tick label that is wider than the axis band it
+   sits in. On a value axis the end ticks sit flush with the edge of the
+   plot area, so a wrapped "₹ 140 Cr" loses its first line off the top of
+   the SVG. Non-breaking spaces remove every break opportunity, so a value
+   label always renders on one line; VALUE_AXIS_W reserves the width that
+   one line needs, and AXIS_GUTTER keeps the end tick off the canvas edge. */
+const valueTick = (money) =>
+  money ? (v) => formatINR(v).replace(/ /g, " ") : (v) => v;
+const VALUE_AXIS_W = (money) => (money ? 64 : 32);
+const AXIS_GUTTER = 14;
+
 /* ─── Shared empty state ────────────────────────────────────────── */
 
 function NoData({ height = 220, label = "No data" }) {
@@ -144,7 +156,7 @@ export function DonutChart({ counts, keys, height = 230, centerLabel = "items", 
    `series` = [{ key, name, color }]. Horizontal category axis. */
 export function StackedBar({ data, series, height = 260, money = false, vertical = false }) {
   if (!data || !data.length || !series || !series.length) return <NoData height={height} />;
-  const tickFmt = money ? (v) => formatINR(v) : (v) => v;
+  const tickFmt = valueTick(money);
   // Angle the category axis when it would otherwise collide: many bars OR
   // long phase labels ("Phase 2 - TDS Recovery"). Truncate very long text so
   // an angled label doesn't run off the canvas.
@@ -160,7 +172,7 @@ export function StackedBar({ data, series, height = 260, money = false, vertical
         <BarChart
           data={data}
           layout={vertical ? "vertical" : "horizontal"}
-          margin={{ top: 8, right: 12, bottom: angled && !vertical ? 8 : 4, left: vertical ? 8 : 0 }}
+          margin={{ top: AXIS_GUTTER, right: 12, bottom: angled && !vertical ? 8 : 4, left: vertical ? 8 : 0 }}
           barCategoryGap={vertical ? "22%" : "28%"}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#eef3fa" vertical={vertical} horizontal={!vertical} />
@@ -176,7 +188,7 @@ export function StackedBar({ data, series, height = 260, money = false, vertical
                 angle={angled ? -28 : 0}
                 textAnchor={angled ? "end" : "middle"}
                 height={angled ? 64 : 24} />
-              <YAxis tickFormatter={tickFmt} tick={{ fontSize: 10, fill: "#7a869a" }} axisLine={false} tickLine={false} width={money ? 52 : 32} />
+              <YAxis tickFormatter={tickFmt} tick={{ fontSize: 10, fill: "#7a869a" }} axisLine={false} tickLine={false} width={VALUE_AXIS_W(money)} />
             </>
           )}
           <Tooltip content={<ChartTooltip money={money} />} cursor={{ fill: "rgba(11,60,136,.05)" }} />
@@ -196,11 +208,11 @@ export function StackedBar({ data, series, height = 260, money = false, vertical
    `data` = [{ label, value, color? }]. Good for leaderboards. */
 export function RankedBar({ data, height = 260, money = false, color = DOMAIN.schedule }) {
   if (!data || !data.length) return <NoData height={height} />;
-  const tickFmt = money ? (v) => formatINR(v) : (v) => v;
+  const tickFmt = valueTick(money);
   return (
     <div className="dash-chart-canvas" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 8 }} barCategoryGap="26%">
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: AXIS_GUTTER, bottom: 4, left: 8 }} barCategoryGap="26%">
           <CartesianGrid strokeDasharray="3 3" stroke="#eef3fa" horizontal={false} />
           <XAxis type="number" tickFormatter={tickFmt} tick={{ fontSize: 10, fill: "#7a869a" }} axisLine={false} tickLine={false} />
           <YAxis type="category" dataKey="label" width={120} tick={{ fontSize: 10.5, fill: "#3d4c6b" }} axisLine={false} tickLine={false} />
@@ -270,11 +282,11 @@ export function FunnelBars({ stages, height }) {
    `data` = [{ label, [seriesKey]: number }], `series` = [{key,name,color}] */
 export function TrendArea({ data, series, height = 240, money = false }) {
   if (!data || !data.length || !series || !series.length) return <NoData height={height} />;
-  const tickFmt = money ? (v) => formatINR(v) : (v) => v;
+  const tickFmt = valueTick(money);
   return (
     <div className="dash-chart-canvas" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+        <AreaChart data={data} margin={{ top: AXIS_GUTTER, right: 12, bottom: 4, left: 0 }}>
           <defs>
             {series.map((s, i) => (
               <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
@@ -285,7 +297,7 @@ export function TrendArea({ data, series, height = 240, money = false }) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#eef3fa" vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 10.5, fill: "#3d4c6b" }} axisLine={false} tickLine={false} />
-          <YAxis tickFormatter={tickFmt} tick={{ fontSize: 10, fill: "#7a869a" }} axisLine={false} tickLine={false} width={money ? 52 : 32} />
+          <YAxis tickFormatter={tickFmt} tick={{ fontSize: 10, fill: "#7a869a" }} axisLine={false} tickLine={false} width={VALUE_AXIS_W(money)} />
           <Tooltip content={<ChartTooltip money={money} />} />
           <RLegend wrapperStyle={{ fontSize: 11.5, fontWeight: 700 }} iconType="circle" iconSize={9} />
           {series.map((s, i) => (
