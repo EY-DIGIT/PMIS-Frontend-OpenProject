@@ -315,7 +315,15 @@ function cleanPayload(obj) {
 }
 
 export default function MeetingDetailPage() {
-  const { id } = useParams();
+  /* projectId is only present on the project-scoped route
+     (/projects/{projectId}/meetings/{id}); on the global /meetings/{id}
+     route it's undefined and "back" keeps pointing at the All-Meetings
+     list as before. */
+  const { id, projectId } = useParams();
+  const backTo = projectId
+    ? `/projects/${encodeURIComponent(projectId)}/meetings`
+    : "/meetings";
+  const backLabel = projectId ? "← Back to Meetings" : "← All Meetings";
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
@@ -852,9 +860,9 @@ export default function MeetingDetailPage() {
             <button
               type="button"
               className="btn cancel"
-              onClick={() => navigate("/meetings")}
+              onClick={() => navigate(backTo)}
             >
-              ← All Meetings
+              {backLabel}
             </button>
           </div>
         </div>
@@ -969,9 +977,9 @@ export default function MeetingDetailPage() {
           <button
             type="button"
             className="btn cancel"
-            onClick={() => navigate("/meetings")}
+            onClick={() => navigate(backTo)}
           >
-            ← All Meetings
+            {backLabel}
           </button>
         </div>
       </div>

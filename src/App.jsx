@@ -698,7 +698,12 @@ function Breadcrumbs() {
                       (projects.find((p) => p.projectId === decodeURIComponent(seg))?.projectCode) ||
                       ""
                     : "";
-                    const isMeetingIdSeg=i===1 && visibleSegments[0]==="meetings" && seg!=="new";
+                    /* The meeting id sits at index 1 on /meetings/{id} and at
+                       index 3 on the project-scoped /projects/{id}/meetings/{id}.
+                       Either way it's a raw uuid, so swap in the meeting name
+                       the detail page publishes into pageContext. */
+                    const isMeetingIdSeg=(i===1 && visibleSegments[0]==="meetings" && seg!=="new")
+                        || (i===3 && visibleSegments[0]==="projects" && visibleSegments[2]==="meetings" && seg!=="new");
                     const meetingName=isMeetingIdSeg?((pageCtx && pageCtx.meetingName) || ""):"";
                 const label = isProjectIdSeg && projectCode
                     ? projectCode
@@ -918,6 +923,13 @@ export default function MainApp() {
                                                 </Route>
                                                 <Route path="/projects/:projectId/activities-started" element={<RequirePermission action="viewProjects"><ActivityStartedListPage /></RequirePermission>} />
                                                 <Route path="/projects/:projectId/meetings" element={<RequirePermission action="viewMeetings"><ProjectMeetingsPage /></RequirePermission>} />
+                                                {/* Project-scoped twins of the /meetings/* screens. Same
+                                                    components — the project in the path keeps the breadcrumb
+                                                    and every "back" inside the project instead of dropping the
+                                                    user on the global All-Meetings list. */}
+                                                <Route path="/projects/:projectId/meetings/new" element={<RequirePermission action="viewMeetings"><CreateMeetingPage /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/meetings/:id/tasks" element={<RequirePermission action="viewMeetings"><LinkedTaskMeeting /></RequirePermission>} />
+                                                <Route path="/projects/:projectId/meetings/:id" element={<RequirePermission action="viewMeetings"><MeetingDetailPage /></RequirePermission>} />
                                                 {/* penalty-report and designation-rate now live in the
                                                     Attendance System layout route above. */}
 

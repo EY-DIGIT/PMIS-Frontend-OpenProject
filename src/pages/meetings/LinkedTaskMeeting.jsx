@@ -108,7 +108,14 @@ function unwrapMoM(mom) {
 }
 
 export default function LinkedTaskMeeting() {
-  const { id } = useParams();
+  /* projectId is only set on the project-scoped route
+     (/projects/{projectId}/meetings/{id}/tasks). When it is, every exit
+     stays inside the project; on the global route nothing changes. */
+  const { id, projectId } = useParams();
+  const meetingBase = projectId
+    ? `/projects/${encodeURIComponent(projectId)}/meetings`
+    : "/meetings";
+  const backLabel = projectId ? "← Back to Meetings" : "← All Meetings";
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
@@ -187,7 +194,7 @@ export default function LinkedTaskMeeting() {
 
         const activityId = m?.activityId;
         if (!activityId) {
-          navigate(`/meetings/${id}`, { replace: true });
+          navigate(`${meetingBase}/${id}`, { replace: true });
           return;
         }
 
@@ -201,7 +208,7 @@ export default function LinkedTaskMeeting() {
 
         const elements = tasksFromResponse(tasksRes);
         if (!Array.isArray(elements) || elements.length === 0) {
-          navigate(`/meetings/${id}`, { replace: true });
+          navigate(`${meetingBase}/${id}`, { replace: true });
           return;
         }
 
@@ -234,7 +241,7 @@ export default function LinkedTaskMeeting() {
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [id, navigate, show]);
+  }, [id, meetingBase, navigate, show]);
 
   const userById = useMemo(() => {
     const m = new Map();
@@ -400,9 +407,9 @@ export default function LinkedTaskMeeting() {
             <button
               type="button"
               className="btn cancel"
-              onClick={() => navigate("/meetings")}
+              onClick={() => navigate(meetingBase)}
             >
-              ← All Meetings
+              {backLabel}
             </button>
           </div>
         </div>
@@ -424,7 +431,7 @@ export default function LinkedTaskMeeting() {
           <button
             type="button"
             className="btn cancel"
-            onClick={() => navigate(`/meetings/${id}`)}
+            onClick={() => navigate(`${meetingBase}/${id}`)}
           >
             Open Meeting Detail
           </button>

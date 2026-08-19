@@ -9,7 +9,7 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
 import { api } from "../../api/client";
@@ -342,12 +342,15 @@ export default function CreateMeetingPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
-  /* Opened from a project's Meeting Details page as
-     /meetings/new?projectId={id} — the project is already decided, so the
-     picker is replaced by a locked read-only field. Opened bare (from the
-     All-Meetings list) there's no project yet and the dropdown stays. */
+  /* Opened project-scoped as /projects/{id}/meetings/new — the project is
+     already decided, so the picker is replaced by a locked read-only field
+     and every exit stays inside the project. The ?projectId= form is the
+     older shape of the same thing, still honoured so existing links work.
+     Opened bare (from the All-Meetings list) there's no project yet and the
+     dropdown stays. */
+  const { projectId: routeProjectId } = useParams();
   const [searchParams] = useSearchParams();
-  const lockedProjectId = searchParams.get("projectId") || "";
+  const lockedProjectId = routeProjectId || searchParams.get("projectId") || "";
 
   /* Where "back" and the post-create redirect land: the originating
      project's meeting list when locked, the all-meetings list otherwise. */
@@ -984,7 +987,7 @@ export default function CreateMeetingPage() {
           <button
             type="button"
             className="btn cancel"
-            onClick={() => navigate("/meetings")}
+            onClick={() => navigate(backTo)}
             disabled={submitting}
           >
             Cancel

@@ -70,6 +70,11 @@ export default function ProjectMeetingsPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
+  /* Every meeting screen reached from here stays under the project, so the
+     breadcrumb and the back buttons lead back to this list rather than the
+     global All-Meetings page. */
+  const meetingBase = `/projects/${encodeURIComponent(projectId)}/meetings`;
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   /* Id of the meeting whose MoM we're checking on click (disables the row
@@ -117,9 +122,9 @@ export default function ProjectMeetingsPage() {
     try {
       const mom = await getMoM(meetingId);
       const hasTasks = actionItemsOf(mom).length > 0;
-      navigate(hasTasks ? `/meetings/${meetingId}/tasks` : `/meetings/${meetingId}`);
+      navigate(hasTasks ? `${meetingBase}/${meetingId}/tasks` : `${meetingBase}/${meetingId}`);
     } catch {
-      navigate(`/meetings/${meetingId}`);
+      navigate(`${meetingBase}/${meetingId}`);
     } finally {
       setRoutingId(null);
     }
@@ -160,11 +165,7 @@ export default function ProjectMeetingsPage() {
           <button
             type="button"
             className="btn"
-            onClick={() =>
-              /* Carry the project through so the form opens with it already
-                 set and locked, instead of asking for it again. */
-              navigate(`/meetings/new?projectId=${encodeURIComponent(projectId)}`)
-            }
+            onClick={() => navigate(`${meetingBase}/new`)}
           >
             Create Meeting
           </button>
