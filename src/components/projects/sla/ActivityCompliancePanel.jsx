@@ -149,7 +149,14 @@ export default function ActivityCompliancePanel({ activityId, activityLabel }) {
                         <div className="uidai-pmis-filter-title">Awaiting manual observation ({triggerResult.manualNeeded.length})</div>
                     </div>
                     <div style={{ fontSize: 12.5, ...muted, marginTop: 10, lineHeight: 1.6 }}>
-                        These SLAs are not date-derivable — use <b style={{ color: "#173e77" }}>Evaluate</b> on the mapping row to enter what was observed.
+                        {/* Driven by the backend's own `manualNeeded`, so this
+                            list is correct whatever it contains — but the
+                            wording no longer implies the resource SLAs live
+                            here. Since 2026-08-11 they are auto-evaluated, so
+                            one turning up in this list is worth questioning
+                            rather than simply typing in. */}
+                        The backend could not score these automatically — use <b style={{ color: "#173e77" }}>Evaluate</b> on the mapping row to enter what was observed.
+                        Resource SLAs (005&ndash;009) are normally scored from attendance, so one appearing here means its measurement was unavailable.
                         <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                             {triggerResult.manualNeeded.map((m, i) => (
                                 <li key={m.mapping_id || i}>

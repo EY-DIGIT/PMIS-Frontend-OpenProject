@@ -22,7 +22,7 @@
    ══════════════════════════════════════════════════════════════════ */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadProjectTree } from "../../../api/milestoneConfigApi";
+import { loadProjectTree, loadActivityById } from "../../../api/milestoneConfigApi";
 import {
     getActivityCompliance,
     getPqp,
@@ -423,7 +423,10 @@ function CategoryBlock({ cat, accent, children, defaultOpen = false }) {
                 )}
                 {cat.met > 0 && <span className="uidai-pmis-badge uidai-pmis-badge-green">{cat.met} met</span>}
                 {cat.pending > 0 && (
-                    <span className="uidai-pmis-badge uidai-pmis-badge-orange">{cat.pending} awaiting</span>
+                    <span
+                        className="uidai-pmis-badge uidai-pmis-badge-orange"
+                        title="Occurrences the evaluation returned no result for. Resource SLAs are scored automatically, so this points at a measurement that did not reach the evaluator rather than at work someone owes."
+                    >{cat.pending} no result</span>
                 )}
                 {cat.excluded > 0 && (
                     <span className="uidai-pmis-badge uidai-pmis-badge-grey">{cat.excluded} excluded</span>
@@ -487,7 +490,10 @@ const RESULT_BADGE = {
 const STATUS_LABEL = {
     [STATUS.BREACHED]: "breached",
     [STATUS.MET]: "met",
-    [STATUS.PENDING]: "awaiting observation",
+    /* Was "awaiting observation", which read as "a human still has to
+       look at this". For an auto-scored SLA the honest reading is simply
+       that no result came back. */
+    [STATUS.PENDING]: "no result",
     [STATUS.EXCLUDED]: "excluded",
     [STATUS.UNKNOWN]: "unknown",
 };
@@ -498,7 +504,16 @@ function StatusBadge({ status }) {
         <span
             className={`uidai-pmis-badge ${RESULT_BADGE[kind] || "uidai-pmis-badge-orange"}`}
             title={kind === STATUS.PENDING
-                ? "The evaluation ran but this SLA is not date-derivable — enter the observed value on Activity SLA Mapping."
+                /* Not "this SLA needs a manual reading" any more. Since
+                   2026-08-11 the resource SLAs (005–009) come back from
+                   /on-complete under `autoEvaluated` with a real met/breached
+                   status and `manualNeeded` empty, so a pending row is an
+                   EXCEPTION — the measurement did not reach the evaluator —
+                   rather than the resting state it used to be. Telling the
+                   reader to go and type a value sends them to enter by hand
+                   something the backend is expected to score, and buries the
+                   fact that something upstream failed. */
+                ? "No result was recorded for this occurrence. Resource SLAs are scored automatically from attendance, so this usually means the measurement did not reach the evaluator — re-run the completion evaluation on the activity. Only an SLA the backend reports under `manualNeeded` has to be entered by hand."
                 : kind === STATUS.EXCLUDED
                     ? "Deliberately outside the calculation — e.g. a resource whose replacement UIDAI initiated (SLA 007 Note). Scores no points."
                     : status || undefined}
@@ -520,6 +535,247 @@ function Banner({ text, kind }) {
             }}
         >
             {text}
+        </div>
+    );
+}
+
+/* ── how F is composed ─────────────────────────────────────────────────
+   F is a sum of allocation costs, and the tiles above give only its total.
+   This shows what that total is MADE of, which is the question anyone
+   checking a PQP actually has: which roles carry the money.
+
+   A ranked horizontal bar, not a pie. Seven-plus long-named categories in a
+   pie are unreadable, and close values cannot be compared by angle; bars
+   sort, label and compare exactly. The table below carries the precise
+   figures, so the chart's job is only the shape of the distribution.
+
+   One measure, so one hue. A categorical rainbow here would imply the roles
+   are different KINDS of thing rather than different sizes of the same
+   thing. The hue is validated against the white panel: inside the lightness
+   band, above the chroma floor, past 3:1 contrast. */
+const BAR_HUE = "#2a78d6";
+
+/* ── the base, and how much of it the penalty took ─────────────────────
+   The one genuine part-to-whole on this page: LD is a percentage OF PQP, so
+   PQP really does divide into the part withheld and the part retained, and
+   the two sum back to it. Note this is the ONLY figure on the page that
+   does: AQP already contains QGR and already has LD taken out of it, so
+   PQP, AQP, LD and QGR together are not slices of anything.
+
+   A ring rather than a flat pie: two slices in a pie are read by comparing
+   angles, which nobody does accurately, so the number that matters sits in
+   the middle at full size and the ring carries the proportion. Both slices
+   are labelled with their amount, so the figure is never colour-only. */
+function PqpSplitDonut({ chain }) {
+    const pqp = Number(chain?.pqp);
+    const ld = Number(chain?.ldAmount);
+    if (!Number.isFinite(pqp) || pqp <= 0 || !Number.isFinite(ld)) return null;
+
+    /* Clamped so a penalty larger than its own base — which would mean a
+       breach somewhere upstream, not a 110% ring — still draws a full ring
+       and reports the real figures beside it. */
+    const withheld = Math.max(0, Math.min(ld, pqp));
+    const retained = Math.max(0, pqp - withheld);
+    const pctWithheld = (withheld / pqp) * 100;
+    const overflow = ld > pqp;
+
+    /* One ring, drawn with stroke-dasharray on a circle. r chosen so the
+       circumference is a round 100 units, which makes each segment's length
+       its own percentage — no trigonometry, and nothing to get wrong. */
+    const R = 100 / (2 * Math.PI);
+    const CIRC = 100;
+    const GAP = withheld > 0 && retained > 0 ? 1 : 0;   // the 2px surface gap
+    const ldLen = Math.max(pctWithheld - GAP, 0);
+    const keepLen = Math.max(100 - pctWithheld - GAP, 0);
+
+    return (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--uidai-pmis-border)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: INK, marginBottom: 12 }}>
+                What the penalty took out of the base
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                <div style={{ position: "relative", width: 132, height: 132, flex: "0 0 auto" }}>
+                    <svg viewBox="0 0 40 40" width="132" height="132" role="img"
+                        aria-label={"Of " + money(pqp) + " PQP, " + money(withheld) + " was withheld as penalty and " + money(retained) + " retained."}>
+                        {/* Track: one step off the surface, so an empty ring is
+                            still visibly a ring. */}
+                        <circle cx="20" cy="20" r={R} fill="none" stroke="#eef3f9" strokeWidth="5" />
+                        {retained > 0 && (
+                            <circle
+                                cx="20" cy="20" r={R} fill="none" stroke={BAR_HUE} strokeWidth="5"
+                                strokeDasharray={keepLen + " " + (CIRC - keepLen)}
+                                strokeDashoffset={-(pctWithheld + GAP / 2)}
+                                transform="rotate(-90 20 20)"
+                                strokeLinecap="butt"
+                            />
+                        )}
+                        {withheld > 0 && (
+                            <circle
+                                cx="20" cy="20" r={R} fill="none" stroke={RED} strokeWidth="5"
+                                strokeDasharray={ldLen + " " + (CIRC - ldLen)}
+                                strokeDashoffset={-(GAP / 2)}
+                                transform="rotate(-90 20 20)"
+                                strokeLinecap="butt"
+                            />
+                        )}
+                    </svg>
+                    {/* The hero figure: the ratio is what the ring is for, and a
+                        number in the middle is read exactly where two angles
+                        would only be estimated. */}
+                    <div style={{
+                        position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+                        alignItems: "center", justifyContent: "center", pointerEvents: "none",
+                    }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: RED, lineHeight: 1 }}>
+                            {(Math.round(pctWithheld * 10) / 10).toFixed(1)}%
+                        </div>
+                        <div style={{ fontSize: 9.5, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginTop: 3 }}>
+                            withheld
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{ flex: 1, minWidth: 220 }}>
+                    <LegendRow tone={RED} label="LD — penalty withheld" value={money(withheld)}
+                        note={(Math.round(pctWithheld * 10) / 10) + "% of PQP"} />
+                    <LegendRow tone={BAR_HUE} label="Retained on the base" value={money(retained)}
+                        note={(Math.round((100 - pctWithheld) * 10) / 10) + "% of PQP"} />
+                    <div style={{ borderTop: "1px solid var(--uidai-pmis-border)", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", gap: 10 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: INK }}>PQP — the base</span>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums" }}>{money(pqp)}</span>
+                    </div>
+                    {overflow && (
+                        <div style={{ fontSize: 11, color: AMBER, marginTop: 8 }}>
+                            The recorded penalty ({money(ld)}) exceeds the base it is charged on. The ring is
+                            capped at 100%; the figures above are the real ones.
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function LegendRow({ tone, label, value, note }) {
+    return (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: tone, flex: "0 0 auto", marginTop: 2 }} aria-hidden="true" />
+            <span style={{ fontSize: 12, fontWeight: 700, color: INK, flex: 1 }}>
+                {label}
+                <span style={{ ...muted, fontWeight: 600, marginLeft: 6, fontSize: 11 }}>{note}</span>
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: INK, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{value}</span>
+        </div>
+    );
+}
+
+function FCompositionChart({ plan, total }) {
+    const [dimension, setDimension] = useState("designation");
+
+    const rows = useMemo(() => {
+        const src = dimension === "designation"
+            ? (plan.byDesignation || []).map((d) => ({
+                key: d.designation,
+                label: d.designation,
+                cost: d.cost,
+                sub: num(d.heads, 0) + " head(s), " + num(d.allocations, 0) + " allocation(s)",
+                unpriced: d.unpriced,
+            }))
+            : (plan.activities || []).map((a) => ({
+                key: a.activityId || a.name,
+                label: a.displayCode ? a.displayCode + " - " + (a.name || "") : (a.name || "-"),
+                cost: a.cost,
+                sub: (a.allocations || []).length + " allocation(s)",
+                unpriced: a.unpriced,
+            }));
+        /* Descending, so the roles carrying the money are read first — that
+           is the whole point of the chart. */
+        return src.filter((r) => r.cost > 0).sort((a, b) => b.cost - a.cost);
+    }, [plan, dimension]);
+
+    if (!rows.length || !total) return null;
+
+    /* Scaled to the largest bar, not to F: across seven roles every bar would
+       otherwise sit under a seventh of the width and none would be readable.
+       Share of F is stated in words on each row instead. */
+    const peak = rows[0].cost;
+    const unit = dimension === "designation" ? "role" : "activity";
+
+    return (
+        <div style={{ marginTop: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: INK }}>What F is made of</span>
+                <div style={{ display: "inline-flex", padding: 2, gap: 2, borderRadius: 8, background: "#eef3f9", border: "1px solid var(--uidai-pmis-border)" }}>
+                    {[["designation", "By designation"], ["activity", "By activity"]].map((opt) => (
+                        <button
+                            key={opt[0]}
+                            type="button"
+                            onClick={() => setDimension(opt[0])}
+                            aria-pressed={dimension === opt[0]}
+                            style={{
+                                border: "none", cursor: "pointer", fontFamily: "inherit",
+                                padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700,
+                                background: dimension === opt[0] ? "#fff" : "transparent",
+                                color: dimension === opt[0] ? INK : "var(--uidai-pmis-muted)",
+                                boxShadow: dimension === opt[0] ? "0 1px 2px rgba(16,32,60,.10)" : "none",
+                            }}
+                        >
+                            {opt[1]}
+                        </button>
+                    ))}
+                </div>
+                <span style={{ fontSize: 11.5, ...muted }}>
+                    {rows.length} {unit}{rows.length === 1 ? "" : "s"} — sums to {money(total)}
+                </span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {rows.map((r) => {
+                    const share = (r.cost / total) * 100;
+                    const shareText = Math.round(share * 10) / 10;
+                    return (
+                        <div
+                            key={r.key}
+                            /* Everything the bar encodes, in words, on the row —
+                               the chart is never the only way to reach a number. */
+                            title={r.label
+                                + "\n" + money(r.cost) + " — " + shareText + "% of F"
+                                + "\n" + r.sub
+                                + (r.unpriced > 0
+                                    ? "\n" + r.unpriced + " allocation(s) unpriced, not in this figure"
+                                    : "")}
+                        >
+                            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 3 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {r.label}
+                                    {r.unpriced > 0 && (
+                                        <span style={{ color: AMBER, marginLeft: 6, fontSize: 11, fontWeight: 800 }}>!</span>
+                                    )}
+                                </span>
+                                {/* Value at the tip of the row, in ink — text never
+                                    wears the data colour. */}
+                                <span style={{ fontSize: 12, fontWeight: 700, color: INK, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                                    {money(r.cost)}
+                                    <span style={{ ...muted, fontWeight: 600, marginLeft: 6 }}>{shareText}%</span>
+                                </span>
+                            </div>
+                            {/* Track is one step off the surface; the bar is capped
+                                at 14px, square at the baseline and rounded at the
+                                data end. */}
+                            <div style={{ height: 14, borderRadius: 3, background: "#eef3f9", overflow: "hidden" }}>
+                                <div
+                                    style={{
+                                        width: Math.max((r.cost / peak) * 100, 1.5) + "%",
+                                        height: "100%",
+                                        background: BAR_HUE,
+                                        borderRadius: "0 4px 4px 0",
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
@@ -2465,7 +2721,7 @@ function SlaGroup({ item, image, onViewImage, recheck, staffing, defaultOpen, ta
                     {item.pending > 0 && (
                         <span className="uidai-pmis-badge uidai-pmis-badge-orange"
                               title="Evaluated, but the observed value has not been entered yet — these score nothing.">
-                            {item.pending} awaiting observation
+                            {item.pending} with no result
                         </span>
                     )}
                     {item.excluded > 0 && (
@@ -3043,8 +3299,17 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 }
             }
             setActivityIndex(actIndex);
-            // Same tree, different question: what is deployed and what it costs.
-            setResourceActivities(collectResourceActivities(treeRes.value?.milestones || []));
+            /* The plan USED to be read straight off the tree here. It cannot
+               be: the tree endpoint returns no `resources` key on an activity
+               at all — only resourceMode / resourceCount / resource, all null
+               — so every activity was skipped and the deployment plan came
+               back empty. That silently hid the whole payment-base section,
+               F included, on every project.
+
+               Verified against the live tree: 5 activities, 0 with a
+               resources array, no such key present. The per-activity GET does
+               carry them, so the allocations are fetched below. */
+            setResourceActivities([]);
             /* And a third: which deliverables are DONE, and when — which
                decides the quarter each one's payment falls in.
 
@@ -3421,6 +3686,58 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
         () => quarterTotals(quarterlyItems, { pqp: pqpValue }),
         [quarterlyItems, pqpValue]
     );
+
+    /* ── the deployment plan's allocation rows ────────────────────────
+       One GET per activity, because the project tree omits `resources`
+       entirely (see the note where the tree is read). Only this panel needs
+       them, so the fan-out lives here rather than inside loadProjectTree,
+       which every other page also calls.
+
+       Keyed on the joined id list so it re-runs when the project's
+       activities change, not on every render that rebuilds the tree array.
+       Failures are per-activity: one unreadable activity costs its own rows
+       and leaves the rest of the plan standing, which is better than an
+       all-or-nothing plan that vanishes on a single 404. */
+    const treeActivityKey = useMemo(() => {
+        const ids = [];
+        for (const m of treeMilestones || []) {
+            for (const a of m?.activities || []) if (a?.apiId) ids.push(String(a.apiId));
+        }
+        return ids.join(",");
+    }, [treeMilestones]);
+
+    useEffect(() => {
+        const ids = treeActivityKey ? treeActivityKey.split(",") : [];
+        if (!ids.length) { setResourceActivities([]); return undefined; }
+        let cancelled = false;
+
+        (async () => {
+            const settled = await Promise.allSettled(ids.map((id) => loadActivityById(id)));
+            if (cancelled) return;
+            const byId = new Map();
+            settled.forEach((r, i) => {
+                if (r.status === "fulfilled" && r.value) byId.set(ids[i], r.value);
+            });
+            /* Merged back into the tree's own shape rather than rebuilt, so
+               the milestone context collectResourceActivities needs — name,
+               id, isResourceBased — is preserved exactly as the tree gave it. */
+            const merged = (treeMilestones || []).map((m) => ({
+                ...m,
+                activities: (m?.activities || []).map((a) => {
+                    const full = a?.apiId ? byId.get(String(a.apiId)) : null;
+                    return full
+                        ? { ...a, resources: full.resources, resourceCostTotal: full.resourceCostTotal }
+                        : a;
+                }),
+            }));
+            setResourceActivities(collectResourceActivities(merged));
+        })();
+
+        return () => { cancelled = true; };
+        // treeMilestones is keyed by treeActivityKey; depending on the array
+        // itself would re-fan-out on every tree rebuild.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [treeActivityKey]);
 
     /* ── F from the resource deployment plan (§5.28.1.d) ──────────────
        The plan is scoped to the CONTRACT quarter, so the endpoint's F has
@@ -4789,6 +5106,14 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             {plan.undatedRefs.length > 0 && ` (${plan.undatedRefs.slice(0, 5).join(", ")})`}.
                                         </div>
                                     )}
+
+                                    {/* The shape of F before the exact figures — which
+                                        roles carry the money, then the numbers. */}
+                                    <FCompositionChart plan={plan} total={plan.fAmount} />
+
+                                    {/* F explains the base; this explains what the
+                                        base then does to the payment. */}
+                                    <PqpSplitDonut chain={chain} />
 
                                     {/* Who is deployed, and what each role costs. */}
                                     {plan.byDesignation.length > 0 && (
