@@ -25,7 +25,8 @@ import "../../styles/global.css";
         PRE-TAX delivery base and deducting from what is actually paid:
             LD          = ldBasisPretaxValue × LD%     (tax-free, one-time excluded)
             net payable = payment − LD                 (payment is tax-inclusive)
-        with LD% capped at 10% per activity (and per milestone). A payment
+        with NO ceiling on the LD % — this is the deliverable track and
+        §5.28.2 states none; see the note above the date helpers. A payment
         page that does not return the pre-tax base falls back to charging
         on the payment itself, which is what this report did before.
 
@@ -45,10 +46,30 @@ import "../../styles/global.css";
 // needs it.
 const CONTRACTS_BASE = "/contracts";
 
-// LD caps (RFP §5.27.6 / §5.28.1 — 10% of the net planned quarterly payment).
-// Kept as knobs so the cap policy is trivial to change.
-const ACTIVITY_LD_CAP = 10;   // max LD% any single activity can contribute
-const MILESTONE_LD_CAP = 10;  // max LD% applied to a milestone's payment
+/* ── No LD ceiling on this track (§5.28.2) ─────────────────────────
+   This page used to cap LD at 10% per activity and again per milestone,
+   citing §5.27.6 / §5.28.1. Both citations were to the QUARTERLY regime —
+   the constant's own comment read "10% of the net planned quarterly
+   payment" while the number was being applied to a MILESTONE delivery
+   payment. It was the quarterly ceiling borrowed onto a track it does
+   not govern.
+
+   §5.28.2 states no ceiling, and the reason is structural rather than an
+   omission: §5.27.6 caps quarterly LD at 10% of PQP, and PQP = F
+   (§5.28.1.d). SLA 001/002 apply only to D1–D8 — Phase 1 — where F does
+   not exist at all; staff cost starts at D9 (§5.25.2). There is no PQP
+   for that cap to be 10% of, so the ceiling is not merely inapplicable
+   here, it is undefined. §5.28.1.b's other ceiling caps points at
+   severity 4, and SLA 001/002 carry no severity level.
+
+   `utils/project/deliverablePayable.js` has scored this track uncapped
+   since the corrigendum analysis on 2026-08-14, and SlaQuarterRollupPanel
+   states the same in three places. This page was simply the last one
+   still holding the pre-corrigendum rule.
+
+   Effect of the removal: reported penalties GO UP wherever a milestone's
+   summed LD exceeded 10%. Figures quoted off this page before 2026-08-19
+   were understated.                                                    */
 
 /* ── date helpers (compare by calendar date to avoid +05:30 drift) ── */
 function toYmd(iso) {
@@ -423,7 +444,7 @@ export default function PenaltyReportPage() {
           try {
             mappings = await loadMappings(a.activityId);
           } catch (err) {
-            activityRows.push({ activity: a, delay: aDelay, completed, error: err?.message || "Could not load SLAs.", slaRows: [], activityLdPercent: 0, activityLdPercentRaw: 0 });
+            activityRows.push({ activity: a, delay: aDelay, completed, error: err?.message || "Could not load SLAs.", slaRows: [], activityLdPercent: 0 });
             continue;
           }
 
@@ -472,21 +493,24 @@ export default function PenaltyReportPage() {
             }
           }
 
-          const rawLd = slaRows.reduce((s, r) => s + num(r.ldPercent), 0);
+          /* Uncapped — see the §5.28.2 note at the top of the file. The
+             companion `activityLdPercentRaw` is gone with the cap: it only
+             ever existed to show what was clipped, and a "raw" figure that
+             always equals the applied one is an invitation to wonder which
+             of the two is real. */
           activityRows.push({
             activity: a,
             delay: aDelay,
             completed,
             slaRows,
-            activityLdPercentRaw: rawLd,
-            activityLdPercent: Math.min(ACTIVITY_LD_CAP, rawLd),
+            activityLdPercent: slaRows.reduce((s, r) => s + num(r.ldPercent), 0),
           });
         }
 
         if (!activityRows.length) continue; // no delayed activities on this milestone
 
         const summedActivityLd = activityRows.reduce((s, r) => s + num(r.activityLdPercent), 0);
-        const milestoneLdPercent = Math.min(MILESTONE_LD_CAP, summedActivityLd);
+        const milestoneLdPercent = summedActivityLd;
         // Charged on the pre-tax base, deducted from the tax-inclusive payment.
         const penalty = (ldBase * milestoneLdPercent) / 100;
         const maxDelay = activityRows.reduce((mx, r) => Math.max(mx, num(r.delay)), 0);
@@ -498,7 +522,6 @@ export default function PenaltyReportPage() {
           ldBase,
           ldBaseIsPretax: money.hasLdBase && money.ldBase > 0,
           activities: activityRows,
-          milestoneLdPercentRaw: summedActivityLd,
           milestoneLdPercent,
           penalty,
           net: value - penalty,
@@ -567,6 +590,29 @@ export default function PenaltyReportPage() {
       <div className="uidai-pmis-title">Penalty Report</div>
       <div className="uidai-pmis-subtitle" style={{ marginTop: -10 }}>
         Delay against each milestone's deadline, the resulting SLA liquidated damages, and the net payable after penalty.
+      </div>
+
+      {/* Stated on the page, not only in the source. This report capped LD at
+          10% until 2026-08-19 — a ceiling belonging to the quarterly track —
+          so anyone comparing today's figures against a copy taken earlier
+          will see them move, upwards, and needs to know which one was wrong.
+          The note is permanent rather than a dismissible banner: it is a
+          statement of what this page scores, not an announcement. */}
+      <div style={{
+        marginTop: 12, padding: "10px 13px", borderRadius: 9,
+        background: "#f6f9fd", border: "1px solid var(--uidai-pmis-border)",
+        fontSize: 12, color: "var(--uidai-pmis-muted)", lineHeight: 1.6, maxWidth: 900,
+      }}>
+        <b style={{ color: "#173e77" }}>Deliverable track (§5.28.2) — no LD ceiling.</b>{" "}
+        LD here is charged on each deliverable's pre-tax value and is <b>not capped</b>.
+        The 10% ceiling in §5.27.6 governs the quarterly <i>resource</i> track, whose base
+        (PQP = F) does not exist in Phase 1 — the deliverables D1–D8 this report scores.
+        The quarterly ceiling is applied on the SLA settlement screen, not here.
+        <div style={{ marginTop: 5 }}>
+          Until 19 Aug 2026 this page wrongly applied that 10% cap, so any penalty figure
+          taken from it before then was <b>understated</b> wherever a milestone's summed LD
+          exceeded 10%.
+        </div>
       </div>
 
       {/* Controls */}
@@ -663,9 +709,15 @@ export default function PenaltyReportPage() {
                   <Tile label="Net payable" value={inr(row.net)} accent="#1b7a42" />
                 </div>
 
-                {row.milestoneLdPercentRaw > MILESTONE_LD_CAP && (
-                  <div style={{ fontSize: 12, color: "#b54708", marginTop: 10 }}>
-                    Raw LD was {row.milestoneLdPercentRaw}% — capped to {MILESTONE_LD_CAP}% per the quarterly LD ceiling.
+                {/* Where the old 10% ceiling would have bitten, say so —
+                    and say that it does not. A reader who remembers this
+                    page capping at 10% needs to know the larger figure is
+                    the correction, not a fault. */}
+                {row.milestoneLdPercent > 10 && (
+                  <div style={{ fontSize: 12, color: "#b54708", marginTop: 10, lineHeight: 1.55 }}>
+                    LD is <b>{row.milestoneLdPercent}%</b>, above 10%. That is correct and not capped —
+                    §5.28.2 sets no ceiling on deliverable LD. The 10% ceiling in §5.27.6 applies to the
+                    quarterly resource track, whose base (PQP = F) does not exist in Phase 1.
                   </div>
                 )}
 
@@ -696,7 +748,6 @@ export default function PenaltyReportPage() {
                               </span>
                               <span style={{ ...muted, fontWeight: 600, marginLeft: 10 }}>
                                 Activity LD {a.activityLdPercent}%
-                                {a.activityLdPercentRaw > ACTIVITY_LD_CAP ? ` (raw ${a.activityLdPercentRaw}%, capped)` : ""}
                               </span>
                             </div>
                             {a.error ? (

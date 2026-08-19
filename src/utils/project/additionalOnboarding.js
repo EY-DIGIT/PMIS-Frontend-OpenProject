@@ -75,10 +75,17 @@ const PENDING = /\b(pending|awaiting|await|awaited|yet\s+to|not\s+yet|in\s+progr
    explicitly and first, exactly as the compliance page already does for
    the replacement SLAs. Punctuation is flattened so "not-met",
    "not_met" and "NOT MET" are one case rather than three. */
+/* The server's real vocabulary, observed on a live activity, is a phrase
+   rather than a verdict word: "Within 21 Days" for a seat filled inside the
+   allowance. Nothing here matched it, so every row on a fully compliant
+   activity read as UNCLASSIFIED — six grey rows where six should have been
+   green. "within" is therefore a pass word and "beyond"/"exceeded"/"outside"/
+   "more than" are failure words, with "not within" handled by the negation
+   rule below so a breach phrased that way cannot come out green. */
 const NEGATED_FAILURE = /\bno(t)?\s+(breach(ed)?|fail(ed|ure)?|delay(ed)?|shortfall|violat(ed|ion))\b/;
-const NEGATED_PASS = /\bno(t|n)?\s+(met|meets|compl(y|ied|iant)|satisf(y|ied)|ok|onboarded|deployed)\b/;
-const FAILURE = /\b(fail(ed|ure)?|breach(ed|es)?|delay(ed|s)?|late|overdue|shortfall|violat(ed|ion)|lapse[ds]?)\b/;
-const PASSING = /\b(pass(ed|es)?|met|meets|compl(y|ied|iant)|ok|yes|onboarded|deployed|satisf(y|ied|actory))\b/;
+const NEGATED_PASS = /\bno(t|n)?\s+(met|meets|compl(y|ied|iant)|satisf(y|ied)|ok|onboarded|deployed|within)\b/;
+const FAILURE = /\b(fail(ed|ure)?|breach(ed|es)?|delay(ed|s)?|late|overdue|shortfall|violat(ed|ion)|lapse[ds]?|beyond|exceed(ed|s)?|outside|more\s+than)\b/;
+const PASSING = /\b(pass(ed|es)?|met|meets|compl(y|ied|iant)|ok|yes|onboarded|deployed|within|satisf(y|ied|actory))\b/;
 
 export function classifyOnboarding(raw) {
     const s = String(raw ?? "").trim();

@@ -80,6 +80,47 @@ const FLAG_TONE = {
    drop the flag would be a silent failure. */
 const desigKey = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 
+/* The report sends ISO. Formatted explicitly rather than through `new Date`,
+   which applies a timezone offset and can slide a 1st-of-month back a day. */
+const MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fmtDay(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(raw || ""));
+  if (!m) return "";
+  const mm = Number(m[2]);
+  return MONTH_ABBR[mm] ? `${Number(m[3])} ${MONTH_ABBR[mm]} ${m[1]}` : "";
+}
+
+/* When the approved heads actually arrived.
+
+   A designation can cover several people, so this is a summary rather than
+   one date: every seat filled shows the dates themselves, a part-filled
+   designation shows how many of how many, and an unfilled one says so. The
+   per-person detail is on the tooltip, because the cell has room for a
+   headline and the names are what you want once the headline surprises you. */
+function onboardedSummary(group) {
+  if (!group) return null;
+  const rows = group.rows || [];
+  const filled = rows.filter((r) => r.actualOnboardingDate);
+  const dates = [...new Set(filled.map((r) => fmtDay(r.actualOnboardingDate)).filter(Boolean))];
+  const detail = rows
+    .map((r) => `${r.employeeName || "(unnamed seat)"} — ${
+      r.actualOnboardingDate ? fmtDay(r.actualOnboardingDate) : "not onboarded yet"
+    }${r.plannedDeploymentDate ? ` (planned ${fmtDay(r.plannedDeploymentDate)})` : ""}`)
+    .join("\n");
+
+  if (!rows.length) return null;
+  if (!filled.length) return { text: "Pending", pending: true, detail };
+  if (filled.length < rows.length) {
+    return { text: `${filled.length} of ${rows.length}`, pending: true, detail };
+  }
+  /* All in: one date if they arrived together, otherwise the span. Listing
+     six identical dates would be noise. */
+  const text = dates.length === 1 ? dates[0] : `${dates[0]} – ${dates[dates.length - 1]}`;
+  return { text, pending: false, detail };
+}
+
+
 /* One designation's worst outstanding state. A breach outranks a pending
    seat, which outranks a clean one — the badge has room for a single
    answer and the reason to look at it is the worst thing it can say. */
@@ -436,6 +477,27 @@ export default function ActivityResourceAllocations({
     </>
   );
 
+  /* Only an additional resource has an onboarding date to show — this comes
+     from the SLA 008 report, which measures heads the team was approved to
+     grow by. An original-plan row is left blank rather than borrowing a date
+     it has no claim to. */
+  const onboardedText = (st) => {
+    const summary = onboardedSummary(st.additional);
+    if (!summary) return <span style={{ color: "#9aa7ba" }}>—</span>;
+    return (
+      <span
+        title={summary.detail}
+        style={{
+          color: summary.pending ? "#b06f00" : "#1a7a48",
+          fontWeight: summary.pending ? 700 : 600,
+          cursor: "help",
+        }}
+      >
+        {summary.text}
+      </span>
+    );
+  };
+
   const removeButton = (idx) => (
     <button
       type="button"
@@ -535,12 +597,13 @@ export default function ActivityResourceAllocations({
             }}
           >
             <colgroup>
-              <col style={{ width: "25%" }} />
-              <col style={{ width: "9%" }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "17%" }} />
-              <col style={{ width: "18%" }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "11%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "14%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "15%" }} />
               <col style={{ width: 44 }} />
             </colgroup>
             <thead>
@@ -553,6 +616,17 @@ export default function ActivityResourceAllocations({
                   title="The date these resources are planned to deploy. One row covers one date — split a staggered start across separate rows."
                 >
                   Planned deployment
+                </th>
+                {/* Read-only, and only ever filled for an additional resource:
+                    this comes from the SLA 008 report, which measures heads the
+                    team was approved to grow by. An original-plan row has no
+                    onboarding to measure, so it stays blank rather than
+                    borrowing a date from somewhere else. */}
+                <th
+                  style={headStyle}
+                  title="When the approved heads actually onboarded, from the additional-resource report. Blank for rows that are not additional resources."
+                >
+                  Onboarded
                 </th>
                 <th style={headStyle} title="Rate-card rate for this designation, per resource per month.">Monthly Rate</th>
                 {/* The planned budget, not what gets billed — attendance has no
@@ -588,6 +662,9 @@ export default function ActivityResourceAllocations({
                     <td style={{ padding: cellPad }}>{qtyField(row, idx)}</td>
                     <td style={{ padding: cellPad }}>{durationField(row, idx, st)}</td>
                     <td style={{ padding: cellPad }}>{dateField(row, idx, st)}</td>
+                    <td style={{ padding: cellPad, fontSize: 12.5, whiteSpace: "nowrap" }}>
+                      {onboardedText(st)}
+                    </td>
                     <td style={{ padding: cellPad, fontSize: 12.5, color: "#5b6b82", whiteSpace: "nowrap" }}>
                       {st.rate == null ? "—" : inr(st.rate)}
                     </td>

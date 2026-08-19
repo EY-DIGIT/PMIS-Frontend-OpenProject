@@ -28,7 +28,7 @@ import {
 } from "../../api/attendanceReports";
 import {
   readAdditionalResources, groupByDesignation, tallyOnboarding,
-  readSlaNumbers, countCheck,
+  readSlaNumbers, countCheck, classifyOnboarding,
 } from "../../utils/project/additionalOnboarding";
 import { normalizeStatus, STATUS } from "../../utils/project/slaRollup";
 import { readErrorMessage, readJsonBody, requestErrorMessage } from "../../utils/apiMessage";
@@ -97,49 +97,25 @@ const pctTone = (p) => {
   return C.red;
 };
 
-/* `slaResult` is a free-text string in the contract, so its exact vocabulary
-   is the server's to choose. Rather than hard-code one, the wording is matched
-   loosely and anything unrecognised is shown verbatim in a neutral tone — a
-   result we can't classify must still be readable, and must never be coloured
-   green by accident. */
-/* Negation is handled explicitly rather than by keyword weighting, because
-   the failure words are contained inside the pass words: "not met" contains
-   "met", "non-compliant" contains "compliant". Matching on keywords alone
-   classified "not-met" and "not compliant" as PASSES — a breach shown in
-   green, which is the one mistake this must never make.
+/* `slaResult` is free text, and every one of these reports comes from the same
+   service — so the vocabulary is shared with the additional-resource report
+   rather than restated here. Two copies drifted apart once already: this page
+   had no idea "Within 21 Days" meant a pass, which is what the server actually
+   sends, so six compliant rows rendered as unclassified.
 
-   Punctuation is flattened to spaces first, so "not-met", "not_met" and
-   "NOT MET" are one case rather than three. */
-const NEGATED_FAILURE = /\bno(t)?\s+(breach(ed)?|fail(ed|ure)?|shortfall|violat(ed|ion))\b/;
-const NEGATED_PASS = /\bno(t|n)?\s+(met|meets|compl(y|ied|iant)|satisf(y|ied)|ok)\b/;
-const FAILURE = /\b(fail(ed|ure)?|breach(ed|es)?|shortfall|violat(ed|ion)|lapse[ds]?)\b/;
-const PASSING = /\b(pass(ed|es)?|met|meets|compl(y|ied|iant)|ok|yes|satisf(y|ied|actory))\b/;
-
+   classifyOnboarding also returns "pending", which the replacement reports do
+   not use today. It is mapped to its own neutral tone rather than folded into
+   a pass or a failure, because a seat nobody has filled yet is neither. */
 const resultTone = (raw) => {
   const s = String(raw ?? "").trim();
   if (!s) return { label: "—", tone: C.faint, kind: "unknown" };
-  const norm = s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-
-  const kind =
-    /* "No breach" is a pass — a negated failure, checked before the plain
-       failure words it contains. */
-    NEGATED_FAILURE.test(norm) ? "pass"
-      /* "Not met" / "non-compliant" — a negated pass, checked before the
-         plain pass words it contains. */
-      : NEGATED_PASS.test(norm) ? "fail"
-        : FAILURE.test(norm) ? "fail"
-          : PASSING.test(norm) ? "pass"
-            : norm === "no" ? "fail"
-              /* Anything else is shown as the server wrote it, in a neutral
-                 tone. An unrecognised result must stay readable, and must
-                 never be coloured green by guesswork. */
-              : "unknown";
-
-  return {
-    label: s,
-    tone: kind === "fail" ? C.red : kind === "pass" ? C.green : C.ink2,
-    kind,
-  };
+  const kind = classifyOnboarding(s);
+  const tone =
+    kind === "fail" ? C.red
+      : kind === "pass" ? C.green
+        : kind === "pending" ? C.amber
+          : C.ink2;
+  return { label: s, tone, kind };
 };
 
 export default function ProjectResourceSlaCompliancePage() {
