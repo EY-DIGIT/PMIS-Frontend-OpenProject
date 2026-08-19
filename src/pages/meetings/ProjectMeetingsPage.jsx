@@ -10,9 +10,14 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { listMeetings, getMoM } from "../../api/meetings";
+import { listMeetings, getMoM, updateMeetingStatus } from "../../api/meetings";
 import { useToast } from "./_shared";
 import "../../styles/meetings.css";
+
+/* The meeting's own status values — the same set the All-Meetings list
+   filters and edits (PUT /meetings/{id}/status). Not to be confused with
+   the MoM's DRAFT/IN_REVIEW/FINALIZED on the meeting detail page. */
+const STATUS_OPTIONS = ["DRAFT", "SCHEDULED", "COMPLETED", "CANCELLED"];
 
 /* DRAFT → cls + label, falls back to a neutral badge for unknowns.
    Mirrors the badge mapping used on the All-Meetings list. */
@@ -81,6 +86,15 @@ export default function ProjectMeetingsPage() {
      so a double-click can't fire two lookups). */
   const [routingId, setRoutingId] = useState(null);
   const [q, setQ] = useState("");
+  /* Server-side status filter — passed straight to /meetings/getAll, so it
+     spans every page of results rather than just the rows on screen. */
+  const [fStatus, setFStatus] = useState("ALL");
+
+  /* Inline per-row status editing, mirroring the All-Meetings list.
+     `editingId` is the meeting being edited; `savingId` guards its Save. */
+  const [editingId, setEditingId] = useState("");
+  const [statusDraft, setStatusDraft] = useState("");
+  const [savingId, setSavingId] = useState("");
   const [pageInfo, setPageInfo] = useState({
     page: 0,
     size: 20,
@@ -92,7 +106,7 @@ export default function ProjectMeetingsPage() {
   const loadPage = (page = 0) => {
     if (!projectId) return;
     setLoading(true);
-    listMeetings({ projectId, status: "ALL", page, size: pageInfo.size })
+    listMeetings({ projectId, status: fStatus || "ALL", page, size: pageInfo.size })
       .then((res) => {
         setRows(Array.isArray(res?.content) ? res.content : []);
         setPageInfo({
@@ -108,9 +122,38 @@ export default function ProjectMeetingsPage() {
   };
 
   useEffect(() => {
+    /* Any filter change restarts at page 0 — the old page number may not
+       exist in the narrowed result set. Also drops any half-finished row
+       edit, since that row may no longer be on screen. */
+    setEditingId("");
+    setStatusDraft("");
     loadPage(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, fStatus]);
+
+  /* Inline status editing — same endpoint the All-Meetings list uses
+     (updateMeetingStatus → PUT /meetings/{id}/status). The row is patched
+     locally on success so the table doesn't need a full reload. */
+  const startStatusEdit = (m) => {
+    setEditingId(m.id);
+    setStatusDraft(String(m.status || "").toUpperCase() || STATUS_OPTIONS[0]);
+  };
+  const cancelStatusEdit = () => { setEditingId(""); setStatusDraft(""); };
+  const saveStatus = async (m) => {
+    if (savingId) return;
+    try {
+      setSavingId(m.id);
+      await updateMeetingStatus(m.id, statusDraft);
+      setRows((list) => list.map((r) => (r.id === m.id ? { ...r, status: statusDraft } : r)));
+      setEditingId("");
+      setStatusDraft("");
+      show("Status updated.", "ok");
+    } catch (e) {
+      show(e.message || "Failed to update status.", "warn");
+    } finally {
+      setSavingId("");
+    }
+  };
 
   /* Decide where a meeting row should go: if the meeting already has a MoM
      with created tasks, open the editable Linked-Task view; otherwise fall
@@ -186,6 +229,19 @@ export default function ProjectMeetingsPage() {
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
+          <div className="field">
+            <label htmlFor="fStatus">Status</label>
+            <select
+              id="fStatus"
+              value={fStatus}
+              onChange={(e) => setFStatus(e.target.value)}
+            >
+              <option value="ALL">All statuses</option>
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -229,8 +285,52 @@ export default function ProjectMeetingsPage() {
                     <td>
                       {trimTime(m.startTime)}–{trimTime(m.endTime)}
                     </td>
-                    <td>
-                      <StatusPill status={m.status} />
+                    {/* Row click opens the meeting, so this cell swallows its
+                        own clicks — editing status must not navigate away. */}
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {editingId === m.id ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <select
+                            value={statusDraft}
+                            onChange={(e) => setStatusDraft(e.target.value)}
+                            disabled={savingId === m.id}
+                            aria-label="Meeting status"
+                            style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border, #dbe5f1)", font: "inherit", fontSize: 12.5 }}
+                          >
+                            {STATUS_OPTIONS.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn small-btn"
+                            onClick={() => saveStatus(m)}
+                            disabled={savingId === m.id}
+                          >
+                            {savingId === m.id ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost small-btn"
+                            onClick={cancelStatusEdit}
+                            disabled={savingId === m.id}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                          <StatusPill status={m.status} />
+                          <button
+                            type="button"
+                            className="btn ghost small-btn"
+                            title="Change this meeting's status"
+                            onClick={() => startStatusEdit(m)}
+                          >
+                            Edit Status
+                          </button>
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))
