@@ -9,9 +9,11 @@
    ══════════════════════════════════════════════════════════════════ */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "./_shared";
 import * as projectsApi from "../../api/projects";
+import { api } from "../../api/client";
+import { ENDPOINTS } from "../../api/endpoint";
 import * as usersApi from "../../api/users";
 import { createMeeting, encodeAttachments } from "../../api/meetings";
 import "../../styles/meetings.css";
@@ -340,8 +342,21 @@ export default function CreateMeetingPage() {
   const navigate = useNavigate();
   const { show, node: toastNode } = useToast();
 
+  /* Opened from a project's Meeting Details page as
+     /meetings/new?projectId={id} — the project is already decided, so the
+     picker is replaced by a locked read-only field. Opened bare (from the
+     All-Meetings list) there's no project yet and the dropdown stays. */
+  const [searchParams] = useSearchParams();
+  const lockedProjectId = searchParams.get("projectId") || "";
+
+  /* Where "back" and the post-create redirect land: the originating
+     project's meeting list when locked, the all-meetings list otherwise. */
+  const backTo = lockedProjectId
+    ? `/projects/${encodeURIComponent(lockedProjectId)}/meetings`
+    : "/meetings";
+
   const [draft, setDraft] = useState({
-    projectId: "",
+    projectId: lockedProjectId,
     title: "",
     date: "",
     start: "",
@@ -369,6 +384,9 @@ export default function CreateMeetingPage() {
   /* Master data fetched from existing APIs. */
   const [projects, setProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  /* Resolved details for a locked project — only its name/code, so the
+     read-only field can show something friendlier than a raw UUID. */
+  const [lockedProject, setLockedProject] = useState(null);
 
   /* Candidate attendees = everyone holding a role on the selected project
      (GET /projects/{id}/role-assignments). This replaces the old approach of
@@ -379,17 +397,41 @@ export default function CreateMeetingPage() {
 
   const updateDraft = (patch) => setDraft((d) => ({ ...d, ...patch }));
 
-  /* Initial load: projects. */
+  /* Initial load. With a locked project only that one project is fetched —
+     the full list exists solely to populate the dropdown, which isn't
+     rendered in that mode. A failed lookup keeps the field locked (the id
+     from the URL is still what the API needs); only the label falls back
+     to the raw id. */
   useEffect(() => {
     let alive = true;
     setLoadingProjects(true);
-    projectsApi
-      .list({ pageSize: 200 })
-      .then((rows) => { if (alive) setProjects(rows); })
-      .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
-      .finally(() => { if (alive) setLoadingProjects(false); });
+    if (lockedProjectId) {
+      /* Hitting the endpoint directly rather than via projectsApi.get():
+         that helper feeds the raw response to its adapter without opening
+         the { data: … } envelope this endpoint replies with, so every
+         field comes back blank. Only the code and name are needed here. */
+      api
+        .get(ENDPOINTS.projects.get(lockedProjectId))
+        .then((res) => {
+          if (!alive) return;
+          const p = res?.data ?? res ?? {};
+          setLockedProject({
+            projectId: p.uuid || p.id || lockedProjectId,
+            projectCode: p.projectCode || "",
+            projectName: p.name || p.projectName || ""
+          });
+        })
+        .catch((e) => { if (alive) show(`Couldn't load the project: ${e.message}`, "warn"); })
+        .finally(() => { if (alive) setLoadingProjects(false); });
+    } else {
+      projectsApi
+        .list({ pageSize: 200 })
+        .then((rows) => { if (alive) setProjects(rows); })
+        .catch((e) => { if (alive) show(`Couldn't load projects: ${e.message}`, "warn"); })
+        .finally(() => { if (alive) setLoadingProjects(false); });
+    }
     return () => { alive = false; };
-  }, [show]);
+  }, [lockedProjectId, show]);
 
   /* Project members → attendee candidates. Refetched on every project switch. */
   useEffect(() => {
@@ -532,7 +574,7 @@ export default function CreateMeetingPage() {
       const createdName =
         created?.title || created?.meetingCode || payload.title || "Meeting";
       show(`“${createdName}” created.`, "ok");
-      setTimeout(() => navigate("/meetings"), 350);
+      setTimeout(() => navigate(backTo), 350);
     } catch (e) {
       show(e.message || "Failed to create meeting.", "warn");
     } finally {
@@ -540,9 +582,15 @@ export default function CreateMeetingPage() {
     }
   };
 
-  const projectForTag = draft.projectId
-    ? projects.find((p) => p.projectId === draft.projectId)
-    : null;
+  const projectForTag = lockedProjectId
+    ? lockedProject
+    : draft.projectId
+      ? projects.find((p) => p.projectId === draft.projectId)
+      : null;
+
+  const lockedProjectLabel = lockedProject
+    ? `${lockedProject.projectCode ? `${lockedProject.projectCode} — ` : ""}${lockedProject.projectName || ""}`.trim()
+    : lockedProjectId;
 
   return (
     <div className="pmis-mtg">
@@ -564,10 +612,10 @@ export default function CreateMeetingPage() {
           <button
             type="button"
             className="btn cancel"
-            onClick={() => navigate("/meetings")}
+            onClick={() => navigate(backTo)}
             disabled={submitting}
           >
-            ← All Meetings
+            {lockedProjectId ? "← Back to Meetings" : "← All Meetings"}
           </button>
         </div>
       </div>
@@ -582,26 +630,41 @@ export default function CreateMeetingPage() {
             <label htmlFor="projSel">
               Project <span className="required">*</span>
             </label>
-            <SearchableSelect
-              id="projSel"
-              value={draft.projectId}
-              loading={loadingProjects}
-              disabled={loadingProjects}
-              placeholder="Select a project…"
-              options={projects.map((p) => ({
-                value: p.projectId,
-                label: `${p.projectCode ? `${p.projectCode} — ` : ""}${p.projectName}`
-              }))}
-              onChange={(val) => {
-                /* Switching project changes the eligible attendee set, so
-                   wipe any previously-picked attendees. */
-                updateDraft({ projectId: val, attendees: [] });
-                setErrors((er) => ({ ...er, projectId: false, attendees: false }));
-              }}
-            />
-            <div className={`field-err${errors.projectId ? " show" : ""}`}>
-              Please select a project.
-            </div>
+            {lockedProjectId ? (
+              /* Came in from this project — nothing to choose. Shown
+                 disabled so it reads like the read-only fields on the
+                 Project Details screen. */
+              <input
+                id="projSel"
+                type="text"
+                readOnly
+                disabled
+                value={loadingProjects && !lockedProject ? "Loading…" : lockedProjectLabel}
+              />
+            ) : (
+              <>
+                <SearchableSelect
+                  id="projSel"
+                  value={draft.projectId}
+                  loading={loadingProjects}
+                  disabled={loadingProjects}
+                  placeholder="Select a project…"
+                  options={projects.map((p) => ({
+                    value: p.projectId,
+                    label: `${p.projectCode ? `${p.projectCode} — ` : ""}${p.projectName}`
+                  }))}
+                  onChange={(val) => {
+                    /* Switching project changes the eligible attendee set, so
+                       wipe any previously-picked attendees. */
+                    updateDraft({ projectId: val, attendees: [] });
+                    setErrors((er) => ({ ...er, projectId: false, attendees: false }));
+                  }}
+                />
+                <div className={`field-err${errors.projectId ? " show" : ""}`}>
+                  Please select a project.
+                </div>
+              </>
+            )}
           </div>
           <div className="field">
             <label htmlFor="mTitle">

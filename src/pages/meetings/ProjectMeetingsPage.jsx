@@ -160,7 +160,11 @@ export default function ProjectMeetingsPage() {
           <button
             type="button"
             className="btn"
-            onClick={() => navigate("/meetings/new")}
+            onClick={() =>
+              /* Carry the project through so the form opens with it already
+                 set and locked, instead of asking for it again. */
+              navigate(`/meetings/new?projectId=${encodeURIComponent(projectId)}`)
+            }
           >
             Create Meeting
           </button>
