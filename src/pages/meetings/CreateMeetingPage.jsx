@@ -555,6 +555,15 @@ export default function CreateMeetingPage() {
     setSubmitting(true);
     try {
       const attachments = await encodeAttachments(files);
+      const externalEmails = Array.from(
+        new Set([
+          ...draft.external,
+          ...extInput
+            .split(",")
+            .map((email) => email.trim())
+            .filter(Boolean)
+        ])
+      );
       const payload = {
         title: draft.title.trim(),
         meetingDate: draft.date,
@@ -570,7 +579,7 @@ export default function CreateMeetingPage() {
           participantRole: "attendee",
           mandatory: false
         })),
-        externalAttendees: draft.external.map((email) => ({ email })),
+        externalAttendees: externalEmails.map((email) => ({ email })),
         attachments
       };
       const created = await createMeeting(payload);

@@ -589,7 +589,7 @@ function PqpSplitDonut({ chain }) {
     const keepLen = Math.max(100 - pctWithheld - GAP, 0);
 
     return (
-        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--uidai-pmis-border)" }}>
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--uidai-pmis-border)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, color: INK, marginBottom: 12 }}>
                 What the penalty took out of the base
             </div>
@@ -780,16 +780,36 @@ function FCompositionChart({ plan, total }) {
     );
 }
 
-function Tile({ label, value, accent, hint }) {
+/* A tile is a figure with a name. The hint is held to ONE line — clipped
+   with an ellipsis and repeated in full on hover — because a tile whose
+   caption wraps to three lines stops being a tile: the row loses its
+   common baseline, and the number, which is the thing being read, gets
+   pushed around by the length of its own footnote.
+
+   Nothing is lost. `title` carries the untruncated text, and the figures
+   that need a paragraph have one in the section below them. */
+function Tile({ label, value, accent, hint, title }) {
+    const hintText = typeof hint === "string" ? hint : undefined;
     return (
-        <div style={{ background: "#f6f9fd", border: "1px solid var(--uidai-pmis-border)", borderRadius: 10, padding: "12px 14px" }}>
-            <div style={{ fontSize: 11, ...muted, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".3px" }}>
+        <div
+            title={title || hintText || undefined}
+            style={{
+                background: "#fff", border: "1px solid var(--uidai-pmis-border)",
+                borderRadius: 10, padding: "12px 14px",
+                display: "flex", flexDirection: "column", gap: 4, minWidth: 0,
+            }}
+        >
+            <div style={{ fontSize: 10.5, ...muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {label}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: accent || INK, lineHeight: 1.15, wordBreak: "break-word" }}>
+            <div style={{ fontSize: 21, fontWeight: 800, color: accent || INK, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", minWidth: 0, overflowWrap: "anywhere" }}>
                 {value}
             </div>
-            {hint && <div style={{ fontSize: 11, ...muted, marginTop: 4 }}>{hint}</div>}
+            {hint && (
+                <div style={{ fontSize: 11, ...muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {hint}
+                </div>
+            )}
         </div>
     );
 }
@@ -1142,7 +1162,7 @@ function PayableRow({ row, open, onToggle, activityDates }) {
    three are different KINDS of thing, not three more headings. */
 function PageSection({ index, title, sub, right, children, id }) {
     return (
-        <section id={id} style={{ marginTop: 30 }}>
+        <section id={id} style={{ marginTop: 24 }}>
             <div style={{
                 display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap",
                 paddingBottom: 10, borderBottom: "2px solid #dbe6f5",
@@ -1200,23 +1220,27 @@ const TRACK_BANNER = {
     deliverable: { accent: "#5b52b5", bg: "#f5f4fd", border: "#d8d5f2" },
 };
 
-function SectionHead({ title, count, sub, clause, onToggle, toggleLabel, showToggle, style, track }) {
+function SectionHead({ title, count, sub, hint, clause, onToggle, toggleLabel, showToggle, style, track }) {
     const banner = track ? TRACK_BANNER[track] || TRACK_BANNER.quarterly : null;
 
     return (
         <div style={banner
             ? {
-                marginTop: 18, borderRadius: 10, padding: "12px 16px",
+                marginTop: 24, borderRadius: 10, padding: "12px 16px",
                 background: banner.bg, border: `1px solid ${banner.border}`,
                 borderLeft: `4px solid ${banner.accent}`, ...style,
             }
-            : { marginTop: 18, ...style }}
+            : { marginTop: 24, ...style }}
         >
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <div style={{
-                    fontSize: banner ? 15 : 13.5, fontWeight: 800,
-                    color: banner ? banner.accent : INK,
-                }}>
+                <div
+                    title={hint || undefined}
+                    style={{
+                        fontSize: banner ? 15 : 13.5, fontWeight: 800,
+                        color: banner ? banner.accent : INK,
+                        cursor: hint ? "help" : undefined,
+                    }}
+                >
                     {title}
                 </div>
                 <span style={{
@@ -4723,7 +4747,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                 <PageSection
                     index="1"
                     title="Reporting interval"
-                    sub="The contract quarter every figure below is measured over."
+                    sub="" hint="The contract quarter every figure below is measured over."
                 >
                     <PeriodStrip period={period} />
                 </PageSection>
@@ -4867,7 +4891,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                 track="quarterly"
                                 title="Quarterly SLAs"
                                 count={visibleQuarterly.reduce((n, c) => n + c.items.length, 0)}
-                                sub="These SLAs are charged on the quarterly resource payment (PQP)."
+                                sub="" hint="These SLAs are charged on the quarterly resource payment (PQP)."
                             />
 
                             {quarterlyItems.length === 0 ? (
@@ -4892,7 +4916,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             hint={`${num(totals.contributingCount, 0)} SLA${totals.contributingCount === 1 ? "" : "s"} contributing`}
                                         />
                                         <Tile
-                                            label="Penalty Percentage after Cap of 10%"
+                                            label="Penalty % after cap"
                                             value={<CapPair
                                                 before={totals.sumLdPercent}
                                                 after={totals.cappedLdPercent}
@@ -4921,10 +4945,15 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                             hint={chain.f === null
                                                 ? "not available"
                                                 : chain.staleNpqpBase
-                                                    ? "⚠ base is F + QGR — priced by the old service"
+                                                    ? "⚠ old F + QGR base"
                                                     : chain.pqpConsistent === false
-                                                        ? "⚠ differs from the settled PQP"
-                                                        : "planned resource cost · the penalty base"}
+                                                        ? "⚠ differs from PQP"
+                                                        : "the penalty base"}
+                                            title={chain.staleNpqpBase
+                                                ? "This row's base is F + QGR — it was priced by the old settlement service and needs re-closing at source."
+                                                : chain.pqpConsistent === false
+                                                    ? "The settled PQP does not equal F. Since corrigendum 47/49 the two should be identical."
+                                                    : "Planned resource cost for the quarter — the figure the penalty percentage is applied to."}
                                             accent={chain.f === null
                                                 ? AMBER
                                                 : (chain.staleNpqpBase || chain.pqpConsistent === false)
@@ -4934,12 +4963,22 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         <Tile
                                             label="PQP"
                                             value={money(totals.pqp)}
+                                            /* Short in the tile, full reason on hover: the
+                                               backend's status strings run to two lines and
+                                               were pushing the row out of alignment. */
                                             hint={pqpIssue
-                                                || (fCheck.diverges
-                                                    ? `⚠ F differs from the deployment plan by ${Math.round(fCheck.percent * 100) / 100}%`
+                                                ? "not resolved"
+                                                : fCheck.diverges
+                                                    ? `⚠ ${Math.round(fCheck.percent * 100) / 100}% off the plan`
                                                     : pqpBlend.exact
-                                                        ? `calendar ${overlaps[0]?.key} · exact`
-                                                        : `blended across ${overlaps.map((o) => o.key).join(" + ")}`)}
+                                                        ? "exact"
+                                                        : "blended"}
+                                            title={pqpIssue
+                                                || (fCheck.diverges
+                                                    ? `F differs from the deployment plan by ${Math.round(fCheck.percent * 100) / 100}%`
+                                                    : pqpBlend.exact
+                                                        ? `Calendar quarter ${overlaps[0]?.key} — an exact match, nothing blended.`
+                                                        : `Blended across ${overlaps.map((o) => o.key).join(" + ")}`)}
                                             accent={pqpIssue || fCheck.diverges ? AMBER : undefined}
                                         />
                                         <Tile
@@ -5003,11 +5042,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="The payment base"
                                         count={plan.activityCount}
-                                        sub="What the planned resources cost — the figure the penalty % is applied to."
+                                        sub="What the plan costs" hint="The aggregate monthly payment of the resources in the deployment plan — the figure the penalty percentage is applied to."
                                         onToggle={() => setShowPlanDetail((v) => !v)}
                                         toggleLabel={showPlanDetail ? "Hide activities" : "Show activities"}
                                         showToggle={plan.activityCount > 0}
-                                        style={{ marginTop: 26 }}
+                                        style={{ marginTop: 24 }}
                                     />
 
                                     <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
@@ -5232,11 +5271,11 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                         title="Resource deployment"
                                         count={occupancy.designationCount}
                                         clause="SLA 007"
-                                        sub="Who was actually on the seats. Vacant days lower the headcount SLA 007 is scored against."
+                                        sub="Who was actually on the seats" hint="Vacant days lower the headcount SLA 007 is scored against."
                                         onToggle={() => setShowStaffingDetail((v) => !v)}
                                         toggleLabel={showStaffingDetail ? "Hide designations" : "Show designations"}
                                         showToggle={occupancy.rows.length > 0}
-                                        style={{ marginTop: 26 }}
+                                        style={{ marginTop: 24 }}
                                     />
 
                                     {replacementsLoading && !occupancy.hasData && (
@@ -5388,8 +5427,8 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Carried forward"
                                         count={carried.length}
-                                        sub="Still-open breaches from earlier quarters. They keep scoring until fixed — shown for information, not counted above."
-                                        style={{ marginTop: 26 }}
+                                        sub="Not counted above" hint="Still-open breaches from earlier quarters. They keep scoring until fixed, and are shown here for information only."
+                                        style={{ marginTop: 24 }}
                                     />
                                     <div className="uidai-pmis-table-wrap" style={{ marginTop: 12 }}>
                                         <table className="uidai-pmis-table uidai-pmis-table-compact" style={{ marginTop: 0 }}>
@@ -5468,13 +5507,13 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                             {/* A rule as well as the gap: the quarterly track ends in
                                 its own tiles and tables, so without a hard break the
                                 deliverable banner reads as one more block inside it. */}
-                            <div style={{ borderTop: "1px solid var(--uidai-pmis-border)", marginTop: 30 }} />
+                            <div style={{ borderTop: "1px solid var(--uidai-pmis-border)", marginTop: 24 }} />
                             <SectionHead
                                 track="deliverable"
                                 title="Deliverable-linked SLAs"
                                 count={visibleDeliverable.reduce((n, c) => n + c.items.length, 0)}
-                                sub="Charged on the deliverable's own cost — no per-deliverable ceiling. Submission, defect rectification, governance tool."
-                                style={{ marginTop: 22 }}
+                                sub="Charged on each deliverable's own cost" hint="No per-deliverable ceiling. Covers submission, defect rectification and the governance tool."
+                                style={{ marginTop: 24 }}
                             />
 
                             {deliverableItems.length === 0 ? (
@@ -5556,7 +5595,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Deliverable payment"
                                         count={payables.rows.length}
-                                        style={{ marginTop: 26 }}
+                                        style={{ marginTop: 24 }}
                                     />
 
                                     {deliverableItems.length === 0 ? (
@@ -5637,7 +5676,7 @@ export default function SlaQuarterRollupPanel({ projectId, projectStartDate, pro
                                     <SectionHead
                                         title="Paid so far across the contract"
                                         count={cumulative.quarterCount}
-                                        style={{ marginTop: 26 }}
+                                        style={{ marginTop: 24 }}
                                     />
                                     <div className="uidai-pmis-grid-4" style={{ gap: 12, marginTop: 12 }}>
                                         <Tile
