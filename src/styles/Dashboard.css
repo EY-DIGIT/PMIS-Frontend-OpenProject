@@ -735,7 +735,7 @@
 }
 .dashboard-wrap .dp-widget-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
 .dashboard-wrap .dp-widget-title { font-size: 14px; font-weight: 900; color: var(--dash-navy); }
-.dashboard-wrap .dp-widget-sub { font-size: 11.5px; color: var(--dash-text-muted); font-weight: 600; }
+.dashboard-wrap .dp-widget-sub { font-size: 11.5px; color: var(--dash-text-muted); font-weight: 600; white-space: nowrap; }
 .dashboard-wrap .dp-widget-link {
   margin-top: auto; padding-top: 10px; text-align: center; font-size: 12px; font-weight: 800;
   color: var(--dash-navy); border-top: 1px solid var(--dash-border-soft); cursor: pointer; background: none; border-left: 0; border-right: 0; border-bottom: 0;
