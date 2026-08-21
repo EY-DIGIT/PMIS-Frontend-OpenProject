@@ -9,9 +9,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FiGrid } from "react-icons/fi";
 import { projectFull as fetchProjectFull } from "../../api/dashboardConsolidated";
+import { getRawProjectTree, treeToLegacyProject } from "../../api/dashboard";
+import { getQuarterlyAggregate, getPqp, listSettlements, quarterKeyOfRow } from "../../api/slaCompliance";
+import { contractQuarters } from "../../utils/project/slaRollup";
 import {
   DelayList,
   itemRowToTrackRow,
+  flattenRows,
   range, fmt, COLORS, LABELS,
 } from "./_shared";
 import { DonutChart, StackedBar, TrendArea, GaugeRing, FunnelBars, formatINR, DOMAIN } from "./charts";
@@ -34,10 +38,17 @@ export default function ProjectView() {
     if (!selectedId) { setData(null); setError(null); return undefined; }
     let cancelled = false; setLoading(true); setError(null);
     fetchProjectFull(selectedId)
-      .then((payload) => {
+      .then(async (payload) => {
         if (cancelled) return;
         if (!payload || !payload.project) { setError("Project not found."); setData(null); }
-        else setData(payload);
+        else {
+          const treeResult = await Promise.allSettled([getRawProjectTree(selectedId)]);
+          if (cancelled) return;
+          const tree = treeResult[0].status === "fulfilled" ? treeResult[0].value : null;
+          const treeProject = tree ? treeToLegacyProject(tree, payload.project) : null;
+          const treeItems = treeProject?.milestones?.length ? flattenRows(treeProject) : null;
+          setData(treeItems ? { ...payload, treeItems } : payload);
+        }
         setLoading(false);
       })
       .catch(() => { if (cancelled) return; setError("Failed to load project. Please retry."); setData(null); setLoading(false); });
@@ -114,8 +125,8 @@ function ProjectDetail({ data, navigate }) {
   }), [p.projectCode, uuid, p.name, p.organisation, p.division]);
 
   const items = useMemo(
-    () => (Array.isArray(data.items) ? data.items : []).map((r) => itemRowToTrackRow(r, pCtx)),
-    [data.items, pCtx],
+    () => (Array.isArray(data.treeItems) ? data.treeItems : (Array.isArray(data.items) ? data.items.map((r) => itemRowToTrackRow(r, pCtx)) : [])),
+    [data.treeItems, data.items, pCtx],
   );
 
   const [itemsFilter, setItemsFilter] = useState(null);
@@ -242,6 +253,13 @@ function ProjectDetail({ data, navigate }) {
           foot={hasFinance ? `${formatINR(released)} released · ${budgetPct}%` : "no finance"} />
       </div>
 
+      <QuarterlyProjectReview
+        project={p}
+        finance={finance}
+        settlements={data.settlements}
+        navigate={navigate}
+      />
+
       {/* ── Widgets — 3 per row ── */}
       <div className="dp-row c3">
         <Widget title="M → A → T → ST Status" sub={itemsFilter ? `Filtered: ${filterLabel(itemsFilter)}` : "milestones & activities"} onClick={() => applyFilter(null)}>
@@ -336,6 +354,127 @@ function ProjectDetail({ data, navigate }) {
   );
 }
 
+function moneyValue(value) {
+  return value == null || value === "" ? null : Number(value) || 0;
+}
+
+function QuarterlyProjectReview({ project, finance, settlements: suppliedSettlements, navigate }) {
+  const projectId = project.id;
+  const [quarters, setQuarters] = useState(() => contractQuarters(project.plannedStart, project.plannedEnd));
+  const [quarter, setQuarter] = useState(() => contractQuarters(project.plannedStart, project.plannedEnd)[0]?.key || "");
+  const [settlements, setSettlements] = useState(Array.isArray(suppliedSettlements) ? suppliedSettlements : []);
+  const [rollup, setRollup] = useState(null);
+  const [pqp, setPqp] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = contractQuarters(project.plannedStart, project.plannedEnd);
+    listSettlements(projectId)
+      .then((rows) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        setSettlements(list);
+        const fromRows = list.map((row) => ({
+          key: quarterKeyOfRow(row),
+          label: quarterKeyOfRow(row),
+          start: row.quarterStart,
+          end: row.quarterEnd,
+        })).filter((row) => row.key);
+        const merged = [...fromRows, ...fallback].filter((row, index, all) => all.findIndex((x) => x.key === row.key) === index);
+        if (merged.length) {
+          setQuarters(merged);
+          setQuarter((current) => current && merged.some((row) => row.key === current) ? current : merged[0].key);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, project.plannedStart, project.plannedEnd]);
+
+  useEffect(() => {
+    if (!projectId || !quarter) return undefined;
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return null;
+      setLoading(true); setRollup(null); setPqp(null);
+      return Promise.allSettled([getQuarterlyAggregate(projectId, quarter), getPqp(projectId, quarter)]);
+    })
+      .then((results) => {
+        if (!results) return;
+        const [aggregateResult, pqpResult] = results;
+        if (cancelled) return;
+        setRollup(aggregateResult.status === "fulfilled" ? aggregateResult.value : null);
+        setPqp(pqpResult.status === "fulfilled" ? pqpResult.value : null);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, quarter]);
+
+  const settlement = settlements.find((row) => quarterKeyOfRow(row) === quarter) || null;
+  const planned = moneyValue(settlement?.pqp ?? pqp?.pqp ?? pqp?.fAmount);
+  const ldAmount = moneyValue(settlement?.ldAmount);
+  const adjusted = moneyValue(settlement?.aqpAmount);
+  const ldPercent = settlement?.sumLdPercent ?? rollup?.totalLdPercent ?? rollup?.totalLdPercentUncapped;
+  const breaches = Array.isArray(rollup?.perSla) ? rollup.perSla.filter((row) => Number(row.ldPercent ?? row.ld_percent ?? 0) > 0) : [];
+  const selectedWindow = quarters.find((row) => row.key === quarter);
+  const financeBaseline = moneyValue(finance?.scheduled);
+  const status = settlement?.status || (rollup ? "calculated_not_settled" : "not_available");
+
+  return (
+    <section className="dp-quarter-review">
+      <div className="dp-quarter-head">
+        <div>
+          <div className="dp-quarter-kicker">Project commercial health</div>
+          <h2 className="dp-quarter-title">Quarterly SLA + Finance Review</h2>
+          <p className="dp-quarter-copy">See what was planned, what SLA performance deducted, and what is actually payable.</p>
+        </div>
+        <div className="dp-quarter-controls">
+          <label htmlFor="project-review-quarter">Quarter</label>
+          <select id="project-review-quarter" value={quarter} onChange={(event) => setQuarter(event.target.value)} disabled={historyLoading || !quarters.length}>
+            {!quarters.length && <option value="">No quarter data</option>}
+            {quarters.map((row) => <option key={row.key} value={row.key}>{row.label || row.key}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {selectedWindow?.start && <div className="dp-quarter-window">Measurement window: {selectedWindow.start} to {selectedWindow.end}</div>}
+      {loading && <div className="dp-quarter-empty">Loading SLA and payment figures…</div>}
+      {!loading && !quarter && <div className="dp-quarter-empty">No quarter is configured for this project.</div>}
+      {!loading && quarter && (
+        <>
+          <div className="dp-quarter-metrics">
+            <QuarterMetric label="SLA deduction base (PQP)" value={planned != null ? formatINR(planned) : "—"} tone="finance" hint="F / PQP from SLA service; not total contract value" />
+            <QuarterMetric label="SLA deduction" value={ldAmount != null ? formatINR(ldAmount) : "Not settled"} tone="danger" hint={ldPercent != null ? `${Number(ldPercent).toFixed(2)}% LD` : "No settlement result yet"} />
+            <QuarterMetric label="Adjusted payable" value={adjusted != null ? formatINR(adjusted) : "Pending"} tone="payable" hint="Quarterly base after SLA deduction" />
+            <QuarterMetric label="Finance baseline" value={financeBaseline != null ? formatINR(financeBaseline) : "—"} tone="neutral" hint="All project payment terms, not a quarter allocation" />
+          </div>
+          <div className="dp-quarter-bottom">
+            <div className={`dp-quarter-status ${status.includes("blocked") || status === "not_available" ? "is-warn" : ""}`}>
+              <strong>{status === "auto_closed" || status === "finalized" || status === "invoiced" ? "Quarter settled" : status === "calculated_not_settled" ? "SLA calculated, payment not settled" : "Quarter data unavailable"}</strong>
+              <span>{status === "calculated_not_settled" ? "Review the breaches and close the quarter in the SLA settlement view before invoicing." : status === "not_available" ? "There is no SLA rollup or settlement recorded for this quarter." : "Use the detailed settlement view for approval, override, and invoice actions."}</span>
+            </div>
+            <div className="dp-quarter-gap">
+              <span className="dp-quarter-gap-label">What may be going wrong</span>
+              <strong>{breaches.length ? `${breaches.length} SLA${breaches.length === 1 ? "" : "s"} causing LD` : "No breach detail available"}</strong>
+              <span>{rollup?.totalLdPercentUncapped != null ? `Uncapped LD: ${Number(rollup.totalLdPercentUncapped).toFixed(2)}%` : "Check activity-level SLA results"}</span>
+            </div>
+          </div>
+          <div className="dp-quarter-actions">
+            <button type="button" className="dash-ghost-btn" onClick={() => navigate(`/projects/${encodeURIComponent(projectId)}/sla-settlement`)}>Open SLA settlement</button>
+            <button type="button" className="dash-primary-btn" onClick={() => navigate(`/projects/${encodeURIComponent(projectId)}/finance`)}>Open finance details</button>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function QuarterMetric({ label, value, hint, tone }) {
+  return <div className={`dp-quarter-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>;
+}
+
 function filterLabel(f) {
   if (!f) return "all";
   const parts = [];
@@ -349,8 +488,8 @@ function ItemsTable({ rows, onOpenPM }) {
   if (!rows.length) return <div className="dash-empty">No items.</div>;
   return (
     <div className="dash-track-table-wrap" style={{ marginTop: "12px" }}>
-      <table className="dash-track-table">
-        <thead><tr><th>WBS</th><th>Name</th><th>Progress</th><th>Status</th><th>Expected Dates</th><th>Actual Dates</th><th>Delay</th><th>Type</th><th>Project Management</th></tr></thead>
+          <table className="dash-track-table">
+        <thead><tr><th>WBS</th><th>Name</th><th>Progress</th><th>Status</th><th>Expected Dates</th><th>Actual Dates</th><th>Delay</th><th>Type</th><th>Approval</th><th>Project Management</th></tr></thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.key} className={`dash-row-${r.kind}`}>
@@ -362,6 +501,7 @@ function ItemsTable({ rows, onOpenPM }) {
               <td className="dash-date-cell">{r.actualStart ? range(r.actualStart, r.actualEnd) : "-"}</td>
               <td>{r.delay ? `${r.delay}d` : "-"}</td>
               <td><span className="dash-type-pill">{r.kind}</span></td>
+              <td>{r.kind === "activity" && <span className={`dash-pill approval-${r.approvalState || "idle"}`}>{LABELS[r.approvalState] || r.approvalState || "Idle"}</span>}</td>
               <td><button type="button" className="dash-pm-btn" onClick={onOpenPM}>Open in PM</button></td>
             </tr>
           ))}

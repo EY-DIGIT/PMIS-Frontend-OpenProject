@@ -46,7 +46,7 @@ export default function OrganizationView() {
             const all = await fetchOrgViewAll({ topN: 8 });
             if (cancelled) return;
             const orgs = all?.organizations || [];
-            id = orgs.find((o) => o.name === nameParam)?.organisationId || orgs[0]?.organisationId;
+            id = orgs.find((o) => o.name === nameParam)?.organisationId;
           }
           if (!id) { setErr("Organization not found."); setSingleData(null); setLoading(false); return; }
           const single = await fetchOrgViewById(id);
@@ -185,7 +185,10 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
 
   const counts = data.projectStatus || {};
   const overview = data.projectsOverview || {};
-  const projects = data.projects || [];
+  const projects = (data.projects || []).map((p) => ({
+    ...p,
+    uuid: p.uuid || p.projectUuid || p.project_id || p.projectId || p.id,
+  }));
   const payByProject = (data.paymentByProject || []).filter((x) => x.contractValue > 0)
     .map((p) => ({ label: p.projectCode, value: p.contractValue })).slice(0, 12);
   const cvs = data.contractVsScheduled || {};
@@ -193,7 +196,9 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
   const sla = data.sla || {};
   const tickets = data.tickets || {};
   const meetings = data.meetings || {};
-  const delayedRows = projects.filter((p) => (p.delayed ?? 0) > 0 || (p.maxDelayDays ?? 0) > 0);
+  const delayedRows = projects.filter((p) => (p.delayedItems ?? p.delayed ?? 0) > 0 || (p.maxDelayDays ?? 0) > 0);
+
+  function projectUuid(project) { return project?.uuid || project?.projectId || project?.id; }
 
   return (
     <>
@@ -228,7 +233,7 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
           {tab === "Overview" && (
             <>
               <div className="dp-row c2">
-                <Widget title="Payment by Project" sub="contract value (₹)" onClick={() => payByProject[0] && onOpenProject(projects.find((p) => p.projectCode === payByProject[0].label)?.id)}>
+                <Widget title="Payment by Project" sub="contract value (₹)" onClick={() => payByProject[0] && onOpenProject(projectUuid(projects.find((p) => p.projectCode === payByProject[0].label)))}>
                   {payByProject.length ? <RankedBar data={payByProject} money color={DOMAIN.finance} height={Math.max(200, payByProject.length * 28)} /> : <div className="dash-empty">No finance data.</div>}
                 </Widget>
                 <Widget title="Project Status" sub={name}>
@@ -249,7 +254,7 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
                     <thead><tr><th>Project</th><th className="num">Delay</th><th className="num">Items</th></tr></thead>
                     <tbody>
                       {topDelayed.slice(0, 5).map((d) => (
-                        <tr key={d.projectCode}><td><button className="dp-link-name" onClick={() => onOpenProject(projects.find((p) => p.projectCode === d.projectCode)?.id)}>{d.projectCode}</button></td><td className="num dp-danger">{d.maxDelayDays}d</td><td className="num">{d.delayedItems}</td></tr>
+                        <tr key={d.projectCode}><td><button className="dp-link-name" onClick={() => onOpenProject(projectUuid(projects.find((p) => p.projectCode === d.projectCode)))}>{d.projectCode}</button></td><td className="num dp-danger">{d.maxDelayDays}d</td><td className="num">{d.delayedItems}</td></tr>
                       ))}
                       {!topDelayed.length && <tr><td colSpan={3}><div className="dash-empty">No delayed projects.</div></td></tr>}
                     </tbody>
@@ -283,8 +288,8 @@ function SingleOrg({ data, onPickOrg, onOpenProject }) {
                 <tbody>
                   {delayedRows.map((p) => (
                     <tr key={p.projectCode}>
-                      <td><button className="dp-link-name" onClick={() => onOpenProject(p.id)}>{p.projectCode}</button></td>
-                      <td>{p.name}</td><td className="num">{p.delayed}</td><td className="num dp-danger">{p.maxDelayDays}d</td>
+                      <td><button className="dp-link-name" onClick={() => onOpenProject(projectUuid(p))}>{p.projectCode}</button></td>
+                      <td>{p.name}</td><td className="num">{p.delayedItems ?? p.delayed ?? 0}</td><td className="num dp-danger">{p.maxDelayDays}d</td>
                     </tr>
                   ))}
                   {!delayedRows.length && <tr><td colSpan={4}><div className="dash-empty">No delayed projects.</div></td></tr>}
@@ -369,9 +374,9 @@ function OrgProjectsTable({ projects, onOpenProject }) {
                 </td>
                 <td className="dash-date-cell">{p.contractValue ? formatINR(p.contractValue) : "—"}</td>
                 <td className="dash-date-cell">{p.scheduled ? formatINR(p.scheduled) : "—"}</td>
-                <td>{p.delayed ? <span className="dp-danger">{p.delayed}</span> : "—"}</td>
+                    <td>{(p.delayedItems ?? p.delayed) ? <span className="dp-danger">{p.delayedItems ?? p.delayed}</span> : "—"}</td>
                 <td className="dash-date-cell">{p.plannedEnd ? fmt(p.plannedEnd) : "—"}</td>
-                <td><button type="button" className="dash-pm-btn" onClick={() => onOpenProject(p.id)}>Open ↗</button></td>
+                <td><button type="button" className="dash-pm-btn" onClick={() => onOpenProject(projectUuid(p))}>Open ↗</button></td>
               </tr>
             );
           })}

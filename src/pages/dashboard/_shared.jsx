@@ -59,6 +59,7 @@ export function itemRowToTrackRow(raw, project) {
     actualStart: fromApiDate(actualStart),
     actualEnd: fromApiDate(actualEnd),
     delay: daysDelayed ?? 0,
+    approvalState: kind === "activity" ? (pick("approvalState", "approval_state") || "idle") : null,
   };
 }
 

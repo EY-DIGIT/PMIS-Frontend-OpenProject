@@ -742,6 +742,48 @@
 }
 .dashboard-wrap .dp-widget-link:hover { color: var(--dash-cyan); }
 
+/* ─── Quarterly SLA + finance review ─────────────────────────────── */
+.dashboard-wrap .dp-quarter-review {
+  margin-top: 14px; padding: 18px; border: 1px solid #cfe0ed; border-radius: 14px;
+  background: linear-gradient(135deg, #f5fbfa 0%, #fff 54%, #fff8ef 100%);
+  box-shadow: 0 5px 16px rgba(11,60,136,.07);
+}
+.dashboard-wrap .dp-quarter-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.dashboard-wrap .dp-quarter-kicker { color: #1f8a4c; font-size: 10px; font-weight: 900; letter-spacing: .6px; text-transform: uppercase; }
+.dashboard-wrap .dp-quarter-title { margin: 3px 0 0; color: var(--dash-navy); font-size: 18px; line-height: 1.2; }
+.dashboard-wrap .dp-quarter-copy { margin: 5px 0 0; color: var(--dash-text-soft); font-size: 12px; }
+.dashboard-wrap .dp-quarter-controls { display: flex; flex-direction: column; gap: 5px; min-width: 150px; }
+.dashboard-wrap .dp-quarter-controls label { color: var(--dash-text-muted); font-size: 10px; font-weight: 900; text-transform: uppercase; }
+.dashboard-wrap .dp-quarter-controls select { border: 1px solid #c8d6e8; border-radius: 7px; padding: 8px 10px; background: #fff; color: var(--dash-navy); font: inherit; font-size: 12px; font-weight: 800; }
+.dashboard-wrap .dp-quarter-window { margin-top: 12px; color: var(--dash-text-muted); font-size: 11px; font-weight: 700; }
+.dashboard-wrap .dp-quarter-empty { padding: 22px 8px 5px; color: var(--dash-text-muted); font-size: 12px; }
+.dashboard-wrap .dp-quarter-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+.dashboard-wrap .dp-quarter-metric { min-width: 0; padding: 13px; border: 1px solid rgba(137,164,186,.24); border-radius: 10px; background: rgba(255,255,255,.78); }
+.dashboard-wrap .dp-quarter-metric > span, .dashboard-wrap .dp-quarter-metric > small { display: block; }
+.dashboard-wrap .dp-quarter-metric > span { color: var(--dash-text-muted); font-size: 10.5px; font-weight: 800; }
+.dashboard-wrap .dp-quarter-metric > strong { display: block; margin-top: 7px; color: var(--dash-navy); font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dashboard-wrap .dp-quarter-metric > small { margin-top: 6px; color: var(--dash-text-soft); font-size: 10.5px; line-height: 1.35; }
+.dashboard-wrap .dp-quarter-metric.finance > strong { color: #1f8a4c; }
+.dashboard-wrap .dp-quarter-metric.danger > strong { color: #c0392b; }
+.dashboard-wrap .dp-quarter-metric.payable > strong { color: #087f73; }
+.dashboard-wrap .dp-quarter-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.dashboard-wrap .dp-quarter-status, .dashboard-wrap .dp-quarter-gap { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 10px; background: rgba(255,255,255,.76); border: 1px solid rgba(137,164,186,.24); }
+.dashboard-wrap .dp-quarter-status strong { color: #087f73; font-size: 12px; }
+.dashboard-wrap .dp-quarter-status.is-warn strong { color: #b25900; }
+.dashboard-wrap .dp-quarter-status span, .dashboard-wrap .dp-quarter-gap span { color: var(--dash-text-soft); font-size: 11px; line-height: 1.4; }
+.dashboard-wrap .dp-quarter-gap-label { color: #b25900 !important; font-size: 10px !important; font-weight: 900; letter-spacing: .4px; text-transform: uppercase; }
+.dashboard-wrap .dp-quarter-gap strong { color: #9a4b00; font-size: 13px; }
+.dashboard-wrap .dp-quarter-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+@media (max-width: 760px) {
+  .dashboard-wrap .dp-quarter-head { flex-direction: column; }
+  .dashboard-wrap .dp-quarter-controls { width: 100%; }
+  .dashboard-wrap .dp-quarter-metrics, .dashboard-wrap .dp-quarter-bottom { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .dashboard-wrap .dp-quarter-metrics, .dashboard-wrap .dp-quarter-bottom { grid-template-columns: 1fr; }
+  .dashboard-wrap .dp-quarter-actions { flex-direction: column; }
+}
+
 /* ─── Mini table ─── */
 .dashboard-wrap .dp-mtable { width: 100%; border-collapse: collapse; font-size: 12px; }
 .dashboard-wrap .dp-mtable th {

@@ -21,7 +21,10 @@ import { fromApiDate } from './adapters';
    `fromApiProject` adapter (api/projects.js) because that mapper drops
    the actualStart/End date fields the dashboard helpers depend on. */
 export async function getRawProjectTree(uuid) {
-  const res = await api.get(ENDPOINTS.projects.tree(uuid));
+  const res = await withTimeout(
+    api.get(ENDPOINTS.projects.tree(uuid)),
+    DASHBOARD_TIMEOUT_MS, "project tree",
+  );
   return unwrap(res);
 }
 
@@ -276,6 +279,19 @@ export async function projectsListFallback({ offset, pageSize } = {}) {
   return list.map(rawProjectToLegacy).filter(Boolean);
 }
 
+/* Accept the response envelopes used by the dashboard list endpoints. */
+export function extractProjectsPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.projects)) return payload.projects;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.rows)) return payload.rows;
+  if (Array.isArray(payload?.data?.projects)) return payload.data.projects;
+  if (Array.isArray(payload?.data?.items)) return payload.data.items;
+  if (Array.isArray(payload?.data?.rows)) return payload.data.rows;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
 function rawProjectToLegacy(p) {
   if (!p) return null;
   const orgList = Array.isArray(p.vendors) ? p.vendors : [];
@@ -383,6 +399,7 @@ export function projectCardToLegacy(card) {
 // into a track-row shape compatible with the Dashboard's row table. WBS comes
 // straight from BE so the FE doesn't have to compute it.
 export function itemRowToTrackRow(row, project) {
+  const pick = (camel, snake) => row[camel] !== undefined ? row[camel] : row[snake];
   return {
     project,
     key: `${row.kind}:${row.id}`,
@@ -399,6 +416,7 @@ export function itemRowToTrackRow(row, project) {
     actualStart: fromApiDate(row.actualStart),
     actualEnd: fromApiDate(row.actualEnd),
     delay: row.daysDelayed ?? 0,
+    approvalState: row.kind === 'activity' ? (pick('approvalState', 'approval_state') || 'idle') : null,
   };
 }
 
@@ -421,58 +439,62 @@ export function treeToLegacyProject(tree, base) {
 }
 
 function mapMilestone(m) {
+  const pick = (camel, snake) => m[camel] !== undefined ? m[camel] : m[snake];
   return {
-    uid: m.uuid || m.id,
+    uid: pick('uuid', 'uuid') || pick('id', 'id'),
     name: m.name || '',
-    plannedStart: fromApiDate(m.startDate),
-    plannedEnd: fromApiDate(m.endDate),
-    actualStart: fromApiDate(m.actualStartDate),
-    actualEnd: fromApiDate(m.actualEndDate),
+    plannedStart: fromApiDate(pick('startDate', 'start_date')),
+    plannedEnd: fromApiDate(pick('endDate', 'end_date')),
+    actualStart: fromApiDate(pick('actualStartDate', 'actual_start_date')),
+    actualEnd: fromApiDate(pick('actualEndDate', 'actual_end_date')),
     status: m.status,
-    scheduleStatus: m.scheduleStatus,
-    daysDelayed: m.daysDelayed || 0,
+    scheduleStatus: pick('scheduleStatus', 'schedule_status'),
+    daysDelayed: pick('daysDelayed', 'days_delayed') || 0,
     activities: Array.isArray(m.activities) ? m.activities.map(mapActivity) : [],
   };
 }
 
 function mapActivity(a) {
+  const pick = (camel, snake) => a[camel] !== undefined ? a[camel] : a[snake];
   return {
-    uid: a.uuid || a.id,
+    uid: pick('uuid', 'uuid') || pick('id', 'id'),
     name: a.name || '',
-    plannedStart: fromApiDate(a.startDate),
-    plannedEnd: fromApiDate(a.endDate),
-    actualStart: fromApiDate(a.actualStartDate),
-    actualEnd: fromApiDate(a.actualEndDate),
+    plannedStart: fromApiDate(pick('startDate', 'start_date')),
+    plannedEnd: fromApiDate(pick('endDate', 'end_date')),
+    actualStart: fromApiDate(pick('actualStartDate', 'actual_start_date')),
+    actualEnd: fromApiDate(pick('actualEndDate', 'actual_end_date')),
     status: a.status,
-    scheduleStatus: a.scheduleStatus,
-    daysDelayed: a.daysDelayed || 0,
-    approvalState: a.approvalState || 'idle',
+    scheduleStatus: pick('scheduleStatus', 'schedule_status'),
+    daysDelayed: pick('daysDelayed', 'days_delayed') || 0,
+    approvalState: pick('approvalState', 'approval_state') || 'idle',
     tasks: Array.isArray(a.tasks) ? a.tasks.map(mapTask) : [],
   };
 }
 
 function mapTask(t) {
+  const pick = (camel, snake) => t[camel] !== undefined ? t[camel] : t[snake];
   return {
-    uid: t.uuid || t.id,
+    uid: pick('uuid', 'uuid') || pick('id', 'id'),
     name: t.name || '',
-    plannedStart: fromApiDate(t.startDate),
-    plannedEnd: fromApiDate(t.endDate),
-    actualStart: fromApiDate(t.actualStartDate),
-    actualEnd: fromApiDate(t.actualEndDate),
+    plannedStart: fromApiDate(pick('startDate', 'start_date')),
+    plannedEnd: fromApiDate(pick('endDate', 'end_date')),
+    actualStart: fromApiDate(pick('actualStartDate', 'actual_start_date')),
+    actualEnd: fromApiDate(pick('actualEndDate', 'actual_end_date')),
     status: t.status,
-    subtasks: Array.isArray(t.subtasks) ? t.subtasks.map(mapSubtask) : [],
+    subtasks: (Array.isArray(t.subtasks) ? t.subtasks : t.sub_tasks || []).map(mapSubtask),
   };
 }
 
 function mapSubtask(s) {
+  const pick = (camel, snake) => s[camel] !== undefined ? s[camel] : s[snake];
   return {
-    uid: s.uuid || s.id,
+    uid: pick('uuid', 'uuid') || pick('id', 'id'),
     name: s.name || '',
-    plannedStart: fromApiDate(s.startDate),
-    plannedEnd: fromApiDate(s.endDate),
-    actualStart: fromApiDate(s.actualStartDate),
-    actualEnd: fromApiDate(s.actualEndDate),
+    plannedStart: fromApiDate(pick('startDate', 'start_date')),
+    plannedEnd: fromApiDate(pick('endDate', 'end_date')),
+    actualStart: fromApiDate(pick('actualStartDate', 'actual_start_date')),
+    actualEnd: fromApiDate(pick('actualEndDate', 'actual_end_date')),
     status: s.status,
-    subtasks: Array.isArray(s.subtasks) ? s.subtasks.map(mapSubtask) : [],
+    subtasks: (Array.isArray(s.subtasks) ? s.subtasks : s.sub_tasks || []).map(mapSubtask),
   };
 }

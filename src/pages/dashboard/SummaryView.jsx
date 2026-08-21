@@ -13,8 +13,9 @@ import {
   projectsList as fetchDashboardProjects,
   projectItems as fetchProjectItems,
   projectCardToLegacy,
+  extractProjectsPayload,
 } from "../../api/dashboard";
-import { summaryView as fetchSummaryView } from "../../api/dashboardConsolidated";
+import { summaryViewWithFallback as fetchSummaryView } from "../../api/dashboardConsolidated";
 import {
   API_BUCKETS, LABELS, COLORS,
   Kpi, ProjectCardGrid,
@@ -172,7 +173,7 @@ function SummaryContent({ data, onOpenProjectList, onOpenProjectItems, onOpenOrg
       {/* ── Widgets — 3 per row ── */}
       <div className="dp-row c3">
         <Widget title="Project Status" sub={`${counts.total} total`} onClick={() => onOpenProjectList("total")}>
-          <DonutChart counts={counts} keys={["completed", "ontrack", "delayed"]} centerLabel="projects" height={180} />
+          <DonutChart counts={counts} keys={["active", "completed", "ontrack", "delayed"]} centerLabel="projects" height={180} />
         </Widget>
         <Widget title="Payment by Phase" sub="Scheduled / One-time / Carry-fwd" onClick={() => navigate("/dashboard/org")}>
           {phaseData.length
@@ -336,7 +337,7 @@ function ProjectListView({ mode, searchText, onSearch, onBack, onOpenProject }) 
     fetchDashboardProjects(query)
       .then((payload) => {
         if (cancelled) return;
-        const cards = Array.isArray(payload?.projects) ? payload.projects : [];
+        const cards = extractProjectsPayload(payload);
         setList(cards.map(projectCardToLegacy).filter(Boolean)); setBusy(false);
       })
       .catch(() => { if (cancelled) return; setErr("Failed to load projects. Please retry."); setList([]); setBusy(false); });
@@ -372,7 +373,7 @@ function DivisionDetail({ name, onBack, onOpenProject }) {
     fetchDashboardProjects({ division: name, pageSize: 200 })
       .then((payload) => {
         if (cancelled) return;
-        const cards = Array.isArray(payload?.projects) ? payload.projects : [];
+        const cards = extractProjectsPayload(payload);
         setList(cards.map(projectCardToLegacy).filter(Boolean)); setBusy(false);
       })
       .catch(() => { if (cancelled) return; setErr("Failed to load projects. Please retry."); setList([]); setBusy(false); });
@@ -440,7 +441,7 @@ function ProjectItemsInline({ project, status, onBack, navigate }) {
   }
   const c = items.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; acc.total = (acc.total || 0) + 1; return acc; }, { active: 0, ontrack: 0, completed: 0, delayed: 0, total: 0 });
   const pieCounts = isDelayed ? { delayed: c.delayed, total: c.delayed } : c;
-  const pieKeys = isDelayed ? ["delayed"] : ["completed", "ontrack", "delayed"];
+  const pieKeys = isDelayed ? ["delayed"] : ["active", "completed", "ontrack", "delayed"];
 
   return (
     <>
@@ -468,10 +469,10 @@ function ProjectItemsInline({ project, status, onBack, navigate }) {
         {!busy && err && <div className="dash-empty" style={{ color: "#d4440e" }}>{err}</div>}
         {!busy && !err && (
           <table className="dash-track-table">
-            <thead><tr><th>WBS</th><th>Name</th><th>Progress</th><th>Status</th><th>Expected Dates</th><th>Actual Dates</th><th>Delay</th><th>Type</th><th>Project Management</th></tr></thead>
+            <thead><tr><th>WBS</th><th>Name</th><th>Progress</th><th>Status</th><th>Expected Dates</th><th>Actual Dates</th><th>Delay</th><th>Type</th><th>Approval</th><th>Project Management</th></tr></thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={9}><div className="dash-empty">No items found.</div></td></tr>
+                <tr><td colSpan={10}><div className="dash-empty">No items found.</div></td></tr>
               ) : items.map((r) => (
                 <tr key={r.key} className={`dash-row-${r.kind}`}>
                   <td className="dash-wbs">{r.wbs}</td>
@@ -482,6 +483,7 @@ function ProjectItemsInline({ project, status, onBack, navigate }) {
                   <td className="dash-date-cell">{r.actualStart ? range(r.actualStart, r.actualEnd) : "-"}</td>
                   <td>{r.delay ? `${r.delay}d` : "-"}</td>
                   <td><span className="dash-type-pill">{r.kind}</span></td>
+                  <td>{r.kind === "activity" && <span className={`dash-pill approval-${r.approvalState || "idle"}`}>{LABELS[r.approvalState] || r.approvalState || "Idle"}</span>}</td>
                   <td><button type="button" className="dash-pm-btn" onClick={openInPM}>Open in PM</button></td>
                 </tr>
               ))}

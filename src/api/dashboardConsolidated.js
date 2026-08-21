@@ -18,6 +18,7 @@
 
 import { api } from './client';
 import { ENDPOINTS } from './endpoint';
+import { summaryWithFallback } from './dashboard';
 
 const DASHBOARD_TIMEOUT_MS = 60000;
 
@@ -45,6 +46,35 @@ export async function summaryView({ delayMinDays = 1, topN = 5 } = {}) {
     DASHBOARD_TIMEOUT_MS, 'dashboard summary-view',
   );
   return unwrap(res);
+}
+
+/* Keep Summary usable while older deployments expose only /dashboard/summary. */
+export async function summaryViewWithFallback(options = {}) {
+  try {
+    return await summaryView(options);
+  } catch (consolidatedError) {
+    const legacy = await summaryWithFallback(options);
+    const totals = legacy?.totals || {};
+    const total = totals.projects ?? 0;
+    const ontrack = totals.ontrack ?? 0;
+    return {
+      kpis: {
+        totalProjects: { value: total, active: totals.active ?? 0, completed: totals.completed ?? 0 },
+        onTrackPct: { value: total ? Math.round(ontrack / total * 100) : 0 },
+        delayedProjects: { value: totals.delayed ?? 0 },
+        contractValue: { value: 0, projectCount: 0, withFinance: 0 },
+        slaCompliance: { value: null },
+      },
+      projectStatus: totals,
+      topOrganizations: (legacy.byOrganisation || []).map((row) => ({ ...row, value: 0 })),
+      topDivisions: (legacy.byDivision || []).map((row) => ({ ...row, value: 0 })),
+      delayedTrack: legacy.delayedProjects || [],
+      paymentByPhase: [], paymentByOrganization: [], costComposition: {},
+      slaHealth: { available: false }, approvalWorkflow: { available: false },
+      tickets: { available: false }, escalationsTriggered: [],
+      _fallbackReason: consolidatedError?.message || "summary-view unavailable",
+    };
+  }
 }
 
 /* Project view — one call for header, KPIs, finance, SLA, approvals,

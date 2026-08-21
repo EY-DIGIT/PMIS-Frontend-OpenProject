@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { projectsList as fetchDashboardProjects, projectCardToLegacy } from "../../api/dashboard";
+import { projectsList as fetchDashboardProjects, projectCardToLegacy, extractProjectsPayload } from "../../api/dashboard";
 
 export default function HeaderProjectPicker() {
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export default function HeaderProjectPicker() {
     fetchDashboardProjects({ pageSize: 200 })
       .then((payload) => {
         if (cancelled) return;
-        const cards = Array.isArray(payload?.projects) ? payload.projects : [];
+        const cards = extractProjectsPayload(payload);
         setList(cards.map(projectCardToLegacy).filter(Boolean));
         setLoaded(true);
       })
