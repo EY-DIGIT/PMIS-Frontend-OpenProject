@@ -178,7 +178,7 @@ export default function TicketManagementPage() {
           <label htmlFor="tkt-cat">Category</label>
           <select id="tkt-cat" value={fCategory} onChange={(e) => setFCategory(e.target.value)}>
             <option value="ALL">All categories</option>
-            {CATEGORIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+            {CATEGORIES.map((c) => <option key={c.code} value={c.label}>{c.label}</option>)}
           </select>
         </div>
         <div className="tkt-field">
