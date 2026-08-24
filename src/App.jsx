@@ -327,9 +327,9 @@ function Breadcrumbs() {
 
     // Leave Policy Configure — heading + project name already live in the
     // navbar, so the breadcrumb trail is redundant noise here. Hide it.
-    if (segments[0] === "projects" && segments[2] === "leave-config") {
-        return null;
-    }
+//     if (segments[0] === "projects" && segments[2] === "leave-config") {
+//         return null;
+//     }
 
     if (criticalPathProjectIdSeg) {
         const projectUrl = `/projects/${encodeURIComponent(criticalPathProjectIdSeg)}`;
