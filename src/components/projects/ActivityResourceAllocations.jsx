@@ -341,9 +341,15 @@ export default function ActivityResourceAllocations({
         {st.missingRole && (
           <option value={row.designation}>{row.designation} (not on the current card)</option>
         )}
-        {roles.map((r) => (
-          <option key={r.id || r.role} value={r.role}>{r.role}</option>
-        ))}
+        {roles
+  .filter((r) => !rows.some((otherRow, otherIdx) =>
+    otherIdx !== idx && otherRow.designation === r.role
+  ))
+  .map((r) => (
+    <option key={r.id || r.role} value={r.role}>
+      {r.role}
+    </option>
+  ))}
       </select>
     </>
   );
