@@ -357,8 +357,19 @@ export default function SlaMastersPage() {
                 footer={
                     <>
                         <button type="button" className="uidai-pmis-btn uidai-pmis-btn-cancel" onClick={() => setPendingDelete(null)} disabled={deleting}>Cancel</button>
-                        <button type="button" className="uidai-pm-icon-btn uidai-pm-icon-btn--danger" style={{ padding: "9px 16px", borderRadius: 6 }} onClick={confirmDelete} disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</button>
-                    </>
+<button
+    type="button"
+    className="uidai-pmis-btn uidai-pmis-btn-cancel"
+    onClick={confirmDelete}
+    disabled={deleting}
+    style={{
+        color: "#d32f2f",
+        borderColor: "#efb0b0",
+        background: "#fff"
+    }}
+>
+    {deleting ? "Deleting…" : "Delete"}
+</button>                    </>
                 }
             >
                 <div style={{ fontSize: 13, ...muted }}>
